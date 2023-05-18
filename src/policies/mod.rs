@@ -12,5 +12,30 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub mod collections;
-pub mod policies;
+//! A collection of cache eviction policies.
+//!
+//! Cache eviction policies only cares about the order of cached entries.
+//! They don't store the real cache entries or resource usage.
+
+pub mod lru;
+
+use std::hash::Hash;
+
+pub trait Index: Clone + Hash + Send + Sync + 'static {}
+
+pub trait Policy: Send + Sync + 'static {}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum AccessMode {
+    Read,
+    Write,
+}
+
+pub enum HandleInner<I: Index> {
+    LruHandle(lru::Handle<I>),
+}
+
+#[allow(unused)]
+pub struct Handle<I: Index> {
+    inner: HandleInner<I>,
+}

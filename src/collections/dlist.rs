@@ -279,6 +279,30 @@ impl<E, A: Adapter<E>> DList<E, A> {
         self.link_at_tail(element);
     }
 
+    pub fn head(&self) -> Option<NonNull<E>> {
+        self.head.map(|entry| A::en2el(entry))
+    }
+
+    pub fn tail(&self) -> Option<NonNull<E>> {
+        self.tail.map(|entry| A::en2el(entry))
+    }
+
+    /// # Safety
+    ///
+    /// element` must be in the list
+    pub unsafe fn prev(&self, element: NonNull<E>) -> Option<NonNull<E>> {
+        let entry = A::el2en(element);
+        entry.as_ref().prev.map(|entry| A::en2el(entry))
+    }
+
+    /// # Safety
+    ///
+    /// element` must be in the list
+    pub unsafe fn next(&self, element: NonNull<E>) -> Option<NonNull<E>> {
+        let entry = A::el2en(element);
+        entry.as_ref().next.map(|entry| A::en2el(entry))
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }
@@ -297,6 +321,8 @@ impl<E, A: Adapter<E>> DList<E, A> {
         Iter { dlist: self, entry }
     }
 }
+
+pub trait DListExt {}
 
 pub struct Iter<'a, E, A: Adapter<E>> {
     dlist: &'a mut DList<E, A>,
