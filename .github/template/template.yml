@@ -1,0 +1,72 @@
+name:
+
+on:
+
+env:
+  RUST_TOOLCHAIN: nightly-2023-04-07
+  CARGO_TERM_COLOR: always
+  CACHE_KEY_SUFFIX: 20230518
+  RUNKV_CI: true
+
+jobs:
+  misc-check:
+    name: misc check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install tools
+        run: |
+          wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
+        env:
+          YQ_VERSION: v4.16.1
+          BINARY: yq_linux_amd64
+          BUF_VERSION: 1.0.0-rc6
+      - name: Check if CI workflows are up-to-date
+        run: |
+          ./.github/template/generate.sh --check
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+  rust-test:
+    name: rust test with codecov
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install rust toolchain@v1
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy, llvm-tools-preview
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}
+      - name: Install cargo-sort
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install cargo-sort
+      - name: Run rust cargo-sort check
+        run: |
+          cargo sort -w -c
+      - name: Run rust format check
+        run: |
+          cargo fmt --all -- --check
+      - name: Run rust clippy check
+        run: |
+          # If new CI checks are added, the one with `--locked` must be run first.
+          cargo clippy --all-targets --locked -- -D warnings
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
+      - name: Run rust test with coverage
+        run: |
+          cargo llvm-cov nextest --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v2
