@@ -359,12 +359,12 @@ mod tests {
     use itertools::Itertools;
 
     #[derive(Debug)]
-    struct SE {
+    struct SingleElement {
         e: Entry,
         data: usize,
     }
 
-    impl SE {
+    impl SingleElement {
         fn new(data: usize) -> Self {
             Self {
                 e: Entry::default(),
@@ -373,20 +373,20 @@ mod tests {
         }
     }
 
-    impl Drop for SE {
+    impl Drop for SingleElement {
         fn drop(&mut self) {
             self.data = 0
         }
     }
 
     #[derive(Debug)]
-    struct DE {
+    struct DoubleElement {
         e1: Entry,
         e2: Entry,
         data: usize,
     }
 
-    impl DE {
+    impl DoubleElement {
         fn new(data: usize) -> Self {
             Self {
                 e1: Entry::default(),
@@ -396,22 +396,26 @@ mod tests {
         }
     }
 
-    impl Drop for DE {
+    impl Drop for DoubleElement {
         fn drop(&mut self) {
             self.data = 0
         }
     }
 
-    intrusive_dlist! {SE, e, SEA}
-    intrusive_dlist! {DE, e1, DEA1}
-    intrusive_dlist! {DE, e2, DEA2}
+    intrusive_dlist! {SingleElement, e, SingleElementAdapter}
+    intrusive_dlist! {DoubleElement, e1, DoubleElementAdapter1}
+    intrusive_dlist! {DoubleElement, e2, DEA2DoubleElementAdapter2}
 
     #[test]
     fn test_se_simple() {
         unsafe {
-            let mut l: DList<SE, SEA> = DList::new();
+            let mut l: DList<SingleElement, SingleElementAdapter> = DList::new();
 
-            let mut es = vec![SE::new(1), SE::new(2), SE::new(3)];
+            let mut es = vec![
+                SingleElement::new(1),
+                SingleElement::new(2),
+                SingleElement::new(3),
+            ];
 
             es.iter_mut()
                 .for_each(|e| l.link_at_tail(NonNull::new_unchecked(e as *mut _)));
@@ -429,10 +433,14 @@ mod tests {
     #[test]
     fn test_de_simple() {
         unsafe {
-            let mut l1: DList<DE, DEA1> = DList::new();
-            let mut l2: DList<DE, DEA2> = DList::new();
+            let mut l1: DList<DoubleElement, DoubleElementAdapter1> = DList::new();
+            let mut l2: DList<DoubleElement, DEA2DoubleElementAdapter2> = DList::new();
 
-            let mut es = vec![DE::new(1), DE::new(2), DE::new(3)];
+            let mut es = vec![
+                DoubleElement::new(1),
+                DoubleElement::new(2),
+                DoubleElement::new(3),
+            ];
             es.iter_mut()
                 .for_each(|e| l1.link_at_tail(NonNull::new_unchecked(e as *mut _)));
             es.iter_mut()
@@ -457,14 +465,18 @@ mod tests {
     #[test]
     fn test_link_before() {
         unsafe {
-            let mut l: DList<SE, SEA> = DList::new();
+            let mut l: DList<SingleElement, SingleElementAdapter> = DList::new();
 
-            let mut es = vec![SE::new(1), SE::new(2), SE::new(3)];
+            let mut es = vec![
+                SingleElement::new(1),
+                SingleElement::new(2),
+                SingleElement::new(3),
+            ];
 
             es.iter_mut()
                 .for_each(|e| l.link_at_tail(NonNull::new_unchecked(e as *mut _)));
 
-            let mut e = SE::new(4);
+            let mut e = SingleElement::new(4);
             l.link_before(
                 NonNull::new_unchecked(&mut es[2] as *mut _),
                 NonNull::new_unchecked(&mut e as *mut _),
@@ -484,9 +496,13 @@ mod tests {
     #[test]
     fn test_remove() {
         unsafe {
-            let mut l: DList<SE, SEA> = DList::new();
+            let mut l: DList<SingleElement, SingleElementAdapter> = DList::new();
 
-            let mut es = vec![SE::new(1), SE::new(2), SE::new(3)];
+            let mut es = vec![
+                SingleElement::new(1),
+                SingleElement::new(2),
+                SingleElement::new(3),
+            ];
 
             es.iter_mut()
                 .for_each(|e| l.link_at_tail(NonNull::new_unchecked(e as *mut _)));
@@ -503,14 +519,18 @@ mod tests {
     #[test]
     fn test_link_replace() {
         unsafe {
-            let mut l: DList<SE, SEA> = DList::new();
+            let mut l: DList<SingleElement, SingleElementAdapter> = DList::new();
 
-            let mut es = vec![SE::new(1), SE::new(2), SE::new(3)];
+            let mut es = vec![
+                SingleElement::new(1),
+                SingleElement::new(2),
+                SingleElement::new(3),
+            ];
 
             es.iter_mut()
                 .for_each(|e| l.link_at_tail(NonNull::new_unchecked(e as *mut _)));
 
-            let mut e = SE::new(4);
+            let mut e = SingleElement::new(4);
             l.replace(
                 NonNull::new_unchecked(&mut es[1] as *mut _),
                 NonNull::new_unchecked(&mut e as *mut _),
@@ -530,9 +550,13 @@ mod tests {
     #[test]
     fn test_move_to_head() {
         unsafe {
-            let mut l: DList<SE, SEA> = DList::new();
+            let mut l: DList<SingleElement, SingleElementAdapter> = DList::new();
 
-            let mut es = vec![SE::new(1), SE::new(2), SE::new(3)];
+            let mut es = vec![
+                SingleElement::new(1),
+                SingleElement::new(2),
+                SingleElement::new(3),
+            ];
 
             es.iter_mut()
                 .for_each(|e| l.link_at_tail(NonNull::new_unchecked(e as *mut _)));
