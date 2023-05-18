@@ -11,6 +11,8 @@ license = "Apache-2.0"
 [dependencies]
 crossbeam-epoch = "0.9"
 futures = "0.3"
+itertools = "0.10.5"
+memoffset = "0.8"
 parking_lot = "0.12"
 paste = "1.0"
 
