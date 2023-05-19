@@ -34,9 +34,9 @@ use cmsketch::CMSketchUsize;
 use twox_hash::XxHash64;
 
 use crate::collections::dlist::{DList, Entry, Iter};
-use crate::intrusive_dlist;
+use crate::{extract_handle, intrusive_dlist};
 
-use super::{AccessMode, Index};
+use super::{AccessMode, Index, Policy};
 
 const MIN_CAPACITY: usize = 100;
 const ERROR_THRESHOLD: f64 = 5.0;
@@ -88,6 +88,10 @@ impl<I: Index> Handle<I> {
 
             index,
         }
+    }
+
+    pub fn index(&self) -> &I {
+        &self.index
     }
 }
 
@@ -166,7 +170,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    pub fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
+    fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
         unsafe {
             if (mode == AccessMode::Read && !self.config.update_on_read)
                 || (mode == AccessMode::Write && !self.config.update_on_write)
@@ -192,7 +196,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    pub fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -231,7 +235,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if handle is successfully removed from the lru,
     /// returns `false` if the handle is unchanged.
-    pub fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if !handle.as_ref().is_in_cache {
                 return false;
@@ -249,7 +253,7 @@ impl<I: Index> TinyLfu<I> {
         }
     }
 
-    pub fn eviction_iter<'a>(&'a mut self) -> EvictionIter<'a, I> {
+    fn eviction_iter<'a>(&'a mut self) -> EvictionIter<'a, I> {
         unsafe {
             let mut iter_main: Iter<'a, _, _> = self.lru_main.iter();
             iter_main.tail();
@@ -393,9 +397,36 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
     }
 }
 
-// unsafe impl `Send + Sync` for `Lru` because it uses `NonNull`
+// unsafe impl `Send + Sync` for `TinyLfu` because it uses `NonNull`
 unsafe impl<I: Index> Send for TinyLfu<I> {}
 unsafe impl<I: Index> Sync for TinyLfu<I> {}
+
+impl<I: Index> Policy for TinyLfu<I> {
+    type I = I;
+
+    fn add(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
+        let handle = extract_handle!(handle, TinyLfu);
+        self.add(handle)
+    }
+
+    fn remove(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
+        let handle = extract_handle!(handle, TinyLfu);
+        self.remove(handle)
+    }
+
+    fn record_access(
+        &mut self,
+        mut handle: NonNull<super::Handle<Self::I>>,
+        mode: AccessMode,
+    ) -> bool {
+        let handle = extract_handle!(handle, TinyLfu);
+        self.record_access(handle, mode)
+    }
+
+    fn eviction_iter(&mut self) -> super::EvictionIter<'_, Self::I> {
+        super::EvictionIter::TinyLfuEvictionIter(self.eviction_iter())
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -20,11 +20,37 @@
 pub mod lru;
 pub mod tinylfu;
 
-use std::hash::Hash;
+use std::{hash::Hash, ptr::NonNull};
 
 pub trait Index: Clone + Hash + Send + Sync + 'static {}
 
-pub trait Policy: Send + Sync + 'static {}
+pub trait Policy: Send + Sync + 'static {
+    type I: Index;
+
+    fn add(&mut self, handle: NonNull<Handle<Self::I>>) -> bool;
+
+    fn remove(&mut self, handle: NonNull<Handle<Self::I>>) -> bool;
+
+    fn record_access(&mut self, handle: NonNull<Handle<Self::I>>, mode: AccessMode) -> bool;
+
+    fn eviction_iter(&mut self) -> EvictionIter<'_, Self::I>;
+}
+
+pub enum EvictionIter<'a, I: Index> {
+    LruEvictionIter(lru::EvictionIter<'a, I>),
+    TinyLfuEvictionIter(tinylfu::EvictionIter<'a, I>),
+}
+
+impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
+    type Item = &'a I;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            EvictionIter::LruEvictionIter(iter) => iter.next(),
+            EvictionIter::TinyLfuEvictionIter(iter) => iter.next(),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum AccessMode {
@@ -32,14 +58,38 @@ pub enum AccessMode {
     Write,
 }
 
-pub enum HandleInner<I: Index> {
+pub enum Handle<I: Index> {
     LruHandle(lru::Handle<I>),
+    TinyLfuHandle(tinylfu::Handle<I>),
 }
 
-#[allow(unused)]
-pub struct Handle<I: Index> {
-    inner: HandleInner<I>,
+impl<I: Index> Handle<I> {
+    pub fn index(&self) -> &I {
+        match self {
+            Handle::LruHandle(handle) => handle.index(),
+            Handle::TinyLfuHandle(handle) => handle.index(),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! extract_handle {
+    ($handle:expr, $type:tt) => {
+        paste::paste! {
+            unsafe {
+                let inner = match $handle.as_mut() {
+                    $crate::policies::Handle::[<$type Handle>](handle) => handle,
+                    _ => unreachable!(),
+                };
+                std::ptr::NonNull::new_unchecked(inner as *mut _)
+            }
+        }
+    };
 }
 
 #[cfg(test)]
-impl Index for u64 {}
+mod tests {
+    use super::*;
+
+    impl Index for u64 {}
+}
