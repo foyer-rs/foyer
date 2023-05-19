@@ -12,5 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use policies::Policy;
+
 pub mod collections;
 pub mod policies;
+
+#[allow(unused)]
+pub struct Cache<P: Policy> {
+    policy: P,
+}
