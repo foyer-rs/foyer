@@ -265,8 +265,6 @@ mod tests {
 
     use super::*;
 
-    impl Index for u64 {}
-
     fn ptr<I: Index>(handle: &mut Handle<I>) -> NonNull<Handle<I>> {
         unsafe { NonNull::new_unchecked(handle as *mut _) }
     }
