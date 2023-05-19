@@ -30,9 +30,9 @@ use std::ptr::NonNull;
 use std::time::SystemTime;
 
 use crate::collections::dlist::{DList, Entry, Iter};
-use crate::intrusive_dlist;
+use crate::{extract_handle, intrusive_dlist};
 
-use super::{AccessMode, Index};
+use super::{AccessMode, Index, Policy};
 
 pub struct Config {
     update_on_write: bool,
@@ -69,6 +69,10 @@ impl<I: Index> Handle<I> {
             index,
         }
     }
+
+    pub fn index(&self) -> &I {
+        &self.index
+    }
 }
 
 intrusive_dlist! { Handle<I: Index>, entry, HandleDListAdapter}
@@ -101,7 +105,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    pub fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
+    fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
         unsafe {
             if (mode == AccessMode::Read && !self.config.update_on_read)
                 || (mode == AccessMode::Write && !self.config.update_on_write)
@@ -131,7 +135,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    pub fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -152,7 +156,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if handle is successfully removed from the lru,
     /// returns `false` if the handle is unchanged.
-    pub fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if !handle.as_ref().is_in_cache {
                 return false;
@@ -170,7 +174,7 @@ impl<I: Index> Lru<I> {
         }
     }
 
-    pub fn eviction_iter(&mut self) -> EvictionIter<'_, I> {
+    fn eviction_iter(&mut self) -> EvictionIter<'_, I> {
         unsafe {
             let mut iter = self.lru.iter();
             iter.tail();
@@ -258,6 +262,33 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
 // unsafe impl `Send + Sync` for `Lru` because it uses `NonNull`
 unsafe impl<I: Index> Send for Lru<I> {}
 unsafe impl<I: Index> Sync for Lru<I> {}
+
+impl<I: Index> Policy for Lru<I> {
+    type I = I;
+
+    fn add(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
+        let handle = extract_handle!(handle, Lru);
+        self.add(handle)
+    }
+
+    fn remove(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
+        let handle = extract_handle!(handle, Lru);
+        self.remove(handle)
+    }
+
+    fn record_access(
+        &mut self,
+        mut handle: NonNull<super::Handle<Self::I>>,
+        mode: AccessMode,
+    ) -> bool {
+        let handle = extract_handle!(handle, Lru);
+        self.record_access(handle, mode)
+    }
+
+    fn eviction_iter(&mut self) -> super::EvictionIter<'_, Self::I> {
+        super::EvictionIter::LruEvictionIter(self.eviction_iter())
+    }
+}
 
 #[cfg(test)]
 mod tests {
