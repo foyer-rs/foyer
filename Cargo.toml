@@ -8,12 +8,14 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+cmsketch = "0.1"
 crossbeam-epoch = "0.9"
 futures = "0.3"
 itertools = "0.10.5"
 memoffset = "0.8"
 parking_lot = "0.12"
 paste = "1.0"
+twox-hash = "1"
 
 [dev-dependencies]
 crossbeam-utils = "0.8"

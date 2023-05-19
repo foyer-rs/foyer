@@ -41,21 +41,21 @@ macro_rules! intrusive_dlist {
         struct $adapter;
 
         impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $crate::collections::dlist::Adapter<$element $(< $( $lt ),+ >)?> for $adapter  {
-            fn en2el(entry: NonNull<Entry>) -> NonNull<$element $(< $( $lt ),+ >)?> {
+            fn en2el(entry: std::ptr::NonNull<Entry>) -> std::ptr::NonNull<$element $(< $( $lt ),+ >)?> {
                 unsafe {
                     let ptr = (entry.as_ptr() as *mut u8)
                         .sub(memoffset::offset_of!($element $(< $( $lt ),+ >)?, $entry))
                         .cast::<$element $(< $( $lt ),+ >)?>();
-                    NonNull::new_unchecked(ptr)
+                    std::ptr::NonNull::new_unchecked(ptr)
                 }
             }
 
-            fn el2en(element: NonNull<$element $(< $( $lt ),+ >)?>) -> NonNull<Entry> {
+            fn el2en(element: std::ptr::NonNull<$element $(< $( $lt ),+ >)?>) -> std::ptr::NonNull<Entry> {
                 unsafe {
                     let ptr = (element.as_ptr() as *mut u8)
                         .add(memoffset::offset_of!($element $(< $( $lt ),+ >)?, $entry))
                         .cast::<Entry>();
-                    NonNull::new_unchecked(ptr)
+                    std::ptr::NonNull::new_unchecked(ptr)
                 }
             }
         }
@@ -316,7 +316,7 @@ impl<E, A: Adapter<E>> DList<E, A> {
     /// # Safety
     ///
     /// there is no guarantee that the element cannot be modified while iterating
-    pub unsafe fn iter(&mut self) -> Iter<'_, E, A> {
+    pub unsafe fn iter(&self) -> Iter<'_, E, A> {
         let entry = self.head;
         Iter { dlist: self, entry }
     }
@@ -325,7 +325,7 @@ impl<E, A: Adapter<E>> DList<E, A> {
 pub trait DListExt {}
 
 pub struct Iter<'a, E, A: Adapter<E>> {
-    dlist: &'a mut DList<E, A>,
+    dlist: &'a DList<E, A>,
     entry: Option<NonNull<Entry>>,
 }
 

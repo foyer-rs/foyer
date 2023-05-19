@@ -18,6 +18,7 @@
 //! They don't store the real cache entries or resource usage.
 
 pub mod lru;
+pub mod tinylfu;
 
 use std::hash::Hash;
 
@@ -39,3 +40,6 @@ pub enum HandleInner<I: Index> {
 pub struct Handle<I: Index> {
     inner: HandleInner<I>,
 }
+
+#[cfg(test)]
+impl Index for u64 {}
