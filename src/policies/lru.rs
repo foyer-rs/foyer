@@ -30,17 +30,18 @@ use std::ptr::NonNull;
 use std::time::SystemTime;
 
 use crate::collections::dlist::{DList, Entry, Iter};
-use crate::{extract_handle, intrusive_dlist};
+use crate::intrusive_dlist;
 
-use super::{AccessMode, Index, Policy};
+use super::Index;
 
+#[derive(Clone, Debug)]
 pub struct Config {
-    update_on_write: bool,
+    pub update_on_write: bool,
 
-    update_on_read: bool,
+    pub update_on_read: bool,
 
     /// Insertion point of the new entry, between 0 and 1.
-    lru_insertion_point_fraction: f64,
+    pub lru_insertion_point_fraction: f64,
 }
 
 pub struct Handle<I: Index> {
@@ -56,7 +57,7 @@ pub struct Handle<I: Index> {
 }
 
 impl<I: Index> Handle<I> {
-    pub fn new(index: I) -> Self {
+    fn new(index: I) -> Self {
         Self {
             entry: Entry::default(),
 
@@ -70,7 +71,7 @@ impl<I: Index> Handle<I> {
         }
     }
 
-    pub fn index(&self) -> &I {
+    fn index(&self) -> &I {
         &self.index
     }
 }
@@ -91,7 +92,7 @@ pub struct Lru<I: Index> {
 }
 
 impl<I: Index> Lru<I> {
-    pub fn new(config: Config) -> Self {
+    fn new(config: Config) -> Self {
         Self {
             lru: DList::new(),
 
@@ -105,13 +106,8 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
+    fn access(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
-            if (mode == AccessMode::Read && !self.config.update_on_read)
-                || (mode == AccessMode::Write && !self.config.update_on_write)
-            {
-                return false;
-            }
             handle.as_mut().is_accessed = true;
 
             // TODO(MrCroxx): try trigger reconfigure
@@ -135,7 +131,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn insert(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -174,7 +170,7 @@ impl<I: Index> Lru<I> {
         }
     }
 
-    fn eviction_iter(&mut self) -> EvictionIter<'_, I> {
+    fn eviction_iter(&self) -> EvictionIter<'_, I> {
         unsafe {
             let mut iter = self.lru.iter();
             iter.tail();
@@ -259,34 +255,52 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
     }
 }
 
-// unsafe impl `Send + Sync` for `Lru` because it uses `NonNull`
+// unsafe impl `Send + Sync` for structs with `NonNull` usage
+
 unsafe impl<I: Index> Send for Lru<I> {}
 unsafe impl<I: Index> Sync for Lru<I> {}
 
-impl<I: Index> Policy for Lru<I> {
+unsafe impl<I: Index> Send for Handle<I> {}
+unsafe impl<I: Index> Sync for Handle<I> {}
+
+impl super::Config for Config {}
+
+impl<I: Index> super::Handle for Handle<I> {
     type I = I;
 
-    fn add(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
-        let handle = extract_handle!(handle, Lru);
-        self.add(handle)
+    fn new(index: Self::I) -> Self {
+        Self::new(index)
     }
 
-    fn remove(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
-        let handle = extract_handle!(handle, Lru);
+    fn index(&self) -> &Self::I {
+        self.index()
+    }
+}
+
+impl<I: Index> super::Policy for Lru<I> {
+    type I = I;
+    type C = Config;
+    type H = Handle<I>;
+    type E<'e> = EvictionIter<'e, I>;
+
+    fn new(config: Self::C) -> Self {
+        Lru::new(config)
+    }
+
+    fn insert(&mut self, handle: NonNull<Self::H>) -> bool {
+        self.insert(handle)
+    }
+
+    fn remove(&mut self, handle: NonNull<Self::H>) -> bool {
         self.remove(handle)
     }
 
-    fn record_access(
-        &mut self,
-        mut handle: NonNull<super::Handle<Self::I>>,
-        mode: AccessMode,
-    ) -> bool {
-        let handle = extract_handle!(handle, Lru);
-        self.record_access(handle, mode)
+    fn access(&mut self, handle: NonNull<Self::H>) -> bool {
+        self.access(handle)
     }
 
-    fn eviction_iter(&mut self) -> super::EvictionIter<'_, Self::I> {
-        super::EvictionIter::LruEvictionIter(self.eviction_iter())
+    fn eviction_iter(&self) -> Self::E<'_> {
+        self.eviction_iter()
     }
 }
 
@@ -311,13 +325,13 @@ mod tests {
 
         let mut handles = vec![Handle::new(0), Handle::new(1), Handle::new(2)];
 
-        lru.add(ptr(&mut handles[0]));
-        lru.add(ptr(&mut handles[1]));
-        lru.add(ptr(&mut handles[2]));
+        lru.insert(ptr(&mut handles[0]));
+        lru.insert(ptr(&mut handles[1]));
+        lru.insert(ptr(&mut handles[2]));
 
         assert_eq!(vec![0, 1, 2], lru.eviction_iter().copied().collect_vec());
 
-        lru.record_access(ptr(&mut handles[1]), AccessMode::Read);
+        lru.access(ptr(&mut handles[1]));
 
         assert_eq!(vec![0, 2, 1], lru.eviction_iter().copied().collect_vec());
 

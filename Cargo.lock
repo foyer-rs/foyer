@@ -22,9 +22,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cmsketch"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c83ab4269fb46767c201bcf7957df0eb14988fbea81fef4efbc8ba8f0241ef"
+checksum = "041ac3f10d521f2049bf4363edc19b63db525b496ad422c99dd3158f4c2e5999"
 dependencies = [
  "paste",
 ]
