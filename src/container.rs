@@ -130,6 +130,11 @@ where
         pool.get(index)
     }
 
+    // TODO(MrCroxx): optimize this
+    pub fn size(&self) -> usize {
+        self.pools.iter().map(|pool| pool.lock().size).sum()
+    }
+
     fn pool(&self, index: &I) -> MutexGuard<'_, Pool<I, P, H, D, S>> {
         let mut hasher = XxHash64::default();
         index.hash(&mut hasher);
@@ -233,7 +238,7 @@ mod tests {
     use crate::store::tests::MemoryStore;
 
     #[test]
-    fn test() {
+    fn test_container_simple() {
         let policy_config = LruConfig {
             update_on_write: true,
             update_on_read: true,
@@ -241,15 +246,32 @@ mod tests {
         };
 
         let config = Config {
-            capacity: 1024 * 1024 * 4,
-            pool_count_bits: 5,
+            capacity: 100,
+            pool_count_bits: 0,
             policy_config,
             weighter: |data: &Vec<u8>| data.len(),
             store: MemoryStore::new(),
             _marker: PhantomData,
         };
 
-        let _container: Container<u64, Lru<_>, LruHandle<_>, Vec<u8>, _, MemoryStore<_, _>> =
+        let container: Container<u64, Lru<_>, LruHandle<_>, Vec<u8>, _, MemoryStore<_, _>> =
             Container::new(config);
+
+        assert!(container.insert(1, vec![b'x'; 40]));
+        assert!(!container.insert(1, vec![b'x'; 40]));
+        assert_eq!(container.get(&1), Some(vec![b'x'; 40]));
+
+        assert!(container.insert(2, vec![b'x'; 60]));
+        assert!(!container.insert(2, vec![b'x'; 60]));
+        assert_eq!(container.get(&2), Some(vec![b'x'; 60]));
+
+        assert!(container.insert(3, vec![b'x'; 50]));
+        assert_eq!(container.get(&3), Some(vec![b'x'; 50]));
+        assert_eq!(container.get(&1), None);
+        assert_eq!(container.get(&2), None);
+
+        assert!(container.remove(&3));
+
+        assert_eq!(container.size(), 0);
     }
 }
