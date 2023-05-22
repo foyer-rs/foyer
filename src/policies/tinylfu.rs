@@ -34,25 +34,26 @@ use cmsketch::CMSketchUsize;
 use twox_hash::XxHash64;
 
 use crate::collections::dlist::{DList, Entry, Iter};
-use crate::{extract_handle, intrusive_dlist};
+use crate::intrusive_dlist;
 
-use super::{AccessMode, Index, Policy};
+use super::Index;
 
 const MIN_CAPACITY: usize = 100;
 const ERROR_THRESHOLD: f64 = 5.0;
 const HASH_COUNT: usize = 4;
 const DECAY_FACTOR: f64 = 0.5;
 
+#[derive(Clone, Debug)]
 pub struct Config {
-    update_on_write: bool,
+    pub update_on_write: bool,
 
-    update_on_read: bool,
+    pub update_on_read: bool,
 
     /// The multiplier for window len given the cache size.
-    window_to_cache_size_ratio: usize,
+    pub window_to_cache_size_ratio: usize,
 
     /// The ratio of tiny lru capacity to overall capacity.
-    tiny_lru_capacity_ratio: f64,
+    pub tiny_lru_capacity_ratio: f64,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -75,7 +76,7 @@ pub struct Handle<I: Index> {
 }
 
 impl<I: Index> Handle<I> {
-    pub fn new(index: I) -> Self {
+    fn new(index: I) -> Self {
         Self {
             entry_tiny: Entry::default(),
             entry_main: Entry::default(),
@@ -90,7 +91,7 @@ impl<I: Index> Handle<I> {
         }
     }
 
-    pub fn index(&self) -> &I {
+    fn index(&self) -> &I {
         &self.index
     }
 }
@@ -170,13 +171,8 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    fn record_access(&mut self, mut handle: NonNull<Handle<I>>, mode: AccessMode) -> bool {
+    fn access(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
-            if (mode == AccessMode::Read && !self.config.update_on_read)
-                || (mode == AccessMode::Write && !self.config.update_on_write)
-            {
-                return false;
-            }
             handle.as_mut().is_accessed = true;
 
             if !handle.as_ref().is_in_cache {
@@ -196,7 +192,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    fn add(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn insert(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -253,7 +249,7 @@ impl<I: Index> TinyLfu<I> {
         }
     }
 
-    fn eviction_iter<'a>(&'a mut self) -> EvictionIter<'a, I> {
+    fn eviction_iter<'a>(&'a self) -> EvictionIter<'a, I> {
         unsafe {
             let mut iter_main: Iter<'a, _, _> = self.lru_main.iter();
             iter_main.tail();
@@ -292,7 +288,7 @@ impl<I: Index> TinyLfu<I> {
     }
 
     fn update_frequencies(&mut self, handle: NonNull<Handle<I>>) {
-        self.frequencies.add(Self::hash_handle(handle));
+        self.frequencies.record(Self::hash_handle(handle));
         self.window_size += 1;
 
         // Decay counts every `max_window_size`. This avoids having items that were
@@ -397,34 +393,52 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
     }
 }
 
-// unsafe impl `Send + Sync` for `TinyLfu` because it uses `NonNull`
+// unsafe impl `Send + Sync` for structs with `NonNull` usage
+
 unsafe impl<I: Index> Send for TinyLfu<I> {}
 unsafe impl<I: Index> Sync for TinyLfu<I> {}
 
-impl<I: Index> Policy for TinyLfu<I> {
+unsafe impl<I: Index> Send for Handle<I> {}
+unsafe impl<I: Index> Sync for Handle<I> {}
+
+impl super::Config for Config {}
+
+impl<I: Index> super::Handle for Handle<I> {
     type I = I;
 
-    fn add(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
-        let handle = extract_handle!(handle, TinyLfu);
-        self.add(handle)
+    fn new(index: Self::I) -> Self {
+        Self::new(index)
     }
 
-    fn remove(&mut self, mut handle: NonNull<super::Handle<Self::I>>) -> bool {
-        let handle = extract_handle!(handle, TinyLfu);
+    fn index(&self) -> &Self::I {
+        self.index()
+    }
+}
+
+impl<I: Index> super::Policy for TinyLfu<I> {
+    type I = I;
+    type C = Config;
+    type H = Handle<I>;
+    type E<'e> = EvictionIter<'e, I>;
+
+    fn new(config: Self::C) -> Self {
+        TinyLfu::new(config)
+    }
+
+    fn insert(&mut self, handle: NonNull<Self::H>) -> bool {
+        self.insert(handle)
+    }
+
+    fn remove(&mut self, handle: NonNull<Self::H>) -> bool {
         self.remove(handle)
     }
 
-    fn record_access(
-        &mut self,
-        mut handle: NonNull<super::Handle<Self::I>>,
-        mode: AccessMode,
-    ) -> bool {
-        let handle = extract_handle!(handle, TinyLfu);
-        self.record_access(handle, mode)
+    fn access(&mut self, handle: NonNull<Self::H>) -> bool {
+        self.access(handle)
     }
 
-    fn eviction_iter(&mut self) -> super::EvictionIter<'_, Self::I> {
-        super::EvictionIter::TinyLfuEvictionIter(self.eviction_iter())
+    fn eviction_iter(&self) -> Self::E<'_> {
+        self.eviction_iter()
     }
 }
 
@@ -450,7 +464,7 @@ mod tests {
 
         let mut handles = (0..101).map(Handle::new).collect_vec();
         for handle in handles.iter_mut().take(100) {
-            lfu.add(ptr(handle));
+            lfu.insert(ptr(handle));
         }
 
         assert_eq!(99, lfu.lru_main.len());
@@ -464,10 +478,10 @@ mod tests {
         );
 
         for handle in handles.iter_mut().take(100) {
-            lfu.record_access(ptr(handle), AccessMode::Read);
+            lfu.access(ptr(handle));
         }
-        lfu.record_access(ptr(&mut handles[0]), AccessMode::Read);
-        lfu.add(ptr(&mut handles[100]));
+        lfu.access(ptr(&mut handles[0]));
+        lfu.insert(ptr(&mut handles[100]));
 
         assert_eq!(handles[0].lru_type, LruType::Main);
         assert_eq!(handles[100].lru_type, LruType::Tiny);
