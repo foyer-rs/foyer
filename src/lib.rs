@@ -12,12 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use policies::Policy;
+#![feature(trait_alias)]
+
+pub use policies::Policy;
 
 pub mod collections;
+pub mod container;
 pub mod policies;
+pub mod store;
 
-#[allow(unused)]
-pub struct Cache<P: Policy> {
-    policy: P,
-}
+pub trait Index =
+    PartialOrd + Ord + PartialEq + Eq + Clone + std::hash::Hash + Send + Sync + 'static;
+pub trait Data = Send + Sync + 'static;
