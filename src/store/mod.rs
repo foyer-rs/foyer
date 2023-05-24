@@ -12,17 +12,41 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{Data, Index};
+pub mod error;
+pub mod file;
+pub mod read_only_file_store;
+pub mod utils;
 
-pub trait Store: Send + Sync + Clone + 'static {
+use crate::{Data, Index};
+use async_trait::async_trait;
+
+use error::Result;
+
+#[async_trait]
+pub trait Store: Send + Sync + Sized + 'static {
     type I: Index;
     type D: Data;
+    type C: Send + Sync + Clone + 'static;
 
-    fn store(&self, index: Self::I, data: Self::D);
+    async fn open(pool: usize, config: Self::C) -> Result<Self>;
 
-    fn load(&self, index: &Self::I) -> Option<Self::D>;
+    async fn store(&self, index: Self::I, data: Self::D) -> Result<()>;
 
-    fn delete(&self, index: &Self::I);
+    async fn load(&self, index: &Self::I) -> Result<Option<Self::D>>;
+
+    async fn delete(&self, index: &Self::I) -> Result<()>;
+}
+
+async fn asyncify<F, T>(f: F) -> error::Result<T>
+where
+    F: FnOnce() -> error::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    #[cfg_attr(madsim, expect(deprecated))]
+    match tokio::task::spawn_blocking(f).await {
+        Ok(res) => res,
+        Err(_) => Err(error::Error::Other("background task failed".to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -32,39 +56,56 @@ pub mod tests {
 
     use parking_lot::RwLock;
 
+    use super::error::Result;
+
     use super::*;
 
     #[derive(Clone, Debug, Default)]
     pub struct MemoryStore<I: Index, D: Data + Clone> {
+        pool: usize,
         inner: Arc<RwLock<HashMap<I, D>>>,
     }
 
     impl<I: Index, D: Data + Clone> MemoryStore<I, D> {
-        pub fn new() -> Self {
+        pub fn new(pool: usize) -> Self {
             Self {
+                pool,
                 inner: Arc::new(RwLock::new(HashMap::default())),
             }
         }
+
+        pub fn pool(&self) -> usize {
+            self.pool
+        }
     }
 
+    #[async_trait]
     impl<I: Index, D: Data + Clone> Store for MemoryStore<I, D> {
         type I = I;
 
         type D = D;
 
-        fn store(&self, index: Self::I, data: Self::D) {
+        type C = ();
+
+        async fn open(pool: usize, _: Self::C) -> Result<Self> {
+            Ok(Self::new(pool))
+        }
+
+        async fn store(&self, index: Self::I, data: Self::D) -> Result<()> {
             let mut inner = self.inner.write();
             inner.insert(index, data);
+            Ok(())
         }
 
-        fn load(&self, index: &Self::I) -> Option<Self::D> {
+        async fn load(&self, index: &Self::I) -> Result<Option<Self::D>> {
             let inner = self.inner.read();
-            inner.get(index).cloned()
+            Ok(inner.get(index).cloned())
         }
 
-        fn delete(&self, index: &Self::I) {
+        async fn delete(&self, index: &Self::I) -> Result<()> {
             let mut inner = self.inner.write();
             inner.remove(index);
+            Ok(())
         }
     }
 }
