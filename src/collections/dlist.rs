@@ -33,7 +33,6 @@ pub trait Adapter<E> {
     fn el2en(_: NonNull<E>) -> NonNull<Entry>;
 }
 
-#[macro_export]
 macro_rules! intrusive_dlist {
     (
         $element:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt)* )? ),+ >)?, $entry:ident, $adapter:ident
@@ -61,6 +60,8 @@ macro_rules! intrusive_dlist {
         }
     };
 }
+
+pub(crate) use intrusive_dlist;
 
 /// TODO: write docs
 #[derive(Debug)]

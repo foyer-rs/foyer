@@ -29,8 +29,7 @@
 use std::ptr::NonNull;
 use std::time::SystemTime;
 
-use crate::collections::dlist::{DList, Entry, Iter};
-use crate::intrusive_dlist;
+use crate::collections::dlist::{intrusive_dlist, DList, Entry, Iter};
 
 use super::Index;
 

@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![feature(trait_alias)]
+#![feature(pattern)]
 
 pub use policies::Policy;
 
@@ -21,6 +22,37 @@ pub mod container;
 pub mod policies;
 pub mod store;
 
-pub trait Index =
-    PartialOrd + Ord + PartialEq + Eq + Clone + std::hash::Hash + Send + Sync + 'static;
-pub trait Data = Send + Sync + 'static;
+pub trait Index:
+    PartialOrd + Ord + PartialEq + Eq + Clone + std::hash::Hash + Send + Sync + 'static
+{
+    fn size() -> usize;
+
+    fn write(&self, buf: &mut [u8]);
+
+    fn read(buf: &[u8]) -> Self;
+}
+pub trait Data = Send + Sync + 'static + Into<Vec<u8>> + From<Vec<u8>>;
+
+#[cfg(test)]
+
+pub mod tests {
+    use bytes::{Buf, BufMut};
+
+    use super::*;
+
+    pub fn is_send_sync_static<T: Send + Sync + 'static>() {}
+
+    impl Index for u64 {
+        fn size() -> usize {
+            8
+        }
+
+        fn write(&self, mut buf: &mut [u8]) {
+            buf.put_u64(*self)
+        }
+
+        fn read(mut buf: &[u8]) -> Self {
+            buf.get_u64()
+        }
+    }
+}

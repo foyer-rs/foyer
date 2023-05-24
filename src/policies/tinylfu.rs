@@ -33,8 +33,7 @@ use std::time::SystemTime;
 use cmsketch::CMSketchUsize;
 use twox_hash::XxHash64;
 
-use crate::collections::dlist::{DList, Entry, Iter};
-use crate::intrusive_dlist;
+use crate::collections::dlist::{intrusive_dlist, DList, Entry, Iter};
 
 use super::Index;
 
