@@ -15,6 +15,8 @@
 #![feature(trait_alias)]
 #![feature(pattern)]
 
+use std::fmt::Debug;
+
 pub use policies::Policy;
 
 pub mod collections;
@@ -23,7 +25,7 @@ pub mod policies;
 pub mod store;
 
 pub trait Index:
-    PartialOrd + Ord + PartialEq + Eq + Clone + std::hash::Hash + Send + Sync + 'static
+    PartialOrd + Ord + PartialEq + Eq + Clone + std::hash::Hash + Send + Sync + 'static + Debug
 {
     fn size() -> usize;
 
