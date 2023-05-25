@@ -37,8 +37,8 @@ impl Location {
     }
 
     pub fn read(mut buf: &[u8]) -> Self {
-        let offset = buf.get_u32();
-        let len = buf.get_u32();
+        let offset = buf.get_u32_le();
+        let len = buf.get_u32_le();
         Self { offset, len }
     }
 
