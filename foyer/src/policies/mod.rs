@@ -40,7 +40,7 @@ pub trait Policy: Send + Sync + 'static {
     fn eviction_iter(&self) -> Self::E<'_>;
 }
 
-pub trait Config: Send + Sync + Clone + 'static {}
+pub trait Config: Send + Sync + std::fmt::Debug + Clone + 'static {}
 
 pub trait Handle: Send + Sync + 'static {
     type I: Index;

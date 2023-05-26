@@ -48,18 +48,18 @@ pub struct Args {
     dir: String,
 
     /// (MiB)
-    #[arg(long)]
+    #[arg(long, default_value_t = 1024)]
     capacity: usize,
 
     /// (s)
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 60)]
     time: u64,
 
-    #[arg(long)]
+    #[arg(long, default_value_t = 16)]
     concurrency: usize,
 
     /// must be power of 2
-    #[arg(long)]
+    #[arg(long, default_value_t = 16)]
     pools: usize,
 
     /// (s)
@@ -84,7 +84,7 @@ pub struct Args {
     look_up_range: u64,
 
     /// read only file store: max cache file size (MiB)
-    #[arg(long, default_value_t = 64)]
+    #[arg(long, default_value_t = 16)]
     rofs_max_file_size: usize,
 
     /// read only file store: ratio of garbage to trigger reclaim (0 ~ 1)
@@ -122,6 +122,8 @@ async fn main() {
     let args = Args::parse();
     args.verify();
 
+    println!("{:#?}", args);
+
     create_dir_all(&args.dir).unwrap();
 
     let iostat_path = match detect_fs_type(&args.dir) {
@@ -144,7 +146,7 @@ async fn main() {
 
     let store_config = ReadOnlyFileStoreConfig {
         dir: PathBuf::from(&args.dir),
-        capacity: args.capacity * 1024 * 1024,
+        capacity: args.capacity * 1024 * 1024 / args.pools,
         max_file_size: args.rofs_max_file_size * 1024 * 1024,
         trigger_reclaim_garbage_ratio: args.rofs_trigger_reclaim_garbage_ratio,
         trigger_reclaim_capacity_ratio: args.rofs_trigger_reclaim_capacity_ratio,
@@ -163,6 +165,8 @@ async fn main() {
         policy_config,
         store_config,
     };
+
+    println!("{:#?}", config);
 
     let container = Container::open(config).await.unwrap();
     let container = Arc::new(container);

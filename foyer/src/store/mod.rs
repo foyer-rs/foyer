@@ -26,7 +26,7 @@ use error::Result;
 pub trait Store: Send + Sync + Sized + 'static {
     type I: Index;
     type D: Data;
-    type C: Send + Sync + Clone + 'static;
+    type C: Send + Sync + Clone + std::fmt::Debug + 'static;
 
     async fn open(pool: usize, config: Self::C) -> Result<Self>;
 
