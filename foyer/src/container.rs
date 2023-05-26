@@ -45,6 +45,23 @@ where
     pub store_config: S::C,
 }
 
+impl<I, P, H, S> std::fmt::Debug for Config<I, P, H, S>
+where
+    I: Index,
+    P: Policy<I = I, H = H>,
+    H: Handle<I = I>,
+    S: Store<I = I>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("capacity", &self.capacity)
+            .field("pool_count_bits", &self.pool_count_bits)
+            .field("policy_config", &self.policy_config)
+            .field("store_config", &self.store_config)
+            .finish()
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub struct Container<I, P, H, D, S>
 where
