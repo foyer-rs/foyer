@@ -1,3 +1,6 @@
 [workspace]
 
 members = ["foyer", "foyer-bench"]
+
+[patch.crates-io]
+# cmsketch = { path = "../cmsketch-rs" }
