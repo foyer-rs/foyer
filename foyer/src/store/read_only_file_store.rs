@@ -43,11 +43,11 @@ pub struct Config {
     /// path to store dir
     pub dir: PathBuf,
 
-    /// max cache file size
-    pub max_file_size: usize,
-
     /// store capacity
     pub capacity: usize,
+
+    /// max cache file size
+    pub max_file_size: usize,
 
     /// ratio of garbage to trigger reclaim
     pub trigger_reclaim_garbage_ratio: f64,
