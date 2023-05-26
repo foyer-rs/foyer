@@ -115,7 +115,6 @@ type TContainer =
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
-
 #[tokio::main]
 async fn main() {
     is_send_sync_static::<TContainer>();

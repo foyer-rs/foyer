@@ -32,14 +32,13 @@ pub fn detect_fs_type(path: impl AsRef<Path>) -> FsType {
     #[cfg(target_os = "linux")]
     {
         let fs_stat = statfs(path.as_ref()).unwrap();
-        let fs_type = match fs_stat.filesystem_type() {
+        match fs_stat.filesystem_type() {
             XFS_SUPER_MAGIC => FsType::Xfs,
             EXT4_SUPER_MAGIC => FsType::Ext4,
             BTRFS_SUPER_MAGIC => FsType::Btrfs,
             TMPFS_MAGIC => FsType::Tmpfs,
             _ => FsType::Others,
-        };
-        fs_type
+        }
     }
 
     #[cfg(not(target_os = "linux"))]
