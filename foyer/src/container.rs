@@ -250,6 +250,23 @@ where
     }
 }
 
+impl<I, P, H, D, S> Drop for Pool<I, P, H, D, S>
+where
+    I: Index,
+    P: Policy<I = I, H = H>,
+    H: Handle<I = I>,
+    D: Data,
+    S: Store<I = I, D = D>,
+{
+    fn drop(&mut self) {
+        let mut handles = BTreeMap::new();
+        std::mem::swap(&mut handles, &mut self.handles);
+        for PoolHandle { weight: _, handle } in handles.into_values() {
+            unsafe { drop(Box::from_raw(handle.0.as_ptr())) }
+        }
+    }
+}
+
 struct PoolHandle<I, H>
 where
     I: Index,
