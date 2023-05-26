@@ -76,6 +76,35 @@ jobs:
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v2
+  asan:
+    name: run with address saniziter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install rust toolchain@v1
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}
+      - name: asan test
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: '-Zsanitizer=address --cfg tokio_unstable'
+          EXTRA_CARGO_ARGS: '--verbose -Zbuild-std --target x86_64-unknown-linux-gnu'
+        run: |-
+          cargo build --all &&
+          mkdir -p $GITHUB_WORKSPACE/foyer-data &&
+          ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data --capacity 256
 concurrency:
   group: environment-${{ github.ref }}
   cancel-in-progress: true
