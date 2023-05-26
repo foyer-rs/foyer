@@ -96,7 +96,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}
-      - name: asan test
+      - name: Run foyer-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: '-Zsanitizer=address --cfg tokio_unstable'
