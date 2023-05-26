@@ -103,7 +103,7 @@ jobs:
           RUSTFLAGS: '-Zsanitizer=address --cfg tokio_unstable'
           EXTRA_CARGO_ARGS: '--verbose -Zbuild-std --target x86_64-unknown-linux-gnu'
         run: |-
-          cargo build --all &&
+          cargo build --all --target x86_64-unknown-linux-gnu &&
           mkdir -p $GITHUB_WORKSPACE/foyer-data &&
           ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data --capacity 256
 
