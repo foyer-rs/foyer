@@ -187,7 +187,7 @@ where
                 break;
             }
             let pool_handle = self.handles.remove(index).unwrap();
-            self.size -= weight;
+            self.size -= pool_handle.weight;
             handles.push(pool_handle.handle);
             self.store.delete(index).await?;
         }
@@ -280,7 +280,9 @@ mod tests {
         assert!(!container.insert(2, vec![b'x'; 60]).await.unwrap());
         assert_eq!(container.get(&2).await.unwrap(), Some(vec![b'x'; 60]));
 
+        // After insert 3, {1, 2} will be evicted.
         assert!(container.insert(3, vec![b'x'; 50]).await.unwrap());
+        assert_eq!(container.size().await, 50);
         assert_eq!(container.get(&3).await.unwrap(), Some(vec![b'x'; 50]));
         assert_eq!(container.get(&1).await.unwrap(), None);
         assert_eq!(container.get(&2).await.unwrap(), None);
