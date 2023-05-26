@@ -1,0 +1,30 @@
+[package]
+name = "foyer-bench"
+version = "0.1.0"
+edition = "2021"
+authors = ["MrCroxx <mrcroxx@outlook.com>"]
+description = "Hybrid cache for Rust"
+license = "Apache-2.0"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytesize = "1"
+clap = { version = "4", features = ["derive"] }
+foyer = { path = "../foyer" }
+futures = "0.3"
+hdrhistogram = "7"
+itertools = "0.10.5"
+libc = "0.2"
+nix = { version = "0.26", features = ["fs", "mman"] }
+parking_lot = "0.12"
+rand = "0.8.5"
+rand_mt = "4.2.1"
+tempfile = "3"
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }

@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::hash::Hasher;
-use std::marker::PhantomData;
+
 use std::ptr::NonNull;
 
 use futures::future::try_join_all;
@@ -24,58 +24,50 @@ use twox_hash::XxHash64;
 
 use crate::policies::{Handle, Policy};
 use crate::store::Store;
-use crate::{Data, Index};
+use crate::{Data, Index, WrappedNonNull};
 
 // TODO(MrCroxx): wrap own result type
 use crate::store::error::Result;
 
-pub struct Config<I, P, H, T, W, S>
+pub struct Config<I, P, H, S>
 where
     I: Index,
     P: Policy<I = I, H = H>,
     H: Handle<I = I>,
-    W: Fn(&T) -> usize + Send + Sync,
-    S: Store<I = I, D = T>,
+    S: Store<I = I>,
 {
-    capacity: usize,
+    pub capacity: usize,
 
-    pool_count_bits: usize,
+    pub pool_count_bits: usize,
 
-    policy_config: P::C,
+    pub policy_config: P::C,
 
-    store_config: S::C,
-
-    weighter: W,
-
-    _marker: PhantomData<(I, H, T)>,
+    pub store_config: S::C,
 }
 
 #[allow(clippy::type_complexity)]
-pub struct Container<I, P, H, D, W, S>
+pub struct Container<I, P, H, D, S>
 where
     I: Index,
     P: Policy<I = I, H = H>,
     H: Handle<I = I>,
     D: Data,
-    W: Fn(&D) -> usize + Send + Sync,
     S: Store<I = I, D = D>,
 {
     pool_count_bits: usize,
     pools: Vec<Mutex<Pool<I, P, H, D, S>>>,
-
-    weighter: W,
 }
 
-impl<I, P, H, D, W, S> Container<I, P, H, D, W, S>
+impl<I, P, H, D, S> Container<I, P, H, D, S>
 where
     I: Index,
     P: Policy<I = I, H = H>,
     H: Handle<I = I>,
     D: Data,
-    W: Fn(&D) -> usize + Send + Sync,
+
     S: Store<I = I, D = D>,
 {
-    pub async fn open(config: Config<I, P, H, D, W, S>) -> Result<Self> {
+    pub async fn open(config: Config<I, P, H, S>) -> Result<Self> {
         let pool_count = 1 << config.pool_count_bits;
         let capacity = config.capacity >> config.pool_count_bits;
 
@@ -101,8 +93,6 @@ where
         Ok(Self {
             pool_count_bits: config.pool_count_bits,
             pools,
-
-            weighter: config.weighter,
         })
     }
 
@@ -114,7 +104,7 @@ where
             return Ok(false);
         }
 
-        let weight = (self.weighter)(&data);
+        let weight = data.weight();
 
         pool.make_room(weight).await?;
 
@@ -196,23 +186,23 @@ where
             if self.size + weight <= self.capacity || self.size == 0 {
                 break;
             }
-            let PoolHandle { weight, handle } = self.handles.remove(index).unwrap();
+            let pool_handle = self.handles.remove(index).unwrap();
             self.size -= weight;
-            handles.push(handle);
+            handles.push(pool_handle.handle);
             self.store.delete(index).await?;
         }
         for handle in handles {
-            assert!(self.policy.remove(handle));
-            unsafe { drop(Box::from_raw(handle.as_ptr())) };
+            assert!(self.policy.remove(handle.0));
+            unsafe { drop(Box::from_raw(handle.0.as_ptr())) };
         }
         Ok(())
     }
 
     async fn insert(&mut self, index: I, weight: usize, data: D) -> Result<()> {
         let handle = Box::new(H::new(index.clone()));
-        let handle = unsafe { NonNull::new_unchecked(Box::leak(handle)) };
+        let handle = unsafe { WrappedNonNull(NonNull::new_unchecked(Box::leak(handle))) };
 
-        assert!(self.policy.insert(handle));
+        assert!(self.policy.insert(handle.0));
         self.handles
             .insert(index.clone(), PoolHandle { weight, handle });
         self.size += weight;
@@ -224,7 +214,7 @@ where
 
     async fn remove(&mut self, index: &I) -> Result<()> {
         let PoolHandle { weight, handle } = self.handles.remove(index).unwrap();
-        assert!(self.policy.remove(handle));
+        assert!(self.policy.remove(handle.0));
         self.size -= weight;
 
         self.store.delete(index).await?;
@@ -234,8 +224,8 @@ where
 
     async fn get(&mut self, index: &I) -> Result<Option<D>> {
         match self.handles.get(index) {
-            Some(PoolHandle { weight: _, handle }) => {
-                self.policy.access(*handle);
+            Some(pool_handle) => {
+                self.policy.access(pool_handle.handle.0);
                 self.store.load(index).await
             }
             None => Ok(None),
@@ -249,7 +239,8 @@ where
     H: Handle<I = I>,
 {
     weight: usize,
-    handle: NonNull<H>,
+    // Use `WrappedNonNull` for ptrs that needs to cross .await points.
+    handle: WrappedNonNull<H>,
 }
 
 #[cfg(test)]
@@ -257,13 +248,16 @@ mod tests {
     use super::*;
 
     use crate::policies::lru::{Config as LruConfig, Handle as LruHandle, Lru};
+    use crate::policies::tinylfu::Handle as TinyLfuHandle;
     use crate::store::tests::MemoryStore;
+    use crate::tests::is_send_sync_static;
 
     #[tokio::test]
     async fn test_container_simple() {
+        is_send_sync_static::<PoolHandle<u64, LruHandle<u64>>>();
+        is_send_sync_static::<PoolHandle<u64, TinyLfuHandle<u64>>>();
+
         let policy_config = LruConfig {
-            update_on_write: true,
-            update_on_read: true,
             lru_insertion_point_fraction: 0.0,
         };
 
@@ -271,12 +265,11 @@ mod tests {
             capacity: 100,
             pool_count_bits: 0,
             policy_config,
-            weighter: |data: &Vec<u8>| data.len(),
+
             store_config: (),
-            _marker: PhantomData,
         };
 
-        let container: Container<u64, Lru<_>, LruHandle<_>, Vec<u8>, _, MemoryStore<_, _>> =
+        let container: Container<u64, Lru<_>, LruHandle<_>, Vec<u8>, MemoryStore<_, _>> =
             Container::open(config).await.unwrap();
 
         assert!(container.insert(1, vec![b'x'; 40]).await.unwrap());

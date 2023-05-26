@@ -44,10 +44,6 @@ const DECAY_FACTOR: f64 = 0.5;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub update_on_write: bool,
-
-    pub update_on_read: bool,
-
     /// The multiplier for window len given the cache size.
     pub window_to_cache_size_ratio: usize,
 
@@ -400,6 +396,9 @@ unsafe impl<I: Index> Sync for TinyLfu<I> {}
 unsafe impl<I: Index> Send for Handle<I> {}
 unsafe impl<I: Index> Sync for Handle<I> {}
 
+unsafe impl<'a, I: Index> Send for EvictionIter<'a, I> {}
+unsafe impl<'a, I: Index> Sync for EvictionIter<'a, I> {}
+
 impl super::Config for Config {}
 
 impl<I: Index> super::Handle for Handle<I> {
@@ -454,8 +453,6 @@ mod tests {
     #[test]
     fn test_lru_simple() {
         let config = Config {
-            update_on_write: true,
-            update_on_read: true,
             window_to_cache_size_ratio: 10,
             tiny_lru_capacity_ratio: 0.01,
         };
