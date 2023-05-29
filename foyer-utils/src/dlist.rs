@@ -33,13 +33,14 @@ pub trait Adapter<E> {
     fn el2en(_: NonNull<E>) -> NonNull<Entry>;
 }
 
+#[macro_export]
 macro_rules! intrusive_dlist {
     (
         $element:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt)* )? ),+ >)?, $entry:ident, $adapter:ident
     ) => {
         struct $adapter;
 
-        impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $crate::collections::dlist::Adapter<$element $(< $( $lt ),+ >)?> for $adapter  {
+        impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $crate::dlist::Adapter<$element $(< $( $lt ),+ >)?> for $adapter  {
             fn en2el(entry: std::ptr::NonNull<Entry>) -> std::ptr::NonNull<$element $(< $( $lt ),+ >)?> {
                 unsafe {
                     let ptr = (entry.as_ptr() as *mut u8)
@@ -60,8 +61,6 @@ macro_rules! intrusive_dlist {
         }
     };
 }
-
-pub(crate) use intrusive_dlist;
 
 /// TODO: write docs
 #[derive(Debug)]

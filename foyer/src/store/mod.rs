@@ -13,9 +13,9 @@
 //  limitations under the License.
 
 pub mod error;
+#[allow(dead_code)]
 pub mod file;
 pub mod read_only_file_store;
-pub mod utils;
 
 use crate::{Data, Index};
 use async_trait::async_trait;
@@ -62,20 +62,14 @@ pub mod tests {
 
     #[derive(Clone, Debug, Default)]
     pub struct MemoryStore<I: Index, D: Data + Clone> {
-        pool: usize,
         inner: Arc<RwLock<HashMap<I, D>>>,
     }
 
     impl<I: Index, D: Data + Clone> MemoryStore<I, D> {
-        pub fn new(pool: usize) -> Self {
+        pub fn new() -> Self {
             Self {
-                pool,
                 inner: Arc::new(RwLock::new(HashMap::default())),
             }
-        }
-
-        pub fn pool(&self) -> usize {
-            self.pool
         }
     }
 
@@ -87,8 +81,8 @@ pub mod tests {
 
         type C = ();
 
-        async fn open(pool: usize, _: Self::C) -> Result<Self> {
-            Ok(Self::new(pool))
+        async fn open(_pool: usize, _: Self::C) -> Result<Self> {
+            Ok(Self::new())
         }
 
         async fn store(&self, index: Self::I, data: Self::D) -> Result<()> {

@@ -97,7 +97,7 @@ where
             .into_iter()
             .enumerate()
             .map(|(id, store)| Pool {
-                id,
+                _id: id,
                 policy: P::new(config.policy_config.clone()),
                 capacity,
                 size: 0,
@@ -175,8 +175,7 @@ where
     D: Data,
     S: Store<I = I, D = D>,
 {
-    #[allow(unused)]
-    id: usize,
+    _id: usize,
 
     policy: P,
 
