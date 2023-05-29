@@ -13,15 +13,30 @@
 //  limitations under the License.
 
 use prometheus::{
-    register_counter_vec_with_registry, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, CounterVec, HistogramVec, IntCounter, Registry,
+    register_counter_vec_with_registry, register_gauge_with_registry,
+    register_histogram_vec_with_registry, register_int_counter_with_registry, Counter, CounterVec,
+    Gauge, Histogram, HistogramVec, IntCounter, Registry,
 };
 
 pub struct Metrics {
+    pub latency_insert: Histogram,
+    pub latency_get: Histogram,
+    pub latency_remove: Histogram,
+
+    pub latency_store: Histogram,
+    pub latency_load: Histogram,
+    pub latency_delete: Histogram,
+
+    pub bytes_store: Counter,
+    pub bytes_load: Counter,
+    pub bytes_delete: Counter,
+
+    pub cache_data_size: Gauge,
+
     pub miss: IntCounter,
 
-    pub latency: HistogramVec,
-    pub bytes: CounterVec,
+    _latency: HistogramVec,
+    _bytes: CounterVec,
 }
 
 impl Default for Metrics {
@@ -32,10 +47,6 @@ impl Default for Metrics {
 
 impl Metrics {
     pub fn new(registry: Registry) -> Self {
-        let miss =
-            register_int_counter_with_registry!("foyer_cache_miss", "file cache miss", registry)
-                .unwrap();
-
         let latency = register_histogram_vec_with_registry!(
             "foyer_latency",
             "foyer latency",
@@ -52,10 +63,47 @@ impl Metrics {
             register_counter_vec_with_registry!("foyer_bytes", "foyer bytes", &["op"], registry)
                 .unwrap();
 
+        let latency_insert = latency.with_label_values(&["insert"]);
+        let latency_get = latency.with_label_values(&["get"]);
+        let latency_remove = latency.with_label_values(&["remove"]);
+
+        let latency_store = latency.with_label_values(&["store"]);
+        let latency_load = latency.with_label_values(&["load"]);
+        let latency_delete = latency.with_label_values(&["delete"]);
+
+        let bytes_store = bytes.with_label_values(&["store"]);
+        let bytes_load = bytes.with_label_values(&["load"]);
+        let bytes_delete = bytes.with_label_values(&["delete"]);
+
+        let miss =
+            register_int_counter_with_registry!("foyer_cache_miss", "foyer cache miss", registry)
+                .unwrap();
+        let cache_data_size = register_gauge_with_registry!(
+            "foyer_cache_data_size",
+            "foyer cache data size",
+            registry
+        )
+        .unwrap();
+
         Self {
+            latency_insert,
+            latency_get,
+            latency_remove,
+
+            latency_store,
+            latency_load,
+            latency_delete,
+
+            bytes_store,
+            bytes_load,
+            bytes_delete,
+
+            cache_data_size,
+
             miss,
-            latency,
-            bytes,
+
+            _latency: latency,
+            _bytes: bytes,
         }
     }
 }

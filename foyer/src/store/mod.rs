@@ -17,7 +17,9 @@ pub mod error;
 pub mod file;
 pub mod read_only_file_store;
 
-use crate::{Data, Index};
+use std::sync::Arc;
+
+use crate::{Data, Index, Metrics};
 use async_trait::async_trait;
 
 use error::Result;
@@ -28,7 +30,7 @@ pub trait Store: Send + Sync + Sized + 'static {
     type D: Data;
     type C: Send + Sync + Clone + std::fmt::Debug + 'static;
 
-    async fn open(pool: usize, config: Self::C) -> Result<Self>;
+    async fn open(pool: usize, config: Self::C, metrics: Arc<Metrics>) -> Result<Self>;
 
     async fn store(&self, index: Self::I, data: Self::D) -> Result<()>;
 
@@ -81,7 +83,7 @@ pub mod tests {
 
         type C = ();
 
-        async fn open(_pool: usize, _: Self::C) -> Result<Self> {
+        async fn open(_pool: usize, _: Self::C, _metrics: Arc<Metrics>) -> Result<Self> {
             Ok(Self::new())
         }
 
