@@ -28,7 +28,7 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::{Data, Index};
+use crate::{Data, Index, Metrics};
 
 use super::error::Result;
 use super::file::{AppendableFile, Location, ReadableFile, WritableFile};
@@ -102,6 +102,8 @@ where
 
     size: Arc<AtomicUsize>,
 
+    metrics: Arc<Metrics>,
+
     _marker: PhantomData<D>,
 }
 
@@ -117,6 +119,7 @@ where
             indices: Arc::clone(&self.indices),
             files: Arc::clone(&self.files),
             size: Arc::clone(&self.size),
+            metrics: Arc::clone(&self.metrics),
             _marker: PhantomData,
         }
     }
@@ -134,7 +137,7 @@ where
 
     type C = Config;
 
-    async fn open(pool: usize, mut config: Self::C) -> Result<Self> {
+    async fn open(pool: usize, mut config: Self::C, metrics: Arc<Metrics>) -> Result<Self> {
         config.dir = config.dir.join(format!("{:04}", pool));
 
         let ids = asyncify({
@@ -182,12 +185,15 @@ where
             indices: Arc::new(RwLock::new(indices)),
             files: Arc::new(RwLock::new(files)),
             size: Arc::new(AtomicUsize::new(size)),
+            metrics,
             _marker: PhantomData,
         })
     }
 
     #[allow(clippy::uninit_vec)]
     async fn store(&self, index: Self::I, data: Self::D) -> Result<()> {
+        let _timer = self.metrics.latency_store.start_timer();
+
         // append cache file and meta file
         let (fid, sid, location) = {
             // randomly drop if size exceeds the threshold
@@ -234,8 +240,13 @@ where
             drop(indices);
         }
 
-        self.size
-            .fetch_add(location.len as usize, Ordering::Relaxed);
+        let cache_data_size = self
+            .size
+            .fetch_add(location.len as usize, Ordering::Relaxed)
+            + location.len as usize;
+
+        self.metrics.bytes_store.inc_by(location.len as f64);
+        self.metrics.cache_data_size.set(cache_data_size as f64);
 
         if active_file_size >= self.config.max_file_size {
             let files = self.files.write().await;
@@ -251,6 +262,8 @@ where
     }
 
     async fn load(&self, index: &Self::I) -> Result<Option<Self::D>> {
+        let _timer = self.metrics.latency_load.start_timer();
+
         // TODO(MrCroxx): add bloom filters ?
         let (fid, _sid, location) = {
             let indices = self.indices.read().await;
@@ -283,12 +296,16 @@ where
             }
         };
 
+        self.metrics.bytes_load.inc_by(location.len as f64);
+
         self.maybe_trigger_reclaim().await?;
 
         Ok(Some(buf.into()))
     }
 
     async fn delete(&self, index: &Self::I) -> Result<()> {
+        let _timer = self.metrics.latency_delete.start_timer();
+
         let (fid, sid, location) = {
             let indices = self.indices.read().await;
             let (fid, sid, location) = match indices.get(index) {
@@ -318,8 +335,13 @@ where
             }
         }
 
-        self.size
-            .fetch_sub(location.len as usize, Ordering::Relaxed);
+        let cache_data_size = self
+            .size
+            .fetch_sub(location.len as usize, Ordering::Relaxed)
+            - location.len as usize;
+
+        self.metrics.bytes_delete.inc_by(location.len as f64);
+        self.metrics.cache_data_size.set(cache_data_size as f64);
 
         self.maybe_trigger_reclaim().await?;
 
@@ -376,7 +398,8 @@ where
             size as usize
         };
 
-        self.size.fetch_sub(size, Ordering::Relaxed);
+        let cache_data_size = self.size.fetch_sub(size, Ordering::Relaxed) - size;
+        self.metrics.cache_data_size.set(cache_data_size as f64);
 
         meta_file.reclaim().await?;
         cache_file.reclaim().await?;
@@ -520,7 +543,9 @@ mod tests {
         };
 
         let store: ReadOnlyFileStore<u64, Vec<u8>> =
-            ReadOnlyFileStore::open(0, config).await.unwrap();
+            ReadOnlyFileStore::open(0, config, Arc::new(Metrics::default()))
+                .await
+                .unwrap();
 
         store.store(1, data(1, 1024)).await.unwrap();
         assert_eq!(store.load(&1).await.unwrap(), Some(data(1, 1024)));
@@ -572,7 +597,9 @@ mod tests {
         };
 
         let store: ReadOnlyFileStore<u64, Vec<u8>> =
-            ReadOnlyFileStore::open(0, config.clone()).await.unwrap();
+            ReadOnlyFileStore::open(0, config.clone(), Arc::new(Metrics::default()))
+                .await
+                .unwrap();
 
         for i in 0..20 {
             store.store(i, data(i as u8, 1024)).await.unwrap();
@@ -589,7 +616,9 @@ mod tests {
         drop(store);
 
         let store: ReadOnlyFileStore<u64, Vec<u8>> =
-            ReadOnlyFileStore::open(0, config).await.unwrap();
+            ReadOnlyFileStore::open(0, config, Arc::new(Metrics::default()))
+                .await
+                .unwrap();
 
         assert_eq!(store.files.read().await.frozens.len(), 3);
         for i in 0..12 {
