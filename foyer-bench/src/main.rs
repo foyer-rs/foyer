@@ -27,11 +27,10 @@ use std::time::{Duration, Instant};
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 
-use foyer::container::{Config, Container};
-
-use foyer::store::read_only_file_store::{Config as ReadOnlyFileStoreConfig, ReadOnlyFileStore};
-
-use foyer::policies::tinylfu::{Config as TinyLfuConfig, Handle, TinyLfu};
+use foyer::{
+    ReadOnlyFileStoreConfig, TinyLfuConfig, TinyLfuReadOnlyFileStoreCache,
+    TinyLfuReadOnlyFileStoreCacheConfig,
+};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -109,9 +108,7 @@ impl Args {
         assert!(self.pools.is_power_of_two());
     }
 }
-
-type TContainer =
-    Container<u64, TinyLfu<u64>, Handle<u64>, Vec<u8>, ReadOnlyFileStore<u64, Vec<u8>>>;
+type TContainer = TinyLfuReadOnlyFileStoreCache<u64, Vec<u8>>;
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
@@ -159,7 +156,7 @@ async fn main() {
         tiny_lru_capacity_ratio: 0.01,
     };
 
-    let config: Config<u64, TinyLfu<_>, _, ReadOnlyFileStore<_, Vec<u8>>> = Config {
+    let config = TinyLfuReadOnlyFileStoreCacheConfig {
         capacity: args.capacity * 1024 * 1024,
         pool_count_bits: (args.pools as f64).log2() as usize,
         policy_config,
@@ -168,7 +165,7 @@ async fn main() {
 
     println!("{:#?}", config);
 
-    let container = Container::open(config).await.unwrap();
+    let container = TinyLfuReadOnlyFileStoreCache::open(config).await.unwrap();
     let container = Arc::new(container);
 
     let (iostat_stop_tx, iostat_stop_rx) = oneshot::channel();

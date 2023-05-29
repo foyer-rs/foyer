@@ -21,10 +21,10 @@ pub use policies::Policy;
 
 use paste::paste;
 
-pub mod collections;
-pub mod container;
-pub mod policies;
-pub mod store;
+mod container;
+mod metrics;
+mod policies;
+mod store;
 
 pub trait Weight {
     fn weight(&self) -> usize;
@@ -87,9 +87,47 @@ pub struct WrappedNonNull<T>(pub NonNull<T>);
 unsafe impl<T> Send for WrappedNonNull<T> {}
 unsafe impl<T> Sync for WrappedNonNull<T> {}
 
+// TODO(MrCroxx): Add global error type.
+pub type Error = store::error::Error;
+
+pub type TinyLfuReadOnlyFileStoreCache<I, D> = container::Container<
+    I,
+    policies::tinylfu::TinyLfu<I>,
+    policies::tinylfu::Handle<I>,
+    D,
+    store::read_only_file_store::ReadOnlyFileStore<I, D>,
+>;
+
+pub type TinyLfuReadOnlyFileStoreCacheConfig<I, D> = container::Config<
+    I,
+    policies::tinylfu::TinyLfu<I>,
+    policies::tinylfu::Handle<I>,
+    store::read_only_file_store::ReadOnlyFileStore<I, D>,
+>;
+
+pub type LruReadOnlyFileStoreCache<I, D> = container::Container<
+    I,
+    policies::lru::Lru<I>,
+    policies::lru::Handle<I>,
+    D,
+    store::read_only_file_store::ReadOnlyFileStore<I, D>,
+>;
+
+pub type LruReadOnlyFileStoreCacheConfig<I, D> = container::Config<
+    I,
+    policies::lru::Lru<I>,
+    policies::lru::Handle<I>,
+    store::read_only_file_store::ReadOnlyFileStore<I, D>,
+>;
+
+pub use metrics::Metrics;
+
+pub use policies::lru::Config as LruConfig;
+pub use policies::tinylfu::Config as TinyLfuConfig;
+pub use store::read_only_file_store::Config as ReadOnlyFileStoreConfig;
+
 #[cfg(test)]
 
-pub mod tests {
-
+mod tests {
     pub fn is_send_sync_static<T: Send + Sync + 'static>() {}
 }
