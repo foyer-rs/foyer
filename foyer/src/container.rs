@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::hash::Hasher;
 
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -24,7 +25,7 @@ use twox_hash::XxHash64;
 
 use crate::policies::{Handle, Policy};
 use crate::store::Store;
-use crate::{Data, Index, WrappedNonNull};
+use crate::{Data, Index, Metrics, WrappedNonNull};
 
 // TODO(MrCroxx): wrap own result type
 use crate::store::error::Result;
@@ -73,6 +74,8 @@ where
 {
     pool_count_bits: usize,
     pools: Vec<Mutex<Pool<I, P, H, D, S>>>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<I, P, H, D, S> Container<I, P, H, D, S>
@@ -85,11 +88,20 @@ where
     S: Store<I = I, D = D>,
 {
     pub async fn open(config: Config<I, P, H, S>) -> Result<Self> {
+        Self::open_with_registry(config, prometheus::Registry::new()).await
+    }
+
+    pub async fn open_with_registry(
+        config: Config<I, P, H, S>,
+        registry: prometheus::Registry,
+    ) -> Result<Self> {
         let pool_count = 1 << config.pool_count_bits;
         let capacity = config.capacity >> config.pool_count_bits;
 
+        let metrics = Arc::new(Metrics::new(registry));
+
         let stores = (0..pool_count)
-            .map(|pool| S::open(pool, config.store_config.clone()))
+            .map(|pool| S::open(pool, config.store_config.clone(), metrics.clone()))
             .collect_vec();
         let stores = try_join_all(stores).await?;
 
@@ -103,6 +115,7 @@ where
                 size: 0,
                 handles: BTreeMap::new(),
                 store,
+                _metrics: metrics.clone(),
             })
             .map(Mutex::new)
             .collect_vec();
@@ -110,10 +123,13 @@ where
         Ok(Self {
             pool_count_bits: config.pool_count_bits,
             pools,
+            metrics,
         })
     }
 
     pub async fn insert(&self, index: I, data: D) -> Result<bool> {
+        let _timer = self.metrics.latency_insert.start_timer();
+
         let mut pool = self.pool(&index).await;
 
         if pool.handles.get(&index).is_some() {
@@ -131,6 +147,8 @@ where
     }
 
     pub async fn remove(&self, index: &I) -> Result<bool> {
+        let _timer = self.metrics.latency_remove.start_timer();
+
         let mut pool = self.pool(index).await;
 
         if pool.handles.get(index).is_none() {
@@ -144,9 +162,17 @@ where
     }
 
     pub async fn get(&self, index: &I) -> Result<Option<D>> {
+        let _timer = self.metrics.latency_get.start_timer();
+
         let mut pool = self.pool(index).await;
 
-        pool.get(index).await
+        let res = pool.get(index).await?;
+
+        if res.is_none() {
+            self.metrics.miss.inc();
+        }
+
+        Ok(res)
     }
 
     // TODO(MrCroxx): optimize this
@@ -186,6 +212,8 @@ where
     handles: BTreeMap<I, PoolHandle<I, H>>,
 
     store: S,
+
+    _metrics: Arc<Metrics>,
 }
 
 impl<I, P, H, D, S> Pool<I, P, H, D, S>
