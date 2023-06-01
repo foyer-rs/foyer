@@ -95,6 +95,8 @@ where
         config: Config<I, P, H, S>,
         registry: prometheus::Registry,
     ) -> Result<Self> {
+        tracing::info!("open foyer with config: \n{:#?}", config);
+
         let pool_count = 1 << config.pool_count_bits;
         let capacity = config.capacity >> config.pool_count_bits;
 
