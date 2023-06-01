@@ -286,13 +286,18 @@ where
                     .read(location.offset as u64, location.len as usize)
                     .await?
             } else {
-                files
-                    .frozens
-                    .get(&fid)
-                    .expect("frozen file not found")
-                    .cache_file
-                    .read(location.offset as u64, location.len as usize)
-                    .await?
+                match files.frozens.get(&fid) {
+                    Some(frozen) => {
+                        frozen
+                            .cache_file
+                            .read(location.offset as u64, location.len as usize)
+                            .await?
+                    }
+                    None => {
+                        tracing::error!("frozen file {} not found", fid);
+                        return Ok(None);
+                    }
+                }
             }
         };
 
@@ -325,13 +330,17 @@ where
                     .write(sid as u64 * Self::meta_entry_size() as u64, empty_entry)
                     .await?;
             } else {
-                files
-                    .frozens
-                    .get(&fid)
-                    .expect("frozen file not found")
-                    .meta_file
-                    .write(sid as u64 * Self::meta_entry_size() as u64, empty_entry)
-                    .await?;
+                match files.frozens.get(&fid) {
+                    Some(frozen) => {
+                        frozen
+                            .meta_file
+                            .write(sid as u64 * Self::meta_entry_size() as u64, empty_entry)
+                            .await?;
+                    }
+                    None => {
+                        tracing::error!("frozen file {} not found", fid);
+                    }
+                }
             }
         }
 
@@ -369,10 +378,14 @@ where
         // update frozen map
         files.frozens.insert(id, frozen);
 
+        tracing::info!("active file rotated: {} => {}", id, id + 1);
+
         Ok(())
     }
 
     async fn reclaim_frozen_file(&self, id: FileId) -> Result<()> {
+        tracing::info!("reclaiming frozen file {}", id);
+
         let (fid, meta_file, cache_file) = {
             let mut files = self.files.write().await;
 
@@ -403,6 +416,8 @@ where
 
         meta_file.reclaim().await?;
         cache_file.reclaim().await?;
+
+        tracing::info!("frozen file {} reclaimed", id);
 
         Ok(())
     }

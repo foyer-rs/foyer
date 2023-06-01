@@ -31,6 +31,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tracing = "0.1"
 twox-hash = "1"
 
 [dev-dependencies]
