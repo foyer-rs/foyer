@@ -101,6 +101,10 @@ pub struct Args {
     /// read only file store: ratio of randomly dropped entries (0 ~ 1)
     #[arg(long, default_value_t = 0.0)]
     rofs_random_drop_ratio: f64,
+
+    /// read only file store: ratio of size to trigger write stall, every new entry to insert will be dropped (0 ~ 1)
+    #[arg(long, default_value_t = 0.0)]
+    rofs_write_stall_threshold_ratio: f64,
 }
 
 impl Args {
@@ -149,6 +153,7 @@ async fn main() {
         trigger_reclaim_capacity_ratio: args.rofs_trigger_reclaim_capacity_ratio,
         trigger_random_drop_ratio: args.rofs_trigger_random_drop_ratio,
         random_drop_ratio: args.rofs_random_drop_ratio,
+        write_stall_threshold_ratio: args.rofs_write_stall_threshold_ratio,
     };
 
     let policy_config = TinyLfuConfig {
