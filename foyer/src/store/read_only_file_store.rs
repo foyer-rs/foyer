@@ -62,6 +62,11 @@ pub struct Config {
 
     /// ratio of randomly dropped entries
     pub random_drop_ratio: f64,
+
+    /// ratio of size to trigger write stall
+    ///
+    /// every new entry to insert will be dropped
+    pub write_stall_threshold_ratio: f64,
 }
 
 struct Frozen {
@@ -196,10 +201,16 @@ where
 
         // append cache file and meta file
         let (fid, sid, location) = {
-            // randomly drop if size exceeds the threshold
-            if self.size.load(Ordering::Relaxed) as f64
-                >= self.config.capacity as f64 * self.config.trigger_random_drop_ratio
+            let size_ratio = self.size.load(Ordering::Relaxed) as f64 / self.config.capacity as f64;
+            if self.config.write_stall_threshold_ratio > 0.0
+                && size_ratio >= self.config.write_stall_threshold_ratio
             {
+                // write stall
+                return Ok(());
+            } else if self.config.trigger_random_drop_ratio > 0.0
+                && size_ratio >= self.config.trigger_random_drop_ratio
+            {
+                // random drop
                 let mut rng = thread_rng();
                 if rng.gen_range(0.0..1.0) < self.config.random_drop_ratio {
                     return Ok(());
@@ -553,8 +564,9 @@ mod tests {
             capacity: 16 * 1024,
             trigger_reclaim_garbage_ratio: 0.0, // disabled
             trigger_reclaim_capacity_ratio: 0.75,
-            trigger_random_drop_ratio: 0.0, // disabled
-            random_drop_ratio: 0.0,         // disabled
+            trigger_random_drop_ratio: 0.0,   // disabled
+            random_drop_ratio: 0.0,           // disabled
+            write_stall_threshold_ratio: 0.0, // disabled
         };
 
         let store: ReadOnlyFileStore<u64, Vec<u8>> =
@@ -607,8 +619,9 @@ mod tests {
             capacity: 16 * 1024,
             trigger_reclaim_garbage_ratio: 0.0, // disabled
             trigger_reclaim_capacity_ratio: 0.75,
-            trigger_random_drop_ratio: 0.0, // disabled
-            random_drop_ratio: 0.0,         // disabled
+            trigger_random_drop_ratio: 0.0,   // disabled
+            random_drop_ratio: 0.0,           // disabled
+            write_stall_threshold_ratio: 0.0, // disabled
         };
 
         let store: ReadOnlyFileStore<u64, Vec<u8>> =
