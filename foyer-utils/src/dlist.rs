@@ -25,6 +25,12 @@ pub struct Entry {
     next: Option<NonNull<Entry>>,
 }
 
+impl Entry {
+    pub fn is_linked(&self) -> bool {
+        self.prev.is_some() || self.next.is_some()
+    }
+}
+
 pub trait Adapter<E> {
     /// entry ptr to element ptr
     fn en2el(_: NonNull<Entry>) -> NonNull<E>;
@@ -61,6 +67,8 @@ macro_rules! intrusive_dlist {
         }
     };
 }
+
+pub use crate::intrusive_dlist;
 
 /// TODO: write docs
 #[derive(Debug)]
@@ -321,8 +329,6 @@ impl<E, A: Adapter<E>> DList<E, A> {
         Iter { dlist: self, entry }
     }
 }
-
-pub trait DListExt {}
 
 pub struct Iter<'a, E, A: Adapter<E>> {
     dlist: &'a DList<E, A>,

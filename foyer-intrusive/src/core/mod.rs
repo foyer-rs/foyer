@@ -12,8 +12,5 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(trait_alias)]
-
-pub mod bits;
-pub mod dlist;
-pub mod queue;
+pub mod adapter;
+pub mod pointer;
