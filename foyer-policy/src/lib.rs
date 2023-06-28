@@ -13,7 +13,18 @@
 //  limitations under the License.
 
 #![feature(trait_alias)]
+#![feature(pattern)]
 
-pub mod bits;
-pub mod dlist;
-pub mod queue;
+pub mod eviction;
+pub mod reinsertion;
+
+pub trait Item = PartialOrd
+    + Ord
+    + PartialEq
+    + Eq
+    + Clone
+    + std::hash::Hash
+    + Send
+    + Sync
+    + 'static
+    + std::fmt::Debug;

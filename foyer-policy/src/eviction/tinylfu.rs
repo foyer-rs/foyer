@@ -36,7 +36,7 @@ use twox_hash::XxHash64;
 use foyer_utils::dlist::{DList, Entry, Iter};
 use foyer_utils::intrusive_dlist;
 
-use super::Index;
+use super::Item;
 
 const MIN_CAPACITY: usize = 100;
 const ERROR_THRESHOLD: f64 = 5.0;
@@ -58,7 +58,7 @@ enum LruType {
     Main,
 }
 
-pub struct Handle<I: Index> {
+pub struct Handle<T: Item> {
     entry_tiny: Entry,
     entry_main: Entry,
 
@@ -68,11 +68,11 @@ pub struct Handle<I: Index> {
 
     lru_type: LruType,
 
-    index: I,
+    item: T,
 }
 
-impl<I: Index> Handle<I> {
-    fn new(index: I) -> Self {
+impl<T: Item> Handle<T> {
+    fn new(item: T) -> Self {
         Self {
             entry_tiny: Entry::default(),
             entry_main: Entry::default(),
@@ -83,17 +83,13 @@ impl<I: Index> Handle<I> {
 
             lru_type: LruType::Tiny,
 
-            index,
+            item,
         }
-    }
-
-    fn index(&self) -> &I {
-        &self.index
     }
 }
 
-intrusive_dlist! { Handle<I: Index>, entry_tiny, HandleDListTinyAdapter}
-intrusive_dlist! { Handle<I: Index>, entry_main, HandleDListMainAdapter}
+intrusive_dlist! { Handle<T: Item>, entry_tiny, HandleDListTinyAdapter}
+intrusive_dlist! { Handle<T: Item>, entry_main, HandleDListMainAdapter}
 
 /// Implements the W-TinyLFU cache eviction policy as described in -
 ///
@@ -122,12 +118,12 @@ intrusive_dlist! { Handle<I: Index>, entry_main, HandleDListMainAdapter}
 ///
 /// Tiny cache size:
 /// This default to 1%. There's no need to tune this parameter.
-pub struct TinyLfu<I: Index> {
+pub struct TinyLfu<T: Item> {
     /// tiny lru list
-    lru_tiny: DList<Handle<I>, HandleDListTinyAdapter>,
+    lru_tiny: DList<Handle<T>, HandleDListTinyAdapter>,
 
     /// main lru list
-    lru_main: DList<Handle<I>, HandleDListMainAdapter>,
+    lru_main: DList<Handle<T>, HandleDListMainAdapter>,
 
     /// the window length counter
     window_size: usize,
@@ -146,7 +142,7 @@ pub struct TinyLfu<I: Index> {
     config: Config,
 }
 
-impl<I: Index> TinyLfu<I> {
+impl<T: Item> TinyLfu<T> {
     pub fn new(config: Config) -> Self {
         let mut res = Self {
             lru_tiny: DList::new(),
@@ -167,7 +163,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    fn access(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn access(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             handle.as_mut().is_accessed = true;
 
@@ -188,7 +184,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    fn insert(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn insert(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -227,7 +223,7 @@ impl<I: Index> TinyLfu<I> {
 
     /// Returns `true` if handle is successfully removed from the lru,
     /// returns `false` if the handle is unchanged.
-    fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn remove(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             if !handle.as_ref().is_in_cache {
                 return false;
@@ -245,7 +241,7 @@ impl<I: Index> TinyLfu<I> {
         }
     }
 
-    fn eviction_iter<'a>(&'a self) -> EvictionIter<'a, I> {
+    fn eviction_iter<'a>(&'a self) -> EvictionIter<'a, T> {
         unsafe {
             let mut iter_main: Iter<'a, _, _> = self.lru_main.iter();
             iter_main.tail();
@@ -283,7 +279,7 @@ impl<I: Index> TinyLfu<I> {
         self.frequencies = CMSketchUsize::new_with_size(num_counters, HASH_COUNT);
     }
 
-    fn update_frequencies(&mut self, handle: NonNull<Handle<I>>) {
+    fn update_frequencies(&mut self, handle: NonNull<Handle<T>>) {
         self.frequencies.record(Self::hash_handle(handle));
         self.window_size += 1;
 
@@ -327,8 +323,8 @@ impl<I: Index> TinyLfu<I> {
 
     fn admit_to_main(
         &self,
-        handle_main: NonNull<Handle<I>>,
-        handle_tiny: NonNull<Handle<I>>,
+        handle_main: NonNull<Handle<T>>,
+        handle_tiny: NonNull<Handle<T>>,
     ) -> bool {
         unsafe {
             assert_eq!(handle_main.as_ref().lru_type, LruType::Main);
@@ -341,21 +337,21 @@ impl<I: Index> TinyLfu<I> {
         }
     }
 
-    fn hash_handle(handle: NonNull<Handle<I>>) -> u64 {
+    fn hash_handle(handle: NonNull<Handle<T>>) -> u64 {
         let mut hasher = XxHash64::default();
-        unsafe { handle.as_ref().index.hash(&mut hasher) };
+        unsafe { handle.as_ref().item.hash(&mut hasher) };
         hasher.finish()
     }
 }
 
-pub struct EvictionIter<'a, I: Index> {
-    tinylfu: &'a TinyLfu<I>,
-    iter_main: Iter<'a, Handle<I>, HandleDListMainAdapter>,
-    iter_tiny: Iter<'a, Handle<I>, HandleDListTinyAdapter>,
+pub struct EvictionIter<'a, T: Item> {
+    tinylfu: &'a TinyLfu<T>,
+    iter_main: Iter<'a, Handle<T>, HandleDListMainAdapter>,
+    iter_tiny: Iter<'a, Handle<T>, HandleDListTinyAdapter>,
 }
 
-impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
-    type Item = &'a I;
+impl<'a, T: Item> Iterator for EvictionIter<'a, T> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -366,11 +362,11 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
                 (None, None) => None,
                 (Some(handle_main), None) => {
                     self.iter_main.prev();
-                    Some(&handle_main.as_ref().index)
+                    Some(&handle_main.as_ref().item)
                 }
                 (None, Some(handle_tiny)) => {
                     self.iter_tiny.prev();
-                    Some(&handle_tiny.as_ref().index)
+                    Some(&handle_tiny.as_ref().item)
                 }
                 (Some(handle_main), Some(handle_tiny)) => {
                     // Eviction from tiny or main depending on whether the tiny handle woould be
@@ -378,10 +374,10 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
                     // from tiny cache.
                     if self.tinylfu.admit_to_main(handle_main, handle_tiny) {
                         self.iter_main.prev();
-                        Some(&handle_main.as_ref().index)
+                        Some(&handle_main.as_ref().item)
                     } else {
                         self.iter_tiny.prev();
-                        Some(&handle_tiny.as_ref().index)
+                        Some(&handle_tiny.as_ref().item)
                     }
                 }
             }
@@ -391,34 +387,34 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
 
 // unsafe impl `Send + Sync` for structs with `NonNull` usage
 
-unsafe impl<I: Index> Send for TinyLfu<I> {}
-unsafe impl<I: Index> Sync for TinyLfu<I> {}
+unsafe impl<T: Item> Send for TinyLfu<T> {}
+unsafe impl<T: Item> Sync for TinyLfu<T> {}
 
-unsafe impl<I: Index> Send for Handle<I> {}
-unsafe impl<I: Index> Sync for Handle<I> {}
+unsafe impl<T: Item> Send for Handle<T> {}
+unsafe impl<T: Item> Sync for Handle<T> {}
 
-unsafe impl<'a, I: Index> Send for EvictionIter<'a, I> {}
-unsafe impl<'a, I: Index> Sync for EvictionIter<'a, I> {}
+unsafe impl<'a, T: Item> Send for EvictionIter<'a, T> {}
+unsafe impl<'a, T: Item> Sync for EvictionIter<'a, T> {}
 
 impl super::Config for Config {}
 
-impl<I: Index> super::Handle for Handle<I> {
-    type I = I;
+impl<T: Item> super::Handle for Handle<T> {
+    type T = T;
 
-    fn new(index: Self::I) -> Self {
+    fn new(index: Self::T) -> Self {
         Self::new(index)
     }
 
-    fn index(&self) -> &Self::I {
-        self.index()
+    fn item(&self) -> &Self::T {
+        &self.item
     }
 }
 
-impl<I: Index> super::Policy for TinyLfu<I> {
-    type I = I;
+impl<T: Item> super::Policy for TinyLfu<T> {
+    type T = T;
     type C = Config;
-    type H = Handle<I>;
-    type E<'e> = EvictionIter<'e, I>;
+    type H = Handle<T>;
+    type E<'e> = EvictionIter<'e, T>;
 
     fn new(config: Self::C) -> Self {
         TinyLfu::new(config)
@@ -447,7 +443,7 @@ mod tests {
 
     use super::*;
 
-    fn ptr<I: Index>(handle: &mut Handle<I>) -> NonNull<Handle<I>> {
+    fn ptr<T: Item>(handle: &mut Handle<T>) -> NonNull<Handle<T>> {
         unsafe { NonNull::new_unchecked(handle as *mut _) }
     }
 

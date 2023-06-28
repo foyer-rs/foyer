@@ -17,13 +17,10 @@
 
 use std::{fmt::Debug, ptr::NonNull};
 
-pub use policies::Policy;
-
 use paste::paste;
 
 mod container;
 mod metrics;
-mod policies;
 mod store;
 
 pub trait Weight {
@@ -92,38 +89,38 @@ pub type Error = store::error::Error;
 
 pub type TinyLfuReadOnlyFileStoreCache<I, D> = container::Container<
     I,
-    policies::tinylfu::TinyLfu<I>,
-    policies::tinylfu::Handle<I>,
+    foyer_policy::eviction::tinylfu::TinyLfu<I>,
+    foyer_policy::eviction::tinylfu::Handle<I>,
     D,
     store::read_only_file_store::ReadOnlyFileStore<I, D>,
 >;
 
 pub type TinyLfuReadOnlyFileStoreCacheConfig<I, D> = container::Config<
     I,
-    policies::tinylfu::TinyLfu<I>,
-    policies::tinylfu::Handle<I>,
+    foyer_policy::eviction::tinylfu::TinyLfu<I>,
+    foyer_policy::eviction::tinylfu::Handle<I>,
     store::read_only_file_store::ReadOnlyFileStore<I, D>,
 >;
 
 pub type LruReadOnlyFileStoreCache<I, D> = container::Container<
     I,
-    policies::lru::Lru<I>,
-    policies::lru::Handle<I>,
+    foyer_policy::eviction::lru::Lru<I>,
+    foyer_policy::eviction::lru::Handle<I>,
     D,
     store::read_only_file_store::ReadOnlyFileStore<I, D>,
 >;
 
 pub type LruReadOnlyFileStoreCacheConfig<I, D> = container::Config<
     I,
-    policies::lru::Lru<I>,
-    policies::lru::Handle<I>,
+    foyer_policy::eviction::lru::Lru<I>,
+    foyer_policy::eviction::lru::Handle<I>,
     store::read_only_file_store::ReadOnlyFileStore<I, D>,
 >;
 
 pub use metrics::Metrics;
 
-pub use policies::lru::Config as LruConfig;
-pub use policies::tinylfu::Config as TinyLfuConfig;
+pub use foyer_policy::eviction::lru::Config as LruConfig;
+pub use foyer_policy::eviction::tinylfu::Config as TinyLfuConfig;
 pub use store::read_only_file_store::Config as ReadOnlyFileStoreConfig;
 
 #[cfg(test)]

@@ -18,10 +18,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("nix error: {0}")]
     Nix(#[from] nix::errno::Errno),
-    #[error("unsupported file system, super block magic: {0}")]
-    UnsupportedFilesystem(i64),
-    #[error("invalid slot: {0}")]
-    InvalidSlot(usize),
     #[error("other error: {0}")]
     Other(String),
 }
