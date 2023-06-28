@@ -32,7 +32,7 @@ use std::time::SystemTime;
 use foyer_utils::dlist::{DList, Entry, Iter};
 use foyer_utils::intrusive_dlist;
 
-use super::Index;
+use super::Item;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -40,7 +40,7 @@ pub struct Config {
     pub lru_insertion_point_fraction: f64,
 }
 
-pub struct Handle<I: Index> {
+pub struct Handle<T: Item> {
     entry: Entry,
 
     is_in_cache: bool,
@@ -49,11 +49,11 @@ pub struct Handle<I: Index> {
 
     is_in_tail: bool,
 
-    index: I,
+    item: T,
 }
 
-impl<I: Index> Handle<I> {
-    fn new(index: I) -> Self {
+impl<T: Item> Handle<T> {
+    fn new(item: T) -> Self {
         Self {
             entry: Entry::default(),
 
@@ -63,23 +63,19 @@ impl<I: Index> Handle<I> {
 
             is_in_tail: false,
 
-            index,
+            item,
         }
-    }
-
-    fn index(&self) -> &I {
-        &self.index
     }
 }
 
-intrusive_dlist! { Handle<I: Index>, entry, HandleDListAdapter}
+intrusive_dlist! { Handle<T: Item>, entry, HandleDListAdapter}
 
-pub struct Lru<I: Index> {
+pub struct Lru<T: Item> {
     /// lru list
-    lru: DList<Handle<I>, HandleDListAdapter>,
+    lru: DList<Handle<T>, HandleDListAdapter>,
 
     /// insertion point
-    insertion_point: Option<NonNull<Handle<I>>>,
+    insertion_point: Option<NonNull<Handle<T>>>,
 
     /// length of tail after insertion point
     tail_len: usize,
@@ -87,7 +83,7 @@ pub struct Lru<I: Index> {
     config: Config,
 }
 
-impl<I: Index> Lru<I> {
+impl<T: Item> Lru<T> {
     fn new(config: Config) -> Self {
         Self {
             lru: DList::new(),
@@ -102,7 +98,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if the information is recorded and bumped the handle to the head of the lru,
     /// returns `false` otherwise.
-    fn access(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn access(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             handle.as_mut().is_accessed = true;
 
@@ -127,7 +123,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if handle is successfully added into the lru,
     /// returns `false` if the handle is already in the lru.
-    fn insert(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn insert(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             if handle.as_ref().is_in_cache {
                 return false;
@@ -148,7 +144,7 @@ impl<I: Index> Lru<I> {
 
     /// Returns `true` if handle is successfully removed from the lru,
     /// returns `false` if the handle is unchanged.
-    fn remove(&mut self, mut handle: NonNull<Handle<I>>) -> bool {
+    fn remove(&mut self, mut handle: NonNull<Handle<T>>) -> bool {
         unsafe {
             if !handle.as_ref().is_in_cache {
                 return false;
@@ -166,7 +162,7 @@ impl<I: Index> Lru<I> {
         }
     }
 
-    fn eviction_iter(&self) -> EvictionIter<'_, I> {
+    fn eviction_iter(&self) -> EvictionIter<'_, T> {
         unsafe {
             let mut iter = self.lru.iter();
             iter.tail();
@@ -214,7 +210,7 @@ impl<I: Index> Lru<I> {
         }
     }
 
-    fn ensuer_not_insertion_point(&mut self, handle: NonNull<Handle<I>>) {
+    fn ensuer_not_insertion_point(&mut self, handle: NonNull<Handle<T>>) {
         unsafe {
             if Some(handle) == self.insertion_point {
                 self.insertion_point = self.lru.prev(handle);
@@ -231,19 +227,19 @@ impl<I: Index> Lru<I> {
     }
 }
 
-pub struct EvictionIter<'a, I: Index> {
-    iter: Iter<'a, Handle<I>, HandleDListAdapter>,
+pub struct EvictionIter<'a, T: Item> {
+    iter: Iter<'a, Handle<T>, HandleDListAdapter>,
 }
 
-impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
-    type Item = &'a I;
+impl<'a, T: Item> Iterator for EvictionIter<'a, T> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
             match self.iter.element() {
                 Some(element) => {
                     self.iter.prev();
-                    Some(&element.as_ref().index)
+                    Some(&element.as_ref().item)
                 }
                 None => None,
             }
@@ -253,34 +249,34 @@ impl<'a, I: Index> Iterator for EvictionIter<'a, I> {
 
 // unsafe impl `Send + Sync` for structs with `NonNull` usage
 
-unsafe impl<I: Index> Send for Lru<I> {}
-unsafe impl<I: Index> Sync for Lru<I> {}
+unsafe impl<T: Item> Send for Lru<T> {}
+unsafe impl<T: Item> Sync for Lru<T> {}
 
-unsafe impl<I: Index> Send for Handle<I> {}
-unsafe impl<I: Index> Sync for Handle<I> {}
+unsafe impl<T: Item> Send for Handle<T> {}
+unsafe impl<T: Item> Sync for Handle<T> {}
 
-unsafe impl<'a, I: Index> Send for EvictionIter<'a, I> {}
-unsafe impl<'a, I: Index> Sync for EvictionIter<'a, I> {}
+unsafe impl<'a, T: Item> Send for EvictionIter<'a, T> {}
+unsafe impl<'a, T: Item> Sync for EvictionIter<'a, T> {}
 
 impl super::Config for Config {}
 
-impl<I: Index> super::Handle for Handle<I> {
-    type I = I;
+impl<T: Item> super::Handle for Handle<T> {
+    type T = T;
 
-    fn new(index: Self::I) -> Self {
-        Self::new(index)
+    fn new(item: Self::T) -> Self {
+        Self::new(item)
     }
 
-    fn index(&self) -> &Self::I {
-        self.index()
+    fn item(&self) -> &Self::T {
+        &self.item
     }
 }
 
-impl<I: Index> super::Policy for Lru<I> {
-    type I = I;
+impl<T: Item> super::Policy for Lru<T> {
+    type T = T;
     type C = Config;
-    type H = Handle<I>;
-    type E<'e> = EvictionIter<'e, I>;
+    type H = Handle<T>;
+    type E<'e> = EvictionIter<'e, T>;
 
     fn new(config: Self::C) -> Self {
         Lru::new(config)
@@ -309,7 +305,7 @@ mod tests {
 
     use super::*;
 
-    fn ptr<I: Index>(handle: &mut Handle<I>) -> NonNull<Handle<I>> {
+    fn ptr<T: Item>(handle: &mut Handle<T>) -> NonNull<Handle<T>> {
         unsafe { NonNull::new_unchecked(handle as *mut _) }
     }
 

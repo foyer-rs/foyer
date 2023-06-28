@@ -311,6 +311,8 @@ dependencies = [
  "clap",
  "cmsketch",
  "crossbeam",
+ "foyer-common",
+ "foyer-policy",
  "foyer-utils",
  "futures",
  "hdrhistogram",
@@ -347,6 +349,94 @@ dependencies = [
  "rand_mt",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "foyer-common"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "clap",
+ "cmsketch",
+ "crossbeam",
+ "foyer-policy",
+ "foyer-utils",
+ "futures",
+ "hdrhistogram",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix",
+ "parking_lot",
+ "paste",
+ "prometheus",
+ "rand",
+ "rand_mt",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-intrusive"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "clap",
+ "cmsketch",
+ "crossbeam",
+ "foyer-common",
+ "foyer-utils",
+ "futures",
+ "hdrhistogram",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix",
+ "parking_lot",
+ "paste",
+ "prometheus",
+ "rand",
+ "rand_mt",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-policy"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "clap",
+ "cmsketch",
+ "crossbeam",
+ "foyer-utils",
+ "futures",
+ "hdrhistogram",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix",
+ "parking_lot",
+ "paste",
+ "prometheus",
+ "rand",
+ "rand_mt",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
 ]
 
 [[package]]

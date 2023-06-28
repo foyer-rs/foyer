@@ -1,5 +1,5 @@
 [package]
-name = "foyer"
+name = "foyer-common"
 version = "0.1.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
@@ -12,7 +12,6 @@ async-trait = "0.1"
 bytes = "1"
 cmsketch = "0.1"
 crossbeam = "0.8"
-foyer-common = { path = "../foyer-common" }
 foyer-policy = { path = "../foyer-policy" }
 foyer-utils = { path = "../foyer-utils" }
 futures = "0.3"

@@ -20,14 +20,15 @@
 pub mod lru;
 pub mod tinylfu;
 
-use crate::Index;
 use std::ptr::NonNull;
 
+use crate::Item;
+
 pub trait Policy: Send + Sync + 'static {
-    type I: Index;
+    type T: Item;
     type C: Config;
-    type H: Handle<I = Self::I>;
-    type E<'e>: Iterator<Item = &'e Self::I>;
+    type H: Handle<T = Self::T>;
+    type E<'e>: Iterator<Item = &'e Self::T>;
 
     fn new(config: Self::C) -> Self;
 
@@ -43,9 +44,9 @@ pub trait Policy: Send + Sync + 'static {
 pub trait Config: Send + Sync + std::fmt::Debug + Clone + 'static {}
 
 pub trait Handle: Send + Sync + 'static {
-    type I: Index;
+    type T: Item;
 
-    fn new(index: Self::I) -> Self;
+    fn new(index: Self::T) -> Self;
 
-    fn index(&self) -> &Self::I;
+    fn item(&self) -> &Self::T;
 }

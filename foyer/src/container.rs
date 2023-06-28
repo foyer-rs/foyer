@@ -23,9 +23,9 @@ use itertools::Itertools;
 use tokio::sync::{Mutex, MutexGuard};
 use twox_hash::XxHash64;
 
-use crate::policies::{Handle, Policy};
 use crate::store::Store;
 use crate::{Data, Index, Metrics, WrappedNonNull};
+use foyer_policy::eviction::{Handle, Policy};
 
 // TODO(MrCroxx): wrap own result type
 use crate::store::error::Result;
@@ -33,8 +33,8 @@ use crate::store::error::Result;
 pub struct Config<I, P, H, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     S: Store<I = I>,
 {
     pub capacity: usize,
@@ -49,8 +49,8 @@ where
 impl<I, P, H, S> std::fmt::Debug for Config<I, P, H, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     S: Store<I = I>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,8 +67,8 @@ where
 pub struct Container<I, P, H, D, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     D: Data,
     S: Store<I = I, D = D>,
 {
@@ -81,8 +81,8 @@ where
 impl<I, P, H, D, S> Container<I, P, H, D, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     D: Data,
 
     S: Store<I = I, D = D>,
@@ -198,8 +198,8 @@ where
 struct Pool<I, P, H, D, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     D: Data,
     S: Store<I = I, D = D>,
 {
@@ -221,8 +221,8 @@ where
 impl<I, P, H, D, S> Pool<I, P, H, D, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     D: Data,
     S: Store<I = I, D = D>,
 {
@@ -282,8 +282,8 @@ where
 impl<I, P, H, D, S> Drop for Pool<I, P, H, D, S>
 where
     I: Index,
-    P: Policy<I = I, H = H>,
-    H: Handle<I = I>,
+    P: Policy<T = I, H = H>,
+    H: Handle<T = I>,
     D: Data,
     S: Store<I = I, D = D>,
 {
@@ -299,7 +299,7 @@ where
 struct PoolHandle<I, H>
 where
     I: Index,
-    H: Handle<I = I>,
+    H: Handle<T = I>,
 {
     weight: usize,
     // Use `WrappedNonNull` for ptrs that needs to cross .await points.
@@ -310,10 +310,10 @@ where
 mod tests {
     use super::*;
 
-    use crate::policies::lru::{Config as LruConfig, Handle as LruHandle, Lru};
-    use crate::policies::tinylfu::Handle as TinyLfuHandle;
     use crate::store::tests::MemoryStore;
     use crate::tests::is_send_sync_static;
+    use foyer_policy::eviction::lru::{Config as LruConfig, Handle as LruHandle, Lru};
+    use foyer_policy::eviction::tinylfu::Handle as TinyLfuHandle;
 
     #[tokio::test]
     async fn test_container_simple() {
