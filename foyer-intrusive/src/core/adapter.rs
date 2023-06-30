@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use foyer_common::Key;
+use foyer_common::code::Key;
 
 use crate::core::pointer::PointerOps;
 
