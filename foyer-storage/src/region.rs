@@ -188,19 +188,24 @@ where
         }
 
         let region = self.id;
-        let offset = start;
-        let len = end - start;
+        let mut buf = self.device.io_buffer(end - start, end - start);
 
-        tracing::trace!(
-            "read from disk, region: {}, offset: {}, len: {}",
-            region,
-            offset,
-            len
-        );
+        let mut offset = 0;
+        while start + offset < end {
+            let len = std::cmp::min(self.device.io_size(), end - start - offset);
+            tracing::trace!(
+                "physical read region {} [{}..{}]",
+                region,
+                start + offset,
+                start + offset + len
+            );
+            let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
+            self.device
+                .read(s, region, (start + offset) as u64, len)
+                .await?;
+            offset += len;
+        }
 
-        let mut buf = self.device.io_buffer(len, len);
-        let slice = unsafe { SliceMut::new(&mut buf) };
-        self.device.read(slice, region, offset as u64, len).await?;
         let callback = {
             let inner = self.inner.clone();
             move || {

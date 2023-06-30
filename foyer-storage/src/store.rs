@@ -119,8 +119,8 @@ where
             clean_regions.release(region_id);
         }
 
-        let mut flusher = Arc::new(Flusher::new(config.flushers));
-        let mut reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
+        let flusher = Arc::new(Flusher::new(config.flushers));
+        let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
 
         let region_manager = Arc::new(RegionManager::new(
             device.regions(),
@@ -142,17 +142,17 @@ where
             _marker: PhantomData,
         });
 
-        // TODO(MrCroxx): refine this!!!
-        unsafe {
-            Arc::get_mut_unchecked(&mut flusher).run(buffers, region_manager.clone());
-            Arc::get_mut_unchecked(&mut reclaimer).run(
+        flusher.run(buffers, region_manager.clone()).await;
+        reclaimer
+            .run(
                 store.clone(),
                 region_manager,
                 clean_regions,
                 config.reinsertion,
                 indices,
-            );
-        }
+            )
+            .await;
+
         Ok(store)
     }
 
