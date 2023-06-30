@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
+use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use foyer_utils::queue::AsyncQueue;
 use itertools::Itertools;
 use tokio::sync::{
     mpsc::{channel, error::TrySendError, Receiver, Sender},

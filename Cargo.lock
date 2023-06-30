@@ -318,8 +318,6 @@ dependencies = [
  "cmsketch",
  "crossbeam",
  "foyer-common",
- "foyer-policy",
- "foyer-utils",
  "futures",
  "hdrhistogram",
  "itertools",
@@ -339,29 +337,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "foyer-bench"
-version = "0.1.0"
-dependencies = [
- "bytesize",
- "clap",
- "foyer",
- "futures",
- "hdrhistogram",
- "itertools",
- "libc",
- "nix",
- "parking_lot",
- "rand",
- "rand_mt",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "foyer-common"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "paste",
+ "tokio",
 ]
 
 [[package]]
@@ -381,25 +362,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "foyer-policy"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "cmsketch",
- "foyer-utils",
- "itertools",
- "memoffset 0.8.0",
- "parking_lot",
- "paste",
- "prometheus",
- "rand",
- "thiserror",
- "tokio",
- "tracing",
- "twox-hash",
-]
-
-[[package]]
 name = "foyer-storage"
 version = "0.1.0"
 dependencies = [
@@ -411,7 +373,6 @@ dependencies = [
  "cmsketch",
  "foyer-common",
  "foyer-intrusive",
- "foyer-utils",
  "futures",
  "hdrhistogram",
  "itertools",
@@ -450,19 +411,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "foyer-utils"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "itertools",
- "memoffset 0.8.0",
- "parking_lot",
- "paste",
- "thiserror",
- "tokio",
 ]
 
 [[package]]

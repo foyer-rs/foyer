@@ -14,12 +14,12 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
+use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
     core::{adapter::Link, pointer::PointerOps},
     eviction::EvictionPolicy,
     intrusive_adapter, key_adapter,
 };
-use foyer_utils::queue::AsyncQueue;
 use tokio::sync::RwLock;
 
 use crate::{

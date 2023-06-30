@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_utils::bits;
+use foyer_common::bits;
 use std::alloc::{Allocator, Global};
 
 #[derive(Debug, Clone, Copy)]

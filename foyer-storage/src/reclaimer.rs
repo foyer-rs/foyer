@@ -24,9 +24,11 @@ use crate::{
     reinsertion::ReinsertionPolicy,
     store::Store,
 };
-use foyer_common::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    queue::AsyncQueue,
+};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use foyer_utils::queue::AsyncQueue;
 use itertools::Itertools;
 use tokio::sync::{
     mpsc::{channel, error::TrySendError, Receiver, Sender},

@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use foyer_common::Key;
+use foyer_common::code::Key;
 use itertools::Itertools;
 use parking_lot::RwLock;
 
