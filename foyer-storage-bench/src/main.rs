@@ -59,9 +59,6 @@ pub struct Args {
     #[arg(short, long, default_value_t = 60)]
     time: u64,
 
-    #[arg(long, default_value_t = 16)]
-    concurrency: usize,
-
     /// must be power of 2
     #[arg(long, default_value_t = 16)]
     pools: usize,
@@ -75,9 +72,11 @@ pub struct Args {
     #[arg(long, default_value = "")]
     iostat_dev: String,
 
+    /// (MiB)
     #[arg(long, default_value_t = 0.0)]
     w_rate: f64,
 
+    /// (MiB)
     #[arg(long, default_value_t = 0.0)]
     r_rate: f64,
 
@@ -106,6 +105,12 @@ pub struct Args {
 
     #[arg(long, default_value_t = 16 * 1024)]
     io_size: usize,
+
+    #[arg(long, default_value_t = 16)]
+    writers: usize,
+
+    #[arg(long, default_value_t = 16)]
+    readers: usize,
 }
 
 impl Args {
@@ -180,8 +185,7 @@ async fn main() {
     let store = TStore::open(config).await.unwrap();
 
     let (iostat_stop_tx, iostat_stop_rx) = oneshot::channel();
-    let (bench_stop_txs, bench_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
-        (0..args.concurrency).map(|_| oneshot::channel()).unzip();
+    let (bench_stop_tx, bench_stop_rx) = oneshot::channel();
 
     let handle_monitor = tokio::spawn({
         let iostat_path = iostat_path.clone();
@@ -196,19 +200,17 @@ async fn main() {
     });
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
-        for bench_stop_tx in bench_stop_txs {
-            bench_stop_tx.send(()).unwrap();
-        }
+        bench_stop_tx.send(()).unwrap();
         iostat_stop_tx.send(()).unwrap();
     });
-    let handles = (bench_stop_rxs)
-        .into_iter()
-        .map(|stop| tokio::spawn(bench(args.clone(), store.clone(), metrics.clone(), stop)))
-        .collect_vec();
+    let handle_bench = tokio::spawn(bench(
+        args.clone(),
+        store.clone(),
+        metrics.clone(),
+        bench_stop_rx,
+    ));
 
-    for handle in handles {
-        handle.await.unwrap();
-    }
+    handle_bench.await.unwrap();
     handle_monitor.abort();
     handle_signal.abort();
 
@@ -228,46 +230,68 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
-        Some(args.w_rate)
+        Some(args.w_rate * 1024.0 * 1024.0)
     };
     let r_rate = if args.r_rate == 0.0 {
         None
     } else {
-        Some(args.r_rate)
+        Some(args.r_rate * 1024.0 * 1024.0)
     };
 
     let index = Arc::new(AtomicU64::new(0));
 
-    let (w_stop_tx, w_stop_rx) = oneshot::channel();
-    let (r_stop_tx, r_stop_rx) = oneshot::channel();
+    let (w_stop_txs, w_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
+        (0..args.writers).map(|_| oneshot::channel()).unzip();
+    let (r_stop_txs, r_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
+        (0..args.readers).map(|_| oneshot::channel()).unzip();
 
-    let handle_w = tokio::spawn(write(
-        args.entry_size,
-        w_rate,
-        index.clone(),
-        store.clone(),
-        args.time,
-        metrics.clone(),
-        w_stop_rx,
-    ));
-    let handle_r = tokio::spawn(read(
-        args.entry_size,
-        r_rate,
-        index.clone(),
-        store.clone(),
-        args.time,
-        metrics.clone(),
-        r_stop_rx,
-        args.lookup_range,
-    ));
+    println!("writers: {} readers: {}", args.writers, args.readers);
+
+    println!("txs: {:?}", w_stop_txs);
+
+    let w_handles = w_stop_rxs
+        .into_iter()
+        .map(|w_stop_rx| {
+            tokio::spawn(write(
+                args.entry_size,
+                w_rate,
+                index.clone(),
+                store.clone(),
+                args.time,
+                metrics.clone(),
+                w_stop_rx,
+            ))
+        })
+        .collect_vec();
+    let r_handles = r_stop_rxs
+        .into_iter()
+        .map(|r_stop_rx| {
+            tokio::spawn(read(
+                args.entry_size,
+                r_rate,
+                index.clone(),
+                store.clone(),
+                args.time,
+                metrics.clone(),
+                r_stop_rx,
+                args.lookup_range,
+            ))
+        })
+        .collect_vec();
+
     tokio::spawn(async move {
         if let Ok(()) = stop.await {
-            let _ = w_stop_tx.send(());
-            let _ = r_stop_tx.send(());
+            for w_stop_tx in w_stop_txs {
+                let _ = w_stop_tx.send(());
+            }
+            for r_stop_tx in r_stop_txs {
+                let _ = r_stop_tx.send(());
+            }
         }
     });
 
-    join_all([handle_r, handle_w]).await;
+    join_all(w_handles).await;
+    join_all(r_handles).await;
 }
 
 #[allow(clippy::too_many_arguments)]
