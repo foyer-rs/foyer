@@ -230,6 +230,8 @@ impl FsDevice {
 #[cfg(test)]
 mod tests {
 
+    use bytes::BufMut;
+
     use crate::slice::{Slice, SliceMut};
 
     use super::*;
@@ -251,8 +253,10 @@ mod tests {
         };
         let dev = FsDevice::open(config).await.unwrap();
 
-        let wbuffer = vec![b'x'; ALIGN];
-        let mut rbuffer = vec![0; ALIGN];
+        let mut wbuffer = dev.io_buffer(ALIGN, ALIGN);
+        (&mut wbuffer[..]).put_slice(&[b'x'; ALIGN]);
+        let mut rbuffer = dev.io_buffer(ALIGN, ALIGN);
+        (&mut rbuffer[..]).put_slice(&[0; ALIGN]);
 
         let wbuf = unsafe { Slice::new(&wbuffer) };
         let rbuf = unsafe { SliceMut::new(&mut rbuffer) };
