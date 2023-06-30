@@ -26,20 +26,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::collections::dlist::DList;
-use crate::collections::dlist::DListIter;
-use crate::core::adapter::Adapter;
-use crate::core::adapter::KeyAdapter;
-use crate::core::adapter::Link;
-use crate::core::pointer::PointerOps;
-use crate::intrusive_adapter;
+use crate::{
+    collections::dlist::{DList, DListIter},
+    core::{
+        adapter::{Adapter, KeyAdapter, Link},
+        pointer::PointerOps,
+    },
+    intrusive_adapter,
+};
 
-use std::mem::ManuallyDrop;
-use std::ptr::NonNull;
+use std::{mem::ManuallyDrop, ptr::NonNull};
 
 use cmsketch::CMSketchUsize;
-use std::hash::Hash;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use twox_hash::XxHash64;
 
 use crate::collections::dlist::DListLink;
@@ -519,6 +518,7 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+        tracing::debug!("[lfu] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -526,10 +526,12 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
     ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
+        tracing::debug!("[lfu] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+        tracing::debug!("[lfu] access {:?}", ptr);
         self.access(ptr)
     }
 
@@ -548,6 +550,7 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
     struct LfuItem {
         link: LfuLink,
         key: u64,

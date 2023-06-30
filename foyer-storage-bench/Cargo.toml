@@ -1,5 +1,5 @@
 [package]
-name = "foyer-intrusive"
+name = "foyer-storage-bench"
 version = "0.1.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
@@ -8,22 +8,21 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1"
-bytes = "1"
-cmsketch = "0.1"
-crossbeam = "0.8"
-foyer-common = { path = "../foyer-common" }
-foyer-utils = { path = "../foyer-utils" }
+bytesize = "1"
+clap = { version = "4", features = ["derive"] }
+foyer-storage = { path = "../foyer-storage" }
+foyer-intrusive = { path = "../foyer-intrusive" }
 futures = "0.3"
+hdrhistogram = "7"
 itertools = "0.10.5"
 libc = "0.2"
-memoffset = "0.8"
 nix = { version = "0.26", features = ["fs", "mman"] }
 parking_lot = "0.12"
-paste = "1.0"
-prometheus = "0.13"
-thiserror = "1"
+rand = "0.8.5"
+rand_mt = "4.2.1"
+tempfile = "3"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -32,12 +31,3 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
-twox-hash = "1"
-
-[dev-dependencies]
-bytesize = "1"
-clap = { version = "4", features = ["derive"] }
-hdrhistogram = "7"
-rand = "0.8.5"
-rand_mt = "4.2.1"
-tempfile = "3"

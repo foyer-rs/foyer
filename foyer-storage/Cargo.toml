@@ -1,5 +1,5 @@
 [package]
-name = "foyer-intrusive"
+name = "foyer-storage"
 version = "0.1.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
@@ -9,21 +9,24 @@ license = "Apache-2.0"
 
 [dependencies]
 async-trait = "0.1"
+bitflags = "2.3.1"
 bytes = "1"
 cmsketch = "0.1"
 crossbeam = "0.8"
-foyer-common = { path = "../foyer-common" }
+foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-utils = { path = "../foyer-utils" }
+foyer-common = { path = "../foyer-common" }
 futures = "0.3"
 itertools = "0.10.5"
+lazy_static = "1.4.0"
 libc = "0.2"
 memoffset = "0.8"
 nix = { version = "0.26", features = ["fs", "mman"] }
-parking_lot = "0.12"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 prometheus = "0.13"
+rand = "0.8.5"
 thiserror = "1"
-tracing = "0.1"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -32,12 +35,12 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tracing = "0.1"
 twox-hash = "1"
 
 [dev-dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 hdrhistogram = "7"
-rand = "0.8.5"
 rand_mt = "4.2.1"
 tempfile = "3"

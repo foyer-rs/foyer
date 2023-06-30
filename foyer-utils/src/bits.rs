@@ -26,8 +26,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Display};
-use std::ops::{Add, BitAnd, Not, Sub};
+use std::{
+    fmt::{Debug, Display},
+    ops::{Add, BitAnd, Not, Sub},
+};
 
 pub trait UnsignedTrait = Add<Output = Self>
     + Sub<Output = Self>

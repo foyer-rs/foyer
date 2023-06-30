@@ -13,16 +13,19 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use nix::sys::stat::fstat;
-use nix::sys::uio::{pread, pwrite};
+use nix::sys::{
+    stat::fstat,
+    uio::{pread, pwrite},
+};
 
-use super::asyncify;
-use super::error::Result;
+use super::{asyncify, error::Result};
 
-use std::fs::{remove_file, File, OpenOptions};
-use std::os::fd::{AsRawFd, RawFd};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    fs::{remove_file, File, OpenOptions},
+    os::fd::{AsRawFd, RawFd},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Location {

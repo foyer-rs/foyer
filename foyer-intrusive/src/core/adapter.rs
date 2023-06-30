@@ -12,11 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
+
 use foyer_common::Key;
 
 use crate::core::pointer::PointerOps;
 
-pub trait Link: Send + Sync + 'static {
+pub trait Link: Send + Sync + 'static + Default + Debug {
     fn is_linked(&self) -> bool;
 }
 
@@ -112,6 +114,7 @@ macro_rules! intrusive_adapter {
     ) => {
         $vis struct $name<$($args),*> $($where_)* {
             pointer_ops: $crate::core::pointer::DefaultPointerOps<$pointer>,
+            _marker: std::marker::PhantomData<($($args),*)>
         }
 
         unsafe impl<$($args),*> Send for $name<$($args),*> $($where_)* {}
@@ -124,6 +127,7 @@ macro_rules! intrusive_adapter {
             fn new() -> Self {
                 Self {
                     pointer_ops: Default::default(),
+                    _marker: std::marker::PhantomData,
                 }
             }
 
@@ -157,7 +161,7 @@ macro_rules! intrusive_adapter {
         $vis:vis $name:ident<$($args:tt),*> = $($rest:tt)*
     ) => {
         intrusive_adapter! {@impl
-            $vis $name ($($args)*) = $($rest)*
+            $vis $name ($($args),*) = $($rest)*
         }
     };
 }
@@ -227,10 +231,18 @@ macro_rules! key_adapter {
         $name:ident<$($args:tt),*> = $($rest:tt)*
     ) => {
         key_adapter! {@impl
-            $name ($($args)*) = $($rest)*
+            $name ($($args),*) = $($rest)*
         }
     };
 }
+
+macro_rules! t {
+    (
+        <$($args:tt),*>
+    ) => {};
+}
+
+t! { <A, B, C> }
 
 #[cfg(test)]
 mod tests {
@@ -242,6 +254,7 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
     struct DListItem {
         link: DListLink,
         val: u64,

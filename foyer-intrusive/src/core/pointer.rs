@@ -26,18 +26,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{fmt::Debug, marker::PhantomData, pin::Pin, ptr::NonNull, rc::Rc, sync::Arc};
 
 /// # Safety
 ///
 /// Pointer operations MUST be valid.
 pub unsafe trait PointerOps {
     type Item: ?Sized;
-    type Pointer;
+    type Pointer: Debug;
 
     /// # Safety
     ///
@@ -85,7 +81,7 @@ impl<Pointer> Default for DefaultPointerOps<Pointer> {
     }
 }
 
-unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<&'a T> {
+unsafe impl<'a, T: ?Sized + Debug> PointerOps for DefaultPointerOps<&'a T> {
     type Item = T;
     type Pointer = &'a T;
 
@@ -105,7 +101,7 @@ unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<&'a T> {
     }
 }
 
-unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<Pin<&'a T>> {
+unsafe impl<'a, T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<&'a T>> {
     type Item = T;
     type Pointer = Pin<&'a T>;
 
@@ -125,7 +121,7 @@ unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<Pin<&'a T>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<NonNull<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<NonNull<T>> {
     type Item = T;
     type Pointer = NonNull<T>;
 
@@ -143,7 +139,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<NonNull<T>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Box<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Box<T>> {
     type Item = T;
     type Pointer = Box<T>;
 
@@ -163,7 +159,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Box<T>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Box<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Box<T>>> {
     type Item = T;
     type Pointer = Pin<Box<T>>;
 
@@ -183,7 +179,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Box<T>>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Rc<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Rc<T>> {
     type Item = T;
     type Pointer = Rc<T>;
 
@@ -203,7 +199,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Rc<T>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
     type Item = T;
     type Pointer = Pin<Rc<T>>;
 
@@ -223,7 +219,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Arc<T>> {
     type Item = T;
     type Pointer = Arc<T>;
 
@@ -243,7 +239,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     }
 }
 
-unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
     type Item = T;
     type Pointer = Pin<Arc<T>>;
 
@@ -263,7 +259,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
     }
 }
 
-unsafe impl<T: ?Sized> DowngradablePointerOps for DefaultPointerOps<Rc<T>> {
+unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for DefaultPointerOps<Rc<T>> {
     type WeakPointer = std::rc::Weak<T>;
 
     fn downgrade(&self, ptr: &<Self as PointerOps>::Pointer) -> Self::WeakPointer {
@@ -271,7 +267,7 @@ unsafe impl<T: ?Sized> DowngradablePointerOps for DefaultPointerOps<Rc<T>> {
     }
 }
 
-unsafe impl<T: ?Sized> DowngradablePointerOps for DefaultPointerOps<Arc<T>> {
+unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for DefaultPointerOps<Arc<T>> {
     type WeakPointer = std::sync::Weak<T>;
 
     fn downgrade(&self, ptr: &<Self as PointerOps>::Pointer) -> Self::WeakPointer {
@@ -282,12 +278,7 @@ unsafe impl<T: ?Sized> DowngradablePointerOps for DefaultPointerOps<Arc<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::boxed::Box;
-    use std::fmt::Debug;
-    use std::mem;
-    use std::pin::Pin;
-    use std::rc::Rc;
-    use std::sync::Arc;
+    use std::{boxed::Box, fmt::Debug, mem, pin::Pin, rc::Rc, sync::Arc};
 
     /// Clones a `PointerOps::Pointer` from a `*const PointerOps::Value`
     ///
@@ -301,8 +292,7 @@ mod tests {
     where
         T::Pointer: Clone,
     {
-        use std::mem::ManuallyDrop;
-        use std::ops::Deref;
+        use std::{mem::ManuallyDrop, ops::Deref};
 
         /// Guard which converts an pointer back into its raw version
         /// when it gets dropped. This makes sure we also perform a full

@@ -6,6 +6,8 @@ members = [
     "foyer-common",
     "foyer-intrusive",
     "foyer-policy",
+    "foyer-storage",
+    "foyer-storage-bench",
     "foyer-utils",
 ]
 

@@ -14,8 +14,10 @@
 
 use std::ptr::NonNull;
 
-use crate::core::adapter::{Adapter, Link};
-use crate::core::pointer::PointerOps;
+use crate::core::{
+    adapter::{Adapter, Link},
+    pointer::PointerOps,
+};
 
 #[derive(Debug, Default)]
 pub struct DListLink {

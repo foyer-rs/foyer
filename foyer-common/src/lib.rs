@@ -16,8 +16,6 @@
 
 use bytes::{Buf, BufMut};
 
-pub trait Item = Sized + Send + Sync + 'static;
-
 pub trait Key:
     Sized
     + Send
@@ -28,6 +26,7 @@ pub trait Key:
     + PartialEq
     + Ord
     + PartialOrd
+    + Clone
     + std::fmt::Debug
 {
     fn serialized_len(&self) -> usize {

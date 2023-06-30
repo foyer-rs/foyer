@@ -12,19 +12,22 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::{fmt::Debug, sync::atomic::AtomicUsize};
+use std::{
+    fmt::Debug,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    Mutex,
+};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AsyncQueue<T: Debug> {
     tx: UnboundedSender<T>,
-    rx: Arc<Mutex<UnboundedReceiver<T>>>,
+    rx: Mutex<UnboundedReceiver<T>>,
 
-    size: Arc<AtomicUsize>,
+    size: AtomicUsize,
 }
 
 impl<T: Debug> Default for AsyncQueue<T> {
@@ -38,8 +41,8 @@ impl<T: Debug> AsyncQueue<T> {
         let (tx, rx) = unbounded_channel();
         Self {
             tx,
-            rx: Arc::new(Mutex::new(rx)),
-            size: Arc::new(AtomicUsize::new(0)),
+            rx: Mutex::new(rx),
+            size: AtomicUsize::new(0),
         }
     }
 
@@ -51,6 +54,7 @@ impl<T: Debug> AsyncQueue<T> {
     }
 
     pub fn release(&self, item: T) {
+        self.size.fetch_add(1, Ordering::Relaxed);
         self.tx.send(item).unwrap();
     }
 

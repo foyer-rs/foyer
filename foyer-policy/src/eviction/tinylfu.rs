@@ -26,15 +26,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::hash::Hasher;
-use std::ptr::NonNull;
-use std::time::SystemTime;
+use std::{hash::Hasher, ptr::NonNull, time::SystemTime};
 
 use cmsketch::CMSketchUsize;
 use twox_hash::XxHash64;
 
-use foyer_utils::dlist::{DList, Entry, Iter};
-use foyer_utils::intrusive_dlist;
+use foyer_utils::{
+    dlist::{DList, Entry, Iter},
+    intrusive_dlist,
+};
 
 use super::Item;
 

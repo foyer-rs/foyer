@@ -12,14 +12,21 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fs::{create_dir_all, read_dir};
-use std::mem::swap;
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{create_dir_all, read_dir},
+    mem::swap,
+    path::{Path, PathBuf},
+};
 
-use std::str::pattern::Pattern;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::{collections::HashMap, marker::PhantomData};
+use std::{
+    collections::HashMap,
+    marker::PhantomData,
+    str::pattern::Pattern,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use async_trait::async_trait;
 
@@ -30,9 +37,12 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::{Data, Index, Metrics};
 
-use super::error::Result;
-use super::file::{AppendableFile, Location, ReadableFile, WritableFile};
-use super::{asyncify, Store};
+use super::{
+    asyncify,
+    error::Result,
+    file::{AppendableFile, Location, ReadableFile, WritableFile},
+    Store,
+};
 
 pub type FileId = u32;
 pub type SlotId = u32;
