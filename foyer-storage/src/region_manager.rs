@@ -38,9 +38,6 @@ where
     id: RegionId,
 }
 
-// intrusive_adapter! { pub RegionEpItemAdapter<E, L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link, E: EvictionPolicy<RegionEpItemAdapter<E, L>, Link = L> }
-// key_adapter! { RegionEpItemAdapter<E, L> = RegionEpItem<L> { id: RegionId } where L: Link, E: EvictionPolicy<RegionEpItemAdapter<E, L>, Link = L> }
-
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
 

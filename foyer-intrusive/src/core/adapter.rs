@@ -89,23 +89,22 @@ pub unsafe trait KeyAdapter: Adapter {
 ///
 /// ```
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter};
+/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::PointerOps;
 /// use foyer_intrusive::eviction::EvictionPolicy;
 /// use std::sync::Arc;
 ///
-/// pub struct Item<A, E>
+/// #[derive(Debug)]
+/// pub struct Item<L>
 /// where
-///     E: EvictionPolicy<A>,
-///     A: KeyAdapter<Link = E::Link>,
-///     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+///     L: Link
 /// {
-///     link: E::Link,
+///     link: L,
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<E> = Arc<Item<ItemAdapter<E>, E>>: Item<ItemAdapter<E>, E> { link: E::Link} where E:EvictionPolicy<ItemAdapter<E>> }
-/// key_adapter! { ItemAdapter<E> = Item<ItemAdapter<E>, E> { key: u64 } where E: EvictionPolicy<ItemAdapter<E>> }
+/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
+/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
@@ -186,23 +185,22 @@ macro_rules! intrusive_adapter {
 ///
 /// ```
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter};
+/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::PointerOps;
 /// use foyer_intrusive::eviction::EvictionPolicy;
 /// use std::sync::Arc;
 ///
-/// pub struct Item<A, E>
+/// #[derive(Debug)]
+/// pub struct Item<L>
 /// where
-///     E: EvictionPolicy<A>,
-///     A: KeyAdapter<Link = E::Link>,
-///     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+///     L: Link
 /// {
-///     link: E::Link,
+///     link: L,
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<E> = Arc<Item<ItemAdapter<E>, E>>: Item<ItemAdapter<E>, E> { link: E::Link} where E:EvictionPolicy<ItemAdapter<E>> }
-/// key_adapter! { ItemAdapter<E> = Item<ItemAdapter<E>, E> { key: u64 } where E: EvictionPolicy<ItemAdapter<E>> }
+/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
+/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! key_adapter {

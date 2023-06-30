@@ -154,10 +154,25 @@ where
     adapter: A,
 }
 
+impl<A> Drop for Lfu<A>
+where
+    A: KeyAdapter<Link = LfuLink>,
+    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+{
+    fn drop(&mut self) {
+        let mut to_remove = vec![];
+        for ptr in self.iter() {
+            to_remove.push(ptr.clone());
+        }
+        for ptr in to_remove {
+            self.remove(&ptr);
+        }
+    }
+}
+
 impl<A> Lfu<A>
 where
     A: KeyAdapter<Link = LfuLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     pub fn new(config: LfuConfig) -> Self {
@@ -241,8 +256,8 @@ where
         let mut iter_main = self.lru_main.iter();
         let mut iter_tiny = self.lru_tiny.iter();
 
-        iter_main.tail();
-        iter_tiny.tail();
+        iter_main.back();
+        iter_tiny.back();
 
         LfuIter {
             lfu: self,

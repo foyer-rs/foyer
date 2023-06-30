@@ -54,6 +54,20 @@ where
     adapter: A,
 }
 
+impl<A> Drop for DList<A>
+where
+    A: Adapter<Link = DListLink>,
+{
+    fn drop(&mut self) {
+        let mut iter = self.iter_mut();
+        iter.front();
+        while iter.is_valid() {
+            iter.remove();
+        }
+        assert!(self.is_empty());
+    }
+}
+
 impl<A> DList<A>
 where
     A: Adapter<Link = DListLink>,
@@ -199,12 +213,12 @@ where
     }
 
     /// Move to head.
-    pub fn head(&mut self) {
+    pub fn front(&mut self) {
         self.link = self.dlist.head;
     }
 
     /// Move to head.
-    pub fn tail(&mut self) {
+    pub fn back(&mut self) {
         self.link = self.dlist.tail;
     }
 }
@@ -430,9 +444,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use itertools::Itertools;
 
-    use crate::core::pointer::DefaultPointerOps;
+    use crate::{core::pointer::DefaultPointerOps, intrusive_adapter};
 
     use super::*;
 
@@ -482,6 +498,8 @@ mod tests {
         }
     }
 
+    intrusive_adapter! { DListArcAdapter = Arc<DListItem>: DListItem { link: DListLink } }
+
     #[test]
     fn test_dlist_simple() {
         let mut l = DList::<DListAdapter>::new();
@@ -511,5 +529,22 @@ mod tests {
         assert_eq!(i1.unwrap().val, 1);
         assert!(l.pop_front().is_none());
         assert_eq!(l.len(), 0);
+    }
+
+    #[test]
+    fn test_arc_drop() {
+        let mut l = DList::<DListArcAdapter>::new();
+
+        let items = (0..10).map(|i| Arc::new(DListItem::new(i))).collect_vec();
+        for item in items.iter() {
+            l.push_back(item.clone());
+        }
+        for item in items.iter() {
+            assert_eq!(Arc::strong_count(item), 2);
+        }
+        drop(l);
+        for item in items.iter() {
+            assert_eq!(Arc::strong_count(item), 1);
+        }
     }
 }
