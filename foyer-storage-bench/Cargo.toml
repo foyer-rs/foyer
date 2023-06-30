@@ -10,8 +10,8 @@ license = "Apache-2.0"
 [dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
-foyer-storage = { path = "../foyer-storage" }
 foyer-intrusive = { path = "../foyer-intrusive" }
+foyer-storage = { path = "../foyer-storage" }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = "0.10.5"
@@ -21,8 +21,6 @@ parking_lot = "0.12"
 rand = "0.8.5"
 rand_mt = "4.2.1"
 tempfile = "3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -31,3 +29,5 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

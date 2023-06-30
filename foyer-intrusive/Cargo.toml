@@ -23,7 +23,6 @@ parking_lot = "0.12"
 paste = "1.0"
 prometheus = "0.13"
 thiserror = "1"
-tracing = "0.1"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -32,6 +31,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tracing = "0.1"
 twox-hash = "1"
 
 [dev-dependencies]
