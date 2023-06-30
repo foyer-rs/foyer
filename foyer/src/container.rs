@@ -12,19 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::collections::BTreeMap;
-use std::hash::Hasher;
+use std::{collections::BTreeMap, hash::Hasher};
 
-use std::ptr::NonNull;
-use std::sync::Arc;
+use std::{ptr::NonNull, sync::Arc};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::{Mutex, MutexGuard};
 use twox_hash::XxHash64;
 
-use crate::store::Store;
-use crate::{Data, Index, Metrics, WrappedNonNull};
+use crate::{store::Store, Data, Index, Metrics, WrappedNonNull};
 use foyer_policy::eviction::{Handle, Policy};
 
 // TODO(MrCroxx): wrap own result type
@@ -310,10 +307,11 @@ where
 mod tests {
     use super::*;
 
-    use crate::store::tests::MemoryStore;
-    use crate::tests::is_send_sync_static;
-    use foyer_policy::eviction::lru::{Config as LruConfig, Handle as LruHandle, Lru};
-    use foyer_policy::eviction::tinylfu::Handle as TinyLfuHandle;
+    use crate::{store::tests::MemoryStore, tests::is_send_sync_static};
+    use foyer_policy::eviction::{
+        lru::{Config as LruConfig, Handle as LruHandle, Lru},
+        tinylfu::Handle as TinyLfuHandle,
+    };
 
     #[tokio::test]
     async fn test_container_simple() {

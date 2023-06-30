@@ -53,8 +53,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     use parking_lot::RwLock;
 

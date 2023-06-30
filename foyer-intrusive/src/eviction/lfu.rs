@@ -26,20 +26,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::collections::dlist::DList;
-use crate::collections::dlist::DListIter;
-use crate::core::adapter::Adapter;
-use crate::core::adapter::KeyAdapter;
-use crate::core::adapter::Link;
-use crate::core::pointer::PointerOps;
-use crate::intrusive_adapter;
+use crate::{
+    collections::dlist::{DList, DListIter},
+    core::{
+        adapter::{Adapter, KeyAdapter, Link},
+        pointer::PointerOps,
+    },
+    intrusive_adapter,
+};
 
-use std::mem::ManuallyDrop;
-use std::ptr::NonNull;
+use std::{mem::ManuallyDrop, ptr::NonNull};
 
 use cmsketch::CMSketchUsize;
-use std::hash::Hash;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use twox_hash::XxHash64;
 
 use crate::collections::dlist::DListLink;
@@ -155,10 +154,25 @@ where
     adapter: A,
 }
 
+impl<A> Drop for Lfu<A>
+where
+    A: KeyAdapter<Link = LfuLink>,
+    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+{
+    fn drop(&mut self) {
+        let mut to_remove = vec![];
+        for ptr in self.iter() {
+            to_remove.push(ptr.clone());
+        }
+        for ptr in to_remove {
+            self.remove(&ptr);
+        }
+    }
+}
+
 impl<A> Lfu<A>
 where
     A: KeyAdapter<Link = LfuLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     pub fn new(config: LfuConfig) -> Self {
@@ -242,8 +256,8 @@ where
         let mut iter_main = self.lru_main.iter();
         let mut iter_tiny = self.lru_tiny.iter();
 
-        iter_main.tail();
-        iter_tiny.tail();
+        iter_main.back();
+        iter_tiny.back();
 
         LfuIter {
             lfu: self,
@@ -519,6 +533,7 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+        tracing::debug!("[lfu] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -526,10 +541,12 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
     ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
+        tracing::debug!("[lfu] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+        tracing::debug!("[lfu] access {:?}", ptr);
         self.access(ptr)
     }
 
@@ -548,6 +565,7 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
     struct LfuItem {
         link: LfuLink,
         key: u64,

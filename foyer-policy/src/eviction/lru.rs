@@ -26,11 +26,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
-use std::time::SystemTime;
+use std::{ptr::NonNull, time::SystemTime};
 
-use foyer_utils::dlist::{DList, Entry, Iter};
-use foyer_utils::intrusive_dlist;
+use foyer_utils::{
+    dlist::{DList, Entry, Iter},
+    intrusive_dlist,
+};
 
 use super::Item;
 

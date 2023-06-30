@@ -12,8 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
-use std::ptr::NonNull;
+use std::{marker::PhantomData, ptr::NonNull};
 
 /// An entry in an intrusive double linked list
 #[derive(Default, Debug)]
