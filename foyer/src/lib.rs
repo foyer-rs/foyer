@@ -119,8 +119,7 @@ pub type LruReadOnlyFileStoreCacheConfig<I, D> = container::Config<
 
 pub use metrics::Metrics;
 
-pub use foyer_policy::eviction::lru::Config as LruConfig;
-pub use foyer_policy::eviction::tinylfu::Config as TinyLfuConfig;
+pub use foyer_policy::eviction::{lru::Config as LruConfig, tinylfu::Config as TinyLfuConfig};
 pub use store::read_only_file_store::Config as ReadOnlyFileStoreConfig;
 
 #[cfg(test)]

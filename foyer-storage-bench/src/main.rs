@@ -31,9 +31,16 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 
-use foyer::{
-    ReadOnlyFileStoreConfig, TinyLfuConfig, TinyLfuReadOnlyFileStoreCache,
-    TinyLfuReadOnlyFileStoreCacheConfig,
+use foyer_intrusive::eviction::lfu::{Lfu, LfuConfig, LfuLink};
+use foyer_storage::{
+    admission::AdmitAll,
+    device::{
+        fs::{FsDevice, FsDeviceConfig},
+        io_buffer::AlignedAllocator,
+    },
+    region_manager::RegionEpItemAdapter,
+    reinsertion::ReinsertNone,
+    store::{Store, StoreConfig},
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -41,6 +48,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use rate::RateLimiter;
 use tokio::sync::oneshot;
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
 
 #[derive(Parser, Debug, Clone)]
@@ -83,31 +91,27 @@ pub struct Args {
     entry_size: usize,
 
     #[arg(long, default_value_t = 10000)]
-    look_up_range: u64,
+    lookup_range: u64,
 
-    /// read only file store: max cache file size (MiB)
-    #[arg(long, default_value_t = 16)]
-    rofs_max_file_size: usize,
+    /// (MiB)
+    #[arg(long, default_value_t = 64)]
+    region_size: usize,
 
-    /// read only file store: ratio of garbage to trigger reclaim (0 ~ 1)
-    #[arg(long, default_value_t = 0.0)]
-    rofs_trigger_reclaim_garbage_ratio: f64,
+    /// (MiB)
+    #[arg(long, default_value_t = 1024)]
+    buffer_pool_size: usize,
 
-    /// read only file store: ratio of size to trigger reclaim (0 ~ 1)
-    #[arg(long, default_value_t = 0.8)]
-    rofs_trigger_reclaim_capacity_ratio: f64,
+    #[arg(long, default_value_t = 4)]
+    flushers: usize,
 
-    /// read only file store: ratio of size to trigger randomly drop (0 ~ 1)
-    #[arg(long, default_value_t = 0.0)]
-    rofs_trigger_random_drop_ratio: f64,
+    #[arg(long, default_value_t = 4)]
+    reclaimers: usize,
 
-    /// read only file store: ratio of randomly dropped entries (0 ~ 1)
-    #[arg(long, default_value_t = 0.0)]
-    rofs_random_drop_ratio: f64,
+    #[arg(long, default_value_t = 4096)]
+    align: usize,
 
-    /// read only file store: ratio of size to trigger write stall, every new entry to insert will be dropped (0 ~ 1)
-    #[arg(long, default_value_t = 0.0)]
-    rofs_write_stall_threshold_ratio: f64,
+    #[arg(long, default_value_t = 16 * 1024)]
+    io_size: usize,
 }
 
 impl Args {
@@ -115,13 +119,28 @@ impl Args {
         assert!(self.pools.is_power_of_two());
     }
 }
-type TContainer = TinyLfuReadOnlyFileStoreCache<u64, Vec<u8>>;
+
+type TStore = Store<
+    u64,
+    Vec<u8>,
+    AlignedAllocator,
+    FsDevice,
+    Lfu<RegionEpItemAdapter<LfuLink>>,
+    AdmitAll<u64, Vec<u8>>,
+    ReinsertNone<u64, Vec<u8>>,
+    LfuLink,
+>;
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
 #[tokio::main]
 async fn main() {
-    is_send_sync_static::<TContainer>();
+    is_send_sync_static::<TStore>();
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let args = Args::parse();
     args.verify();
@@ -148,33 +167,32 @@ async fn main() {
     let metrics_dump_start = metrics.dump();
     let time = Instant::now();
 
-    let store_config = ReadOnlyFileStoreConfig {
-        dir: PathBuf::from(&args.dir),
-        capacity: args.capacity * 1024 * 1024 / args.pools,
-        max_file_size: args.rofs_max_file_size * 1024 * 1024,
-        trigger_reclaim_garbage_ratio: args.rofs_trigger_reclaim_garbage_ratio,
-        trigger_reclaim_capacity_ratio: args.rofs_trigger_reclaim_capacity_ratio,
-        trigger_random_drop_ratio: args.rofs_trigger_random_drop_ratio,
-        random_drop_ratio: args.rofs_random_drop_ratio,
-        write_stall_threshold_ratio: args.rofs_write_stall_threshold_ratio,
-    };
-
-    let policy_config = TinyLfuConfig {
+    let eviction_config = LfuConfig {
         window_to_cache_size_ratio: 1,
         tiny_lru_capacity_ratio: 0.01,
     };
 
-    let config = TinyLfuReadOnlyFileStoreCacheConfig {
+    let device_config = FsDeviceConfig {
+        dir: PathBuf::from(&args.dir),
         capacity: args.capacity * 1024 * 1024,
-        pool_count_bits: (args.pools as f64).log2() as usize,
-        policy_config,
-        store_config,
+        file_capacity: args.region_size * 1024 * 1024,
+        align: args.align,
+        io_size: args.io_size,
+    };
+
+    let config = StoreConfig {
+        eviction_config,
+        device_config,
+        admission: AdmitAll::default(),
+        reinsertion: ReinsertNone::default(),
+        buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
+        flushers: args.flushers,
+        reclaimers: args.reclaimers,
     };
 
     println!("{:#?}", config);
 
-    let container = TinyLfuReadOnlyFileStoreCache::open(config).await.unwrap();
-    let container = Arc::new(container);
+    let store = TStore::open(config).await.unwrap();
 
     let (iostat_stop_tx, iostat_stop_rx) = oneshot::channel();
     let (bench_stop_txs, bench_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
@@ -200,14 +218,7 @@ async fn main() {
     });
     let handles = (bench_stop_rxs)
         .into_iter()
-        .map(|stop| {
-            tokio::spawn(bench(
-                args.clone(),
-                container.clone(),
-                metrics.clone(),
-                stop,
-            ))
-        })
+        .map(|stop| tokio::spawn(bench(args.clone(), store.clone(), metrics.clone(), stop)))
         .collect_vec();
 
     for handle in handles {
@@ -228,12 +239,7 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(
-    args: Args,
-    container: Arc<TContainer>,
-    metrics: Metrics,
-    stop: oneshot::Receiver<()>,
-) {
+async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::Receiver<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -254,7 +260,7 @@ async fn bench(
         args.entry_size,
         w_rate,
         index.clone(),
-        container.clone(),
+        store.clone(),
         args.time,
         metrics.clone(),
         w_stop_rx,
@@ -263,11 +269,11 @@ async fn bench(
         args.entry_size,
         r_rate,
         index.clone(),
-        container.clone(),
+        store.clone(),
         args.time,
         metrics.clone(),
         r_stop_rx,
-        args.look_up_range,
+        args.lookup_range,
     ));
     tokio::spawn(async move {
         if let Ok(()) = stop.await {
@@ -284,7 +290,7 @@ async fn write(
     entry_size: usize,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    container: Arc<TContainer>,
+    store: Arc<TStore>,
     time: u64,
     metrics: Metrics,
     mut stop: oneshot::Receiver<()>,
@@ -310,7 +316,7 @@ async fn write(
         }
 
         let time = Instant::now();
-        container.insert(idx, data).await.unwrap();
+        store.insert(idx, data).await.unwrap();
         metrics
             .insert_lats
             .write()
@@ -328,7 +334,7 @@ async fn read(
     entry_size: usize,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    container: Arc<TContainer>,
+    store: Arc<TStore>,
     time: u64,
     metrics: Metrics,
     mut stop: oneshot::Receiver<()>,
@@ -357,7 +363,7 @@ async fn read(
         }
 
         let time = Instant::now();
-        let hit = container.get(&idx).await.unwrap().is_some();
+        let hit = store.lookup(&idx).await.unwrap().is_some();
         let lat = time.elapsed().as_micros() as u64;
         if hit {
             metrics

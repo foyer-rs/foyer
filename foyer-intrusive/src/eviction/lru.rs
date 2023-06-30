@@ -85,6 +85,22 @@ where
     adapter: A,
 }
 
+impl<A> Drop for Lru<A>
+where
+    A: KeyAdapter<Link = LruLink>,
+    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+{
+    fn drop(&mut self) {
+        let mut to_remove = vec![];
+        for ptr in self.iter() {
+            to_remove.push(ptr.clone());
+        }
+        for ptr in to_remove {
+            self.remove(&ptr);
+        }
+    }
+}
+
 impl<A> Lru<A>
 where
     A: KeyAdapter<Link = LruLink>,
@@ -162,7 +178,7 @@ where
 
     fn iter(&self) -> LruIter<'_, A> {
         let mut iter = self.lru.iter();
-        iter.tail();
+        iter.back();
         LruIter {
             iter,
             lru: self,
@@ -363,6 +379,7 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as PointerOps>::Pointer) {
+        tracing::debug!("[lru] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -370,10 +387,12 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as PointerOps>::Pointer,
     ) -> <<A>::PointerOps as PointerOps>::Pointer {
+        tracing::debug!("[lru] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as PointerOps>::Pointer) {
+        tracing::debug!("[lru] access {:?}", ptr);
         self.access(ptr)
     }
 
@@ -392,6 +411,7 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
     struct LruItem {
         link: LruLink,
         key: u64,

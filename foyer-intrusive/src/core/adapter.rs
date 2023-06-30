@@ -12,11 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
+
 use foyer_common::Key;
 
 use crate::core::pointer::PointerOps;
 
-pub trait Link: Send + Sync + 'static {
+pub trait Link: Send + Sync + 'static + Default + Debug {
     fn is_linked(&self) -> bool;
 }
 
@@ -87,23 +89,22 @@ pub unsafe trait KeyAdapter: Adapter {
 ///
 /// ```
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter};
+/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::PointerOps;
 /// use foyer_intrusive::eviction::EvictionPolicy;
 /// use std::sync::Arc;
 ///
-/// pub struct Item<A, E>
+/// #[derive(Debug)]
+/// pub struct Item<L>
 /// where
-///     E: EvictionPolicy<A>,
-///     A: KeyAdapter<Link = E::Link>,
-///     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+///     L: Link
 /// {
-///     link: E::Link,
+///     link: L,
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<E> = Arc<Item<ItemAdapter<E>, E>>: Item<ItemAdapter<E>, E> { link: E::Link} where E:EvictionPolicy<ItemAdapter<E>> }
-/// key_adapter! { ItemAdapter<E> = Item<ItemAdapter<E>, E> { key: u64 } where E: EvictionPolicy<ItemAdapter<E>> }
+/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
+/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
@@ -112,6 +113,7 @@ macro_rules! intrusive_adapter {
     ) => {
         $vis struct $name<$($args),*> $($where_)* {
             pointer_ops: $crate::core::pointer::DefaultPointerOps<$pointer>,
+            _marker: std::marker::PhantomData<($($args),*)>
         }
 
         unsafe impl<$($args),*> Send for $name<$($args),*> $($where_)* {}
@@ -124,6 +126,7 @@ macro_rules! intrusive_adapter {
             fn new() -> Self {
                 Self {
                     pointer_ops: Default::default(),
+                    _marker: std::marker::PhantomData,
                 }
             }
 
@@ -157,7 +160,7 @@ macro_rules! intrusive_adapter {
         $vis:vis $name:ident<$($args:tt),*> = $($rest:tt)*
     ) => {
         intrusive_adapter! {@impl
-            $vis $name ($($args)*) = $($rest)*
+            $vis $name ($($args),*) = $($rest)*
         }
     };
 }
@@ -182,23 +185,22 @@ macro_rules! intrusive_adapter {
 ///
 /// ```
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter};
+/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::PointerOps;
 /// use foyer_intrusive::eviction::EvictionPolicy;
 /// use std::sync::Arc;
 ///
-/// pub struct Item<A, E>
+/// #[derive(Debug)]
+/// pub struct Item<L>
 /// where
-///     E: EvictionPolicy<A>,
-///     A: KeyAdapter<Link = E::Link>,
-///     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+///     L: Link
 /// {
-///     link: E::Link,
+///     link: L,
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<E> = Arc<Item<ItemAdapter<E>, E>>: Item<ItemAdapter<E>, E> { link: E::Link} where E:EvictionPolicy<ItemAdapter<E>> }
-/// key_adapter! { ItemAdapter<E> = Item<ItemAdapter<E>, E> { key: u64 } where E: EvictionPolicy<ItemAdapter<E>> }
+/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
+/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! key_adapter {
@@ -227,10 +229,18 @@ macro_rules! key_adapter {
         $name:ident<$($args:tt),*> = $($rest:tt)*
     ) => {
         key_adapter! {@impl
-            $name ($($args)*) = $($rest)*
+            $name ($($args),*) = $($rest)*
         }
     };
 }
+
+macro_rules! t {
+    (
+        <$($args:tt),*>
+    ) => {};
+}
+
+t! { <A, B, C> }
 
 #[cfg(test)]
 mod tests {
@@ -242,6 +252,7 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
     struct DListItem {
         link: DListLink,
         val: u64,

@@ -12,10 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::core::adapter::{Adapter, KeyAdapter, Link};
-use crate::core::pointer::PointerOps;
+use crate::core::{
+    adapter::{Adapter, KeyAdapter, Link},
+    pointer::PointerOps,
+};
 
-pub trait Config = Send + Sync + 'static;
+use std::fmt::Debug;
+
+pub trait Config = Send + Sync + 'static + Debug;
 
 pub trait EvictionPolicy<A>: Send + Sync + 'static
 where
