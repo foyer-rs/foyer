@@ -31,16 +31,10 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 
-use foyer_intrusive::eviction::lfu::{Lfu, LfuConfig, LfuLink};
+use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::AdmitAll,
-    device::{
-        fs::{FsDevice, FsDeviceConfig},
-        io_buffer::AlignedAllocator,
-    },
-    region_manager::RegionEpItemAdapter,
-    reinsertion::ReinsertNone,
-    store::{Store, StoreConfig},
+    admission::AdmitAll, device::fs::FsDeviceConfig, reinsertion::ReinsertNone, store::StoreConfig,
+    LfuFsStore,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -120,16 +114,7 @@ impl Args {
     }
 }
 
-type TStore = Store<
-    u64,
-    Vec<u8>,
-    AlignedAllocator,
-    FsDevice,
-    Lfu<RegionEpItemAdapter<LfuLink>>,
-    AdmitAll<u64, Vec<u8>>,
-    ReinsertNone<u64, Vec<u8>>,
-    LfuLink,
->;
+type TStore = LfuFsStore<u64, Vec<u8>, AdmitAll<u64, Vec<u8>>, ReinsertNone<u64, Vec<u8>>>;
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
@@ -310,7 +295,7 @@ async fn write(
 
         let idx = index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
-        let data = vec![b'x'; entry_size];
+        let data = vec![idx as u8; entry_size];
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
         }
@@ -363,9 +348,11 @@ async fn read(
         }
 
         let time = Instant::now();
-        let hit = store.lookup(&idx).await.unwrap().is_some();
+        let res = store.lookup(&idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
-        if hit {
+
+        if res.is_some() {
+            assert_eq!(vec![idx as u8; entry_size], res.unwrap());
             metrics
                 .get_hit_lats
                 .write()

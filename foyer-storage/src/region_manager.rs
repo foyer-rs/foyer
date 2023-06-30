@@ -134,16 +134,19 @@ where
             }
 
             // current region is full, schedule flushing
-            self.flusher.submit(FlushTask { region_id });
+            self.flusher.submit(FlushTask { region_id }).await.unwrap();
             inner.current = None;
         }
 
         assert!(inner.current.is_none());
 
         tracing::debug!("clean regions: {}", inner.clean_regions.len());
-        if inner.clean_regions.is_empty() {
+        if inner.clean_regions.len() < self.reclaimer.runners() {
             if let Some(item) = inner.eviction.pop() {
-                self.reclaimer.submit(ReclaimTask { region_id: item.id });
+                self.reclaimer
+                    .submit(ReclaimTask { region_id: item.id })
+                    .await
+                    .unwrap();
             }
         }
 

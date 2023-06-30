@@ -14,7 +14,10 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::fd::{AsRawFd, RawFd},
+    os::{
+        fd::{AsRawFd, RawFd},
+        unix::prelude::OpenOptionsExt,
+    },
     path::PathBuf,
     sync::Arc,
 };
@@ -191,8 +194,7 @@ impl FsDevice {
                     opts.create(true);
                     opts.write(true);
                     opts.read(true);
-
-                    // TODO(MrCroxx): use direct i/o on linux targets
+                    opts.custom_flags(libc::O_DIRECT);
 
                     let file = opts.open(path).map_err(Error::io)?;
 
@@ -228,6 +230,8 @@ impl FsDevice {
 #[cfg(test)]
 mod tests {
 
+    use bytes::BufMut;
+
     use crate::slice::{Slice, SliceMut};
 
     use super::*;
@@ -249,8 +253,10 @@ mod tests {
         };
         let dev = FsDevice::open(config).await.unwrap();
 
-        let wbuffer = vec![b'x'; ALIGN];
-        let mut rbuffer = vec![0; ALIGN];
+        let mut wbuffer = dev.io_buffer(ALIGN, ALIGN);
+        (&mut wbuffer[..]).put_slice(&[b'x'; ALIGN]);
+        let mut rbuffer = dev.io_buffer(ALIGN, ALIGN);
+        (&mut rbuffer[..]).put_slice(&[0; ALIGN]);
 
         let wbuf = unsafe { Slice::new(&wbuffer) };
         let rbuf = unsafe { SliceMut::new(&mut rbuffer) };

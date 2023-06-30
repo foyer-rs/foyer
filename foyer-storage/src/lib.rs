@@ -18,6 +18,8 @@
 #![feature(get_mut_unchecked)]
 #![allow(clippy::type_complexity)]
 
+use device::io_buffer::AlignedAllocator;
+
 pub mod admission;
 pub mod device;
 pub mod error;
@@ -29,3 +31,29 @@ pub mod region_manager;
 pub mod reinsertion;
 pub mod slice;
 pub mod store;
+
+pub type LruFsStore<K, V, AP, RP> = store::Store<
+    K,
+    V,
+    AlignedAllocator,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::lru::Lru<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
+    >,
+    AP,
+    RP,
+    foyer_intrusive::eviction::lru::LruLink,
+>;
+
+pub type LfuFsStore<K, V, AP, RP> = store::Store<
+    K,
+    V,
+    AlignedAllocator,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::lfu::Lfu<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
+    >,
+    AP,
+    RP,
+    foyer_intrusive::eviction::lfu::LfuLink,
+>;

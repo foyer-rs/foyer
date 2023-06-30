@@ -12,15 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use crate::{
     admission::AdmissionPolicy,
     device::{BufferAllocator, Device},
-    error::Result,
+    error::{Error, Result},
     indices::Indices,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
@@ -31,29 +28,43 @@ use foyer_common::{Key, Value};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use foyer_utils::queue::AsyncQueue;
 use itertools::Itertools;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{channel, error::TrySendError, Receiver, Sender},
+    Mutex,
+};
 
 #[derive(Debug)]
 pub struct ReclaimTask {
     pub region_id: RegionId,
 }
 
-pub struct Reclaimer {
-    sequence: AtomicUsize,
+struct ReclaimerInner {
+    sequence: usize,
 
-    task_txs: Vec<UnboundedSender<ReclaimTask>>,
+    task_txs: Vec<Sender<ReclaimTask>>,
+}
+
+pub struct Reclaimer {
+    runners: usize,
+
+    inner: Mutex<ReclaimerInner>,
 }
 
 impl Reclaimer {
     pub fn new(runners: usize) -> Self {
-        Self {
-            sequence: AtomicUsize::new(0),
+        let inner = ReclaimerInner {
+            sequence: 0,
             task_txs: Vec::with_capacity(runners),
+        };
+
+        Self {
+            runners,
+            inner: Mutex::new(inner),
         }
     }
 
-    pub fn run<K, V, A, D, EP, AP, RP, EL>(
-        &mut self,
+    pub async fn run<K, V, A, D, EP, AP, RP, EL>(
+        &self,
         store: Arc<Store<K, V, A, D, EP, AP, RP, EL>>,
         region_manager: Arc<RegionManager<A, D, EP, EL>>,
         clean_regions: Arc<AsyncQueue<RegionId>>,
@@ -69,14 +80,12 @@ impl Reclaimer {
         RP: ReinsertionPolicy<Key = K, Value = V>,
         EL: Link,
     {
-        let runners = self.task_txs.capacity();
+        let mut inner = self.inner.lock().await;
 
         #[allow(clippy::type_complexity)]
-        let (mut txs, rxs): (
-            Vec<UnboundedSender<ReclaimTask>>,
-            Vec<UnboundedReceiver<ReclaimTask>>,
-        ) = (0..runners).map(|_| unbounded_channel()).unzip();
-        self.task_txs.append(&mut txs);
+        let (mut txs, rxs): (Vec<Sender<ReclaimTask>>, Vec<Receiver<ReclaimTask>>) =
+            (0..self.runners).map(|_| channel(1)).unzip();
+        inner.task_txs.append(&mut txs);
 
         let runners = rxs
             .into_iter()
@@ -97,9 +106,31 @@ impl Reclaimer {
         }
     }
 
-    pub fn submit(&self, task: ReclaimTask) {
-        let submittee = self.sequence.fetch_add(1, Ordering::Relaxed) % self.task_txs.len();
-        self.task_txs[submittee].send(task).unwrap();
+    pub fn runners(&self) -> usize {
+        self.runners
+    }
+
+    pub async fn submit(&self, task: ReclaimTask) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let submittee = inner.sequence % inner.task_txs.len();
+        inner.sequence += 1;
+        inner.task_txs[submittee]
+            .send(task)
+            .await
+            .map_err(Error::other)
+    }
+
+    pub async fn try_submit(&self, task: ReclaimTask) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let submittee = inner.sequence % inner.task_txs.len();
+        match inner.task_txs[submittee].try_send(task) {
+            Ok(()) => {
+                inner.sequence += 1;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(Error::ChannelFull),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 }
 
@@ -114,7 +145,7 @@ where
     RP: ReinsertionPolicy<Key = K, Value = V>,
     EL: Link,
 {
-    task_rx: UnboundedReceiver<ReclaimTask>,
+    task_rx: Receiver<ReclaimTask>,
 
     _store: Arc<Store<K, V, A, D, EP, AP, RP, EL>>,
     region_manager: Arc<RegionManager<A, D, EP, EL>>,
