@@ -12,19 +12,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use foyer_utils::queue::AsyncQueue;
 use itertools::Itertools;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{channel, error::TrySendError, Receiver, Sender},
+    Mutex,
+};
 
 use crate::{
     device::{BufferAllocator, Device},
-    error::Result,
+    error::{Error, Result},
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
     slice::Slice,
@@ -35,22 +35,32 @@ pub struct FlushTask {
     pub region_id: RegionId,
 }
 
-pub struct Flusher {
-    sequence: AtomicUsize,
+struct FlusherInner {
+    sequence: usize,
 
-    task_txs: Vec<UnboundedSender<FlushTask>>,
+    task_txs: Vec<Sender<FlushTask>>,
+}
+
+pub struct Flusher {
+    runners: usize,
+
+    inner: Mutex<FlusherInner>,
 }
 
 impl Flusher {
     pub fn new(runners: usize) -> Self {
-        Self {
-            sequence: AtomicUsize::new(0),
+        let inner = FlusherInner {
+            sequence: 0,
             task_txs: Vec::with_capacity(runners),
+        };
+        Self {
+            runners,
+            inner: Mutex::new(inner),
         }
     }
 
-    pub fn run<A, D, E, EL>(
-        &mut self,
+    pub async fn run<A, D, E, EL>(
+        &self,
         buffers: Arc<AsyncQueue<Vec<u8, A>>>,
         region_manager: Arc<RegionManager<A, D, E, EL>>,
     ) where
@@ -59,14 +69,12 @@ impl Flusher {
         E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
         EL: Link,
     {
-        let runners = self.task_txs.capacity();
+        let mut inner = self.inner.lock().await;
 
         #[allow(clippy::type_complexity)]
-        let (mut txs, rxs): (
-            Vec<UnboundedSender<FlushTask>>,
-            Vec<UnboundedReceiver<FlushTask>>,
-        ) = (0..runners).map(|_| unbounded_channel()).unzip();
-        self.task_txs.append(&mut txs);
+        let (mut txs, rxs): (Vec<Sender<FlushTask>>, Vec<Receiver<FlushTask>>) =
+            (0..self.runners).map(|_| channel(1)).unzip();
+        inner.task_txs.append(&mut txs);
 
         let runners = rxs
             .into_iter()
@@ -84,9 +92,31 @@ impl Flusher {
         }
     }
 
-    pub fn submit(&self, task: FlushTask) {
-        let submittee = self.sequence.fetch_add(1, Ordering::Relaxed) % self.task_txs.len();
-        self.task_txs[submittee].send(task).unwrap();
+    pub fn runners(&self) -> usize {
+        self.runners
+    }
+
+    pub async fn submit(&self, task: FlushTask) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let submittee = inner.sequence % inner.task_txs.len();
+        inner.sequence += 1;
+        inner.task_txs[submittee]
+            .send(task)
+            .await
+            .map_err(Error::other)
+    }
+
+    pub async fn try_submit(&self, task: FlushTask) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let submittee = inner.sequence % inner.task_txs.len();
+        match inner.task_txs[submittee].try_send(task) {
+            Ok(()) => {
+                inner.sequence += 1;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(Error::ChannelFull),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 }
 
@@ -97,7 +127,7 @@ where
     E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
     EL: Link,
 {
-    task_rx: UnboundedReceiver<FlushTask>,
+    task_rx: Receiver<FlushTask>,
     buffers: Arc<AsyncQueue<Vec<u8, A>>>,
 
     region_manager: Arc<RegionManager<A, D, E, EL>>,

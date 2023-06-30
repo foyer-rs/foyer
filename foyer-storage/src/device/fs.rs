@@ -14,7 +14,10 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::fd::{AsRawFd, RawFd},
+    os::{
+        fd::{AsRawFd, RawFd},
+        unix::prelude::OpenOptionsExt,
+    },
     path::PathBuf,
     sync::Arc,
 };
@@ -191,8 +194,7 @@ impl FsDevice {
                     opts.create(true);
                     opts.write(true);
                     opts.read(true);
-
-                    // TODO(MrCroxx): use direct i/o on linux targets
+                    opts.custom_flags(libc::O_DIRECT);
 
                     let file = opts.open(path).map_err(Error::io)?;
 

@@ -20,6 +20,8 @@ pub enum Error {
     EntryTooLarge { len: usize, capacity: usize },
     #[error("checksum mismatch, checksum: {checksum}, expected: {expected}")]
     ChecksumMismatch { checksum: u64, expected: u64 },
+    #[error("channel full")]
+    ChannelFull,
     #[error("other error: {0}")]
     Other(String),
 }
@@ -27,6 +29,10 @@ pub enum Error {
 impl Error {
     pub fn device(e: super::device::error::Error) -> Self {
         Self::Device(e)
+    }
+
+    pub fn other(e: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self::Other(e.into().to_string())
     }
 }
 

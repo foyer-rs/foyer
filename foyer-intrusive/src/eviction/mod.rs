@@ -55,6 +55,10 @@ where
         };
         ptr.map(|ptr| self.remove(&ptr))
     }
+
+    fn peek(&self) -> Option<&<A::PointerOps as PointerOps>::Pointer> {
+        self.iter().next()
+    }
 }
 
 pub mod lfu;
