@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use foyer_common::{Key, Value};
+use foyer_common::code::{Key, Value};
 
 use std::fmt::Debug;
 

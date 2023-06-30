@@ -15,8 +15,8 @@
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use bytes::{Buf, BufMut};
+use foyer_common::{bits::align_up, queue::AsyncQueue};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use foyer_utils::{bits::align_up, queue::AsyncQueue};
 use twox_hash::XxHash64;
 
 use crate::{
@@ -30,7 +30,7 @@ use crate::{
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
-use foyer_common::{Key, Value};
+use foyer_common::code::{Key, Value};
 use std::hash::Hasher;
 
 pub struct StoreConfig<D, AP, EP, RP, EL>
