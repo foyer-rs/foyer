@@ -12,13 +12,11 @@ async-trait = "0.1"
 bitflags = "2.3.1"
 bytes = "1"
 cmsketch = "0.1"
-crossbeam = "0.8"
 foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-utils = { path = "../foyer-utils" }
 futures = "0.3"
 itertools = "0.10.5"
-lazy_static = "1.4.0"
 libc = "0.2"
 memoffset = "0.8"
 nix = { version = "0.26", features = ["fs", "mman"] }
