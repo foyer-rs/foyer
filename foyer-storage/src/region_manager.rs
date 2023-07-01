@@ -26,7 +26,7 @@ use crate::{
     device::{BufferAllocator, Device},
     flusher::{FlushTask, Flusher},
     reclaimer::{ReclaimTask, Reclaimer},
-    region::{Region, RegionId, WriteSlice},
+    region::{AllocateResult, Region, RegionId},
 };
 
 #[derive(Debug)]
@@ -41,16 +41,12 @@ where
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
 
-struct RegionManagerInner<A, E, EL>
+struct RegionManagerInner<E, EL>
 where
-    A: BufferAllocator,
     E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
     EL: Link,
 {
     current: Option<RegionId>,
-
-    buffers: Arc<AsyncQueue<Vec<u8, A>>>,
-    clean_regions: Arc<AsyncQueue<RegionId>>,
 
     eviction: E,
 
@@ -64,7 +60,10 @@ where
     E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
     EL: Link,
 {
-    inner: Arc<RwLock<RegionManagerInner<A, E, EL>>>,
+    inner: Arc<RwLock<RegionManagerInner<E, EL>>>,
+
+    buffers: Arc<AsyncQueue<Vec<u8, A>>>,
+    clean_regions: Arc<AsyncQueue<RegionId>>,
 
     regions: Vec<Region<A, D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
@@ -107,14 +106,15 @@ where
 
         let inner = RegionManagerInner {
             current: None,
-            buffers,
-            clean_regions,
+
             eviction,
             _marker: PhantomData,
         };
 
         Self {
             inner: Arc::new(RwLock::new(inner)),
+            buffers,
+            clean_regions,
             regions,
             items,
             flusher,
@@ -123,25 +123,27 @@ where
     }
 
     /// Allocate a buffer slice with given size in an active region to write.
-    pub async fn allocate(&self, size: usize) -> WriteSlice {
+    pub async fn allocate(&self, size: usize) -> AllocateResult {
         let mut inner = self.inner.write().await;
 
         // try allocate from current region
         if let Some(region_id) = inner.current {
             let region = self.region(&region_id);
-            if let Some(slice) = region.allocate(size) {
-                return slice;
+            match region.allocate(size) {
+                AllocateResult::Ok(slice) => return AllocateResult::Ok(slice),
+                AllocateResult::Full { slice, remain } => {
+                    // current region is full, schedule flushing
+                    self.flusher.submit(FlushTask { region_id }).await.unwrap();
+                    inner.current = None;
+                    return AllocateResult::Full { slice, remain };
+                }
             }
-
-            // current region is full, schedule flushing
-            self.flusher.submit(FlushTask { region_id }).await.unwrap();
-            inner.current = None;
         }
 
         assert!(inner.current.is_none());
 
-        tracing::debug!("clean regions: {}", inner.clean_regions.len());
-        if inner.clean_regions.len() < self.reclaimer.runners() {
+        tracing::debug!("clean regions: {}", self.clean_regions.len());
+        if self.clean_regions.len() < self.reclaimer.runners() {
             if let Some(item) = inner.eviction.pop() {
                 self.reclaimer
                     .submit(ReclaimTask { region_id: item.id })
@@ -150,11 +152,11 @@ where
             }
         }
 
-        let region_id = inner.clean_regions.acquire().await;
+        let region_id = self.clean_regions.acquire().await;
         tracing::info!("switch to clean region: {}", region_id);
 
         let region = self.region(&region_id);
-        let buffer = inner.buffers.acquire().await;
+        let buffer = self.buffers.acquire().await;
         region.attach_buffer(buffer);
 
         let slice = region.allocate(size).unwrap();
@@ -162,7 +164,7 @@ where
         region.advance();
         inner.current = Some(region_id);
 
-        slice
+        AllocateResult::Ok(slice)
     }
 
     pub fn region(&self, id: &RegionId) -> &Region<A, D> {
@@ -177,8 +179,15 @@ where
         }
     }
 
-    pub async fn post_flush(&self, id: &RegionId) {
+    pub async fn set_region_evictable(&self, id: &RegionId) {
         let mut inner = self.inner.write().await;
-        inner.eviction.push(self.items[*id as usize].clone());
+        let item = &self.items[*id as usize];
+        if !item.link.is_linked() {
+            inner.eviction.push(item.clone());
+        }
+    }
+
+    pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
+        &self.clean_regions
     }
 }

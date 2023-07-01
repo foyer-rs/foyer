@@ -15,7 +15,7 @@
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use bytes::{Buf, BufMut};
-use foyer_common::{bits::align_up, queue::AsyncQueue};
+use foyer_common::{bits, queue::AsyncQueue};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use twox_hash::XxHash64;
 
@@ -26,12 +26,14 @@ use crate::{
     flusher::Flusher,
     indices::{Index, Indices},
     reclaimer::Reclaimer,
-    region::RegionId,
+    region::{Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
 use foyer_common::code::{Key, Value};
 use std::hash::Hasher;
+
+const REGION_MAGIC: u64 = 0x19970327;
 
 pub struct StoreConfig<D, AP, EP, RP, EL>
 where
@@ -48,6 +50,7 @@ where
     pub buffer_pool_size: usize,
     pub flushers: usize,
     pub reclaimers: usize,
+    pub recover_concurrency: usize,
 }
 
 impl<D, AP, EP, RP, EL> Debug for StoreConfig<D, AP, EP, RP, EL>
@@ -105,6 +108,8 @@ where
     EL: Link,
 {
     pub async fn open(config: StoreConfig<D, AP, EP, RP, EL>) -> Result<Arc<Self>> {
+        tracing::info!("open store with config:\n{:#?}", config);
+
         let device = D::open(config.device_config).await?;
 
         let buffers = Arc::new(AsyncQueue::new());
@@ -115,9 +120,6 @@ where
         }
 
         let clean_regions = Arc::new(AsyncQueue::new());
-        for region_id in 0..device.regions() as RegionId {
-            clean_regions.release(region_id);
-        }
 
         let flusher = Arc::new(Flusher::new(config.flushers));
         let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
@@ -137,10 +139,12 @@ where
         let store = Arc::new(Self {
             indices: indices.clone(),
             region_manager: region_manager.clone(),
-            device,
+            device: device.clone(),
             admission: config.admission,
             _marker: PhantomData,
         });
+
+        store.recover(config.recover_concurrency).await?;
 
         flusher.run(buffers, region_manager.clone()).await;
         reclaimer
@@ -163,23 +167,20 @@ where
 
         let serialized_len = self.serialized_len(&key, &value);
 
-        let mut slice = self.region_manager.allocate(serialized_len).await;
-
-        let mut offset = 0;
-        value.write(&mut slice.as_mut()[offset..offset + value.serialized_len()]);
-        offset += value.serialized_len();
-        key.write(&mut slice.as_mut()[offset..offset + key.serialized_len()]);
-        offset += key.serialized_len();
-
-        let checksum = checksum(&slice.as_ref()[..offset]);
-
-        let footer = Footer {
-            key_len: key.serialized_len() as u32,
-            value_len: value.serialized_len() as u32,
-            checksum,
+        let mut slice = match self.region_manager.allocate(serialized_len).await {
+            crate::region::AllocateResult::Ok(slice) => slice,
+            crate::region::AllocateResult::Full { mut slice, remain } => {
+                // current region is full, write region footer and try allocate again
+                let footer = RegionFooter {
+                    magic: REGION_MAGIC,
+                    padding: remain as u64,
+                };
+                footer.write(slice.as_mut());
+                self.region_manager.allocate(serialized_len).await.unwrap()
+            }
         };
-        offset = slice.len() - Footer::serialized_len();
-        footer.write(&mut slice.as_mut()[offset..]);
+
+        write_entry(slice.as_mut(), &key, &value);
 
         let index = Index {
             region: slice.region_id(),
@@ -208,22 +209,18 @@ where
         self.region_manager.record_access(&index.region).await;
         let region = self.region_manager.region(&index.region);
         let start = index.offset as usize;
-        // TODO(MrCroxx): read value and checksum only
         let end = start + index.len as usize;
+
+        // TODO(MrCroxx): read value only
         let slice = match region.load(start..end, index.version).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
 
-        let checksum = checksum(&slice.as_ref()[..(index.value_len + index.key_len) as usize]);
-        let expected = (&slice.as_ref()[slice.len() - 8..]).get_u64();
-        if checksum != expected {
-            return Err(Error::ChecksumMismatch { checksum, expected });
+        match read_entry::<K, V>(slice.as_ref()) {
+            Some((_key, value)) => Ok(Some(value)),
+            None => Ok(None),
         }
-
-        let value = V::read(&slice.as_ref()[..index.value_len as usize]);
-
-        Ok(Some(value))
     }
 
     pub fn remove(&self, key: &K) {
@@ -231,25 +228,82 @@ where
     }
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
-        let unaligned = key.serialized_len() + value.serialized_len() + Footer::serialized_len();
-        align_up(self.device.align(), unaligned)
+        let unaligned =
+            key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
+        bits::align_up(self.device.align(), unaligned)
+    }
+
+    async fn recover(&self, concurrency: usize) -> Result<()> {
+        tracing::info!("start store recovery");
+
+        let (tx, rx) = async_channel::bounded(concurrency);
+
+        let mut handles = vec![];
+        for region_id in 0..self.device.regions() as RegionId {
+            let itx = tx.clone();
+            let irx = rx.clone();
+            let region_manager = self.region_manager.clone();
+            let indices = self.indices.clone();
+            let handle = tokio::spawn(async move {
+                itx.send(()).await.unwrap();
+                let res = Self::recover_region(region_id, region_manager, indices).await;
+                irx.recv().await.unwrap();
+                res
+            });
+            handles.push(handle);
+        }
+
+        let mut recovered = 0;
+        for (region_id, handle) in handles.into_iter().enumerate() {
+            if handle.await.map_err(Error::other)?? {
+                tracing::debug!("region {} is recovered", region_id);
+                recovered += 1;
+            }
+        }
+
+        tracing::info!("finish store recovery, {} region recovered", recovered);
+
+        Ok(())
+    }
+
+    /// return `true` if region is valid, otherwise `false`
+    async fn recover_region(
+        region_id: RegionId,
+        region_manager: Arc<RegionManager<BA, D, EP, EL>>,
+        indices: Arc<Indices<K>>,
+    ) -> Result<bool> {
+        let region = region_manager.region(&region_id).clone();
+        let res = if let Some(mut iter) = RegionEntryIter::<K, V, BA, D>::open(region).await? {
+            while let Some(index) = iter.next().await? {
+                indices.insert(index);
+            }
+            region_manager.set_region_evictable(&region_id).await;
+            true
+        } else {
+            region_manager.clean_regions().release(region_id);
+            false
+        };
+        Ok(res)
     }
 }
 
-struct Footer {
+#[derive(Debug)]
+struct EntryFooter {
     key_len: u32,
     value_len: u32,
+    padding: u32,
     checksum: u64,
 }
 
-impl Footer {
+impl EntryFooter {
     fn serialized_len() -> usize {
-        4 + 4 + 8
+        4 + 4 + 4 + 8
     }
 
     fn write(&self, mut buf: &mut [u8]) {
         buf.put_u32(self.key_len);
         buf.put_u32(self.value_len);
+        buf.put_u32(self.padding);
         buf.put_u64(self.checksum);
     }
 
@@ -257,18 +311,215 @@ impl Footer {
     fn read(mut buf: &[u8]) -> Self {
         let key_len = buf.get_u32();
         let value_len = buf.get_u32();
+        let padding = buf.get_u32();
         let checksum = buf.get_u64();
 
         Self {
             key_len,
             value_len,
+            padding,
             checksum,
         }
     }
+}
+
+#[derive(Debug)]
+struct RegionFooter {
+    /// magic number to decide a valid region
+    magic: u64,
+
+    /// padding from the end of the last entry footer to the end of region
+    padding: u64,
+}
+
+impl RegionFooter {
+    fn write(&self, buf: &mut [u8]) {
+        let mut offset = buf.len();
+
+        offset -= 8;
+        (&mut buf[offset..offset + 8]).put_u64(self.magic);
+
+        offset -= 8;
+        (&mut buf[offset..offset + 8]).put_u64(self.padding);
+    }
+
+    fn read(buf: &[u8]) -> Self {
+        let mut offset = buf.len();
+
+        offset -= 8;
+        let magic = (&buf[offset..offset + 8]).get_u64();
+
+        offset -= 8;
+        let padding = (&buf[offset..offset + 8]).get_u64();
+
+        Self { magic, padding }
+    }
+}
+
+/// | value | key | <padding> | footer |
+///
+/// # Safety
+///
+/// `buf.len()` must excatly fit entry size
+fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V)
+where
+    K: Key,
+    V: Value,
+{
+    let mut offset = 0;
+    value.write(&mut buf[offset..offset + value.serialized_len()]);
+    offset += value.serialized_len();
+    key.write(&mut buf[offset..offset + key.serialized_len()]);
+    offset += key.serialized_len();
+
+    let checksum = checksum(&buf[..offset]);
+    let padding = buf.len() as u32
+        - key.serialized_len() as u32
+        - value.serialized_len() as u32
+        - EntryFooter::serialized_len() as u32;
+
+    let footer = EntryFooter {
+        key_len: key.serialized_len() as u32,
+        value_len: value.serialized_len() as u32,
+        padding,
+        checksum,
+    };
+    offset = buf.len() - EntryFooter::serialized_len();
+    footer.write(&mut buf[offset..]);
+}
+
+/// | value | key | <padding> | footer |
+///
+/// # Safety
+///
+/// `buf.len()` must excatly fit entry size
+fn read_entry<K, V>(buf: &[u8]) -> Option<(K, V)>
+where
+    K: Key,
+    V: Value,
+{
+    let mut offset = buf.len();
+
+    offset -= EntryFooter::serialized_len();
+    let footer = EntryFooter::read(&buf[offset..]);
+
+    offset = 0;
+    let value = V::read(&buf[offset..offset + footer.value_len as usize]);
+
+    offset += footer.value_len as usize;
+    let key = K::read(&buf[offset..offset + footer.key_len as usize]);
+
+    offset += footer.key_len as usize;
+    let checksum = checksum(&buf[..offset]);
+    if checksum != footer.checksum {
+        tracing::warn!(
+            "read entry error: {}",
+            Error::ChecksumMismatch {
+                checksum,
+                expected: footer.checksum,
+            }
+        );
+        return None;
+    }
+
+    Some((key, value))
 }
 
 fn checksum(buf: &[u8]) -> u64 {
     let mut hasher = XxHash64::with_seed(0);
     hasher.write(buf);
     hasher.finish()
+}
+
+struct RegionEntryIter<K, V, BA, D>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+{
+    region: Region<BA, D>,
+
+    cursor: usize,
+
+    _marker: PhantomData<(K, V)>,
+}
+
+impl<K, V, BA, D> RegionEntryIter<K, V, BA, D>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+{
+    async fn open(region: Region<BA, D>) -> Result<Option<Self>> {
+        let region_size = region.device().region_size();
+        let align = region.device().align();
+
+        let slice = match region.load(region_size - align..region_size, 0).await? {
+            Some(slice) => slice,
+            None => return Ok(None),
+        };
+
+        let footer = RegionFooter::read(slice.as_ref());
+        if footer.magic != REGION_MAGIC {
+            return Ok(None);
+        }
+        let cursor = region_size - footer.padding as usize;
+        Ok(Some(Self {
+            region,
+            cursor,
+            _marker: PhantomData,
+        }))
+    }
+
+    async fn next(&mut self) -> Result<Option<Index<K>>> {
+        if self.cursor == 0 {
+            return Ok(None);
+        }
+
+        let align = self.region.device().align();
+
+        let slice = self
+            .region
+            .load(self.cursor - align..self.cursor, 0)
+            .await?
+            .unwrap();
+
+        let footer =
+            EntryFooter::read(&slice.as_ref()[align - EntryFooter::serialized_len()..align]);
+        let entry_len = (footer.value_len + footer.key_len + footer.padding) as usize
+            + EntryFooter::serialized_len();
+
+        let abs_start = self.cursor - entry_len + footer.value_len as usize;
+        let abs_end = self.cursor - entry_len + (footer.value_len + footer.key_len) as usize;
+        let align_start = bits::align_down(align, abs_start);
+        let align_end = bits::align_up(align, abs_end);
+
+        let key = if align_start == self.cursor - align && align_end == self.cursor {
+            // key and foooter in the same block, read directly from slice
+            let rel_start =
+                align - EntryFooter::serialized_len() - (footer.padding + footer.key_len) as usize;
+            let rel_end = align - EntryFooter::serialized_len() - footer.padding as usize;
+            K::read(&slice.as_ref()[rel_start..rel_end])
+        } else {
+            let slice = self.region.load(align_start..align_end, 0).await?.unwrap();
+            let rel_start = abs_start - align_start;
+            let rel_end = abs_end - align_start;
+
+            K::read(&slice.as_ref()[rel_start..rel_end])
+        };
+
+        self.cursor -= entry_len;
+
+        Ok(Some(Index {
+            key,
+            region: self.region.id(),
+            version: 0,
+            offset: self.cursor as u32,
+            len: entry_len as u32,
+            key_len: footer.key_len,
+            value_len: footer.value_len,
+        }))
+    }
 }

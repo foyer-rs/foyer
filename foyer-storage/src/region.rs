@@ -33,6 +33,20 @@ pub type RegionId = u32;
 /// 0 matches any version
 pub type Version = u32;
 
+pub enum AllocateResult {
+    Ok(WriteSlice),
+    Full { slice: WriteSlice, remain: usize },
+}
+
+impl AllocateResult {
+    pub fn unwrap(self) -> WriteSlice {
+        match self {
+            AllocateResult::Ok(slice) => slice,
+            AllocateResult::Full { .. } => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RegionInner<A>
 where
@@ -51,7 +65,7 @@ where
     wakers: Vec<Waker>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Region<A, D>
 where
     A: BufferAllocator,
@@ -102,7 +116,7 @@ where
         }
     }
 
-    pub fn allocate(&self, size: usize) -> Option<WriteSlice> {
+    pub fn allocate(&self, size: usize) -> AllocateResult {
         let callback = {
             let inner = self.inner.clone();
             move || {
@@ -114,28 +128,44 @@ where
 
         let mut inner = self.inner.write();
 
-        if inner.len + size > inner.capacity {
-            return None;
-        }
-
         inner.writers += 1;
         let version = inner.version;
         let offset = inner.len;
-        inner.len += size;
-        let buffer = inner.buffer.as_mut().unwrap();
-
-        let slice = unsafe { SliceMut::new(&mut buffer[offset..offset + size]) };
         let region_id = self.id;
 
-        let slice = WriteSlice {
-            slice,
-            region_id,
-            version,
-            offset,
-            callback: Box::new(callback),
-        };
+        // reserve 1 align size for region footer
+        if inner.len + size + self.device.align() > inner.capacity {
+            // if full, return the reserved 1 aligen write buf
+            let remain = self.device.region_size() - inner.len;
+            inner.len = self.device.region_size();
+            let range = inner.len - self.device.align()..inner.len;
 
-        Some(slice)
+            let buffer = inner.buffer.as_mut().unwrap();
+            let slice = unsafe { SliceMut::new(&mut buffer[range]) };
+
+            let slice = WriteSlice {
+                slice,
+                region_id,
+                version,
+                offset,
+                callback: Box::new(callback),
+            };
+            AllocateResult::Full { slice, remain }
+        } else {
+            inner.len += size;
+
+            let buffer = inner.buffer.as_mut().unwrap();
+            let slice = unsafe { SliceMut::new(&mut buffer[offset..offset + size]) };
+
+            let slice = WriteSlice {
+                slice,
+                region_id,
+                version,
+                offset,
+                callback: Box::new(callback),
+            };
+            AllocateResult::Ok(slice)
+        }
     }
 
     pub async fn load(
@@ -200,9 +230,15 @@ where
                 start + offset + len
             );
             let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
-            self.device
+            if self
+                .device
                 .read(s, region, (start + offset) as u64, len)
-                .await?;
+                .await?
+                != len
+            {
+                self.inner.write().physical_readers -= 1;
+                return Ok(None);
+            }
             offset += len;
         }
 
