@@ -34,8 +34,13 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
 
     async fn open(config: Self::Config) -> Result<Self>;
 
-    async fn write(&self, buf: impl IoBuf, region: RegionId, offset: u64, len: usize)
-        -> Result<()>;
+    async fn write(
+        &self,
+        buf: impl IoBuf,
+        region: RegionId,
+        offset: u64,
+        len: usize,
+    ) -> Result<usize>;
 
     async fn read(
         &self,
@@ -43,7 +48,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<()>;
+    ) -> Result<usize>;
 
     async fn flush(&self) -> Result<()>;
 
@@ -108,8 +113,8 @@ pub mod tests {
             _region: RegionId,
             _offset: u64,
             _len: usize,
-        ) -> Result<()> {
-            Ok(())
+        ) -> Result<usize> {
+            Ok(0)
         }
 
         async fn read(
@@ -118,8 +123,8 @@ pub mod tests {
             _region: RegionId,
             _offset: u64,
             _len: usize,
-        ) -> Result<()> {
-            Ok(())
+        ) -> Result<usize> {
+            Ok(0)
         }
 
         async fn flush(&self) -> Result<()> {

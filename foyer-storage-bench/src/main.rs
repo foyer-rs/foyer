@@ -111,6 +111,9 @@ pub struct Args {
 
     #[arg(long, default_value_t = 16)]
     readers: usize,
+
+    #[arg(long, default_value_t = 16)]
+    recover_concurrency: usize,
 }
 
 impl Args {
@@ -178,6 +181,7 @@ async fn main() {
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
         flushers: args.flushers,
         reclaimers: args.reclaimers,
+        recover_concurrency: args.recover_concurrency,
     };
 
     println!("{:#?}", config);
@@ -244,10 +248,6 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::
         (0..args.writers).map(|_| oneshot::channel()).unzip();
     let (r_stop_txs, r_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
         (0..args.readers).map(|_| oneshot::channel()).unzip();
-
-    println!("writers: {} readers: {}", args.writers, args.readers);
-
-    println!("txs: {:?}", w_stop_txs);
 
     let w_handles = w_stop_rxs
         .into_iter()

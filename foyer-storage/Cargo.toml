@@ -8,6 +8,7 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-channel = "1.8"
 async-trait = "0.1"
 bitflags = "2.3.1"
 bytes = "1"
