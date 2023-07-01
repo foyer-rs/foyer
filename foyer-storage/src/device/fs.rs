@@ -91,18 +91,18 @@ impl Device for FsDevice {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         assert!(offset as usize + len <= self.inner.config.file_capacity);
 
         let fd = self.fd(region);
 
-        asyncify(move || {
-            nix::sys::uio::pwrite(fd, &buf.as_ref()[..len], offset as i64)?;
-            Ok(())
+        let res = asyncify(move || {
+            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[..len], offset as i64)?;
+            Ok(res)
         })
         .await?;
 
-        Ok(())
+        Ok(res)
     }
 
     async fn read(
@@ -111,18 +111,18 @@ impl Device for FsDevice {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         assert!(offset as usize + len <= self.inner.config.file_capacity);
 
         let fd = self.fd(region);
 
-        asyncify(move || {
-            nix::sys::uio::pread(fd, &mut buf.as_mut()[..len], offset as i64)?;
-            Ok(())
+        let res = asyncify(move || {
+            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[..len], offset as i64)?;
+            Ok(res)
         })
         .await?;
 
-        Ok(())
+        Ok(res)
     }
 
     async fn flush(&self) -> Result<()> {

@@ -200,7 +200,7 @@ where
                 // step 3: release buffer
                 self.buffers.release(buffer);
 
-                self.region_manager.post_flush(&region.id()).await;
+                self.region_manager.set_region_evictable(&region.id()).await;
 
                 tracing::info!("[flusher] finish flush task, region: {}", task.region_id);
             } else {
