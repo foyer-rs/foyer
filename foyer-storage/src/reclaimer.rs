@@ -196,14 +196,14 @@ where
                 // TODO(MrCroxx): do reinsertion
 
                 // step 3: set region last block zero
-                // let align = region.device().align();
-                // let region_size = region.device().region_size();
-                // let mut buf = region.device().io_buffer(align, align);
-                // (&mut buf[..]).put_slice(&vec![0; align]);
-                // region
-                //     .device()
-                //     .write(buf, task.region_id, (region_size - align) as u64, align)
-                //     .await?;
+                let align = region.device().align();
+                let region_size = region.device().region_size();
+                let mut buf = region.device().io_buffer(align, align);
+                (&mut buf[..]).put_slice(&vec![0; align]);
+                region
+                    .device()
+                    .write(buf, task.region_id, (region_size - align) as u64, align)
+                    .await?;
 
                 // step 4: send clean region
                 self.clean_regions.release(task.region_id);
