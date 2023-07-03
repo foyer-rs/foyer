@@ -57,3 +57,16 @@ pub type LfuFsStore<K, V, AP, RP> = store::Store<
     RP,
     foyer_intrusive::eviction::lfu::LfuLink,
 >;
+
+pub type FifoFsStore<K, V, AP, RP> = store::Store<
+    K,
+    V,
+    AlignedAllocator,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::fifo::Fifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
+    >,
+    AP,
+    RP,
+    foyer_intrusive::eviction::fifo::FifoLink,
+>;
