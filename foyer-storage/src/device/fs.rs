@@ -14,10 +14,7 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::{
-        fd::{AsRawFd, RawFd},
-        unix::prelude::OpenOptionsExt,
-    },
+    os::fd::{AsRawFd, RawFd},
     path::PathBuf,
     sync::Arc,
 };
@@ -64,6 +61,7 @@ impl FsDeviceConfig {
 struct FsDeviceInner {
     config: FsDeviceConfig,
 
+    #[allow(unused)]
     dir: File,
 
     files: Vec<File>,
@@ -125,18 +123,25 @@ impl Device for FsDevice {
         Ok(res)
     }
 
+    #[cfg(target_os = "linux")]
     async fn flush(&self) -> Result<()> {
         let fd = self.inner.dir.as_raw_fd();
         // Commit fs cache to disk. Linux waits for I/O completions.
         //
         // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
-        #[cfg(target_os = "linux")]
         asyncify(move || {
             nix::unistd::syncfs(fd)?;
             Ok(())
         })
         .await?;
 
+        // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    async fn flush(&self) -> Result<()> {
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
 
         Ok(())
@@ -190,10 +195,14 @@ impl FsDevice {
             .map(|i| {
                 let path = config.dir.clone().join(Self::filename(i as RegionId));
                 async move {
+                    #[cfg(target_os = "linux")]
+                    use std::os::unix::prelude::OpenOptionsExt;
+
                     let mut opts = OpenOptions::new();
                     opts.create(true);
                     opts.write(true);
                     opts.read(true);
+                    #[cfg(target_os = "linux")]
                     opts.custom_flags(libc::O_DIRECT);
 
                     let file = opts.open(path).map_err(Error::io)?;
