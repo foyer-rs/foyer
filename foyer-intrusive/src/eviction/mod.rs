@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 use crate::core::{
-    adapter::{Adapter, KeyAdapter, Link},
+    adapter::{Adapter, Link},
     pointer::PointerOps,
 };
 
@@ -23,7 +23,7 @@ pub trait Config = Send + Sync + 'static + Debug;
 
 pub trait EvictionPolicy<A>: Send + Sync + 'static
 where
-    A: KeyAdapter<Link = Self::Link>,
+    A: Adapter<Link = Self::Link>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     type Link: Link;
@@ -61,5 +61,6 @@ where
     }
 }
 
+pub mod fifo;
 pub mod lfu;
 pub mod lru;

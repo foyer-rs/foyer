@@ -126,7 +126,7 @@ intrusive_adapter! { LfuLinkMainDListAdapter = NonNull<LfuLink>: LfuLink { link_
 /// This default to 1%. There's no need to tune this parameter.
 pub struct Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     /// tiny lru list
@@ -156,7 +156,7 @@ where
 
 impl<A> Drop for Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     fn drop(&mut self) {
@@ -172,7 +172,7 @@ where
 
 impl<A> Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     pub fn new(config: LfuConfig) -> Self {
@@ -401,8 +401,7 @@ where
 
 pub struct LfuIter<'a, A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     lfu: &'a Lfu<A>,
@@ -414,7 +413,7 @@ where
 
 impl<'a, A> LfuIter<'a, A>
 where
-    A: KeyAdapter<Link = LfuLink>,
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<LfuLink>) {
@@ -437,8 +436,7 @@ where
 
 impl<'a, A> Iterator for LfuIter<'a, A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     type Item = &'a <A::PointerOps as PointerOps>::Pointer;
@@ -485,15 +483,13 @@ where
 
 unsafe impl<A> Send for Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 unsafe impl<A> Sync for Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
@@ -503,23 +499,21 @@ unsafe impl Sync for LfuLink {}
 
 unsafe impl<'a, A> Send for LfuIter<'a, A>
 where
-    A: KeyAdapter<Link = LfuLink>,
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
 
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 unsafe impl<'a, A> Sync for LfuIter<'a, A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 
 impl<A> EvictionPolicy<A> for Lfu<A>
 where
-    A: KeyAdapter<Link = LfuLink>,
-
+    A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     type Link = LfuLink;
@@ -624,10 +618,7 @@ mod tests {
             lfu.iter().map(|item| item.key).collect_vec()
         );
 
-        let to_remove_items = lfu.iter().cloned().collect_vec();
-        for item in to_remove_items {
-            lfu.remove(&item);
-        }
+        drop(lfu);
 
         for item in items {
             assert_eq!(Arc::strong_count(&item), 1);

@@ -31,13 +31,13 @@ use std::{mem::ManuallyDrop, ptr::NonNull};
 use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
-        adapter::{KeyAdapter, Link},
+        adapter::{Adapter, Link},
         pointer::PointerOps,
     },
     intrusive_adapter,
 };
 
-use super::{Adapter, EvictionPolicy};
+use super::EvictionPolicy;
 
 #[derive(Clone, Debug)]
 pub struct LruConfig {
@@ -68,7 +68,7 @@ intrusive_adapter! { LruLinkAdapter = NonNull<LruLink>: LruLink { link_lru: DLis
 
 pub struct Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     /// lru list
@@ -87,7 +87,7 @@ where
 
 impl<A> Drop for Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     fn drop(&mut self) {
@@ -103,7 +103,7 @@ where
 
 impl<A> Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     fn new(config: LruConfig) -> Self {
@@ -277,7 +277,7 @@ where
 
 pub struct LruIter<'a, A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     lru: &'a Lru<A>,
@@ -288,7 +288,7 @@ where
 
 impl<'a, A> LruIter<'a, A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<LruLink>) {
@@ -311,7 +311,7 @@ where
 
 impl<'a, A> Iterator for LruIter<'a, A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     type Item = &'a <A::PointerOps as PointerOps>::Pointer;
@@ -336,13 +336,13 @@ where
 
 unsafe impl<A> Send for Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 unsafe impl<A> Sync for Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
@@ -352,20 +352,20 @@ unsafe impl Sync for LruLink {}
 
 unsafe impl<'a, A> Send for LruIter<'a, A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 unsafe impl<'a, A> Sync for LruIter<'a, A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 
 impl<A> EvictionPolicy<A> for Lru<A>
 where
-    A: KeyAdapter<Link = LruLink>,
+    A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
     type Link = LruLink;
@@ -456,8 +456,7 @@ mod tests {
 
         assert_eq!(vec![0, 1], lru.iter().map(|item| item.key).collect_vec());
 
-        lru.remove(&handles[0]);
-        lru.remove(&handles[1]);
+        drop(lru);
 
         for handle in handles {
             assert_eq!(Arc::strong_count(&handle), 1);
