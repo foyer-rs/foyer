@@ -344,6 +344,8 @@ dependencies = [
  "cmsketch",
  "crossbeam",
  "foyer-common",
+ "foyer-intrusive",
+ "foyer-storage",
  "futures",
  "hdrhistogram",
  "itertools",
