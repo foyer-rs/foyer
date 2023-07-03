@@ -13,6 +13,8 @@ bytes = "1"
 cmsketch = "0.1"
 crossbeam = "0.8"
 foyer-common = { path = "../foyer-common" }
+foyer-storage = { path = "../foyer-storage" }
+foyer-intrusive = { path = "../foyer-intrusive" }
 futures = "0.3"
 itertools = "0.10.5"
 libc = "0.2"
