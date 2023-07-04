@@ -17,6 +17,9 @@ use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, queue::AsyncQueue};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use itertools::Itertools;
+use parking_lot::Mutex;
+use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
@@ -93,6 +96,10 @@ where
 
     admission: AP,
 
+    handles: Mutex<Vec<JoinHandle<()>>>,
+
+    stop_tx: broadcast::Sender<()>,
+
     _marker: PhantomData<(V, RP)>,
 }
 
@@ -136,28 +143,56 @@ where
 
         let indices = Arc::new(Indices::new(device.regions()));
 
+        let (stop_tx, _stop_rx) = broadcast::channel(config.flushers + config.reclaimers + 1);
+        let flusher_stop_rxs = (0..config.flushers)
+            .map(|_| stop_tx.subscribe())
+            .collect_vec();
+        let reclaimer_stop_rxs = (0..config.reclaimers)
+            .map(|_| stop_tx.subscribe())
+            .collect_vec();
+
         let store = Arc::new(Self {
             indices: indices.clone(),
             region_manager: region_manager.clone(),
             device: device.clone(),
             admission: config.admission,
+            handles: Mutex::new(vec![]),
+            stop_tx,
             _marker: PhantomData,
         });
 
         store.recover(config.recover_concurrency).await?;
 
-        flusher.run(buffers, region_manager.clone()).await;
-        reclaimer
-            .run(
-                store.clone(),
-                region_manager,
-                clean_regions,
-                config.reinsertion,
-                indices,
-            )
-            .await;
+        let mut handles = vec![];
+        handles.append(
+            &mut flusher
+                .run(buffers, region_manager.clone(), flusher_stop_rxs)
+                .await,
+        );
+        handles.append(
+            &mut reclaimer
+                .run(
+                    store.clone(),
+                    region_manager,
+                    clean_regions,
+                    config.reinsertion,
+                    indices,
+                    reclaimer_stop_rxs,
+                )
+                .await,
+        );
+        store.handles.lock().append(&mut handles);
 
         Ok(store)
+    }
+
+    pub async fn shutdown_runners(&self) -> Result<()> {
+        self.stop_tx.send(()).unwrap();
+        let handles = self.handles.lock().drain(..).collect_vec();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        Ok(())
     }
 
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {

@@ -129,7 +129,7 @@ where
                 }
                 AllocateResult::Full { slice, remain } => {
                     // current region is full, schedule flushing
-                    self.flusher.submit(FlushTask { region_id }).await.unwrap();
+                    self.submit_flush_task(FlushTask { region_id }).await;
                     inner.current = None;
                     return AllocateResult::Full { slice, remain };
                 }
@@ -142,10 +142,8 @@ where
         if self.clean_regions.len() < self.reclaimer.runners() {
             let item = self.eviction.write().pop();
             if let Some(item) = item {
-                self.reclaimer
-                    .submit(ReclaimTask { region_id: item.id })
-                    .await
-                    .unwrap();
+                self.submit_reclaim_task(ReclaimTask { region_id: item.id })
+                    .await;
             }
         }
 
@@ -194,15 +192,25 @@ where
         };
 
         if let Some(item) = to_reclaim {
-            self.reclaimer
-                .submit(ReclaimTask { region_id: item.id })
+            self.submit_reclaim_task(ReclaimTask { region_id: item.id })
                 .await
-                .unwrap();
         }
     }
 
     #[tracing::instrument(skip(self))]
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
         &self.clean_regions
+    }
+
+    async fn submit_reclaim_task(&self, task: ReclaimTask) {
+        if let Err(e) = self.reclaimer.submit(task).await {
+            tracing::warn!("fail to submit reclaim task: {:?}", e);
+        }
+    }
+
+    async fn submit_flush_task(&self, task: FlushTask) {
+        if let Err(e) = self.flusher.submit(task).await {
+            tracing::warn!("fail to submit reclaim task: {:?}", e);
+        }
     }
 }
