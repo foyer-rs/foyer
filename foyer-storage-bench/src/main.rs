@@ -163,6 +163,7 @@ async fn main() {
                     println!("{:#?}", t.backtrace());
                 }
             }
+            panic!()
         });
     }
 
