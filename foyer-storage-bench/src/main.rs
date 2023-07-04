@@ -42,7 +42,6 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use rate::RateLimiter;
 use tokio::sync::oneshot;
-use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
 
 #[derive(Parser, Debug, Clone)]
@@ -130,10 +129,42 @@ fn is_send_sync_static<T: Send + Sync + 'static>() {}
 async fn main() {
     is_send_sync_static::<TStore>();
 
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
+    #[cfg(not(feature = "tokio-console"))]
+    {
+        use tracing_subscriber::{prelude::*, EnvFilter};
+
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    // .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .with_line_number(true),
+            )
+            .with(EnvFilter::from_default_env())
+            .init();
+    }
+
+    #[cfg(feature = "deadlock")]
+    {
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let deadlocks = parking_lot::deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
+            }
+
+            println!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                println!("Deadlock #{}", i);
+                for t in threads {
+                    println!("Thread Id {:#?}", t.thread_id());
+                    println!("{:#?}", t.backtrace());
+                }
+            }
+        });
+    }
 
     let args = Args::parse();
     args.verify();

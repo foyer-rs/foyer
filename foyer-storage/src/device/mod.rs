@@ -70,6 +70,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(f))]
 async fn asyncify<F, T>(f: F) -> error::Result<T>
 where
     F: FnOnce() -> error::Result<T> + Send + 'static,
