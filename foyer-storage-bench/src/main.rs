@@ -260,6 +260,8 @@ async fn main() {
         &metrics_dump_end,
     );
     println!("\nTotal:\n{}", analysis);
+
+    store.shutdown_runners().await.unwrap();
 }
 
 async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::Receiver<()>) {
