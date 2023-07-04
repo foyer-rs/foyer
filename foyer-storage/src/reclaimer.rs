@@ -32,7 +32,7 @@ use foyer_common::{
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use itertools::Itertools;
 use tokio::sync::{
-    mpsc::{channel, error::TrySendError, Receiver, Sender},
+    mpsc::{channel, Receiver, Sender},
     Mutex,
 };
 
@@ -121,19 +121,6 @@ impl Reclaimer {
             .send(task)
             .await
             .map_err(Error::other)
-    }
-
-    pub async fn try_submit(&self, task: ReclaimTask) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        let submittee = inner.sequence % inner.task_txs.len();
-        match inner.task_txs[submittee].try_send(task) {
-            Ok(()) => {
-                inner.sequence += 1;
-                Ok(())
-            }
-            Err(TrySendError::Full(_)) => Err(Error::ChannelFull),
-            Err(e) => Err(Error::Other(e.to_string())),
-        }
     }
 }
 

@@ -10,6 +10,7 @@ license = "Apache-2.0"
 [dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
+console-subscriber = { version = "0.1", optional = true }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-storage = { path = "../foyer-storage" }
 futures = "0.3"
@@ -31,3 +32,7 @@ tokio = { version = "1", features = [
 ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+deadlock = ["parking_lot/deadlock_detection", "foyer-storage/deadlock"]
+tokio-console = ["console-subscriber"]
