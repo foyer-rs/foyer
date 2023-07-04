@@ -16,6 +16,7 @@
 #![feature(strict_provenance)]
 #![feature(trait_alias)]
 #![feature(get_mut_unchecked)]
+#![feature(let_chains)]
 #![allow(clippy::type_complexity)]
 
 use device::io_buffer::AlignedAllocator;
