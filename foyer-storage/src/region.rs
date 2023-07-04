@@ -12,16 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut, RangeBounds},
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll, Waker},
-};
+use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, pin::Pin, sync::Arc, task::Waker};
 
-use futures::Future;
-use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock};
+use futures::future::BoxFuture;
+use tokio::sync::{OwnedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tracing::instrument;
 
 use crate::{
     device::{BufferAllocator, Device},
@@ -62,7 +57,7 @@ where
     buffered_readers: usize,
     physical_readers: usize,
 
-    wakers: Vec<Waker>,
+    wakers: HashMap<usize, Waker>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +68,7 @@ where
 {
     id: RegionId,
 
-    inner: Arc<RwLock<RegionInner<A>>>,
+    inner: ErwLock<A>,
 
     device: D,
 }
@@ -107,26 +102,26 @@ where
             buffered_readers: 0,
             physical_readers: 0,
 
-            wakers: vec![],
+            wakers: HashMap::default(),
         };
         Self {
             id,
-            inner: Arc::new(RwLock::new(inner)),
+            inner: ErwLock::new(inner),
             device,
         }
     }
 
-    pub fn allocate(&self, size: usize) -> AllocateResult {
-        let callback = {
+    pub async fn allocate(&self, size: usize) -> AllocateResult {
+        let future = {
             let inner = self.inner.clone();
-            move || {
-                let mut guard = inner.write();
+            async move {
+                let mut guard = inner.write().await;
                 guard.writers -= 1;
                 guard.wake_all();
             }
         };
 
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.write().await;
 
         inner.writers += 1;
         let version = inner.version;
@@ -148,7 +143,7 @@ where
                 region_id,
                 version,
                 offset,
-                callback: Box::new(callback),
+                future: Some(Box::pin(future)),
             };
             AllocateResult::Full { slice, remain }
         } else {
@@ -162,12 +157,13 @@ where
                 region_id,
                 version,
                 offset,
-                callback: Box::new(callback),
+                future: Some(Box::pin(future)),
             };
             AllocateResult::Ok(slice)
         }
     }
 
+    #[tracing::instrument(skip(self, range), fields(start, end))]
     pub async fn load(
         &self,
         range: impl RangeBounds<usize>,
@@ -186,7 +182,8 @@ where
 
         // restrict guard lifetime
         {
-            let mut inner = self.inner.write();
+            let mut inner = self.inner.write().await;
+
             if version != 0 && version != inner.version {
                 return Ok(None);
             }
@@ -197,10 +194,10 @@ where
                 inner.buffered_readers += 1;
                 let allocator = inner.buffer.as_ref().unwrap().allocator().clone();
                 let slice = unsafe { Slice::new(&inner.buffer.as_ref().unwrap()[start..end]) };
-                let callback = {
+                let future = {
                     let inner = self.inner.clone();
-                    move || {
-                        let mut guard = inner.write();
+                    async move {
+                        let mut guard = inner.write().await;
                         guard.buffered_readers -= 1;
                         guard.wake_all();
                     }
@@ -208,7 +205,7 @@ where
                 return Ok(Some(ReadSlice::Slice {
                     slice,
                     allocator: Some(allocator),
-                    callback: Box::new(callback),
+                    future: Some(Box::pin(future)),
                 }));
             }
 
@@ -236,28 +233,30 @@ where
                 .await?
                 != len
             {
-                self.inner.write().physical_readers -= 1;
+                let mut inner = self.inner.write().await;
+                inner.physical_readers -= 1;
+                inner.wake_all();
                 return Ok(None);
             }
             offset += len;
         }
 
-        let callback = {
+        let future = {
             let inner = self.inner.clone();
-            move || {
-                let mut guard = inner.write();
+            async move {
+                let mut guard = inner.write().await;
                 guard.physical_readers -= 1;
                 guard.wake_all();
             }
         };
         Ok(Some(ReadSlice::Owned {
             buf: Some(buf),
-            callback: Box::new(callback),
+            future: Some(Box::pin(future)),
         }))
     }
 
-    pub fn attach_buffer(&self, buf: Vec<u8, A>) {
-        let mut inner = self.inner.write();
+    pub async fn attach_buffer(&self, buf: Vec<u8, A>) {
+        let mut inner = self.inner.write().await;
 
         assert_eq!(inner.writers, 0);
         assert_eq!(inner.buffered_readers, 0);
@@ -265,31 +264,27 @@ where
         inner.attach_buffer(buf);
     }
 
-    pub fn detach_buffer(&self) -> Vec<u8, A> {
-        let mut inner = self.inner.write();
+    pub async fn detach_buffer(&self) -> Vec<u8, A> {
+        let mut inner = self.inner.write().await;
 
         inner.detach_buffer()
     }
 
-    pub fn has_buffer(&self) -> bool {
-        let inner = self.inner.read();
+    pub async fn has_buffer(&self) -> bool {
+        let inner = self.inner.read().await;
         inner.has_buffer()
     }
 
+    #[instrument(skip(self))]
     pub async fn exclusive(
         &self,
         can_write: bool,
         can_buffered_read: bool,
         can_physical_read: bool,
-    ) -> ExclusiveGuard<A> {
-        ExclusiveFuture {
-            inner: self.inner.clone(),
-            can_write,
-            can_buffered_read,
-            can_physical_read,
-            is_waker_set: false,
-        }
-        .await
+    ) -> OwnedRwLockWriteGuard<RegionInner<A>> {
+        self.inner
+            .exclusive(can_write, can_buffered_read, can_physical_read)
+            .await
     }
 
     pub fn id(&self) -> RegionId {
@@ -300,12 +295,12 @@ where
         &self.device
     }
 
-    pub fn version(&self) -> Version {
-        self.inner.read().version
+    pub async fn version(&self) -> Version {
+        self.inner.read().await.version
     }
 
-    pub fn advance(&self) -> Version {
-        let mut inner = self.inner.write();
+    pub async fn advance(&self) -> Version {
+        let mut inner = self.inner.write().await;
         let res = inner.version;
         inner.version += 1;
         res
@@ -345,84 +340,22 @@ where
     }
 
     fn wake_all(&self) {
-        for waker in self.wakers.iter() {
+        for waker in self.wakers.values() {
             waker.wake_by_ref();
         }
     }
 }
 
-// future
-
-pub struct ExclusiveGuard<A: BufferAllocator> {
-    inner: ArcRwLockWriteGuard<RawRwLock, RegionInner<A>>,
-}
-
-unsafe impl<A: BufferAllocator> Send for ExclusiveGuard<A> {}
-
-impl<A: BufferAllocator> Deref for ExclusiveGuard<A> {
-    type Target = RegionInner<A>;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref()
-    }
-}
-
-impl<A: BufferAllocator> DerefMut for ExclusiveGuard<A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.deref_mut()
-    }
-}
-
-struct ExclusiveFuture<A>
-where
-    A: BufferAllocator,
-{
-    inner: Arc<RwLock<RegionInner<A>>>,
-
-    can_write: bool,
-    can_buffered_read: bool,
-    can_physical_read: bool,
-
-    is_waker_set: bool,
-}
-
-impl<A: BufferAllocator> ExclusiveFuture<A> {
-    fn is_ready(&self, guard: &ArcRwLockWriteGuard<RawRwLock, RegionInner<A>>) -> bool {
-        tracing::trace!("exclusive: [can write: {}, writers: {}] [can buffered read: {}, buffered readers: {}] [can physical read: {}, physical readers: {}]", self.can_write, guard.writers, self.can_buffered_read, guard.buffered_readers, self.can_physical_read, guard.physical_readers);
-        (self.can_write || guard.writers == 0)
-            && (self.can_buffered_read || guard.buffered_readers == 0)
-            && (self.can_physical_read || guard.physical_readers == 0)
-    }
-}
-
-impl<A: BufferAllocator> Future for ExclusiveFuture<A> {
-    type Output = ExclusiveGuard<A>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let inner = self.inner.clone();
-        let mut guard = inner.write_arc();
-        let is_ready = self.is_ready(&guard);
-        if is_ready {
-            Poll::Ready(ExclusiveGuard { inner: guard })
-        } else {
-            if !self.is_waker_set {
-                self.is_waker_set = true;
-                guard.wakers.push(cx.waker().clone());
-            }
-            Poll::Pending
-        }
-    }
-}
 // read & write slice
 
-pub type DropCallback = Box<dyn Fn() + Send + Sync + 'static>;
-
+#[pin_project::pin_project(PinnedDrop)]
 pub struct WriteSlice {
     slice: SliceMut,
     region_id: RegionId,
     version: Version,
     offset: usize,
-    callback: DropCallback,
+    #[pin]
+    future: Option<BoxFuture<'static, ()>>,
 }
 
 impl Debug for WriteSlice {
@@ -456,6 +389,15 @@ impl WriteSlice {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// # Safety
+    ///
+    /// `destroy` MUST be called before actually drop if `future` is set.
+    pub async fn destroy(mut self) {
+        if let Some(future) = self.future.take() {
+            future.await;
+        }
+    }
 }
 
 impl AsRef<[u8]> for WriteSlice {
@@ -470,12 +412,16 @@ impl AsMut<[u8]> for WriteSlice {
     }
 }
 
-impl Drop for WriteSlice {
-    fn drop(&mut self) {
-        (self.callback)();
+#[pin_project::pinned_drop]
+impl PinnedDrop for WriteSlice {
+    fn drop(self: Pin<&mut Self>) {
+        if self.future.is_some() {
+            panic!("future is not consumed: {:?}", self);
+        }
     }
 }
 
+#[pin_project::pin_project(project = ReadSliceProj, PinnedDrop)]
 pub enum ReadSlice<A>
 where
     A: BufferAllocator,
@@ -483,11 +429,13 @@ where
     Slice {
         slice: Slice,
         allocator: Option<A>,
-        callback: DropCallback,
+        #[pin]
+        future: Option<BoxFuture<'static, ()>>,
     },
     Owned {
         buf: Option<Vec<u8, A>>,
-        callback: DropCallback,
+        #[pin]
+        future: Option<BoxFuture<'static, ()>>,
     },
 }
 
@@ -523,6 +471,18 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// # Safety
+    ///
+    /// `destroy` MUST be called before actually drop if `future` is set.
+    pub async fn destroy(mut self) {
+        if let Some(future) = match &mut self {
+            ReadSlice::Slice { future, .. } => future.take(),
+            ReadSlice::Owned { future, .. } => future.take(),
+        } {
+            future.await;
+        }
+    }
 }
 
 impl<A> AsRef<[u8]> for ReadSlice<A>
@@ -537,14 +497,71 @@ where
     }
 }
 
-impl<A> Drop for ReadSlice<A>
+#[pin_project::pinned_drop]
+impl<A> PinnedDrop for ReadSlice<A>
 where
     A: BufferAllocator,
 {
-    fn drop(&mut self) {
+    fn drop(self: Pin<&mut Self>) {
+        let mut this = self.project();
+        if match &mut this {
+            ReadSliceProj::Slice { future, .. } => future.is_some(),
+            ReadSliceProj::Owned { future, .. } => future.is_some(),
+        } {
+            panic!("future is not consumed: {:?}", this);
+        }
+    }
+}
+
+impl<'pin, A: BufferAllocator> Debug for ReadSliceProj<'pin, A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Slice { callback, .. } => (callback)(),
-            Self::Owned { callback, .. } => (callback)(),
+            Self::Slice {
+                slice, allocator, ..
+            } => f
+                .debug_struct("Slice")
+                .field("slice", slice)
+                .field("allocator", allocator)
+                .finish(),
+            Self::Owned { buf, .. } => f.debug_struct("Owned").field("buf", buf).finish(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ErwLock<A: BufferAllocator> {
+    inner: Arc<RwLock<RegionInner<A>>>,
+}
+
+impl<A: BufferAllocator> ErwLock<A> {
+    pub fn new(inner: RegionInner<A>) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+        }
+    }
+
+    pub async fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
+        self.inner.read().await
+    }
+
+    pub async fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
+        self.inner.write().await
+    }
+
+    pub async fn exclusive(
+        &self,
+        can_write: bool,
+        can_buffered_read: bool,
+        can_physical_read: bool,
+    ) -> OwnedRwLockWriteGuard<RegionInner<A>> {
+        loop {
+            let guard = self.inner.clone().write_owned().await;
+            let is_ready = (can_write || guard.writers == 0)
+                && (can_buffered_read || guard.buffered_readers == 0)
+                && (can_physical_read || guard.physical_readers == 0);
+            if is_ready {
+                return guard;
+            }
         }
     }
 }

@@ -83,6 +83,7 @@ impl Device for FsDevice {
         Self::open(config).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self, buf))]
     async fn write(
         &self,
         buf: impl IoBuf,
@@ -103,6 +104,7 @@ impl Device for FsDevice {
         Ok(res)
     }
 
+    #[tracing::instrument(level = "trace", skip(self, buf))]
     async fn read(
         &self,
         mut buf: impl IoBufMut,

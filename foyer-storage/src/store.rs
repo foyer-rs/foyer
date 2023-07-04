@@ -176,6 +176,7 @@ where
                     padding: remain as u64,
                 };
                 footer.write(slice.as_mut());
+                slice.destroy().await;
                 self.region_manager.allocate(serialized_len).await.unwrap()
             }
         };
@@ -193,7 +194,7 @@ where
             key,
         };
 
-        drop(slice);
+        slice.destroy().await;
 
         self.indices.insert(index);
 
@@ -206,7 +207,7 @@ where
             None => return Ok(None),
         };
 
-        self.region_manager.record_access(&index.region).await;
+        self.region_manager.record_access(&index.region);
         let region = self.region_manager.region(&index.region);
         let start = index.offset as usize;
         let end = start + index.len as usize;
@@ -217,10 +218,12 @@ where
             None => return Ok(None),
         };
 
-        match read_entry::<K, V>(slice.as_ref()) {
+        let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
             None => Ok(None),
-        }
+        };
+        slice.destroy().await;
+        res
     }
 
     pub fn remove(&self, key: &K) {
