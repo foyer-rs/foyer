@@ -25,8 +25,14 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AdmitAll<K: Key, V: Value>(PhantomData<(K, V)>);
+
+impl<K: Key, V: Value> Default for AdmitAll<K, V> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<K: Key, V: Value> AdmissionPolicy for AdmitAll<K, V> {
     type Key = K;
