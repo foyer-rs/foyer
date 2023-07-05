@@ -46,6 +46,16 @@ pub type LruFsStore<K, V, AP, RP> = store::Store<
     foyer_intrusive::eviction::lru::LruLink,
 >;
 
+pub type LruFsStoreConfig<AP, RP> = store::StoreConfig<
+    device::fs::FsDevice,
+    AP,
+    foyer_intrusive::eviction::lru::Lru<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
+    >,
+    RP,
+    foyer_intrusive::eviction::lru::LruLink,
+>;
+
 pub type LfuFsStore<K, V, AP, RP> = store::Store<
     K,
     V,
@@ -59,6 +69,16 @@ pub type LfuFsStore<K, V, AP, RP> = store::Store<
     foyer_intrusive::eviction::lfu::LfuLink,
 >;
 
+pub type LfuFsStoreConfig<AP, RP> = store::StoreConfig<
+    device::fs::FsDevice,
+    AP,
+    foyer_intrusive::eviction::lfu::Lfu<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
+    >,
+    RP,
+    foyer_intrusive::eviction::lfu::LfuLink,
+>;
+
 pub type FifoFsStore<K, V, AP, RP> = store::Store<
     K,
     V,
@@ -68,6 +88,16 @@ pub type FifoFsStore<K, V, AP, RP> = store::Store<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
     AP,
+    RP,
+    foyer_intrusive::eviction::fifo::FifoLink,
+>;
+
+pub type FifoFsStoreConfig<AP, RP> = store::StoreConfig<
+    device::fs::FsDevice,
+    AP,
+    foyer_intrusive::eviction::fifo::Fifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
+    >,
     RP,
     foyer_intrusive::eviction::fifo::FifoLink,
 >;
