@@ -138,6 +138,7 @@ where
     async fn run(mut self) -> Result<()> {
         loop {
             tokio::select! {
+                biased;
                 Some(task) = self.task_rx.recv() => {
                     self.handle(task).await?;
                 }

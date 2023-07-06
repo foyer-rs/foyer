@@ -18,7 +18,7 @@ use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
     core::{adapter::Link, pointer::PointerOps},
     eviction::EvictionPolicy,
-    intrusive_adapter, key_adapter,
+    intrusive_adapter, key_adapter, priority_adapter,
 };
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -37,10 +37,12 @@ where
 {
     link: L,
     id: RegionId,
+    priority: usize,
 }
 
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
+priority_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { priority: usize } where L: Link }
 
 struct RegionManagerInner {
     current: Option<RegionId>,
@@ -94,6 +96,7 @@ where
             let item = Arc::new(RegionEpItem {
                 link: E::Link::default(),
                 id,
+                priority: 0,
             });
 
             regions.push(region);
@@ -151,12 +154,13 @@ where
         tracing::info!("switch to clean region: {}", region_id);
 
         let region = self.region(&region_id);
+        region.advance().await;
+
         let buffer = self.buffers.acquire().await;
         region.attach_buffer(buffer).await;
 
         let slice = region.allocate(size).await.unwrap();
 
-        region.advance().await;
         inner.current = Some(region_id);
 
         AllocateResult::Ok(slice)
