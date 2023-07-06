@@ -33,6 +33,9 @@ pub mod reinsertion;
 pub mod slice;
 pub mod store;
 
+#[cfg(feature = "prometheus")]
+pub mod metrics;
+
 pub type LruFsStore<K, V, AP, RP> = store::Store<
     K,
     V,
