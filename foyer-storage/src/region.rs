@@ -92,7 +92,7 @@ where
 {
     pub fn new(id: RegionId, device: D) -> Self {
         let inner = RegionInner {
-            version: 1,
+            version: 0,
 
             buffer: None,
             len: 0,
