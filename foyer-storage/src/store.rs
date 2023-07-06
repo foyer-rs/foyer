@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Instant};
 
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, queue::AsyncQueue};
@@ -28,6 +28,7 @@ use crate::{
     error::{Error, Result},
     flusher::Flusher,
     indices::{Index, Indices},
+    metrics::Metrics,
     reclaimer::Reclaimer,
     region::{Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
@@ -54,6 +55,7 @@ where
     pub flushers: usize,
     pub reclaimers: usize,
     pub recover_concurrency: usize,
+    pub prometheus_registry: Option<prometheus::Registry>,
 }
 
 impl<D, AP, EP, RP, EL> Debug for StoreConfig<D, AP, EP, RP, EL>
@@ -99,6 +101,8 @@ where
     handles: Mutex<Vec<JoinHandle<()>>>,
 
     stop_tx: broadcast::Sender<()>,
+
+    metrics: Arc<Metrics>,
 
     _marker: PhantomData<(V, RP)>,
 }
@@ -151,6 +155,11 @@ where
             .map(|_| stop_tx.subscribe())
             .collect_vec();
 
+        let metrics = match config.prometheus_registry {
+            Some(registry) => Arc::new(crate::metrics::Metrics::with_registry(registry)),
+            None => Arc::new(crate::metrics::Metrics::new()),
+        };
+
         let store = Arc::new(Self {
             indices: indices.clone(),
             region_manager: region_manager.clone(),
@@ -158,6 +167,7 @@ where
             admission: config.admission,
             handles: Mutex::new(vec![]),
             stop_tx,
+            metrics: metrics.clone(),
             _marker: PhantomData,
         });
 
@@ -166,7 +176,12 @@ where
         let mut handles = vec![];
         handles.append(
             &mut flusher
-                .run(buffers, region_manager.clone(), flusher_stop_rxs)
+                .run(
+                    buffers,
+                    region_manager.clone(),
+                    flusher_stop_rxs,
+                    metrics.clone(),
+                )
                 .await,
         );
         handles.append(
@@ -178,6 +193,7 @@ where
                     config.reinsertion,
                     indices,
                     reclaimer_stop_rxs,
+                    metrics,
                 )
                 .await,
         );
@@ -197,11 +213,14 @@ where
     }
 
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
+        let _timer = self.metrics.latency_insert.start_timer();
+
         if !self.admission.judge(&key, &value) {
             return Ok(false);
         }
 
         let serialized_len = self.serialized_len(&key, &value);
+        self.metrics.bytes_insert.inc_by(serialized_len as u64);
 
         let mut slice = match self.region_manager.allocate(serialized_len).await {
             crate::region::AllocateResult::Ok(slice) => slice,
@@ -238,9 +257,16 @@ where
     }
 
     pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
+        let now = Instant::now();
+
         let index = match self.indices.lookup(key) {
             Some(index) => index,
-            None => return Ok(None),
+            None => {
+                self.metrics
+                    .latency_lookup_miss
+                    .observe(now.elapsed().as_secs_f64());
+                return Ok(None);
+            }
         };
 
         self.region_manager.record_access(&index.region);
@@ -251,18 +277,31 @@ where
         // TODO(MrCroxx): read value only
         let slice = match region.load(start..end, index.version).await? {
             Some(slice) => slice,
-            None => return Ok(None),
+            None => {
+                self.metrics
+                    .latency_lookup_miss
+                    .observe(now.elapsed().as_secs_f64());
+                return Ok(None);
+            }
         };
+        self.metrics.bytes_lookup.inc_by(slice.len() as u64);
 
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
             None => Ok(None),
         };
         slice.destroy().await;
+
+        self.metrics
+            .latency_lookup_hit
+            .observe(now.elapsed().as_secs_f64());
+
         res
     }
 
     pub fn remove(&self, key: &K) {
+        let _timer = self.metrics.latency_remove.start_timer();
+
         self.indices.remove(key);
     }
 
@@ -656,6 +695,7 @@ pub mod tests {
             flushers: 1,
             reclaimers: 1,
             recover_concurrency: 2,
+            prometheus_registry: None,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -699,6 +739,7 @@ pub mod tests {
             flushers: 1,
             reclaimers: 1,
             recover_concurrency: 2,
+            prometheus_registry: None,
         };
         let store = TestStore::open(config).await.unwrap();
 

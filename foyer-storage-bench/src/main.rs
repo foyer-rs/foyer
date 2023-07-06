@@ -214,6 +214,7 @@ async fn main() {
         flushers: args.flushers,
         reclaimers: args.reclaimers,
         recover_concurrency: args.recover_concurrency,
+        prometheus_registry: None,
     };
 
     println!("{:#?}", config);
