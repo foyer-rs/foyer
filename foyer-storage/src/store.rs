@@ -187,6 +187,7 @@ where
     }
 
     pub async fn shutdown_runners(&self) -> Result<()> {
+        self.seal().await?;
         self.stop_tx.send(()).unwrap();
         let handles = self.handles.lock().drain(..).collect_vec();
         for handle in handles {
@@ -269,6 +270,31 @@ where
         let unaligned =
             key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
         bits::align_up(self.device.align(), unaligned)
+    }
+
+    async fn seal(&self) -> Result<()> {
+        match self
+            .region_manager
+            .allocate(self.device.region_size() - self.device.align())
+            .await
+        {
+            crate::region::AllocateResult::Full { mut slice, remain } => {
+                println!("seal");
+                // current region is full, write region footer and try allocate again
+                let footer = RegionFooter {
+                    magic: REGION_MAGIC,
+                    padding: remain as u64,
+                };
+                footer.write(slice.as_mut());
+                slice.destroy().await;
+            }
+            crate::region::AllocateResult::Ok(slice) => {
+                println!("not seal");
+                // region is empty, skip
+                slice.destroy().await
+            }
+        }
+        Ok(())
     }
 
     async fn recover(&self, concurrency: usize) -> Result<()> {
@@ -500,6 +526,8 @@ where
         };
 
         let footer = RegionFooter::read(slice.as_ref());
+        slice.destroy().await;
+
         if footer.magic != REGION_MAGIC {
             return Ok(None);
         }
@@ -539,13 +567,18 @@ where
             let rel_start =
                 align - EntryFooter::serialized_len() - (footer.padding + footer.key_len) as usize;
             let rel_end = align - EntryFooter::serialized_len() - footer.padding as usize;
-            K::read(&slice.as_ref()[rel_start..rel_end])
+            let key = K::read(&slice.as_ref()[rel_start..rel_end]);
+            slice.destroy().await;
+            key
         } else {
-            let slice = self.region.load(align_start..align_end, 0).await?.unwrap();
+            slice.destroy().await;
+            let s = self.region.load(align_start..align_end, 0).await?.unwrap();
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
-            K::read(&slice.as_ref()[rel_start..rel_end])
+            let key = K::read(&s.as_ref()[rel_start..rel_end]);
+            s.destroy().await;
+            key
         };
 
         self.cursor -= entry_len;
@@ -559,5 +592,127 @@ where
             key_len: footer.key_len,
             value_len: footer.value_len,
         }))
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::path::PathBuf;
+
+    use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
+
+    use crate::{
+        admission::AdmitAll,
+        device::{
+            fs::{FsDevice, FsDeviceConfig},
+            io_buffer::AlignedAllocator,
+        },
+        reinsertion::ReinsertNone,
+    };
+
+    use super::*;
+
+    type TestStore = Store<
+        u64,
+        Vec<u8>,
+        AlignedAllocator,
+        FsDevice,
+        Fifo<RegionEpItemAdapter<FifoLink>>,
+        AdmitAll<u64, Vec<u8>>,
+        ReinsertNone<u64, Vec<u8>>,
+        FifoLink,
+    >;
+
+    type TestStoreConfig = StoreConfig<
+        FsDevice,
+        AdmitAll<u64, Vec<u8>>,
+        Fifo<RegionEpItemAdapter<FifoLink>>,
+        ReinsertNone<u64, Vec<u8>>,
+        FifoLink,
+    >;
+
+    #[tokio::test]
+    #[allow(clippy::identity_op)]
+    async fn test_recovery() {
+        const KB: usize = 1024;
+        const MB: usize = 1024 * 1024;
+
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let config = TestStoreConfig {
+            eviction_config: FifoConfig {
+                segment_ratios: vec![1],
+            },
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_capacity: 4 * MB,
+                align: 4096,
+                io_size: 4096 * KB,
+            },
+            admission: AdmitAll::default(),
+            reinsertion: ReinsertNone::default(),
+            buffer_pool_size: 8 * MB,
+            flushers: 1,
+            reclaimers: 1,
+            recover_concurrency: 2,
+        };
+
+        let store = TestStore::open(config).await.unwrap();
+
+        // files:
+        // [0, 1, 2] (evicted)
+        // [3, 4, 5]
+        // [6, 7, 8]
+        // [9, 10, 11]
+        for i in 0..12 {
+            store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
+        }
+
+        for i in 0..3 {
+            assert!(store.lookup(&i).await.unwrap().is_none());
+        }
+        for i in 3..12 {
+            assert_eq!(
+                store.lookup(&i).await.unwrap().unwrap(),
+                vec![i as u8; 1 * MB],
+            );
+        }
+
+        store.shutdown_runners().await.unwrap();
+        drop(store);
+
+        let config = TestStoreConfig {
+            eviction_config: FifoConfig {
+                segment_ratios: vec![1],
+            },
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_capacity: 4 * MB,
+                align: 4096,
+                io_size: 4096 * KB,
+            },
+            admission: AdmitAll::default(),
+            reinsertion: ReinsertNone::default(),
+            buffer_pool_size: 8 * MB,
+            flushers: 1,
+            reclaimers: 1,
+            recover_concurrency: 2,
+        };
+        let store = TestStore::open(config).await.unwrap();
+
+        for i in 0..3 {
+            assert!(store.lookup(&i).await.unwrap().is_none());
+        }
+        for i in 3..12 {
+            assert_eq!(
+                store.lookup(&i).await.unwrap().unwrap(),
+                vec![i as u8; 1 * MB],
+            );
+        }
+
+        store.shutdown_runners().await.unwrap();
+        drop(store);
     }
 }
