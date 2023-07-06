@@ -48,7 +48,7 @@ pub struct FifoConfig {
     /// The formula is as follows:
     ///
     /// `segment's size = total_segments * (segment's ratio / sum(ratio))`
-    segment_ratios: Vec<usize>,
+    pub segment_ratios: Vec<usize>,
 }
 
 #[derive(Debug, Default)]
