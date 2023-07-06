@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use crate::{
-    admission::AdmissionPolicy,
     device::{BufferAllocator, Device},
     error::{Error, Result},
     indices::Indices,
@@ -68,12 +67,12 @@ impl Reclaimer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn run<K, V, A, D, EP, AP, RP, EL>(
+    pub async fn run<K, V, A, D, EP, EL>(
         &self,
-        store: Arc<Store<K, V, A, D, EP, AP, RP, EL>>,
+        store: Arc<Store<K, V, A, D, EP, EL>>,
         region_manager: Arc<RegionManager<A, D, EP, EL>>,
         clean_regions: Arc<AsyncQueue<RegionId>>,
-        reinsertion: RP,
+        reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
         indices: Arc<Indices<K>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
         metrics: Arc<Metrics>,
@@ -84,8 +83,6 @@ impl Reclaimer {
         A: BufferAllocator,
         D: Device<IoBufferAllocator = A>,
         EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-        AP: AdmissionPolicy<Key = K, Value = V>,
-        RP: ReinsertionPolicy<Key = K, Value = V>,
         EL: Link,
     {
         let mut inner = self.inner.lock().await;
@@ -105,7 +102,7 @@ impl Reclaimer {
                 _store: store.clone(),
                 region_manager: region_manager.clone(),
                 clean_regions: clean_regions.clone(),
-                _reinsertion: reinsertion.clone(),
+                _reinsertions: reinsertions.clone(),
                 indices: indices.clone(),
                 stop_rx,
                 metrics: metrics.clone(),
@@ -137,23 +134,21 @@ impl Reclaimer {
     }
 }
 
-struct Runner<K, V, A, D, EP, AP, RP, EL>
+struct Runner<K, V, A, D, EP, EL>
 where
     K: Key,
     V: Value,
     A: BufferAllocator,
     D: Device<IoBufferAllocator = A>,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    AP: AdmissionPolicy<Key = K, Value = V>,
-    RP: ReinsertionPolicy<Key = K, Value = V>,
     EL: Link,
 {
     task_rx: mpsc::Receiver<ReclaimTask>,
 
-    _store: Arc<Store<K, V, A, D, EP, AP, RP, EL>>,
+    _store: Arc<Store<K, V, A, D, EP, EL>>,
     region_manager: Arc<RegionManager<A, D, EP, EL>>,
     clean_regions: Arc<AsyncQueue<RegionId>>,
-    _reinsertion: RP,
+    _reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     indices: Arc<Indices<K>>,
 
     stop_rx: broadcast::Receiver<()>,
@@ -161,15 +156,13 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, A, D, EP, AP, RP, EL> Runner<K, V, A, D, EP, AP, RP, EL>
+impl<K, V, A, D, EP, EL> Runner<K, V, A, D, EP, EL>
 where
     K: Key,
     V: Value,
     A: BufferAllocator,
     D: Device<IoBufferAllocator = A>,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    AP: AdmissionPolicy<Key = K, Value = V>,
-    RP: ReinsertionPolicy<Key = K, Value = V>,
     EL: Link,
 {
     async fn run(mut self) -> Result<()> {
