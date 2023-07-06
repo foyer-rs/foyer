@@ -66,11 +66,11 @@ impl Metrics {
         let latency_lookup_miss = latency.with_label_values(&["lookup", "miss"]);
         let latency_remove = latency.with_label_values(&["remove", ""]);
 
-        let bytes_insert = bytes.with_label_values(&["insert"]);
-        let bytes_lookup = bytes.with_label_values(&["lookup"]);
-        let bytes_flush = bytes.with_label_values(&["flush"]);
-        let bytes_reclaim = bytes.with_label_values(&["reclaim"]);
-        let bytes_reinsert = bytes.with_label_values(&["reinsert"]);
+        let bytes_insert = bytes.with_label_values(&["insert", ""]);
+        let bytes_lookup = bytes.with_label_values(&["lookup", ""]);
+        let bytes_flush = bytes.with_label_values(&["flush", ""]);
+        let bytes_reclaim = bytes.with_label_values(&["reclaim", ""]);
+        let bytes_reinsert = bytes.with_label_values(&["reinsert", ""]);
 
         let size =
             register_int_gauge_with_registry!("foyer_storage_size", "foyer storage size", registry)
