@@ -162,31 +162,31 @@ where
 
         tracing::trace!("[flusher] step 1");
 
-        {
-            // step 1: write buffer back to device
-            let slice = region.load(.., 0).await?.unwrap();
+        // step 1: write buffer back to device
+        let slice = region.load(.., 0).await?.unwrap();
 
+        {
             // wait all physical readers (from previous version) and writers done
             let guard = region.exclusive(false, true, false).await;
-
-            tracing::trace!("[flusher] write region {} back to device", task.region_id);
-
-            let mut offset = 0;
-            let len = region.device().io_size();
-            while offset < region.device().region_size() {
-                let start = offset;
-                let end = std::cmp::min(offset + len, region.device().region_size());
-
-                let s = unsafe { Slice::new(&slice.as_ref()[start..end]) };
-                region
-                    .device()
-                    .write(s, region.id(), offset as u64, len)
-                    .await?;
-                offset += len;
-            }
             drop(guard);
-            slice.destroy().await;
         }
+
+        tracing::trace!("[flusher] write region {} back to device", task.region_id);
+
+        let mut offset = 0;
+        let len = region.device().io_size();
+        while offset < region.device().region_size() {
+            let start = offset;
+            let end = std::cmp::min(offset + len, region.device().region_size());
+
+            let s = unsafe { Slice::new(&slice.as_ref()[start..end]) };
+            region
+                .device()
+                .write(s, region.id(), offset as u64, len)
+                .await?;
+            offset += len;
+        }
+        slice.destroy().await;
 
         tracing::trace!("[flusher] step 2");
 

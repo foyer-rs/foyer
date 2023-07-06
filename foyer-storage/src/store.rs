@@ -39,18 +39,18 @@ use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
 
-pub struct StoreConfig<D, AP, EP, RP, EL>
+pub struct StoreConfig<K, V, D, EP, EL>
 where
+    K: Key,
+    V: Value,
     D: Device,
-    AP: AdmissionPolicy,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    RP: ReinsertionPolicy,
     EL: Link,
 {
     pub eviction_config: EP::Config,
     pub device_config: D::Config,
-    pub admission: AP,
-    pub reinsertion: RP,
+    pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     pub buffer_pool_size: usize,
     pub flushers: usize,
     pub reclaimers: usize,
@@ -58,20 +58,20 @@ where
     pub prometheus_registry: Option<prometheus::Registry>,
 }
 
-impl<D, AP, EP, RP, EL> Debug for StoreConfig<D, AP, EP, RP, EL>
+impl<K, V, D, EP, EL> Debug for StoreConfig<K, V, D, EP, EL>
 where
+    K: Key,
+    V: Value,
     D: Device,
-    AP: AdmissionPolicy,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    RP: ReinsertionPolicy,
     EL: Link,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
-            .field("admission", &self.admission)
-            .field("reinsertion", &self.reinsertion)
+            .field("admissions", &self.admissions)
+            .field("reinsertions", &self.reinsertions)
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
@@ -79,15 +79,13 @@ where
     }
 }
 
-pub struct Store<K, V, BA, D, EP, AP, RP, EL>
+pub struct Store<K, V, BA, D, EP, EL>
 where
     K: Key,
     V: Value,
     BA: BufferAllocator,
     D: Device<IoBufferAllocator = BA>,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    AP: AdmissionPolicy<Key = K, Value = V>,
-    RP: ReinsertionPolicy<Key = K, Value = V>,
     EL: Link,
 {
     indices: Arc<Indices<K>>,
@@ -96,7 +94,7 @@ where
 
     device: D,
 
-    admission: AP,
+    admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
 
     handles: Mutex<Vec<JoinHandle<()>>>,
 
@@ -104,21 +102,19 @@ where
 
     metrics: Arc<Metrics>,
 
-    _marker: PhantomData<(V, RP)>,
+    _marker: PhantomData<V>,
 }
 
-impl<K, V, BA, D, EP, AP, RP, EL> Store<K, V, BA, D, EP, AP, RP, EL>
+impl<K, V, BA, D, EP, EL> Store<K, V, BA, D, EP, EL>
 where
     K: Key,
     V: Value,
     BA: BufferAllocator,
     D: Device<IoBufferAllocator = BA>,
     EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    AP: AdmissionPolicy<Key = K, Value = V>,
-    RP: ReinsertionPolicy<Key = K, Value = V>,
     EL: Link,
 {
-    pub async fn open(config: StoreConfig<D, AP, EP, RP, EL>) -> Result<Arc<Self>> {
+    pub async fn open(config: StoreConfig<K, V, D, EP, EL>) -> Result<Arc<Self>> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let device = D::open(config.device_config).await?;
@@ -164,7 +160,7 @@ where
             indices: indices.clone(),
             region_manager: region_manager.clone(),
             device: device.clone(),
-            admission: config.admission,
+            admissions: config.admissions,
             handles: Mutex::new(vec![]),
             stop_tx,
             metrics: metrics.clone(),
@@ -190,7 +186,7 @@ where
                     store.clone(),
                     region_manager,
                     clean_regions,
-                    config.reinsertion,
+                    config.reinsertions,
                     indices,
                     reclaimer_stop_rxs,
                     metrics,
@@ -215,8 +211,10 @@ where
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         let _timer = self.metrics.latency_insert.start_timer();
 
-        if !self.admission.judge(&key, &value) {
-            return Ok(false);
+        for admission in &self.admissions {
+            if !admission.judge(&key, &value) {
+                return Ok(false);
+            }
         }
 
         let serialized_len = self.serialized_len(&key, &value);
@@ -318,7 +316,6 @@ where
             .await
         {
             crate::region::AllocateResult::Full { mut slice, remain } => {
-                println!("seal");
                 // current region is full, write region footer and try allocate again
                 let footer = RegionFooter {
                     magic: REGION_MAGIC,
@@ -328,7 +325,6 @@ where
                 slice.destroy().await;
             }
             crate::region::AllocateResult::Ok(slice) => {
-                println!("not seal");
                 // region is empty, skip
                 slice.destroy().await
             }
@@ -657,18 +653,11 @@ pub mod tests {
         AlignedAllocator,
         FsDevice,
         Fifo<RegionEpItemAdapter<FifoLink>>,
-        AdmitAll<u64, Vec<u8>>,
-        ReinsertNone<u64, Vec<u8>>,
         FifoLink,
     >;
 
-    type TestStoreConfig = StoreConfig<
-        FsDevice,
-        AdmitAll<u64, Vec<u8>>,
-        Fifo<RegionEpItemAdapter<FifoLink>>,
-        ReinsertNone<u64, Vec<u8>>,
-        FifoLink,
-    >;
+    type TestStoreConfig =
+        StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
     #[tokio::test]
     #[allow(clippy::identity_op)]
@@ -689,8 +678,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admission: AdmitAll::default(),
-            reinsertion: ReinsertNone::default(),
+            admissions: vec![Arc::new(AdmitAll::default())],
+            reinsertions: vec![Arc::new(ReinsertNone::default())],
             buffer_pool_size: 8 * MB,
             flushers: 1,
             reclaimers: 1,
@@ -733,8 +722,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admission: AdmitAll::default(),
-            reinsertion: ReinsertNone::default(),
+            admissions: vec![Arc::new(AdmitAll::default())],
+            reinsertions: vec![Arc::new(ReinsertNone::default())],
             buffer_pool_size: 8 * MB,
             flushers: 1,
             reclaimers: 0,

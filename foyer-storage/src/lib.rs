@@ -34,7 +34,7 @@ pub mod reinsertion;
 pub mod slice;
 pub mod store;
 
-pub type LruFsStore<K, V, AP, RP> = store::Store<
+pub type LruFsStore<K, V> = store::Store<
     K,
     V,
     AlignedAllocator,
@@ -42,22 +42,20 @@ pub type LruFsStore<K, V, AP, RP> = store::Store<
     foyer_intrusive::eviction::lru::Lru<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
     >,
-    AP,
-    RP,
     foyer_intrusive::eviction::lru::LruLink,
 >;
 
-pub type LruFsStoreConfig<AP, RP> = store::StoreConfig<
+pub type LruFsStoreConfig<K, V> = store::StoreConfig<
+    K,
+    V,
     device::fs::FsDevice,
-    AP,
     foyer_intrusive::eviction::lru::Lru<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
     >,
-    RP,
     foyer_intrusive::eviction::lru::LruLink,
 >;
 
-pub type LfuFsStore<K, V, AP, RP> = store::Store<
+pub type LfuFsStore<K, V> = store::Store<
     K,
     V,
     AlignedAllocator,
@@ -65,22 +63,20 @@ pub type LfuFsStore<K, V, AP, RP> = store::Store<
     foyer_intrusive::eviction::lfu::Lfu<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
     >,
-    AP,
-    RP,
     foyer_intrusive::eviction::lfu::LfuLink,
 >;
 
-pub type LfuFsStoreConfig<AP, RP> = store::StoreConfig<
+pub type LfuFsStoreConfig<K, V> = store::StoreConfig<
+    K,
+    V,
     device::fs::FsDevice,
-    AP,
     foyer_intrusive::eviction::lfu::Lfu<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
     >,
-    RP,
     foyer_intrusive::eviction::lfu::LfuLink,
 >;
 
-pub type FifoFsStore<K, V, AP, RP> = store::Store<
+pub type FifoFsStore<K, V> = store::Store<
     K,
     V,
     AlignedAllocator,
@@ -88,17 +84,15 @@ pub type FifoFsStore<K, V, AP, RP> = store::Store<
     foyer_intrusive::eviction::fifo::Fifo<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
-    AP,
-    RP,
     foyer_intrusive::eviction::fifo::FifoLink,
 >;
 
-pub type FifoFsStoreConfig<AP, RP> = store::StoreConfig<
+pub type FifoFsStoreConfig<K, V> = store::StoreConfig<
+    K,
+    V,
     device::fs::FsDevice,
-    AP,
     foyer_intrusive::eviction::fifo::Fifo<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
-    RP,
     foyer_intrusive::eviction::fifo::FifoLink,
 >;
