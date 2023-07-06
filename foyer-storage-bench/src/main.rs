@@ -121,7 +121,7 @@ impl Args {
     }
 }
 
-type TStore = LfuFsStore<u64, Vec<u8>, AdmitAll<u64, Vec<u8>>, ReinsertNone<u64, Vec<u8>>>;
+type TStore = LfuFsStore<u64, Vec<u8>>;
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
@@ -208,8 +208,8 @@ async fn main() {
     let config = StoreConfig {
         eviction_config,
         device_config,
-        admission: AdmitAll::default(),
-        reinsertion: ReinsertNone::default(),
+        admissions: vec![Arc::new(AdmitAll::default())],
+        reinsertions: vec![Arc::new(ReinsertNone::default())],
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
         flushers: args.flushers,
         reclaimers: args.reclaimers,

@@ -18,7 +18,7 @@ use foyer_common::code::{Key, Value};
 
 use std::fmt::Debug;
 
-pub trait ReinsertionPolicy: Send + Sync + 'static + Clone + Debug {
+pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
