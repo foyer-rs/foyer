@@ -19,6 +19,7 @@ use crate::{
     device::{BufferAllocator, Device},
     error::{Error, Result},
     indices::Indices,
+    metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
@@ -66,6 +67,7 @@ impl Reclaimer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run<K, V, A, D, EP, AP, RP, EL>(
         &self,
         store: Arc<Store<K, V, A, D, EP, AP, RP, EL>>,
@@ -74,6 +76,7 @@ impl Reclaimer {
         reinsertion: RP,
         indices: Arc<Indices<K>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
+        metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
     where
         K: Key,
@@ -105,6 +108,7 @@ impl Reclaimer {
                 _reinsertion: reinsertion.clone(),
                 indices: indices.clone(),
                 stop_rx,
+                metrics: metrics.clone(),
             })
             .collect_vec();
 
@@ -153,6 +157,8 @@ where
     indices: Arc<Indices<K>>,
 
     stop_rx: broadcast::Receiver<()>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, A, D, EP, AP, RP, EL> Runner<K, V, A, D, EP, AP, RP, EL>
@@ -225,6 +231,11 @@ where
             "[reclaimer] finish reclaim task, region: {}",
             task.region_id
         );
+
+        self.metrics
+            .bytes_reclaim
+            .inc_by(region.device().region_size() as u64);
+        self.metrics.size.sub(region.device().region_size() as i64);
 
         Ok(())
     }

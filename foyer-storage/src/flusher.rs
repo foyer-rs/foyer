@@ -25,6 +25,7 @@ use tokio::{
 use crate::{
     device::{BufferAllocator, Device},
     error::{Error, Result},
+    metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
     slice::Slice,
@@ -64,6 +65,7 @@ impl Flusher {
         buffers: Arc<AsyncQueue<Vec<u8, A>>>,
         region_manager: Arc<RegionManager<A, D, E, EL>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
+        metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
     where
         A: BufferAllocator,
@@ -88,6 +90,7 @@ impl Flusher {
                 buffers: buffers.clone(),
                 region_manager: region_manager.clone(),
                 stop_rx,
+                metrics: metrics.clone(),
             })
             .collect_vec();
 
@@ -126,6 +129,8 @@ where
     region_manager: Arc<RegionManager<A, D, E, EL>>,
 
     stop_rx: broadcast::Receiver<()>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<A, D, E, EL> Runner<A, D, E, EL>
@@ -210,6 +215,11 @@ where
         self.region_manager.set_region_evictable(&region.id()).await;
 
         tracing::info!("[flusher] finish flush task, region: {}", task.region_id);
+
+        self.metrics
+            .bytes_flush
+            .inc_by(region.device().region_size() as u64);
+        self.metrics.size.add(region.device().region_size() as i64);
 
         Ok(())
     }
