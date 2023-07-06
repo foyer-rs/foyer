@@ -14,8 +14,7 @@
 
 use prometheus::{
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
-    IntCounter, IntCounterVec, IntGauge, Registry,
+    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
 };
 
 #[derive(Debug)]
@@ -27,19 +26,25 @@ pub struct Metrics {
 
     pub bytes_insert: IntCounter,
     pub bytes_lookup: IntCounter,
-    pub bytes_remove: IntCounter,
+    pub bytes_flush: IntCounter,
+    pub bytes_reclaim: IntCounter,
+    pub bytes_reinsert: IntCounter,
 
     pub size: IntGauge,
 }
 
 impl Default for Metrics {
     fn default() -> Self {
-        Self::new(Registry::default())
+        Self::new()
     }
 }
 
 impl Metrics {
-    pub fn new(registry: Registry) -> Self {
+    pub fn new() -> Self {
+        Self::with_registry(Registry::default())
+    }
+
+    pub fn with_registry(registry: Registry) -> Self {
         let latency = register_histogram_vec_with_registry!(
             "foyer_storage_latency",
             "foyer storage latency",
@@ -63,7 +68,9 @@ impl Metrics {
 
         let bytes_insert = bytes.with_label_values(&["insert"]);
         let bytes_lookup = bytes.with_label_values(&["lookup"]);
-        let bytes_remove = bytes.with_label_values(&["remove"]);
+        let bytes_flush = bytes.with_label_values(&["flush"]);
+        let bytes_reclaim = bytes.with_label_values(&["reclaim"]);
+        let bytes_reinsert = bytes.with_label_values(&["reinsert"]);
 
         let size =
             register_int_gauge_with_registry!("foyer_storage_size", "foyer storage size", registry)
@@ -77,7 +84,9 @@ impl Metrics {
 
             bytes_insert,
             bytes_lookup,
-            bytes_remove,
+            bytes_flush,
+            bytes_reclaim,
+            bytes_reinsert,
 
             size,
         }

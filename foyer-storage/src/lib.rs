@@ -26,15 +26,13 @@ pub mod device;
 pub mod error;
 pub mod flusher;
 pub mod indices;
+pub mod metrics;
 pub mod reclaimer;
 pub mod region;
 pub mod region_manager;
 pub mod reinsertion;
 pub mod slice;
 pub mod store;
-
-#[cfg(feature = "prometheus")]
-pub mod metrics;
 
 pub type LruFsStore<K, V, AP, RP> = store::Store<
     K,
