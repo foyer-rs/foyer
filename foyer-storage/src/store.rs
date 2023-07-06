@@ -737,7 +737,7 @@ pub mod tests {
             reinsertion: ReinsertNone::default(),
             buffer_pool_size: 8 * MB,
             flushers: 1,
-            reclaimers: 1,
+            reclaimers: 0,
             recover_concurrency: 2,
             prometheus_registry: None,
         };
