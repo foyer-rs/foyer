@@ -15,6 +15,7 @@
 use bytes::{Buf, BufMut};
 use paste::paste;
 
+#[allow(unused)]
 pub trait Key:
     Sized
     + Send
@@ -32,25 +33,26 @@ pub trait Key:
         panic!("Method `serialized_len` must be implemented for `Key` if storage is used.")
     }
 
-    fn write(&self, _buf: &mut [u8]) {
+    fn write(&self, buf: &mut [u8]) {
         panic!("Method `write` must be implemented for `Key` if storage is used.")
     }
 
-    fn read(_buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> Self {
         panic!("Method `read` must be implemented for `Key` if storage is used.")
     }
 }
 
+#[allow(unused)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Value` if storage is used.")
     }
 
-    fn write(&self, _buf: &mut [u8]) {
+    fn write(&self, buf: &mut [u8]) {
         panic!("Method `write` must be implemented for `Value` if storage is used.")
     }
 
-    fn read(_buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> Self {
         panic!("Method `read` must be implemented for `Value` if storage is used.")
     }
 }
