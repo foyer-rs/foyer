@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
-
 use foyer_common::code::{Key, Value};
 
 use std::fmt::Debug;
@@ -23,29 +21,4 @@ pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Value: Value;
 
     fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool;
-}
-
-#[derive(Debug)]
-pub struct ReinsertNone<K: Key, V: Value>(PhantomData<(K, V)>);
-
-impl<K: Key, V: Value> Default for ReinsertNone<K, V> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: Key, V: Value> Clone for ReinsertNone<K, V> {
-    fn clone(&self) -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: Key, V: Value> ReinsertionPolicy for ReinsertNone<K, V> {
-    type Key = K;
-
-    type Value = V;
-
-    fn judge(&self, _key: &Self::Key, _value: &Self::Value) -> bool {
-        false
-    }
 }

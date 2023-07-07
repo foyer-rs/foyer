@@ -47,5 +47,4 @@ impl<K: Key, V: Value> AdmissionPolicy for AdmitAll<K, V> {
     }
 }
 
-pub mod all;
 pub mod rated_random;

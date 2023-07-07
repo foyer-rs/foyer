@@ -639,13 +639,9 @@ pub mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
-    use crate::{
-        admission::AdmitAll,
-        device::{
-            fs::{FsDevice, FsDeviceConfig},
-            io_buffer::AlignedAllocator,
-        },
-        reinsertion::ReinsertNone,
+    use crate::device::{
+        fs::{FsDevice, FsDeviceConfig},
+        io_buffer::AlignedAllocator,
     };
 
     use super::*;
@@ -681,8 +677,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admissions: vec![Arc::new(AdmitAll::default())],
-            reinsertions: vec![Arc::new(ReinsertNone::default())],
+            admissions: vec![],
+            reinsertions: vec![],
             buffer_pool_size: 8 * MB,
             flushers: 1,
             reclaimers: 1,
@@ -725,8 +721,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admissions: vec![Arc::new(AdmitAll::default())],
-            reinsertions: vec![Arc::new(ReinsertNone::default())],
+            admissions: vec![],
+            reinsertions: vec![],
             buffer_pool_size: 8 * MB,
             flushers: 1,
             reclaimers: 0,
