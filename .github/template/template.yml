@@ -66,6 +66,9 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
+      - name: Run rust test with coverage (igored tests)
+        run: |
+          cargo llvm-cov --no-report test --package foyer-storage --lib -- admission::rated_random::tests::test_rated_random --exact --nocapture --ignored
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info
@@ -94,7 +97,7 @@ jobs:
       - name: Run foyer-storage-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: '--cfg tokio_unstable'
+          RUSTFLAGS: "--cfg tokio_unstable"
           RUST_LOG: info
           TOKIO_WORKER_THREADS: 1
         run: |-
@@ -125,7 +128,7 @@ jobs:
       - name: Run foyer-storage-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: '-Zsanitizer=address --cfg tokio_unstable'
+          RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
           cargo build --all --target x86_64-unknown-linux-gnu &&

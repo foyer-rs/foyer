@@ -216,6 +216,9 @@ where
                 return Ok(false);
             }
         }
+        for admission in &self.admissions {
+            admission.admit(&key, &value);
+        }
 
         let serialized_len = self.serialized_len(&key, &value);
         self.metrics.bytes_insert.inc_by(serialized_len as u64);

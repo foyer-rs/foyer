@@ -16,14 +16,7 @@ use std::marker::PhantomData;
 
 use foyer_common::code::{Key, Value};
 
-use std::fmt::Debug;
-
-pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
-    type Key: Key;
-    type Value: Value;
-
-    fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool;
-}
+use super::AdmissionPolicy;
 
 #[derive(Debug)]
 pub struct AdmitAll<K: Key, V: Value>(PhantomData<(K, V)>);
