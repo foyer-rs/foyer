@@ -105,7 +105,7 @@ where
         thread_rng().gen_range(0..PRECISION) < self.probability.load(Ordering::Relaxed)
     }
 
-    fn update<'g>(&self, mut inner: MutexGuard<'g, Inner<K, V>>) {
+    fn update(&self, mut inner: MutexGuard<'_, Inner<K, V>>) {
         let now = Instant::now();
 
         let elapsed = match inner.last_update_time {
@@ -178,7 +178,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(10)).await;
         let s = score.load(Ordering::Relaxed);
-        let error = (s as isize - RATE as isize * 10).abs() as usize;
+        let error = (s as isize - RATE as isize * 10).unsigned_abs();
         let eratio = error as f64 / (RATE as f64 * 10.0);
 
         assert!(eratio < ERATIO);
