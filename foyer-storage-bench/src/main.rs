@@ -33,7 +33,9 @@ use clap::Parser;
 
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::AdmitAll, device::fs::FsDeviceConfig, reinsertion::ReinsertNone, store::StoreConfig,
+    admission::{rated_random::RatedRandom, AdmissionPolicy},
+    device::fs::FsDeviceConfig,
+    store::StoreConfig,
     LfuFsStore,
 };
 use futures::future::join_all;
@@ -113,6 +115,11 @@ pub struct Args {
 
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
+
+    /// enable rated random admission policy if `rated_random` > 0
+    /// (MiB)
+    #[arg(long, default_value_t = 0)]
+    rated_random: usize,
 }
 
 impl Args {
@@ -205,11 +212,17 @@ async fn main() {
         io_size: args.io_size,
     };
 
+    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
+    if args.rated_random > 0 {
+        let rr = RatedRandom::new(args.rated_random * 1024 * 1024, Duration::from_millis(100));
+        admissions.push(Arc::new(rr));
+    }
+
     let config = StoreConfig {
         eviction_config,
         device_config,
-        admissions: vec![Arc::new(AdmitAll::default())],
-        reinsertions: vec![Arc::new(ReinsertNone::default())],
+        admissions,
+        reinsertions: vec![],
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
         flushers: args.flushers,
         reclaimers: args.reclaimers,
