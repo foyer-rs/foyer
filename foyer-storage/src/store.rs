@@ -167,8 +167,6 @@ where
             _marker: PhantomData,
         });
 
-        store.recover(config.recover_concurrency).await?;
-
         let mut handles = vec![];
         handles.append(
             &mut flusher
@@ -194,6 +192,8 @@ where
                 .await,
         );
         store.handles.lock().append(&mut handles);
+
+        store.recover(config.recover_concurrency).await?;
 
         Ok(store)
     }
