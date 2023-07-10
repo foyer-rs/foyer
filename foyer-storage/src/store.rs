@@ -640,8 +640,8 @@ pub mod tests {
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
     use crate::device::{
+        allocator::AlignedAllocator,
         fs::{FsDevice, FsDeviceConfig},
-        io_buffer::AlignedAllocator,
     };
 
     use super::*;
