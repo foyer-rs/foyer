@@ -15,8 +15,6 @@
 #![feature(trait_alias)]
 #![feature(pattern)]
 
-mod metrics;
-
 pub trait Weight {
     fn weight(&self) -> usize;
 }
