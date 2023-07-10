@@ -12,9 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub mod allocator;
 pub mod error;
 pub mod fs;
-pub mod io_buffer;
 
 use async_trait::async_trait;
 use error::Result;
@@ -88,7 +88,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use super::{io_buffer::AlignedAllocator, *};
+    use super::{allocator::AlignedAllocator, *};
 
     #[derive(Debug, Clone)]
     pub struct NullDevice(AlignedAllocator);

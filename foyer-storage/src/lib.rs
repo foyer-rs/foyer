@@ -19,7 +19,7 @@
 #![feature(let_chains)]
 #![allow(clippy::type_complexity)]
 
-use device::io_buffer::AlignedAllocator;
+use device::allocator::AlignedAllocator;
 
 pub mod admission;
 pub mod device;
