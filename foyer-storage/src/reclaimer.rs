@@ -188,7 +188,10 @@ where
 
         let region = self.region_manager.region(&task.region_id);
 
-        // keep region totally exclusive while reclamation
+        // step 1: drop indices
+        let _indices = self.indices.take_region(&task.region_id);
+
+        // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         let guard = region.exclusive(false, false, false).await;
 
         tracing::trace!(
@@ -198,9 +201,6 @@ where
             guard.buffered_readers(),
             guard.physical_readers()
         );
-
-        // step 1: drop indices
-        let _indices = self.indices.take_region(&task.region_id);
 
         // step 2: do reinsertion
         // TODO(MrCroxx): do reinsertion
