@@ -22,9 +22,9 @@ use std::{
 use crate::region::RegionId;
 
 use super::{
+    allocator::AlignedAllocator,
     asyncify,
     error::{Error, Result},
-    io_buffer::AlignedAllocator,
     Device, IoBuf, IoBufMut,
 };
 use async_trait::async_trait;
