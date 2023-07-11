@@ -374,11 +374,11 @@ async fn write(
 
         let time = Instant::now();
         store.insert(idx, data).await.unwrap();
-        metrics
-            .insert_lats
-            .write()
-            .record(time.elapsed().as_micros() as u64)
-            .expect("record out of range");
+        let lat = time.elapsed().as_micros() as u64;
+        if let Err(e) = metrics.insert_lats.write().record(lat) {
+            tracing::error!("metrics error: {:?}, value: {}", e, lat);
+        }
+
         metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
         metrics
             .insert_bytes
@@ -425,17 +425,13 @@ async fn read(
 
         if res.is_some() {
             assert_eq!(vec![idx as u8; entry_size], res.unwrap());
-            metrics
-                .get_hit_lats
-                .write()
-                .record(lat)
-                .expect("record out of range");
+            if let Err(e) = metrics.get_hit_lats.write().record(lat) {
+                tracing::error!("metrics error: {:?}, value: {}", e, lat);
+            }
         } else {
-            metrics
-                .get_miss_lats
-                .write()
-                .record(lat)
-                .expect("record out of range");
+            if let Err(e) = metrics.get_miss_lats.write().record(lat) {
+                tracing::error!("metrics error: {:?}, value: {}", e, lat);
+            }
             metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
         metrics.get_ios.fetch_add(1, Ordering::Relaxed);
