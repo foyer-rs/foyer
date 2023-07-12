@@ -80,6 +80,8 @@ where
     /// length of tail after insertion point
     tail_len: usize,
 
+    len: usize,
+
     config: LruConfig,
 
     adapter: A,
@@ -114,6 +116,8 @@ where
 
             tail_len: 0,
 
+            len: 0,
+
             config,
 
             adapter: A::new(),
@@ -130,6 +134,8 @@ where
             self.insert_lru(link);
 
             self.update_lru_insertion_point();
+
+            self.len += 1;
         }
     }
 
@@ -153,6 +159,8 @@ where
                 self.tail_len -= 1;
             }
 
+            self.len -= 1;
+
             self.adapter.pointer_ops().from_raw(item)
         }
     }
@@ -174,6 +182,10 @@ where
                 self.update_lru_insertion_point();
             }
         }
+    }
+
+    fn len(&self) -> usize {
+        self.len
     }
 
     fn iter(&self) -> LruIter<'_, A> {
@@ -379,7 +391,6 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as PointerOps>::Pointer) {
-        tracing::debug!("[lru] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -387,13 +398,15 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as PointerOps>::Pointer,
     ) -> <<A>::PointerOps as PointerOps>::Pointer {
-        tracing::debug!("[lru] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as PointerOps>::Pointer) {
-        tracing::debug!("[lru] access {:?}", ptr);
         self.access(ptr)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
     }
 
     fn iter(&self) -> Self::E<'_> {

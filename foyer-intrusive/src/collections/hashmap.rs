@@ -118,8 +118,13 @@ where
             let slot = (self.slots.len() - 1) & hash as usize;
 
             let res = self.remove_inner(key_new, slot);
+            if res.is_some() {
+                self.len -= 1;
+            }
 
             self.slots[slot].push_front(link_new);
+
+            self.len += 1;
 
             res
         }
@@ -130,7 +135,11 @@ where
             let hash = self.hash_key(key);
             let slot = (self.slots.len() - 1) & hash as usize;
 
-            self.remove_inner(key, slot)
+            let res = self.remove_inner(key, slot);
+            if res.is_some() {
+                self.len -= 1;
+            }
+            res
         }
     }
 
@@ -160,6 +169,25 @@ where
 
     pub fn iter(&self) -> HashMapIter<'_, K, V, A> {
         HashMapIter::new(self)
+    }
+
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`HashMap`].
+    pub unsafe fn remove_in_place(
+        &mut self,
+        link: NonNull<HashMapLink>,
+    ) -> <A::PointerOps as PointerOps>::Pointer {
+        assert!(link.as_ref().is_linked());
+        let item = self.adapter.link2item(link.as_ptr());
+        let key = &*self.adapter.item2key(item);
+        let hash = self.hash_key(key);
+        let slot = (self.slots.len() - 1) & hash as usize;
+        self.slots[slot]
+            .iter_mut_from_raw(link.as_ref().dlist_link.raw())
+            .remove();
+        self.len -= 1;
+        self.adapter.pointer_ops().from_raw(item)
     }
 
     /// # Safety
@@ -393,6 +421,9 @@ mod tests {
             assert_eq!(item.key, i);
             assert_eq!(item.value, i);
         }
+
+        unsafe { map.remove_in_place(items[0].link.raw()) };
+        assert!(map.lookup(&0).is_none());
 
         drop(map);
 
