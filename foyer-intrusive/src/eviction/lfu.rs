@@ -149,6 +149,8 @@ where
     /// the counts are halved every time the max_window_len is hit
     frequencies: CMSketchUsize,
 
+    len: usize,
+
     config: LfuConfig,
 
     adapter: A,
@@ -187,6 +189,8 @@ where
             // A dummy size, will be updated later.
             frequencies: CMSketchUsize::new_with_size(1, 1),
 
+            len: 0,
+
             config,
 
             adapter: A::new(),
@@ -220,6 +224,8 @@ where
 
             // If the number of counters are too small for the cache size, double them.
             self.maybe_grow_access_counters();
+
+            self.len += 1;
         }
     }
 
@@ -234,6 +240,8 @@ where
             assert!(link.as_ref().is_linked());
 
             self.remove_from_lru(link);
+
+            self.len -= 1;
 
             self.adapter.pointer_ops().from_raw(item)
         }
@@ -250,6 +258,10 @@ where
 
             self.update_frequencies(link);
         }
+    }
+
+    fn len(&self) -> usize {
+        self.len
     }
 
     fn iter(&self) -> LfuIter<A> {
@@ -527,7 +539,6 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
-        tracing::debug!("[lfu] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -535,13 +546,15 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
     ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
-        tracing::debug!("[lfu] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
-        tracing::debug!("[lfu] access {:?}", ptr);
         self.access(ptr)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
     }
 
     fn iter(&self) -> Self::E<'_> {

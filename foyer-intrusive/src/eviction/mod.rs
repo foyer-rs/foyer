@@ -19,7 +19,7 @@ use crate::core::{
 
 use std::fmt::Debug;
 
-pub trait Config = Send + Sync + 'static + Debug;
+pub trait Config = Send + Sync + 'static + Debug + Clone;
 
 pub trait EvictionPolicy<A>: Send + Sync + 'static
 where
@@ -40,6 +40,12 @@ where
     ) -> <A::PointerOps as PointerOps>::Pointer;
 
     fn access(&mut self, ptr: &<A::PointerOps as PointerOps>::Pointer);
+
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     fn iter(&self) -> Self::E<'_>;
 

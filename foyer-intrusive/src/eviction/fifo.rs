@@ -114,6 +114,8 @@ where
     config: FifoConfig,
     total_ratio: usize,
 
+    len: usize,
+
     adapter: A,
 }
 
@@ -150,6 +152,8 @@ where
             config,
             total_ratio,
 
+            len: 0,
+
             adapter: A::new(),
         }
     }
@@ -167,6 +171,8 @@ where
             self.segments[priority.into()].push_back(link);
 
             self.rebalance();
+
+            self.len += 1;
         }
     }
 
@@ -188,11 +194,17 @@ where
 
             self.rebalance();
 
+            self.len -= 1;
+
             self.adapter.pointer_ops().from_raw(item)
         }
     }
 
     fn access(&mut self, _ptr: &<A::PointerOps as PointerOps>::Pointer) {}
+
+    fn len(&self) -> usize {
+        self.len
+    }
 
     fn rebalance(&mut self) {
         unsafe {
@@ -350,7 +362,6 @@ where
     }
 
     fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
-        tracing::debug!("[lfu] insert {:?}", ptr);
         self.insert(ptr)
     }
 
@@ -358,13 +369,15 @@ where
         &mut self,
         ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
     ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
-        tracing::debug!("[lfu] remove {:?}", ptr);
         self.remove(ptr)
     }
 
     fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
-        tracing::debug!("[lfu] access {:?}", ptr);
         self.access(ptr)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
     }
 
     fn iter(&self) -> Self::E<'_> {
