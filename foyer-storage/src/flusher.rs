@@ -167,8 +167,7 @@ where
 
         {
             // wait all physical readers (from previous version) and writers done
-            let guard = region.exclusive(false, true, false).await;
-            drop(guard);
+            let _ = region.exclusive(false, true, false).await;
         }
 
         tracing::trace!("[flusher] write region {} back to device", task.region_id);
@@ -193,19 +192,7 @@ where
         let buffer = {
             // step 2: detach buffer
             let mut guard = region.exclusive(false, false, true).await;
-
-            let buffer = guard.detach_buffer();
-
-            tracing::trace!(
-                "[flusher] region {}, writers: {}, buffered readers: {}, physical readers: {}",
-                region.id(),
-                guard.writers(),
-                guard.buffered_readers(),
-                guard.physical_readers()
-            );
-
-            drop(guard);
-            buffer
+            guard.detach_buffer()
         };
 
         tracing::trace!("[flusher] step 3");

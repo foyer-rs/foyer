@@ -243,7 +243,7 @@ macro_rules! key_adapter {
 
             unsafe fn item2key(
                 &self,
-                item: *const <Self::PointerOps as PointerOps>::Item,
+                item: *const <Self::PointerOps as $crate::core::pointer::PointerOps>::Item,
             ) -> *const Self::Key {
                 (item as *const u8).add($crate::offset_of!($item, $field)) as *const _
             }
@@ -312,7 +312,7 @@ macro_rules! priority_adapter {
 
             unsafe fn item2priority(
                 &self,
-                item: *const <Self::PointerOps as PointerOps>::Item,
+                item: *const <Self::PointerOps as $crate::core::pointer::PointerOps>::Item,
             ) -> *const Self::Priority {
                 (item as *const u8).add($crate::offset_of!($item, $field)) as *const _
             }
