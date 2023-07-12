@@ -29,6 +29,10 @@ pub trait Key:
     + Clone
     + std::fmt::Debug
 {
+    fn weight(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Key` if storage is used.")
     }
@@ -44,6 +48,10 @@ pub trait Key:
 
 #[allow(unused)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
+    fn weight(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Value` if storage is used.")
     }
@@ -114,6 +122,10 @@ for_all_primitives! { impl_key }
 for_all_primitives! { impl_value }
 
 impl Value for Vec<u8> {
+    fn weight(&self) -> usize {
+        self.len()
+    }
+
     fn serialized_len(&self) -> usize {
         self.len()
     }
