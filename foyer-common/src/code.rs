@@ -88,7 +88,30 @@ macro_rules! impl_key {
     };
 }
 
+macro_rules! impl_value {
+    ($( $type:ty, )*) => {
+        paste! {
+            $(
+                impl Value for $type {
+                    fn serialized_len(&self) -> usize {
+                        std::mem::size_of::<$type>()
+                    }
+
+                    fn write(&self, mut buf: &mut [u8]) {
+                        buf.[< put_ $type>](*self)
+                    }
+
+                    fn read(mut buf: &[u8]) -> Self {
+                        buf.[< get_ $type>]()
+                    }
+                }
+            )*
+        }
+    };
+}
+
 for_all_primitives! { impl_key }
+for_all_primitives! { impl_value }
 
 impl Value for Vec<u8> {
     fn serialized_len(&self) -> usize {

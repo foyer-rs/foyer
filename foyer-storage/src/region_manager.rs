@@ -16,9 +16,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
-    core::{adapter::Link, pointer::PointerOps},
-    eviction::EvictionPolicy,
-    intrusive_adapter, key_adapter, priority_adapter,
+    core::adapter::Link, eviction::EvictionPolicy, intrusive_adapter, key_adapter, priority_adapter,
 };
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
