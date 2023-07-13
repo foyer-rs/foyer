@@ -18,7 +18,7 @@ use foyer_common::code::{Key, Value};
 
 use std::fmt::Debug;
 
-#[allow(unused)]
+#[allow(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
