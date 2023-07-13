@@ -117,9 +117,17 @@ pub struct Args {
     recover_concurrency: usize,
 
     /// enable rated random admission policy if `rated_random` > 0
-    /// (MiB)
+    /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     rated_random: usize,
+
+    /// (MiB/s)
+    #[arg(long, default_value_t = 0)]
+    flush_rate_limit: usize,
+
+    /// (MiB/s)
+    #[arg(long, default_value_t = 0)]
+    reclaim_rate_limit: usize,
 }
 
 impl Args {
@@ -225,7 +233,9 @@ async fn main() {
         reinsertions: vec![],
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
         flushers: args.flushers,
+        flush_rate_limit: args.flush_rate_limit * 1024 * 1024,
         reclaimers: args.reclaimers,
+        reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
         prometheus_registry: None,
     };

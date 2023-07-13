@@ -28,6 +28,7 @@ use bytes::BufMut;
 use foyer_common::{
     code::{Key, Value},
     queue::AsyncQueue,
+    rate::RateLimiter,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use itertools::Itertools;
@@ -74,6 +75,7 @@ impl Reclaimer {
         clean_regions: Arc<AsyncQueue<RegionId>>,
         reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
         indices: Arc<Indices<K>>,
+        rate_limiter: Option<Arc<RateLimiter>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
         metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
@@ -104,6 +106,7 @@ impl Reclaimer {
                 clean_regions: clean_regions.clone(),
                 _reinsertions: reinsertions.clone(),
                 indices: indices.clone(),
+                _rate_limiter: rate_limiter.clone(),
                 stop_rx,
                 metrics: metrics.clone(),
             })
@@ -150,6 +153,8 @@ where
     clean_regions: Arc<AsyncQueue<RegionId>>,
     _reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     indices: Arc<Indices<K>>,
+
+    _rate_limiter: Option<Arc<RateLimiter>>,
 
     stop_rx: broadcast::Receiver<()>,
 
