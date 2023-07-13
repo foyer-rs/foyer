@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::queue::AsyncQueue;
+use foyer_common::{queue::AsyncQueue, rate::RateLimiter};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use itertools::Itertools;
 use tokio::{
@@ -64,6 +64,7 @@ impl Flusher {
         &self,
         buffers: Arc<AsyncQueue<Vec<u8, A>>>,
         region_manager: Arc<RegionManager<A, D, E, EL>>,
+        rate_limiter: Option<Arc<RateLimiter>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
         metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
@@ -89,6 +90,7 @@ impl Flusher {
                 task_rx,
                 buffers: buffers.clone(),
                 region_manager: region_manager.clone(),
+                rate_limiter: rate_limiter.clone(),
                 stop_rx,
                 metrics: metrics.clone(),
             })
@@ -127,6 +129,8 @@ where
     buffers: Arc<AsyncQueue<Vec<u8, A>>>,
 
     region_manager: Arc<RegionManager<A, D, E, EL>>,
+
+    rate_limiter: Option<Arc<RateLimiter>>,
 
     stop_rx: broadcast::Receiver<()>,
 
@@ -179,6 +183,9 @@ where
             let end = std::cmp::min(offset + len, region.device().region_size());
 
             let s = unsafe { Slice::new(&slice.as_ref()[start..end]) };
+            if let Some(limiter) = &self.rate_limiter && let Some(duration) = limiter.consume(len as f64) {
+                tokio::time::sleep(duration).await;
+            }
             region
                 .device()
                 .write(s, region.id(), offset as u64, len)
