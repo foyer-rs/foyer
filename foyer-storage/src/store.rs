@@ -15,7 +15,7 @@
 use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Instant};
 
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, queue::AsyncQueue};
+use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -53,7 +53,9 @@ where
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     pub buffer_pool_size: usize,
     pub flushers: usize,
+    pub flush_rate_limit: usize,
     pub reclaimers: usize,
+    pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub prometheus_registry: Option<prometheus::Registry>,
 }
@@ -167,12 +169,22 @@ where
             _marker: PhantomData,
         });
 
+        let flush_rate_limiter = match config.flush_rate_limit {
+            0 => None,
+            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
+        };
+        let reclaim_rate_limiter = match config.reclaim_rate_limit {
+            0 => None,
+            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
+        };
+
         let mut handles = vec![];
         handles.append(
             &mut flusher
                 .run(
                     buffers,
                     region_manager.clone(),
+                    flush_rate_limiter,
                     flusher_stop_rxs,
                     metrics.clone(),
                 )
@@ -186,6 +198,7 @@ where
                     clean_regions,
                     config.reinsertions,
                     indices,
+                    reclaim_rate_limiter,
                     reclaimer_stop_rxs,
                     metrics,
                 )
@@ -685,7 +698,9 @@ pub mod tests {
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
             flushers: 1,
+            flush_rate_limit: 0,
             reclaimers: 1,
+            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             prometheus_registry: None,
         };
@@ -729,7 +744,9 @@ pub mod tests {
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
             flushers: 1,
+            flush_rate_limit: 0,
             reclaimers: 0,
+            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             prometheus_registry: None,
         };
