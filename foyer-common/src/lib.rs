@@ -17,3 +17,4 @@
 pub mod bits;
 pub mod code;
 pub mod queue;
+pub mod rate;

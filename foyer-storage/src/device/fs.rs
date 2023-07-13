@@ -61,7 +61,7 @@ impl FsDeviceConfig {
 struct FsDeviceInner {
     config: FsDeviceConfig,
 
-    #[allow(unused)]
+    #[allow(unused_variables)]
     dir: File,
 
     files: Vec<File>,
