@@ -65,8 +65,8 @@ jobs:
           cargo fmt --all -- --check
       - name: Run rust clippy check
         run: |
-          cargo clippy --all-targets --features tokio-console -- -D warnings &&
-          cargo clippy --all-targets --features deadlock -- -D warnings &&
+          cargo clippy --all-targets --features tokio-console -- -D warnings
+          cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -74,7 +74,8 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
         run: |
-          cargo llvm-cov --no-report test --package foyer-storage --lib -- admission::rated_random::tests::test_rated_random --exact --nocapture --ignored
+          cargo llvm-cov --no-report test --package foyer-storage --lib -- admission::rated_random::tests --nocapture --ignored
+          cargo llvm-cov --no-report test --package foyer-common --lib -- rate::tests --nocapture --ignored
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info
@@ -106,8 +107,8 @@ jobs:
           RUST_LOG: info
           TOKIO_WORKER_THREADS: 1
         run: |-
-          cargo build --all --features deadlock &&
-          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock &&
+          cargo build --all --features deadlock
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
           timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --region-size 16 --buffer-pool-size 256 --lookup-range 1000 --time 60
   asan:
     name: run with address saniziter
@@ -135,8 +136,8 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
-          cargo build --all --target x86_64-unknown-linux-gnu &&
-          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan &&
+          cargo build --all --target x86_64-unknown-linux-gnu
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --buffer-pool-size 256 --lookup-range 1000 --time 60
 concurrency:
   group: environment-${{ github.ref }}

@@ -15,7 +15,7 @@
 use bytes::{Buf, BufMut};
 use paste::paste;
 
-#[allow(unused)]
+#[allow(unused_variables)]
 pub trait Key:
     Sized
     + Send
@@ -46,7 +46,7 @@ pub trait Key:
     }
 }
 
-#[allow(unused)]
+#[allow(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
     fn weight(&self) -> usize {
         std::mem::size_of::<Self>()
