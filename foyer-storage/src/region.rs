@@ -555,13 +555,16 @@ impl<A: BufferAllocator> ErwLock<A> {
         can_physical_read: bool,
     ) -> OwnedRwLockWriteGuard<RegionInner<A>> {
         loop {
-            let guard = self.inner.clone().write_owned().await;
-            let is_ready = (can_write || guard.writers == 0)
-                && (can_buffered_read || guard.buffered_readers == 0)
-                && (can_physical_read || guard.physical_readers == 0);
-            if is_ready {
-                return guard;
+            {
+                let guard = self.inner.clone().write_owned().await;
+                let is_ready = (can_write || guard.writers == 0)
+                    && (can_buffered_read || guard.buffered_readers == 0)
+                    && (can_physical_read || guard.physical_readers == 0);
+                if is_ready {
+                    return guard;
+                }
             }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 }
