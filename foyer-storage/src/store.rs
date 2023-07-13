@@ -208,6 +208,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         let _timer = self.metrics.latency_insert.start_timer();
 
@@ -257,6 +258,7 @@ where
         Ok(true)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
@@ -300,6 +302,7 @@ where
         res
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn remove(&self, key: &K) {
         let _timer = self.metrics.latency_remove.start_timer();
 
@@ -335,6 +338,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn recover(&self, concurrency: usize) -> Result<()> {
         tracing::info!("start store recovery");
 

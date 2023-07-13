@@ -59,7 +59,10 @@ where
     V: Value,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynamicRandom").finish()
+        f.debug_struct("DynamicRandom")
+            .field("rate", &self.rate)
+            .field("probability", &self.probability.load(Ordering::Relaxed))
+            .finish()
     }
 }
 

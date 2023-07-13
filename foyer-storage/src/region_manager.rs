@@ -199,7 +199,6 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
         &self.clean_regions
     }
