@@ -13,4 +13,5 @@
 //  limitations under the License.
 
 pub mod dlist;
+pub mod duplicated_hashmap;
 pub mod hashmap;

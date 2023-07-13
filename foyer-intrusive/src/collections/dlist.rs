@@ -30,6 +30,14 @@ impl DListLink {
     pub fn raw(&self) -> NonNull<DListLink> {
         unsafe { NonNull::new_unchecked(self as *const _ as *mut _) }
     }
+
+    pub fn prev(&self) -> Option<NonNull<DListLink>> {
+        self.prev
+    }
+
+    pub fn next(&self) -> Option<NonNull<DListLink>> {
+        self.next
+    }
 }
 
 unsafe impl Send for DListLink {}
@@ -98,6 +106,24 @@ where
         }
     }
 
+    pub fn front_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+        unsafe {
+            self.head
+                .map(|link| self.adapter.link2item(link.as_ptr()))
+                .map(|link| link as *mut _)
+                .map(|link| &mut *link)
+        }
+    }
+
+    pub fn back_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+        unsafe {
+            self.tail
+                .map(|link| self.adapter.link2item(link.as_ptr()))
+                .map(|link| link as *mut _)
+                .map(|link| &mut *link)
+        }
+    }
+
     pub fn push_front(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
         self.iter_mut().insert_after(ptr);
     }
@@ -163,6 +189,23 @@ where
             dlist: self,
         }
     }
+
+    /// # Safety
+    ///
+    /// `self` must be empty. `src` will be set empty after operation.
+    pub unsafe fn replace_with(&mut self, src: &mut DList<A>) {
+        debug_assert!(self.head.is_none());
+        debug_assert!(self.tail.is_none());
+        debug_assert_eq!(self.len, 0);
+
+        self.head = src.head;
+        self.tail = src.tail;
+        self.len = src.len;
+
+        src.head = None;
+        src.tail = None;
+        src.len = 0;
+    }
 }
 
 pub struct DListIter<'a, A>
@@ -220,6 +263,14 @@ where
     /// Move to head.
     pub fn back(&mut self) {
         self.link = self.dlist.tail;
+    }
+
+    pub fn is_front(&self) -> bool {
+        self.link == self.dlist.head
+    }
+
+    pub fn is_back(&self) -> bool {
+        self.link == self.dlist.tail
     }
 }
 
@@ -405,6 +456,14 @@ where
         }
         link.as_mut().prev = prev;
         link.as_mut().next = next;
+    }
+
+    pub fn is_front(&self) -> bool {
+        self.link == self.dlist.head
+    }
+
+    pub fn is_back(&self) -> bool {
+        self.link == self.dlist.tail
     }
 }
 
