@@ -39,6 +39,12 @@ use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
 
+#[derive(Debug, Default)]
+pub struct PrometheusConfig {
+    pub registry: Option<prometheus::Registry>,
+    pub namespace: Option<String>,
+}
+
 pub struct StoreConfig<K, V, D, EP, EL>
 where
     K: Key,
@@ -57,7 +63,7 @@ where
     pub reclaimers: usize,
     pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
-    pub prometheus_registry: Option<prometheus::Registry>,
+    pub prometheus_config: PrometheusConfig,
 }
 
 impl<K, V, D, EP, EL> Debug for StoreConfig<K, V, D, EP, EL>
@@ -153,10 +159,18 @@ where
             .map(|_| stop_tx.subscribe())
             .collect_vec();
 
-        let metrics = match config.prometheus_registry {
-            Some(registry) => Arc::new(crate::metrics::Metrics::with_registry(registry)),
-            None => Arc::new(crate::metrics::Metrics::new()),
+        let metrics = match (
+            config.prometheus_config.registry,
+            config.prometheus_config.namespace,
+        ) {
+            (Some(registry), Some(namespace)) => {
+                Metrics::with_registry_namespace(registry, namespace)
+            }
+            (Some(registry), None) => Metrics::with_registry(registry),
+            (None, Some(namespace)) => Metrics::with_namespace(namespace),
+            (None, None) => Metrics::new(),
         };
+        let metrics = Arc::new(metrics);
 
         let store = Arc::new(Self {
             indices: indices.clone(),
@@ -320,6 +334,13 @@ where
         let _timer = self.metrics.latency_remove.start_timer();
 
         self.indices.remove(key);
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn clear(&self) {
+        let _timer = self.metrics.latency_remove.start_timer();
+
+        self.indices.clear();
     }
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
@@ -702,7 +723,7 @@ pub mod tests {
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            prometheus_registry: None,
+            prometheus_config: PrometheusConfig::default(),
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -748,7 +769,7 @@ pub mod tests {
             reclaimers: 0,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            prometheus_registry: None,
+            prometheus_config: PrometheusConfig::default(),
         };
         let store = TestStore::open(config).await.unwrap();
 

@@ -96,6 +96,12 @@ where
         inner.regions[slot.region as usize].remove(&slot.sequence)
     }
 
+    pub fn clear(&self) {
+        let mut inner = self.inner.write();
+        inner.slots.clear();
+        inner.regions.iter_mut().for_each(|region| region.clear());
+    }
+
     pub fn take_region(&self, region: &RegionId) -> Vec<Index<K>> {
         let mut inner = self.inner.write();
         let mut indices = BTreeMap::new();
