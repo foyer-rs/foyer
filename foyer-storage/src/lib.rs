@@ -26,6 +26,7 @@ pub mod device;
 pub mod error;
 pub mod flusher;
 pub mod indices;
+pub mod indices_v2;
 pub mod metrics;
 pub mod reclaimer;
 pub mod region;

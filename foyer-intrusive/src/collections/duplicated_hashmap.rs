@@ -71,6 +71,7 @@ impl Link for DuplicatedHashMapLink {
     }
 }
 
+#[derive(Debug)]
 pub struct DuplicatedHashMap<K, V, A>
 where
     K: Key,
@@ -93,22 +94,7 @@ where
     A: KeyAdapter<Key = K, Link = DuplicatedHashMapLink>,
 {
     fn drop(&mut self) {
-        unsafe {
-            for slot in self.slots.iter_mut() {
-                let mut iter_slot = slot.iter_mut();
-                iter_slot.front();
-                while iter_slot.is_valid() {
-                    let mut link_slot = iter_slot.remove().unwrap();
-                    let mut iter_group = link_slot.as_mut().group.iter_mut();
-                    iter_group.front();
-                    while iter_group.is_valid() {
-                        let link_group = iter_group.remove().unwrap();
-                        let item = self.adapter.link2item(link_group.as_ptr());
-                        let _ = self.adapter.pointer_ops().from_raw(item);
-                    }
-                }
-            }
-        }
+        self.clear()
     }
 }
 
@@ -206,6 +192,28 @@ where
                 }
                 None => vec![],
             }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        unsafe {
+            for slot in self.slots.iter_mut() {
+                let mut iter_slot = slot.iter_mut();
+                iter_slot.front();
+                while iter_slot.is_valid() {
+                    let mut link_slot = iter_slot.remove().unwrap();
+                    let mut iter_group = link_slot.as_mut().group.iter_mut();
+                    iter_group.front();
+                    let mut to_drop = Vec::with_capacity(link_slot.as_ref().group.len());
+                    while iter_group.is_valid() {
+                        let link_group = iter_group.remove().unwrap();
+                        let item = self.adapter.link2item(link_group.as_ptr());
+                        let ptr = self.adapter.pointer_ops().from_raw(item);
+                        to_drop.push(ptr);
+                    }
+                }
+            }
+            self.len = 0;
         }
     }
 

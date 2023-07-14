@@ -72,17 +72,7 @@ where
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     fn drop(&mut self) {
-        unsafe {
-            for slot in self.slots.iter_mut() {
-                let mut iter = slot.iter_mut();
-                iter.front();
-                while iter.is_valid() {
-                    let link = iter.remove().unwrap();
-                    let item = self.adapter.link2item(link.as_ptr());
-                    let _ = self.adapter.pointer_ops().from_raw(item);
-                }
-            }
-        }
+        self.clear();
     }
 }
 
@@ -156,6 +146,21 @@ where
                 }
                 None => None,
             }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        unsafe {
+            for slot in self.slots.iter_mut() {
+                let mut iter = slot.iter_mut();
+                iter.front();
+                while iter.is_valid() {
+                    let link = iter.remove().unwrap();
+                    let item = self.adapter.link2item(link.as_ptr());
+                    let _ = self.adapter.pointer_ops().from_raw(item);
+                }
+            }
+            self.len = 0;
         }
     }
 

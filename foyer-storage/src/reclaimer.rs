@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::{
     device::{BufferAllocator, Device},
     error::{Error, Result},
-    indices::Indices,
+    indices_v2::Indices,
     metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},

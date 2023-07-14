@@ -27,7 +27,7 @@ use crate::{
     device::{BufferAllocator, Device},
     error::{Error, Result},
     flusher::Flusher,
-    indices::{Index, Indices},
+    indices_v2::{Index, Indices},
     metrics::Metrics,
     reclaimer::Reclaimer,
     region::{Region, RegionId},
@@ -149,7 +149,7 @@ where
             reclaimer.clone(),
         ));
 
-        let indices = Arc::new(Indices::new(device.regions()));
+        let indices = Arc::new(Indices::new(device.regions().next_power_of_two()));
 
         let (stop_tx, _stop_rx) = broadcast::channel(config.flushers + config.reclaimers + 1);
         let flusher_stop_rxs = (0..config.flushers)
@@ -274,13 +274,11 @@ where
             len: slice.len() as u32,
             key_len: key.serialized_len() as u32,
             value_len: value.serialized_len() as u32,
-
-            key,
         };
 
         slice.destroy().await;
 
-        self.indices.insert(index);
+        self.indices.insert(key, index);
 
         Ok(true)
     }
@@ -414,8 +412,8 @@ where
     ) -> Result<bool> {
         let region = region_manager.region(&region_id).clone();
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, BA, D>::open(region).await? {
-            while let Some(index) = iter.next().await? {
-                indices.insert(index);
+            while let Some((key, index)) = iter.next().await? {
+                indices.insert(key, index);
             }
             region_manager.set_region_evictable(&region_id).await;
             true
@@ -615,7 +613,7 @@ where
         }))
     }
 
-    async fn next(&mut self) -> Result<Option<Index<K>>> {
+    async fn next(&mut self) -> Result<Option<(K, Index)>> {
         if self.cursor == 0 {
             return Ok(None);
         }
@@ -659,15 +657,17 @@ where
 
         self.cursor -= entry_len;
 
-        Ok(Some(Index {
+        Ok(Some((
             key,
-            region: self.region.id(),
-            version: 0,
-            offset: self.cursor as u32,
-            len: entry_len as u32,
-            key_len: footer.key_len,
-            value_len: footer.value_len,
-        }))
+            Index {
+                region: self.region.id(),
+                version: 0,
+                offset: self.cursor as u32,
+                len: entry_len as u32,
+                key_len: footer.key_len,
+                value_len: footer.value_len,
+            },
+        )))
     }
 }
 
