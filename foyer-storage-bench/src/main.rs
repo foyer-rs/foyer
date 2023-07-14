@@ -35,7 +35,7 @@ use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
     admission::{rated_random::RatedRandom, AdmissionPolicy},
     device::fs::FsDeviceConfig,
-    store::StoreConfig,
+    store::{PrometheusConfig, StoreConfig},
     LfuFsStore,
 };
 use futures::future::join_all;
@@ -237,7 +237,7 @@ async fn main() {
         reclaimers: args.reclaimers,
         reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
-        prometheus_registry: None,
+        prometheus_config: PrometheusConfig::default(),
     };
 
     println!("{:#?}", config);

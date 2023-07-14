@@ -14,7 +14,8 @@
 
 use prometheus::{
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
+    register_int_gauge_with_registry, Histogram, HistogramOpts, IntCounter, IntGauge, Opts,
+    Registry,
 };
 
 #[derive(Debug)]
@@ -41,25 +42,31 @@ impl Default for Metrics {
 
 impl Metrics {
     pub fn new() -> Self {
-        Self::with_registry(Registry::default())
+        Self::with_registry_namespace(Registry::default(), "")
+    }
+
+    pub fn with_namespace(namespace: impl ToString) -> Self {
+        Self::with_registry_namespace(Registry::default(), namespace)
     }
 
     pub fn with_registry(registry: Registry) -> Self {
-        let latency = register_histogram_vec_with_registry!(
-            "foyer_storage_latency",
-            "foyer storage latency",
-            &["op", "extra"],
-            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
-            registry
-        )
-        .unwrap();
-        let bytes = register_int_counter_vec_with_registry!(
-            "foyer_storage_bytes",
-            "foyer storage bytes",
-            &["op", "extra"],
-            registry
-        )
-        .unwrap();
+        Self::with_registry_namespace(registry, "")
+    }
+
+    pub fn with_registry_namespace(registry: Registry, namespace: impl ToString) -> Self {
+        let latency = {
+            let opts = HistogramOpts::new("foyer_storage_latency", "foyer storage latency")
+                .namespace(namespace.to_string())
+                .buckets(vec![
+                    0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0,
+                ]);
+            register_histogram_vec_with_registry!(opts, &["op", "extra"], registry).unwrap()
+        };
+        let bytes = {
+            let opts = Opts::new("foyer_storage_bytes", "foyer storage bytes")
+                .namespace(namespace.to_string());
+            register_int_counter_vec_with_registry!(opts, &["op", "extra"], registry).unwrap()
+        };
 
         let latency_insert = latency.with_label_values(&["insert", ""]);
         let latency_lookup_hit = latency.with_label_values(&["lookup", "hit"]);
@@ -72,9 +79,11 @@ impl Metrics {
         let bytes_reclaim = bytes.with_label_values(&["reclaim", ""]);
         let bytes_reinsert = bytes.with_label_values(&["reinsert", ""]);
 
-        let size =
-            register_int_gauge_with_registry!("foyer_storage_size", "foyer storage size", registry)
-                .unwrap();
+        let size = {
+            let opts = Opts::new("foyer_storage_size", "foyer storage size")
+                .namespace(namespace.to_string());
+            register_int_gauge_with_registry!(opts, registry).unwrap()
+        };
 
         Self {
             latency_insert,
