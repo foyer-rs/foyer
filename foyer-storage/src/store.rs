@@ -26,6 +26,7 @@ use crate::{
     admission::AdmissionPolicy,
     device::{BufferAllocator, Device},
     error::{Error, Result},
+    event::EventListener,
     flusher::Flusher,
     indices::{Index, Indices},
     metrics::Metrics,
@@ -63,6 +64,7 @@ where
     pub reclaimers: usize,
     pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
+    pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub prometheus_config: PrometheusConfig,
 }
 
@@ -103,6 +105,8 @@ where
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+
+    event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
     handles: Mutex<Vec<JoinHandle<()>>>,
 
@@ -177,6 +181,7 @@ where
             region_manager: region_manager.clone(),
             device: device.clone(),
             admissions: config.admissions,
+            event_listeners: config.event_listeners.clone(),
             handles: Mutex::new(vec![]),
             stop_tx,
             metrics: metrics.clone(),
@@ -213,6 +218,7 @@ where
                     config.reinsertions,
                     indices,
                     reclaim_rate_limiter,
+                    config.event_listeners,
                     reclaimer_stop_rxs,
                     metrics,
                 )
@@ -275,14 +281,23 @@ where
             key_len: key.serialized_len() as u32,
             value_len: value.serialized_len() as u32,
 
-            key,
+            key: key.clone(),
         };
 
         slice.destroy().await;
 
         self.indices.insert(index);
 
+        for listener in self.event_listeners.iter() {
+            listener.on_insert(&key).await?;
+        }
+
         Ok(true)
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn exists(&self, key: &K) -> Result<bool> {
+        Ok(self.indices.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip(self))]
@@ -330,17 +345,33 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn remove(&self, key: &K) {
+    pub async fn remove(&self, key: &K) -> Result<bool> {
         let _timer = self.metrics.latency_remove.start_timer();
 
-        self.indices.remove(key);
+        let res = self.indices.remove(key).is_some();
+
+        if res {
+            for listener in self.event_listeners.iter() {
+                listener.on_remove(key).await?;
+            }
+        }
+
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn clear(&self) {
+    pub async fn clear(&self) -> Result<()> {
         let _timer = self.metrics.latency_remove.start_timer();
 
         self.indices.clear();
+
+        for listener in self.event_listeners.iter() {
+            listener.on_clear().await?;
+        }
+
+        // TODO(MrCroxx): set all regions as clean?
+
+        Ok(())
     }
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
@@ -384,9 +415,11 @@ where
             let irx = rx.clone();
             let region_manager = self.region_manager.clone();
             let indices = self.indices.clone();
+            let event_listeners = self.event_listeners.clone();
             let handle = tokio::spawn(async move {
                 itx.send(()).await.unwrap();
-                let res = Self::recover_region(region_id, region_manager, indices).await;
+                let res =
+                    Self::recover_region(region_id, region_manager, indices, event_listeners).await;
                 irx.recv().await.unwrap();
                 res
             });
@@ -411,10 +444,14 @@ where
         region_id: RegionId,
         region_manager: Arc<RegionManager<BA, D, EP, EL>>,
         indices: Arc<Indices<K>>,
+        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     ) -> Result<bool> {
         let region = region_manager.region(&region_id).clone();
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, BA, D>::open(region).await? {
             while let Some(index) = iter.next().await? {
+                for listener in event_listeners.iter() {
+                    listener.on_recover(&index.key).await?;
+                }
                 indices.insert(index);
             }
             region_manager.set_region_evictable(&region_id).await;
@@ -723,6 +760,7 @@ pub mod tests {
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
+            event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
         };
 
@@ -769,6 +807,7 @@ pub mod tests {
             reclaimers: 0,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
+            event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
         };
         let store = TestStore::open(config).await.unwrap();
