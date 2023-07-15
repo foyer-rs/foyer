@@ -237,6 +237,7 @@ async fn main() {
         reclaimers: args.reclaimers,
         reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
+        event_listeners: vec![],
         prometheus_config: PrometheusConfig::default(),
     };
 

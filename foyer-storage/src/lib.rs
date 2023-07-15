@@ -24,6 +24,7 @@ use device::allocator::AlignedAllocator;
 pub mod admission;
 pub mod device;
 pub mod error;
+pub mod event;
 pub mod flusher;
 pub mod indices;
 pub mod metrics;

@@ -22,6 +22,8 @@ pub enum Error {
     ChecksumMismatch { checksum: u64, expected: u64 },
     #[error("channel full")]
     ChannelFull,
+    #[error("event listener error: {0}")]
+    EventListener(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("other error: {0}")]
     Other(String),
 }
@@ -29,6 +31,12 @@ pub enum Error {
 impl Error {
     pub fn device(e: super::device::error::Error) -> Self {
         Self::Device(e)
+    }
+
+    pub fn event_listener(
+        e: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        Self::EventListener(e.into())
     }
 
     pub fn other(e: impl Into<Box<dyn std::error::Error>>) -> Self {
