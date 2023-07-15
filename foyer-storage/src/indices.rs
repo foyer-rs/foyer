@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use foyer_common::code::Key;
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockWriteGuard};
 
 use crate::region::{RegionId, Version};
 
@@ -48,6 +48,7 @@ where
 {
     slots: BTreeMap<K, Slot>,
     regions: Vec<BTreeMap<u32, Index<K>>>,
+    sequences: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -66,6 +67,7 @@ where
         let inner = IndicesInner {
             slots: BTreeMap::new(),
             regions: vec![BTreeMap::new(); regions],
+            sequences: vec![0; regions],
         };
         Self {
             inner: RwLock::new(inner),
@@ -73,13 +75,8 @@ where
     }
 
     pub fn insert(&self, index: Index<K>) {
-        let region = index.region;
-        let key = index.key.clone();
-
         let mut inner = self.inner.write();
-        let sequence = inner.regions[region as usize].len() as u32;
-        inner.regions[region as usize].insert(sequence, index);
-        inner.slots.insert(key, Slot { region, sequence });
+        self.insert_inner(&mut inner, index)
     }
 
     pub fn lookup(&self, key: &K) -> Option<Index<K>> {
@@ -90,10 +87,21 @@ where
             .cloned()
     }
 
+    pub fn remap(&self, old_key: &K, new_key: K) -> bool {
+        let mut inner = self.inner.write();
+        match self.remove_inner(&mut inner, old_key) {
+            Some(mut index) => {
+                index.key = new_key;
+                self.insert_inner(&mut inner, index);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn remove(&self, key: &K) -> Option<Index<K>> {
         let mut inner = self.inner.write();
-        let slot = inner.slots.remove(key)?;
-        inner.regions[slot.region as usize].remove(&slot.sequence)
+        self.remove_inner(&mut inner, key)
     }
 
     pub fn clear(&self) {
@@ -112,5 +120,25 @@ where
         }
 
         indices.into_values().collect_vec()
+    }
+
+    fn insert_inner(&self, inner: &mut RwLockWriteGuard<'_, IndicesInner<K>>, index: Index<K>) {
+        let region = index.region;
+        let key = index.key.clone();
+
+        let sequence = inner.sequences[region as usize] as u32;
+        inner.sequences[region as usize] += 1;
+
+        inner.regions[region as usize].insert(sequence, index);
+        inner.slots.insert(key, Slot { region, sequence });
+    }
+
+    fn remove_inner(
+        &self,
+        inner: &mut RwLockWriteGuard<'_, IndicesInner<K>>,
+        key: &K,
+    ) -> Option<Index<K>> {
+        let slot = inner.slots.remove(key)?;
+        inner.regions[slot.region as usize].remove(&slot.sequence)
     }
 }

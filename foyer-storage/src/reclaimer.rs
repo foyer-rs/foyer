@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::{
     device::{BufferAllocator, Device},
     error::{Error, Result},
+    event::EventListener,
     indices::Indices,
     metrics::Metrics,
     region::RegionId,
@@ -76,6 +77,7 @@ impl Reclaimer {
         reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
         indices: Arc<Indices<K>>,
         rate_limiter: Option<Arc<RateLimiter>>,
+        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
         metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
@@ -109,6 +111,7 @@ impl Reclaimer {
                 _rate_limiter: rate_limiter.clone(),
                 stop_rx,
                 metrics: metrics.clone(),
+                event_listeners: event_listeners.clone(),
             })
             .collect_vec();
 
@@ -156,6 +159,8 @@ where
 
     _rate_limiter: Option<Arc<RateLimiter>>,
 
+    event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
+
     stop_rx: broadcast::Receiver<()>,
 
     metrics: Arc<Metrics>,
@@ -194,7 +199,12 @@ where
         let region = self.region_manager.region(&task.region_id);
 
         // step 1: drop indices
-        let _indices = self.indices.take_region(&task.region_id);
+        let indices = self.indices.take_region(&task.region_id);
+        for index in indices.iter() {
+            for listener in self.event_listeners.iter() {
+                listener.on_evict(&index.key).await?;
+            }
+        }
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         let guard = region.exclusive(false, false, false).await;
