@@ -12,7 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
@@ -243,56 +248,15 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
-        let _timer = self.metrics.latency_insert.start_timer();
+        let weight = self.serialized_len(&key, &value);
+        let writer = StoreWriter::new(self, key, weight);
+        writer.finish(value).await
+    }
 
-        for admission in &self.admissions {
-            if !admission.judge(&key, &value) {
-                return Ok(false);
-            }
-        }
-        for admission in &self.admissions {
-            admission.admit(&key, &value);
-        }
-
-        let serialized_len = self.serialized_len(&key, &value);
-        self.metrics.bytes_insert.inc_by(serialized_len as u64);
-
-        let mut slice = match self.region_manager.allocate(serialized_len).await {
-            crate::region::AllocateResult::Ok(slice) => slice,
-            crate::region::AllocateResult::Full { mut slice, remain } => {
-                // current region is full, write region footer and try allocate again
-                let footer = RegionFooter {
-                    magic: REGION_MAGIC,
-                    padding: remain as u64,
-                };
-                footer.write(slice.as_mut());
-                slice.destroy().await;
-                self.region_manager.allocate(serialized_len).await.unwrap()
-            }
-        };
-
-        write_entry(slice.as_mut(), &key, &value);
-
-        let index = Index {
-            region: slice.region_id(),
-            version: slice.version(),
-            offset: slice.offset() as u32,
-            len: slice.len() as u32,
-            key_len: key.serialized_len() as u32,
-            value_len: value.serialized_len() as u32,
-
-            key: key.clone(),
-        };
-
-        slice.destroy().await;
-
-        self.indices.insert(index);
-
-        for listener in self.event_listeners.iter() {
-            listener.on_insert(&key).await?;
-        }
-
-        Ok(true)
+    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
+    #[tracing::instrument(skip(self))]
+    pub fn writer(&self, key: K, weight: usize) -> StoreWriter<'_, K, V, BA, D, EP, EL> {
+        StoreWriter::new(self, key, weight)
     }
 
     #[tracing::instrument(skip(self))]
@@ -461,6 +425,185 @@ where
             false
         };
         Ok(res)
+    }
+
+    async fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> bool {
+        for admission in &self.admissions {
+            if !admission.judge(&writer.key, writer.weight).await {
+                return false;
+            }
+        }
+        true
+    }
+
+    async fn apply_writer(
+        &self,
+        mut writer: StoreWriter<'_, K, V, BA, D, EP, EL>,
+        value: V,
+    ) -> Result<bool> {
+        let now = Instant::now();
+
+        if !writer.judge().await {
+            let duration = now.elapsed() + writer.duration;
+            self.metrics
+                .latency_insert_rejected
+                .observe(duration.as_secs_f64());
+            return Ok(false);
+        }
+
+        assert!(writer.admitted.unwrap());
+
+        let key = &writer.key;
+
+        for admission in &self.admissions {
+            admission.admit(key, writer.weight).await;
+        }
+
+        let serialized_len = self.serialized_len(key, &value);
+        assert_eq!(serialized_len, writer.weight);
+
+        self.metrics.bytes_insert.inc_by(serialized_len as u64);
+
+        let mut slice = match self.region_manager.allocate(serialized_len).await {
+            crate::region::AllocateResult::Ok(slice) => slice,
+            crate::region::AllocateResult::Full { mut slice, remain } => {
+                // current region is full, write region footer and try allocate again
+                let footer = RegionFooter {
+                    magic: REGION_MAGIC,
+                    padding: remain as u64,
+                };
+                footer.write(slice.as_mut());
+                slice.destroy().await;
+                self.region_manager.allocate(serialized_len).await.unwrap()
+            }
+        };
+
+        write_entry(slice.as_mut(), key, &value);
+
+        let index = Index {
+            region: slice.region_id(),
+            version: slice.version(),
+            offset: slice.offset() as u32,
+            len: slice.len() as u32,
+            key_len: key.serialized_len() as u32,
+            value_len: value.serialized_len() as u32,
+
+            key: key.clone(),
+        };
+
+        slice.destroy().await;
+
+        self.indices.insert(index);
+
+        for listener in self.event_listeners.iter() {
+            listener.on_insert(key).await?;
+        }
+
+        let duration = now.elapsed() + writer.duration;
+        self.metrics
+            .latency_insert_admitted
+            .observe(duration.as_secs_f64());
+
+        Ok(true)
+    }
+}
+
+pub struct StoreWriter<'a, K, V, BA, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    EL: Link,
+{
+    store: &'a Store<K, V, BA, D, EP, EL>,
+    key: K,
+    weight: usize,
+
+    admitted: Option<bool>,
+
+    /// judge duration
+    duration: Duration,
+
+    applied: bool,
+}
+
+impl<'a, K, V, BA, D, EP, EL> StoreWriter<'a, K, V, BA, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    EL: Link,
+{
+    fn new(store: &'a Store<K, V, BA, D, EP, EL>, key: K, weight: usize) -> Self {
+        Self {
+            store,
+            key,
+            weight,
+            admitted: None,
+            duration: Duration::from_nanos(0),
+            applied: false,
+        }
+    }
+
+    /// Judge if the entry can be admitted by configured admission policies.
+    pub async fn judge(&mut self) -> bool {
+        let now = Instant::now();
+        if let Some(admitted) = self.admitted {
+            self.duration += now.elapsed();
+            return admitted;
+        }
+        let admitted = self.store.judge_inner(self).await;
+        self.admitted = Some(admitted);
+        self.duration += now.elapsed();
+        admitted
+    }
+
+    pub async fn finish(mut self, value: V) -> Result<bool> {
+        self.applied = true;
+        self.store.apply_writer(self, value).await
+    }
+}
+
+impl<'a, K, V, BA, D, EP, EL> Debug for StoreWriter<'a, K, V, BA, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    EL: Link,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreWriter")
+            .field("key", &self.key)
+            .field("weight", &self.weight)
+            .field("admitted", &self.admitted)
+            .field("duration", &self.duration)
+            .field("applied", &self.applied)
+            .finish()
+    }
+}
+
+impl<'a, K, V, BA, D, EP, EL> Drop for StoreWriter<'a, K, V, BA, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    BA: BufferAllocator,
+    D: Device<IoBufferAllocator = BA>,
+    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    EL: Link,
+{
+    fn drop(&mut self) {
+        if !self.applied {
+            self.store
+                .metrics
+                .latency_insert_rejected
+                .observe(self.duration.as_secs_f64());
+        }
     }
 }
 
