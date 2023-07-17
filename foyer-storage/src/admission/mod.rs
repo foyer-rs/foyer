@@ -12,39 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
-
+use async_trait::async_trait;
 use foyer_common::code::{Key, Value};
 
 use std::fmt::Debug;
 
 #[allow(unused_variables)]
+#[async_trait]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool;
+    async fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 
-    fn admit(&self, key: &Self::Key, value: &Self::Value) {}
-}
-
-#[derive(Debug)]
-pub struct AdmitAll<K: Key, V: Value>(PhantomData<(K, V)>);
-
-impl<K: Key, V: Value> Default for AdmitAll<K, V> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: Key, V: Value> AdmissionPolicy for AdmitAll<K, V> {
-    type Key = K;
-
-    type Value = V;
-
-    fn judge(&self, _key: &Self::Key, _value: &Self::Value) -> bool {
-        true
-    }
+    async fn admit(&self, key: &Self::Key, weight: usize);
 }
 
 pub mod rated_random;

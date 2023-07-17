@@ -19,6 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use async_trait::async_trait;
 use foyer_common::code::{Key, Value};
 use parking_lot::{Mutex, MutexGuard};
 use rand::{thread_rng, Rng};
@@ -96,17 +97,17 @@ where
         }
     }
 
-    fn judge(&self, key: &K, value: &V) -> bool {
+    fn judge(&self, _key: &K, weight: usize) -> bool {
         if let Some(inner) = self.inner.try_lock() {
             self.update(inner);
         }
 
-        // TODO(MrCroxx): unify weighter?
-        let weight = key.serialized_len() + value.serialized_len();
         self.bytes.fetch_add(weight, Ordering::Relaxed);
 
         thread_rng().gen_range(0..PRECISION) < self.probability.load(Ordering::Relaxed)
     }
+
+    fn admit(&self, _key: &K, _weight: usize) {}
 
     fn update(&self, mut inner: MutexGuard<'_, Inner<K, V>>) {
         let now = Instant::now();
@@ -132,6 +133,7 @@ where
     }
 }
 
+#[async_trait]
 impl<K, V> AdmissionPolicy for RatedRandom<K, V>
 where
     K: Key,
@@ -141,8 +143,12 @@ where
 
     type Value = V;
 
-    fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool {
-        self.judge(key, value)
+    async fn judge(&self, key: &Self::Key, weight: usize) -> bool {
+        self.judge(key, weight)
+    }
+
+    async fn admit(&self, key: &Self::Key, weight: usize) {
+        self.admit(key, weight)
     }
 }
 
@@ -168,9 +174,10 @@ mod tests {
         async fn submit(rr: Arc<RatedRandom<u64, Vec<u8>>>, score: Arc<AtomicUsize>) {
             loop {
                 tokio::time::sleep(Duration::from_millis(10)).await;
-                let size = thread_rng().gen_range(1000..10000);
-                if rr.judge(&0, &vec![0; size]) {
-                    score.fetch_add(size, Ordering::Relaxed);
+                let weight = thread_rng().gen_range(1000..10000);
+                if rr.judge(&0, weight) {
+                    score.fetch_add(weight, Ordering::Relaxed);
+                    rr.admit(&0, weight);
                 }
             }
         }
@@ -184,6 +191,6 @@ mod tests {
         let error = (s as isize - RATE as isize * 10).unsigned_abs();
         let eratio = error as f64 / (RATE as f64 * 10.0);
 
-        assert!(eratio < ERATIO);
+        assert!(eratio < ERATIO, "eratio: {} < ERATIO: {}", eratio, ERATIO);
     }
 }
