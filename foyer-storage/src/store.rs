@@ -15,6 +15,7 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
+    ops::{BitAnd, BitOr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -28,7 +29,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::AdmissionPolicy,
+    admission::{AdmissionPolicy, Judges},
     device::{BufferAllocator, Device},
     error::{Error, Result},
     event::EventListener,
@@ -427,13 +428,13 @@ where
         Ok(res)
     }
 
-    async fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> bool {
-        for admission in &self.admissions {
-            if !admission.judge(&writer.key, writer.weight).await {
-                return false;
-            }
+    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> Judges {
+        let mut res = Judges::new();
+        for (index, admission) in self.admissions.iter().enumerate() {
+            let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
+            res.set(index, admitted);
         }
-        true
+        res
     }
 
     async fn apply_writer(
@@ -441,22 +442,24 @@ where
         mut writer: StoreWriter<'_, K, V, BA, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
+        debug_assert!(!writer.inserted);
+
         let now = Instant::now();
 
-        if !writer.judge().await {
+        if !writer.judge() {
             let duration = now.elapsed() + writer.duration;
             self.metrics
-                .latency_insert_rejected
+                .latency_insert_dropped
                 .observe(duration.as_secs_f64());
             return Ok(false);
         }
 
-        assert!(writer.admitted.unwrap());
-
+        writer.inserted = true;
         let key = &writer.key;
 
-        for admission in &self.admissions {
-            admission.admit(key, writer.weight).await;
+        for (i, admission) in self.admissions.iter().enumerate() {
+            let judge = writer.judges.as_ref().unwrap().get(i);
+            admission.on_insert(key, writer.weight, &self.metrics, judge);
         }
 
         let serialized_len = self.serialized_len(key, &value);
@@ -501,7 +504,7 @@ where
 
         let duration = now.elapsed() + writer.duration;
         self.metrics
-            .latency_insert_admitted
+            .latency_insert_inserted
             .observe(duration.as_secs_f64());
 
         Ok(true)
@@ -521,12 +524,17 @@ where
     key: K,
     weight: usize,
 
-    admitted: Option<bool>,
+    /// 1: admit
+    /// 0: reject
+    judges: Option<Judges>,
+    /// 1: use
+    /// 0: ignore
+    mask: Judges,
 
     /// judge duration
     duration: Duration,
 
-    applied: bool,
+    inserted: bool,
 }
 
 impl<'a, K, V, BA, D, EP, EL> StoreWriter<'a, K, V, BA, D, EP, EL>
@@ -543,27 +551,52 @@ where
             store,
             key,
             weight,
-            admitted: None,
+            judges: None,
+            mask: Judges::from_value((1 << store.admissions.len()) - 1),
             duration: Duration::from_nanos(0),
-            applied: false,
+            inserted: false,
         }
+    }
+
+    pub fn set_admission_mask(&mut self, mask: Judges) {
+        self.mask = mask.bitand(Judges::from_value((1 << self.store.admissions.len()) - 1));
+    }
+
+    pub fn all_admission(&mut self) {
+        self.mask = Judges::from_value((1 << self.store.admissions.len()) - 1);
+    }
+
+    pub fn ignore_admission(&mut self) {
+        self.mask = Judges::new();
     }
 
     /// Judge if the entry can be admitted by configured admission policies.
-    pub async fn judge(&mut self) -> bool {
+    pub fn judge(&mut self) -> bool {
         let now = Instant::now();
-        if let Some(admitted) = self.admitted {
+        if let Some(judges) = self.judges {
             self.duration += now.elapsed();
-            return admitted;
+            return Self::is_admitted(&judges, &self.mask);
         }
-        let admitted = self.store.judge_inner(self).await;
-        self.admitted = Some(admitted);
+        let judges = self.store.judge_inner(self);
+        self.judges = Some(judges);
         self.duration += now.elapsed();
-        admitted
+        Self::is_admitted(&judges, &self.mask)
     }
 
-    pub async fn finish(mut self, value: V) -> Result<bool> {
-        self.applied = true;
+    /// judge | ( ~mask )
+    ///
+    /// | judge | mask | ~mask | result |
+    /// |   0   |  0   |   1   |    1   |
+    /// |   0   |  1   |   0   |    0   |
+    /// |   1   |  0   |   1   |    1   |
+    /// |   1   |  1   |   0   |    1   |
+    fn is_admitted(judges: &Judges, mask: &Judges) -> bool {
+        let mut umask = *mask;
+        umask.invert();
+        judges.bitor(umask).is_full()
+    }
+
+    pub async fn finish(self, value: V) -> Result<bool> {
         self.store.apply_writer(self, value).await
     }
 }
@@ -581,9 +614,9 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("admitted", &self.admitted)
+            .field("judged", &self.judges)
             .field("duration", &self.duration)
-            .field("applied", &self.applied)
+            .field("inserted", &self.inserted)
             .finish()
     }
 }
@@ -598,11 +631,17 @@ where
     EL: Link,
 {
     fn drop(&mut self) {
-        if !self.applied {
+        if !self.inserted {
             self.store
                 .metrics
-                .latency_insert_rejected
+                .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
+            if let Some(judge) = self.judges.as_ref() {
+                for (i, admission) in self.store.admissions.iter().enumerate() {
+                    let judge = judge.get(i);
+                    admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
+                }
+            }
         }
     }
 }
@@ -967,5 +1006,32 @@ pub mod tests {
 
         store.shutdown_runners().await.unwrap();
         drop(store);
+    }
+
+    #[test]
+    fn test_admission_mask() {
+        type T = StoreWriter<
+            'static,
+            u64,
+            Vec<u8>,
+            AlignedAllocator,
+            FsDevice,
+            Fifo<RegionEpItemAdapter<FifoLink>>,
+            FifoLink,
+        >;
+
+        let mask = Judges::from_value(0b_0011);
+
+        assert!(mask.get(0));
+        assert!(mask.get(1));
+        assert!(!mask.get(2));
+        assert!(!mask.get(3));
+
+        let j1 = Judges::from_value(0b_0011);
+        let j2 = Judges::from_value(0b_1011);
+        let j3 = Judges::from_value(0b_1010);
+        assert!(T::is_admitted(&j1, &mask));
+        assert!(T::is_admitted(&j2, &mask));
+        assert!(!T::is_admitted(&j3, &mask));
     }
 }

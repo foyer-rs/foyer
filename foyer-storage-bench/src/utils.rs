@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use itertools::Itertools;
 use nix::{fcntl::readlink, sys::stat::stat};
 
-#[allow(unused_variables)]
+#[allow(dead_code)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
