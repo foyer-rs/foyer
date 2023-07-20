@@ -12,20 +12,25 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use async_trait::async_trait;
+use bitmaps::Bitmap;
 use foyer_common::code::{Key, Value};
 
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
+
+use crate::metrics::Metrics;
+
+pub type Judges = Bitmap<64>;
 
 #[allow(unused_variables)]
-#[async_trait]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    async fn judge(&self, key: &Self::Key, weight: usize) -> bool;
+    fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
 
-    async fn admit(&self, key: &Self::Key, weight: usize);
+    fn on_insert(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+
+    fn on_drop(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
 }
 
 pub mod rated_random;
