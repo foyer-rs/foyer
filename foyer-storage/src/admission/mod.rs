@@ -19,7 +19,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use crate::metrics::Metrics;
 
-pub type Admission = Bitmap<64>;
+pub type Judges = Bitmap<64>;
 
 #[allow(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {

@@ -29,7 +29,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::{Admission, AdmissionPolicy},
+    admission::{AdmissionPolicy, Judges},
     device::{BufferAllocator, Device},
     error::{Error, Result},
     event::EventListener,
@@ -428,8 +428,8 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> Admission {
-        let mut res = Admission::new();
+    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> Judges {
+        let mut res = Judges::new();
         for (index, admission) in self.admissions.iter().enumerate() {
             let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
             res.set(index, admitted);
@@ -455,7 +455,7 @@ where
         let key = &writer.key;
 
         for (i, admission) in self.admissions.iter().enumerate() {
-            let judge = writer.admission.as_ref().unwrap().get(i);
+            let judge = writer.judges.as_ref().unwrap().get(i);
             admission.on_insert(key, writer.weight, &self.metrics, judge);
         }
 
@@ -521,8 +521,12 @@ where
     key: K,
     weight: usize,
 
-    admission: Option<Admission>,
-    mask: Admission,
+    /// 1: admit
+    /// 0: reject
+    judges: Option<Judges>,
+    /// 1: use
+    /// 0: ignore
+    mask: Judges,
 
     /// judge duration
     duration: Duration,
@@ -544,51 +548,49 @@ where
             store,
             key,
             weight,
-            admission: None,
-            mask: Admission::from_value((1 << store.admissions.len()) - 1),
+            judges: None,
+            mask: Judges::from_value((1 << store.admissions.len()) - 1),
             duration: Duration::from_nanos(0),
             applied: false,
         }
     }
 
-    pub fn set_admission_mask(&mut self, mask: Admission) {
-        self.mask = mask.bitand(Admission::from_value(
-            (1 << self.store.admissions.len()) - 1,
-        ));
+    pub fn set_admission_mask(&mut self, mask: Judges) {
+        self.mask = mask.bitand(Judges::from_value((1 << self.store.admissions.len()) - 1));
     }
 
     pub fn all_admission(&mut self) {
-        self.mask = Admission::from_value((1 << self.store.admissions.len()) - 1);
+        self.mask = Judges::from_value((1 << self.store.admissions.len()) - 1);
     }
 
     pub fn ignore_admission(&mut self) {
-        self.mask = Admission::new();
+        self.mask = Judges::new();
     }
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub async fn judge(&mut self) -> bool {
         let now = Instant::now();
-        if let Some(admission) = self.admission {
+        if let Some(judges) = self.judges {
             self.duration += now.elapsed();
-            return self.is_admitted(&admission, &self.mask);
+            return Self::is_admitted(&judges, &self.mask);
         }
-        let admitted = self.store.judge_inner(self);
-        self.admission = Some(admitted);
+        let judges = self.store.judge_inner(self);
+        self.judges = Some(judges);
         self.duration += now.elapsed();
-        self.is_admitted(&admitted, &self.mask)
+        Self::is_admitted(&judges, &self.mask)
     }
 
-    /// admission | ( ~mask )
+    /// judge | ( ~mask )
     ///
-    /// | admission | mask | ~mask | result |
-    /// |     0     |  0   |   1   |    1   |
-    /// |     0     |  1   |   0   |    0   |
-    /// |     1     |  0   |   1   |    1   |
-    /// |     1     |  1   |   0   |    1   |
-    fn is_admitted(&self, admission: &Admission, mask: &Admission) -> bool {
+    /// | judge | mask | ~mask | result |
+    /// |   0   |  0   |   1   |    1   |
+    /// |   0   |  1   |   0   |    0   |
+    /// |   1   |  0   |   1   |    1   |
+    /// |   1   |  1   |   0   |    1   |
+    fn is_admitted(judges: &Judges, mask: &Judges) -> bool {
         let mut umask = *mask;
         umask.invert();
-        admission.bitor(umask).is_full()
+        judges.bitor(umask).is_full()
     }
 
     pub async fn finish(mut self, value: V) -> Result<bool> {
@@ -610,7 +612,7 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("admitted", &self.admission)
+            .field("admitted", &self.judges)
             .field("duration", &self.duration)
             .field("applied", &self.applied)
             .finish()
@@ -632,6 +634,12 @@ where
                 .metrics
                 .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
+            if let Some(judge) = self.judges.as_ref() {
+                for (i, admission) in self.store.admissions.iter().enumerate() {
+                    let judge = judge.get(i);
+                    admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
+                }
+            }
         }
     }
 }
@@ -996,5 +1004,26 @@ pub mod tests {
 
         store.shutdown_runners().await.unwrap();
         drop(store);
+    }
+
+    #[test]
+    fn test_admission_mask() {
+        type T = StoreWriter<
+            'static,
+            u64,
+            Vec<u8>,
+            AlignedAllocator,
+            FsDevice,
+            Fifo<RegionEpItemAdapter<FifoLink>>,
+            FifoLink,
+        >;
+
+        let mask = Judges::from_value(0b_0011);
+        let j1 = Judges::from_value(0b_0011);
+        let j2 = Judges::from_value(0b_1011);
+        let j3 = Judges::from_value(0b_1010);
+        assert!(T::is_admitted(&j1, &mask));
+        assert!(T::is_admitted(&j2, &mask));
+        assert!(!T::is_admitted(&j3, &mask));
     }
 }
