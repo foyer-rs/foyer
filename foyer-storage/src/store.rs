@@ -249,7 +249,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
-        let weight = self.serialized_len(&key, &value);
+        let weight = key.serialized_len() + value.serialized_len();
         let writer = StoreWriter::new(self, key, weight);
         writer.finish(value).await
     }
@@ -463,7 +463,7 @@ where
         }
 
         let serialized_len = self.serialized_len(key, &value);
-        assert_eq!(serialized_len, writer.weight);
+        assert_eq!(key.serialized_len() + value.serialized_len(), writer.weight);
 
         self.metrics.bytes_insert.inc_by(serialized_len as u64);
 
