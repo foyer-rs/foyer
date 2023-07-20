@@ -169,6 +169,8 @@ where
 
         let p = (p * PRECISION as f64) as usize;
         self.probability.store(p, Ordering::Relaxed);
+
+        tracing::debug!("probability: {}", p as f64 / PRECISION as f64);
     }
 }
 

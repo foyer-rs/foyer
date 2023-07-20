@@ -442,9 +442,11 @@ where
         mut writer: StoreWriter<'_, K, V, BA, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
+        debug_assert!(!writer.inserted);
+
         let now = Instant::now();
 
-        if !writer.judge().await {
+        if !writer.judge() {
             let duration = now.elapsed() + writer.duration;
             self.metrics
                 .latency_insert_dropped
@@ -452,6 +454,7 @@ where
             return Ok(false);
         }
 
+        writer.inserted = true;
         let key = &writer.key;
 
         for (i, admission) in self.admissions.iter().enumerate() {
@@ -501,7 +504,7 @@ where
 
         let duration = now.elapsed() + writer.duration;
         self.metrics
-            .latency_insert_admitted
+            .latency_insert_inserted
             .observe(duration.as_secs_f64());
 
         Ok(true)
@@ -531,7 +534,7 @@ where
     /// judge duration
     duration: Duration,
 
-    applied: bool,
+    inserted: bool,
 }
 
 impl<'a, K, V, BA, D, EP, EL> StoreWriter<'a, K, V, BA, D, EP, EL>
@@ -551,7 +554,7 @@ where
             judges: None,
             mask: Judges::from_value((1 << store.admissions.len()) - 1),
             duration: Duration::from_nanos(0),
-            applied: false,
+            inserted: false,
         }
     }
 
@@ -568,7 +571,7 @@ where
     }
 
     /// Judge if the entry can be admitted by configured admission policies.
-    pub async fn judge(&mut self) -> bool {
+    pub fn judge(&mut self) -> bool {
         let now = Instant::now();
         if let Some(judges) = self.judges {
             self.duration += now.elapsed();
@@ -593,8 +596,7 @@ where
         judges.bitor(umask).is_full()
     }
 
-    pub async fn finish(mut self, value: V) -> Result<bool> {
-        self.applied = true;
+    pub async fn finish(self, value: V) -> Result<bool> {
         self.store.apply_writer(self, value).await
     }
 }
@@ -612,9 +614,9 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("admitted", &self.judges)
+            .field("judged", &self.judges)
             .field("duration", &self.duration)
-            .field("applied", &self.applied)
+            .field("inserted", &self.inserted)
             .finish()
     }
 }
@@ -629,7 +631,7 @@ where
     EL: Link,
 {
     fn drop(&mut self) {
-        if !self.applied {
+        if !self.inserted {
             self.store
                 .metrics
                 .latency_insert_dropped
@@ -1019,6 +1021,12 @@ pub mod tests {
         >;
 
         let mask = Judges::from_value(0b_0011);
+
+        assert!(mask.get(0));
+        assert!(mask.get(1));
+        assert!(!mask.get(2));
+        assert!(!mask.get(3));
+
         let j1 = Judges::from_value(0b_0011);
         let j2 = Judges::from_value(0b_1011);
         let j3 = Judges::from_value(0b_1010);

@@ -20,7 +20,7 @@ use prometheus::{
 
 #[derive(Debug)]
 pub struct Metrics {
-    pub latency_insert_admitted: Histogram,
+    pub latency_insert_inserted: Histogram,
     pub latency_insert_dropped: Histogram,
     pub latency_lookup_hit: Histogram,
     pub latency_lookup_miss: Histogram,
@@ -69,7 +69,7 @@ impl Metrics {
             register_int_counter_vec_with_registry!(opts, &["op", "extra"], registry).unwrap()
         };
 
-        let latency_insert_admitted = latency.with_label_values(&["insert", "admitted"]);
+        let latency_insert_inserted = latency.with_label_values(&["insert", "inserted"]);
         let latency_insert_dropped = latency.with_label_values(&["insert", "dropped"]);
         let latency_lookup_hit = latency.with_label_values(&["lookup", "hit"]);
         let latency_lookup_miss = latency.with_label_values(&["lookup", "miss"]);
@@ -88,7 +88,7 @@ impl Metrics {
         };
 
         Self {
-            latency_insert_admitted,
+            latency_insert_inserted,
             latency_insert_dropped,
             latency_lookup_hit,
             latency_lookup_miss,
