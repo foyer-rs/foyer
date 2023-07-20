@@ -21,7 +21,7 @@ use prometheus::{
 #[derive(Debug)]
 pub struct Metrics {
     pub latency_insert_admitted: Histogram,
-    pub latency_insert_rejected: Histogram,
+    pub latency_insert_dropped: Histogram,
     pub latency_lookup_hit: Histogram,
     pub latency_lookup_miss: Histogram,
     pub latency_remove: Histogram,
@@ -70,7 +70,7 @@ impl Metrics {
         };
 
         let latency_insert_admitted = latency.with_label_values(&["insert", "admitted"]);
-        let latency_insert_rejected = latency.with_label_values(&["insert", "rejected"]);
+        let latency_insert_dropped = latency.with_label_values(&["insert", "dropped"]);
         let latency_lookup_hit = latency.with_label_values(&["lookup", "hit"]);
         let latency_lookup_miss = latency.with_label_values(&["lookup", "miss"]);
         let latency_remove = latency.with_label_values(&["remove", ""]);
@@ -89,7 +89,7 @@ impl Metrics {
 
         Self {
             latency_insert_admitted,
-            latency_insert_rejected,
+            latency_insert_dropped,
             latency_lookup_hit,
             latency_lookup_miss,
             latency_remove,

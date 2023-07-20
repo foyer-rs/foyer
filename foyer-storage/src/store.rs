@@ -15,6 +15,7 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
+    ops::{BitAnd, BitOr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -28,7 +29,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::AdmissionPolicy,
+    admission::{Admission, AdmissionPolicy},
     device::{BufferAllocator, Device},
     error::{Error, Result},
     event::EventListener,
@@ -427,13 +428,13 @@ where
         Ok(res)
     }
 
-    async fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> bool {
-        for admission in &self.admissions {
-            if !admission.judge(&writer.key, writer.weight).await {
-                return false;
-            }
+    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> Admission {
+        let mut res = Admission::new();
+        for (index, admission) in self.admissions.iter().enumerate() {
+            let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
+            res.set(index, admitted);
         }
-        true
+        res
     }
 
     async fn apply_writer(
@@ -446,17 +447,16 @@ where
         if !writer.judge().await {
             let duration = now.elapsed() + writer.duration;
             self.metrics
-                .latency_insert_rejected
+                .latency_insert_dropped
                 .observe(duration.as_secs_f64());
             return Ok(false);
         }
 
-        assert!(writer.admitted.unwrap());
-
         let key = &writer.key;
 
-        for admission in &self.admissions {
-            admission.admit(key, writer.weight).await;
+        for (i, admission) in self.admissions.iter().enumerate() {
+            let judge = writer.admission.as_ref().unwrap().get(i);
+            admission.on_insert(key, writer.weight, &self.metrics, judge);
         }
 
         let serialized_len = self.serialized_len(key, &value);
@@ -521,7 +521,8 @@ where
     key: K,
     weight: usize,
 
-    admitted: Option<bool>,
+    admission: Option<Admission>,
+    mask: Admission,
 
     /// judge duration
     duration: Duration,
@@ -543,23 +544,51 @@ where
             store,
             key,
             weight,
-            admitted: None,
+            admission: None,
+            mask: Admission::from_value((1 << store.admissions.len()) - 1),
             duration: Duration::from_nanos(0),
             applied: false,
         }
     }
 
+    pub fn set_admission_mask(&mut self, mask: Admission) {
+        self.mask = mask.bitand(Admission::from_value(
+            (1 << self.store.admissions.len()) - 1,
+        ));
+    }
+
+    pub fn all_admission(&mut self) {
+        self.mask = Admission::from_value((1 << self.store.admissions.len()) - 1);
+    }
+
+    pub fn ignore_admission(&mut self) {
+        self.mask = Admission::new();
+    }
+
     /// Judge if the entry can be admitted by configured admission policies.
     pub async fn judge(&mut self) -> bool {
         let now = Instant::now();
-        if let Some(admitted) = self.admitted {
+        if let Some(admission) = self.admission {
             self.duration += now.elapsed();
-            return admitted;
+            return self.is_admitted(&admission, &self.mask);
         }
-        let admitted = self.store.judge_inner(self).await;
-        self.admitted = Some(admitted);
+        let admitted = self.store.judge_inner(self);
+        self.admission = Some(admitted);
         self.duration += now.elapsed();
-        admitted
+        self.is_admitted(&admitted, &self.mask)
+    }
+
+    /// admission | ( ~mask )
+    ///
+    /// | admission | mask | ~mask | result |
+    /// |     0     |  0   |   1   |    1   |
+    /// |     0     |  1   |   0   |    0   |
+    /// |     1     |  0   |   1   |    1   |
+    /// |     1     |  1   |   0   |    1   |
+    fn is_admitted(&self, admission: &Admission, mask: &Admission) -> bool {
+        let mut umask = *mask;
+        umask.invert();
+        admission.bitor(umask).is_full()
     }
 
     pub async fn finish(mut self, value: V) -> Result<bool> {
@@ -581,7 +610,7 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("admitted", &self.admitted)
+            .field("admitted", &self.admission)
             .field("duration", &self.duration)
             .field("applied", &self.applied)
             .finish()
@@ -601,7 +630,7 @@ where
         if !self.applied {
             self.store
                 .metrics
-                .latency_insert_rejected
+                .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
         }
     }
