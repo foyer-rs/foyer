@@ -16,6 +16,7 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     ops::{BitAnd, BitOr},
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -23,6 +24,7 @@ use std::{
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -252,6 +254,79 @@ where
         let weight = key.serialized_len() + value.serialized_len();
         let writer = StoreWriter::new(self, key, weight);
         writer.finish(value).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn insert_if_not_exists(&self, key: K, value: V) -> Result<bool> {
+        if !self.exists(&key)? {
+            return Ok(false);
+        }
+        self.insert(key, value).await
+    }
+
+    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
+    /// Then `f` will be called and entry will be inserted.
+    ///
+    /// # Safety
+    ///
+    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    where
+        F: Fn(&K) -> V,
+    {
+        let mut writer = self.writer(key, weight);
+        if !writer.judge() {
+            return Ok(false);
+        }
+        let value = f(&writer.key);
+        writer.finish(value).await
+    }
+
+    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
+    /// Then `f` will be called to fetch value, and entry will be inserted.
+    ///
+    /// # Safety
+    ///
+    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_with_future<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    where
+        F: Fn(&K) -> Pin<Box<dyn Future<Output = V>>>,
+    {
+        let mut writer = self.writer(key, weight);
+        if !writer.judge() {
+            return Ok(false);
+        }
+        let value = f(&writer.key).await;
+        writer.finish(value).await
+    }
+
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    where
+        F: Fn(&K) -> V,
+    {
+        if !self.exists(&key)? {
+            return Ok(false);
+        }
+        self.insert_with(key, f, weight).await
+    }
+
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_if_not_exists_with_future<F>(
+        &self,
+        key: K,
+        f: F,
+        weight: usize,
+    ) -> Result<bool>
+    where
+        F: Fn(&K) -> Pin<Box<dyn Future<Output = V>>>,
+    {
+        if !self.exists(&key)? {
+            return Ok(false);
+        }
+        self.insert_with_future(key, f, weight).await
     }
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
