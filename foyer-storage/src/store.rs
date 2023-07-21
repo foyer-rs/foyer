@@ -273,13 +273,13 @@ where
     #[tracing::instrument(skip(self, f))]
     pub async fn insert_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> V,
+        F: Fn(&K) -> anyhow::Result<V>,
     {
         let mut writer = self.writer(key, weight);
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f(&writer.key);
+        let value = f(&writer.key).map_err(Error::fetch_value)?;
         writer.finish(value).await
     }
 
@@ -292,20 +292,20 @@ where
     #[tracing::instrument(skip(self, f))]
     pub async fn insert_with_future<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> Pin<Box<dyn Future<Output = V>>>,
+        F: Fn(&K) -> Pin<Box<dyn Future<Output = anyhow::Result<V>>>>,
     {
         let mut writer = self.writer(key, weight);
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f(&writer.key).await;
+        let value = f(&writer.key).await.map_err(Error::fetch_value)?;
         writer.finish(value).await
     }
 
     #[tracing::instrument(skip(self, f))]
     pub async fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> V,
+        F: Fn(&K) -> anyhow::Result<V>,
     {
         if !self.exists(&key)? {
             return Ok(false);
@@ -321,7 +321,7 @@ where
         weight: usize,
     ) -> Result<bool>
     where
-        F: Fn(&K) -> Pin<Box<dyn Future<Output = V>>>,
+        F: Fn(&K) -> Pin<Box<dyn Future<Output = anyhow::Result<V>>>>,
     {
         if !self.exists(&key)? {
             return Ok(false);

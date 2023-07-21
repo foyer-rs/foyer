@@ -23,9 +23,11 @@ pub enum Error {
     #[error("channel full")]
     ChannelFull,
     #[error("event listener error: {0}")]
-    EventListener(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+    EventListener(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("fetch value error: {0}")]
+    FetchValue(anyhow::Error),
     #[error("other error: {0}")]
-    Other(String),
+    Other(#[from] anyhow::Error),
 }
 
 impl Error {
@@ -33,14 +35,18 @@ impl Error {
         Self::Device(e)
     }
 
+    pub fn fetch_value(e: impl Into<anyhow::Error>) -> Self {
+        Self::Other(e.into())
+    }
+
+    pub fn other(e: impl Into<anyhow::Error>) -> Self {
+        Self::Other(e.into())
+    }
+
     pub fn event_listener(
         e: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         Self::EventListener(e.into())
-    }
-
-    pub fn other(e: impl Into<Box<dyn std::error::Error>>) -> Self {
-        Self::Other(e.into().to_string())
     }
 }
 
