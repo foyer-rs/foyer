@@ -259,7 +259,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn insert_if_not_exists(&self, key: K, value: V) -> Result<bool> {
-        if !self.exists(&key)? {
+        if self.exists(&key)? {
             return Ok(false);
         }
         self.insert(key, value).await
@@ -309,7 +309,7 @@ where
     where
         F: FnOnce() -> anyhow::Result<V>,
     {
-        if !self.exists(&key)? {
+        if self.exists(&key)? {
             return Ok(false);
         }
         self.insert_with(key, f, weight).await
@@ -326,7 +326,7 @@ where
         F: FnOnce() -> FU,
         FU: FetchValueFuture<V>,
     {
-        if !self.exists(&key)? {
+        if self.exists(&key)? {
             return Ok(false);
         }
         self.insert_with_future(key, f, weight).await
