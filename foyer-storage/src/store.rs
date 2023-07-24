@@ -16,7 +16,6 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     ops::{BitAnd, BitOr},
-    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -47,6 +46,8 @@ use foyer_common::code::{Key, Value};
 use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
+
+pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
 #[derive(Debug, Default)]
 pub struct PrometheusConfig {
@@ -273,13 +274,13 @@ where
     #[tracing::instrument(skip(self, f))]
     pub async fn insert_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> anyhow::Result<V>,
+        F: FnOnce() -> anyhow::Result<V>,
     {
         let mut writer = self.writer(key, weight);
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f(&writer.key).map_err(Error::fetch_value)?;
+        let value = f().map_err(Error::fetch_value)?;
         writer.finish(value).await
     }
 
@@ -290,22 +291,23 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    pub async fn insert_with_future<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    pub async fn insert_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> Pin<Box<dyn Future<Output = anyhow::Result<V>>>>,
+        F: FnOnce() -> FU,
+        FU: FetchValueFuture<V>,
     {
         let mut writer = self.writer(key, weight);
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f(&writer.key).await.map_err(Error::fetch_value)?;
+        let value = f().await.map_err(Error::fetch_value)?;
         writer.finish(value).await
     }
 
     #[tracing::instrument(skip(self, f))]
     pub async fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
     where
-        F: Fn(&K) -> anyhow::Result<V>,
+        F: FnOnce() -> anyhow::Result<V>,
     {
         if !self.exists(&key)? {
             return Ok(false);
@@ -314,14 +316,15 @@ where
     }
 
     #[tracing::instrument(skip(self, f))]
-    pub async fn insert_if_not_exists_with_future<F>(
+    pub async fn insert_if_not_exists_with_future<F, FU>(
         &self,
         key: K,
         f: F,
         weight: usize,
     ) -> Result<bool>
     where
-        F: Fn(&K) -> Pin<Box<dyn Future<Output = anyhow::Result<V>>>>,
+        F: FnOnce() -> FU,
+        FU: FetchValueFuture<V>,
     {
         if !self.exists(&key)? {
             return Ok(false);
@@ -522,10 +525,7 @@ where
         let now = Instant::now();
 
         if !writer.judge() {
-            let duration = now.elapsed() + writer.duration;
-            self.metrics
-                .latency_insert_dropped
-                .observe(duration.as_secs_f64());
+            writer.duration += now.elapsed();
             return Ok(false);
         }
 
@@ -711,11 +711,24 @@ where
                 .metrics
                 .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
+            let mut filtered = false;
             if let Some(judge) = self.judges.as_ref() {
                 for (i, admission) in self.store.admissions.iter().enumerate() {
                     let judge = judge.get(i);
                     admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
                 }
+                filtered = !self.judge();
+            }
+            if filtered {
+                self.store
+                    .metrics
+                    .latency_insert_filtered
+                    .observe(self.duration.as_secs_f64());
+            } else {
+                self.store
+                    .metrics
+                    .latency_insert_dropped
+                    .observe(self.duration.as_secs_f64());
             }
         }
     }
