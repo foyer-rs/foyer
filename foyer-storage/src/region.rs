@@ -348,7 +348,7 @@ where
 
 // read & write slice
 
-#[pin_project::pin_project(PinnedDrop)]
+#[pin_project::pin_project(project = WriteSliceProj, PinnedDrop)]
 pub struct WriteSlice {
     slice: SliceMut,
     region_id: RegionId,
@@ -415,9 +415,22 @@ impl AsMut<[u8]> for WriteSlice {
 #[pin_project::pinned_drop]
 impl PinnedDrop for WriteSlice {
     fn drop(self: Pin<&mut Self>) {
-        if self.future.is_some() {
-            panic!("future is not consumed: {:?}", self);
+        let mut this = self.project();
+        if let Some(future) = this.future.take() {
+            tracing::error!("future is not consumed. This may be caused by error early return. If there's not, check if there's slice not destroyed. {:?}", this);
+            tokio::spawn(future);
         }
+    }
+}
+
+impl<'pin> Debug for WriteSliceProj<'pin> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteSlice")
+            .field("slice", &self.slice)
+            .field("region_id", &self.region_id)
+            .field("version", &self.version)
+            .field("offset", &self.offset)
+            .finish()
     }
 }
 
@@ -448,11 +461,14 @@ where
             Self::Slice {
                 slice, allocator, ..
             } => f
-                .debug_struct("Slice")
+                .debug_struct("ReadSlice::Slice")
                 .field("slice", slice)
                 .field("allocator", allocator)
                 .finish(),
-            Self::Owned { buf, .. } => f.debug_struct("Owned").field("buf", buf).finish(),
+            Self::Owned { buf, .. } => f
+                .debug_struct("ReadSlice::Owned")
+                .field("buf", buf)
+                .finish(),
         }
     }
 }
@@ -504,11 +520,12 @@ where
 {
     fn drop(self: Pin<&mut Self>) {
         let mut this = self.project();
-        if match &mut this {
-            ReadSliceProj::Slice { future, .. } => future.is_some(),
-            ReadSliceProj::Owned { future, .. } => future.is_some(),
+        if let Some(future) = match &mut this {
+            ReadSliceProj::Slice { future, .. } => future.take(),
+            ReadSliceProj::Owned { future, .. } => future.take(),
         } {
-            panic!("future is not consumed: {:?}", this);
+            tracing::error!("future is not consumed. This may be caused by error early return. If there's not, check if there's slice not destroyed. {:?}", this);
+            tokio::spawn(future);
         }
     }
 }
