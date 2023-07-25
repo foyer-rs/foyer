@@ -16,18 +16,16 @@ use std::{
     fmt::Debug,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use std::collections::VecDeque;
+use parking_lot::Mutex;
+use tokio::sync::Notify;
 
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    Mutex,
-};
 
 #[derive(Debug)]
-pub struct AsyncQueue<T: Debug> {
-    tx: UnboundedSender<T>,
-    rx: Mutex<UnboundedReceiver<T>>,
-
+pub struct AsyncQueue<T> {
+    queue: Mutex<VecDeque<T>>,
     size: AtomicUsize,
+    notified: Notify,
 }
 
 impl<T: Debug> Default for AsyncQueue<T> {
@@ -38,24 +36,29 @@ impl<T: Debug> Default for AsyncQueue<T> {
 
 impl<T: Debug> AsyncQueue<T> {
     pub fn new() -> Self {
-        let (tx, rx) = unbounded_channel();
         Self {
-            tx,
-            rx: Mutex::new(rx),
+            queue: Mutex::new(VecDeque::default()),
             size: AtomicUsize::new(0),
+            notified: Notify::new(),
         }
     }
 
     pub async fn acquire(&self) -> T {
-        let mut rx = self.rx.lock().await;
-        let item = rx.recv().await.unwrap();
-        self.size.fetch_sub(1, Ordering::Relaxed);
-        item
+        loop {
+            let notified = self.notified.notified();
+            if let Some(item) = self.queue.lock().pop_front() {
+                self.size.fetch_sub(1, Ordering::Relaxed);
+                break item;
+            }
+            notified.await;
+        }
     }
 
     pub fn release(&self, item: T) {
+        self.queue.lock().push_back(item);
         self.size.fetch_add(1, Ordering::Relaxed);
-        self.tx.send(item).unwrap();
+        // TODO: may optimize with `notify_one`
+        self.notified.notify_waiters();
     }
 
     pub fn len(&self) -> usize {
