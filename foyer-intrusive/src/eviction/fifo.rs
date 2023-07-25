@@ -315,47 +315,43 @@ where
 unsafe impl<A> Send for Fifo<A>
 where
     A: Adapter<Link = FifoLink> + PriorityAdapter<Link = FifoLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
+
 unsafe impl<A> Sync for Fifo<A>
 where
     A: Adapter<Link = FifoLink> + PriorityAdapter<Link = FifoLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 
 unsafe impl Send for FifoLink {}
+
 unsafe impl Sync for FifoLink {}
 
 unsafe impl<'a, A> Send for FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink> + PriorityAdapter<Link = FifoLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
+
 unsafe impl<'a, A> Sync for FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink> + PriorityAdapter<Link = FifoLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
 
-impl<A> EvictionPolicy<A> for Fifo<A>
+impl<A> EvictionPolicy for Fifo<A>
 where
     A: Adapter<Link = FifoLink> + PriorityAdapter<Link = FifoLink>,
-
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
-    type Link = FifoLink;
+    type Adapter = A;
 
     type Config = FifoConfig;
-
-    type E<'e> = FifoIter<'e, A>;
 
     fn new(config: Self::Config) -> Self {
         Self::new(config)
@@ -380,7 +376,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> Self::E<'_> {
+    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
         self.iter()
     }
 }

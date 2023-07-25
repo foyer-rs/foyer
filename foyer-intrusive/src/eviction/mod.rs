@@ -12,34 +12,26 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::core::{
-    adapter::{Adapter, Link},
-    pointer::PointerOps,
-};
+use crate::core::{adapter::Adapter, pointer::PointerOps};
 
 use std::fmt::Debug;
 
 pub trait Config = Send + Sync + 'static + Debug + Clone;
 
-pub trait EvictionPolicy<A>: Send + Sync + 'static
-where
-    A: Adapter<Link = Self::Link>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
-{
-    type Link: Link;
+pub trait EvictionPolicy: Send + Sync + 'static {
+    type Adapter: Adapter;
     type Config: Config;
-    type E<'e>: Iterator<Item = &'e <A::PointerOps as PointerOps>::Pointer>;
 
     fn new(config: Self::Config) -> Self;
 
-    fn insert(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer);
+    fn insert(&mut self, ptr: <<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer);
 
     fn remove(
         &mut self,
-        ptr: &<A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::PointerOps as PointerOps>::Pointer;
+        ptr: &<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer,
+    ) -> <<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer;
 
-    fn access(&mut self, ptr: &<A::PointerOps as PointerOps>::Pointer);
+    fn access(&mut self, ptr: &<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer);
 
     fn len(&self) -> usize;
 
@@ -47,13 +39,28 @@ where
         self.len() == 0
     }
 
-    fn iter(&self) -> Self::E<'_>;
+    fn iter(
+        &self,
+    ) -> impl Iterator<Item = &'_ <<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer> + '_;
+}
 
-    fn push(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+pub trait EvictionPolicyExt: EvictionPolicy {
+    fn push(&mut self, ptr: <<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer);
+
+    fn pop(&mut self) -> Option<<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer>;
+
+    fn peek(&self) -> Option<&<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer>;
+}
+
+impl<E: EvictionPolicy> EvictionPolicyExt for E
+where
+    <<E::Adapter as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+{
+    fn push(&mut self, ptr: <<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer) {
         self.insert(ptr)
     }
 
-    fn pop(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    fn pop(&mut self) -> Option<<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer> {
         let ptr = {
             let mut iter = self.iter();
             let ptr = iter.next();
@@ -62,7 +69,7 @@ where
         ptr.map(|ptr| self.remove(&ptr))
     }
 
-    fn peek(&self) -> Option<&<A::PointerOps as PointerOps>::Pointer> {
+    fn peek(&self) -> Option<&<<Self::Adapter as Adapter>::PointerOps as PointerOps>::Pointer> {
         self.iter().next()
     }
 }

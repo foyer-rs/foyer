@@ -25,12 +25,9 @@ use parking_lot::Mutex;
 use std::hash::Hasher;
 use twox_hash::XxHash64;
 
-pub struct CacheConfig<K, V, E, EL>
+pub struct CacheConfig<E>
 where
-    K: Key,
-    V: Value,
-    E: EvictionPolicy<CacheItemEpAdapter<K, V, EL>, Link = EL>,
-    EL: Link,
+    E: EvictionPolicy,
 {
     capacity: usize,
     shard_bits: usize,
@@ -42,7 +39,7 @@ pub struct Cache<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<CacheItemEpAdapter<K, V, EL>, Link = EL>,
+    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
     EL: Link,
 {
     shards: Vec<Mutex<CacheShard<K, V, E, EL>>>,
@@ -52,7 +49,7 @@ struct CacheShard<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<CacheItemEpAdapter<K, V, EL>, Link = EL>,
+    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
     EL: Link,
 {
     container: HashMap<K, V, CacheItemHmAdapter<K, V, EL>>,
@@ -115,10 +112,10 @@ impl<K, V, E, EL> Cache<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<CacheItemEpAdapter<K, V, EL>, Link = EL>,
+    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
     EL: Link,
 {
-    pub fn new(config: CacheConfig<K, V, E, EL>) -> Self {
+    pub fn new(config: CacheConfig<E>) -> Self {
         let mut shards = Vec::with_capacity(1 << config.shard_bits);
 
         let shard_capacity = config.capacity / (1 << config.shard_bits);
@@ -231,8 +228,8 @@ mod tests {
         }
     }
 
-    type FifoCacheConfig = CacheConfig<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>, FifoLink>;
-    type FifoCache = Cache<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>, FifoLink>;
+    type FifoCacheConfig = CacheConfig<Fifo<CacheItemEpAdapter<K, V, FifoLink>>>;
+    type FifoCache = Cache<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>>;
 
     #[test]
     fn test_fifo_cache_simple() {

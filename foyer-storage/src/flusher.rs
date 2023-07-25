@@ -60,18 +60,17 @@ impl Flusher {
         }
     }
 
-    pub async fn run<A, D, E, EL>(
+    pub async fn run<D, E, EL>(
         &self,
-        buffers: Arc<AsyncQueue<Vec<u8, A>>>,
-        region_manager: Arc<RegionManager<A, D, E, EL>>,
+        buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
+        region_manager: Arc<RegionManager<D, E, EL>>,
         rate_limiter: Option<Arc<RateLimiter>>,
         stop_rxs: Vec<broadcast::Receiver<()>>,
         metrics: Arc<Metrics>,
     ) -> Vec<JoinHandle<()>>
     where
-        A: BufferAllocator,
-        D: Device<IoBufferAllocator = A>,
-        E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+        D: Device,
+        E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
         EL: Link,
     {
         let mut inner = self.inner.lock().await;
@@ -118,17 +117,16 @@ impl Flusher {
     }
 }
 
-struct Runner<A, D, E, EL>
+struct Runner<D, E, EL>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     task_rx: mpsc::UnboundedReceiver<FlushTask>,
-    buffers: Arc<AsyncQueue<Vec<u8, A>>>,
+    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
 
-    region_manager: Arc<RegionManager<A, D, E, EL>>,
+    region_manager: Arc<RegionManager<D, E, EL>>,
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
@@ -137,11 +135,10 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<A, D, E, EL> Runner<A, D, E, EL>
+impl<D, E, EL> Runner<D, E, EL>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     async fn run(mut self) -> Result<()> {

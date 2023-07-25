@@ -61,14 +61,13 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct Region<A, D>
+pub struct Region<D>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
+    D: Device,
 {
     id: RegionId,
 
-    inner: ErwLock<A>,
+    inner: ErwLock<D::IoBufferAllocator>,
 
     device: D,
 }
@@ -85,10 +84,9 @@ where
 ///                    step 2 detaches dirty buffer, must guarantee there is no buffer readers
 /// - reclaim        : happens after the region is evicted, must guarantee there is no writers, buffer readers or physical readers,
 ///                    *or in-flight writers or readers* (verify by version)
-impl<A, D> Region<A, D>
+impl<D> Region<D>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
+    D: Device,
 {
     pub fn new(id: RegionId, device: D) -> Self {
         let inner = RegionInner {
@@ -168,7 +166,7 @@ where
         &self,
         range: impl RangeBounds<usize>,
         version: Version,
-    ) -> Result<Option<ReadSlice<A>>> {
+    ) -> Result<Option<ReadSlice<D::IoBufferAllocator>>> {
         let start = match range.start_bound() {
             std::ops::Bound::Included(i) => *i,
             std::ops::Bound::Excluded(i) => *i + 1,
@@ -255,7 +253,7 @@ where
         }))
     }
 
-    pub async fn attach_buffer(&self, buf: Vec<u8, A>) {
+    pub async fn attach_buffer(&self, buf: Vec<u8, D::IoBufferAllocator>) {
         let mut inner = self.inner.write().await;
 
         assert_eq!(inner.writers, 0);
@@ -264,7 +262,7 @@ where
         inner.attach_buffer(buf);
     }
 
-    pub async fn detach_buffer(&self) -> Vec<u8, A> {
+    pub async fn detach_buffer(&self) -> Vec<u8, D::IoBufferAllocator> {
         let mut inner = self.inner.write().await;
 
         inner.detach_buffer()
@@ -281,7 +279,7 @@ where
         can_write: bool,
         can_buffered_read: bool,
         can_physical_read: bool,
-    ) -> OwnedRwLockWriteGuard<RegionInner<A>> {
+    ) -> OwnedRwLockWriteGuard<RegionInner<D::IoBufferAllocator>> {
         self.inner
             .exclusive(can_write, can_buffered_read, can_physical_read)
             .await

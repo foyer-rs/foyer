@@ -12,17 +12,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
-    core::adapter::Link, eviction::EvictionPolicy, intrusive_adapter, key_adapter, priority_adapter,
+    core::adapter::Link,
+    eviction::{EvictionPolicy, EvictionPolicyExt},
+    intrusive_adapter, key_adapter, priority_adapter,
 };
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::{
-    device::{BufferAllocator, Device},
+    device::Device,
     flusher::{FlushTask, Flusher},
     reclaimer::{ReclaimTask, Reclaimer},
     region::{AllocateResult, Region, RegionId},
@@ -46,39 +48,36 @@ struct RegionManagerInner {
     current: Option<RegionId>,
 }
 
-pub struct RegionManager<A, D, E, EL>
+pub struct RegionManager<D, E, EL>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     inner: Arc<AsyncRwLock<RegionManagerInner>>,
 
-    buffers: Arc<AsyncQueue<Vec<u8, A>>>,
+    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
     clean_regions: Arc<AsyncQueue<RegionId>>,
 
-    regions: Vec<Region<A, D>>,
+    regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
 
     flusher: Arc<Flusher>,
     reclaimer: Arc<Reclaimer>,
 
     eviction: RwLock<E>,
-    _marker: PhantomData<EL>,
 }
 
-impl<A, D, E, EL> RegionManager<A, D, E, EL>
+impl<D, E, EL> RegionManager<D, E, EL>
 where
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    E: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     pub fn new(
         region_nums: usize,
         eviction_config: E::Config,
-        buffers: Arc<AsyncQueue<Vec<u8, A>>>,
+        buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
         clean_regions: Arc<AsyncQueue<RegionId>>,
         device: D,
         flusher: Arc<Flusher>,
@@ -92,7 +91,7 @@ where
         for id in 0..region_nums as RegionId {
             let region = Region::new(id, device.clone());
             let item = Arc::new(RegionEpItem {
-                link: E::Link::default(),
+                link: EL::default(),
                 id,
                 priority: 0,
             });
@@ -112,7 +111,6 @@ where
             flusher,
             reclaimer,
             eviction: RwLock::new(eviction),
-            _marker: PhantomData,
         }
     }
 
@@ -165,7 +163,7 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn region(&self, id: &RegionId) -> &Region<A, D> {
+    pub fn region(&self, id: &RegionId) -> &Region<D> {
         &self.regions[*id as usize]
     }
 
