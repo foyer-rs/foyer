@@ -76,7 +76,6 @@ where
     F: FnOnce() -> error::Result<T> + Send + 'static,
     T: Send + 'static,
 {
-    #[cfg_attr(madsim, expect(deprecated))]
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => res,
         Err(e) => Err(error::Error::Other(format!(
