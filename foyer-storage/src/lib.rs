@@ -19,8 +19,6 @@
 #![feature(let_chains)]
 #![allow(clippy::type_complexity)]
 
-use device::allocator::AlignedAllocator;
-
 pub mod admission;
 pub mod device;
 pub mod error;
@@ -38,7 +36,6 @@ pub mod store;
 pub type LruFsStore<K, V> = store::Store<
     K,
     V,
-    AlignedAllocator,
     device::fs::FsDevice,
     foyer_intrusive::eviction::lru::Lru<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
@@ -53,13 +50,11 @@ pub type LruFsStoreConfig<K, V> = store::StoreConfig<
     foyer_intrusive::eviction::lru::Lru<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
     >,
-    foyer_intrusive::eviction::lru::LruLink,
 >;
 
 pub type LfuFsStore<K, V> = store::Store<
     K,
     V,
-    AlignedAllocator,
     device::fs::FsDevice,
     foyer_intrusive::eviction::lfu::Lfu<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
@@ -74,13 +69,11 @@ pub type LfuFsStoreConfig<K, V> = store::StoreConfig<
     foyer_intrusive::eviction::lfu::Lfu<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
     >,
-    foyer_intrusive::eviction::lfu::LfuLink,
 >;
 
 pub type FifoFsStore<K, V> = store::Store<
     K,
     V,
-    AlignedAllocator,
     device::fs::FsDevice,
     foyer_intrusive::eviction::fifo::Fifo<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
@@ -95,5 +88,4 @@ pub type FifoFsStoreConfig<K, V> = store::StoreConfig<
     foyer_intrusive::eviction::fifo::Fifo<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
-    foyer_intrusive::eviction::fifo::FifoLink,
 >;
