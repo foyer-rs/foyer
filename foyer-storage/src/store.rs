@@ -976,18 +976,13 @@ pub mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
-    use crate::device::{
-        allocator::AlignedAllocator,
-        fs::{FsDevice, FsDeviceConfig},
-    };
+    use crate::device::fs::{FsDevice, FsDeviceConfig};
 
     use super::*;
 
-    type TestStore =
-        Store<u64, AlignedAllocator, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+    type TestStore = Store<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
-    type TestStoreConfig =
-        StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+    type TestStoreConfig = StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
     #[tokio::test]
     #[allow(clippy::identity_op)]
@@ -1087,7 +1082,7 @@ pub mod tests {
         type T = StoreWriter<
             'static,
             u64,
-            AlignedAllocator,
+            Vec<u8>,
             FsDevice,
             Fifo<RegionEpItemAdapter<FifoLink>>,
             FifoLink,

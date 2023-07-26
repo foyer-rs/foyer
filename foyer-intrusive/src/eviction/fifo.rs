@@ -385,6 +385,7 @@ where
 mod tests {
     use std::sync::Arc;
 
+    use crate::eviction::EvictionPolicyExt;
     use itertools::Itertools;
 
     use crate::priority_adapter;

@@ -229,7 +229,7 @@ mod tests {
     }
 
     type FifoCacheConfig = CacheConfig<Fifo<CacheItemEpAdapter<K, V, FifoLink>>>;
-    type FifoCache = Cache<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>>;
+    type FifoCache = Cache<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>, FifoLink>;
 
     #[test]
     fn test_fifo_cache_simple() {
