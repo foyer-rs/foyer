@@ -12,19 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-use std::collections::VecDeque;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
+use std::{collections::VecDeque, fmt::Debug};
 use tokio::sync::Notify;
-
 
 #[derive(Debug)]
 pub struct AsyncQueue<T> {
-    queue: Mutex<VecDeque<T>>,
-    size: AtomicUsize,
+    queue: RwLock<VecDeque<T>>,
     notified: Notify,
 }
 
@@ -37,8 +31,7 @@ impl<T: Debug> Default for AsyncQueue<T> {
 impl<T: Debug> AsyncQueue<T> {
     pub fn new() -> Self {
         Self {
-            queue: Mutex::new(VecDeque::default()),
-            size: AtomicUsize::new(0),
+            queue: RwLock::new(VecDeque::default()),
             notified: Notify::new(),
         }
     }
@@ -46,26 +39,61 @@ impl<T: Debug> AsyncQueue<T> {
     pub async fn acquire(&self) -> T {
         loop {
             let notified = self.notified.notified();
-            if let Some(item) = self.queue.lock().pop_front() {
-                self.size.fetch_sub(1, Ordering::Relaxed);
-                break item;
+            {
+                let mut guard = self.queue.write();
+                if let Some(item) = guard.pop_front() {
+                    if !guard.is_empty() {
+                        // Since in `release` we use `notify_one`, not all waiters
+                        // will be waken up. Therefore if we figure out that the queue is not empty,
+                        // we call `notify_one` to awake the next pending `acquire`.
+                        self.notified.notify_one();
+                    }
+                    break item;
+                }
             }
             notified.await;
         }
     }
 
     pub fn release(&self, item: T) {
-        self.queue.lock().push_back(item);
-        self.size.fetch_add(1, Ordering::Relaxed);
-        // TODO: may optimize with `notify_one`
-        self.notified.notify_waiters();
+        self.queue.write().push_back(item);
+        self.notified.notify_one();
     }
 
     pub fn len(&self) -> usize {
-        self.size.load(Ordering::Relaxed)
+        self.queue.read().len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{Future, poll_fn};
+    use std::pin::pin;
+    use std::task::Poll;
+    use std::task::Poll::Pending;
+    use crate::queue::AsyncQueue;
+
+    #[tokio::test]
+    async fn test_basic() {
+        let queue = AsyncQueue::new();
+        queue.release(1);
+        assert_eq!(1, queue.acquire().await);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_reader() {
+        let queue = AsyncQueue::new();
+        let mut read_future1 = pin!(queue.acquire());
+        let mut read_future2 = pin!(queue.acquire());
+        assert_eq!(Pending, poll_fn(|cx| Poll::Ready(read_future1.as_mut().poll(cx))).await);
+        assert_eq!(Pending, poll_fn(|cx| Poll::Ready(read_future2.as_mut().poll(cx))).await);
+        queue.release(1);
+        queue.release(2);
+        assert_eq!(1, read_future1.await);
+        assert_eq!(2, read_future2.await);
     }
 }

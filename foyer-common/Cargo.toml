@@ -11,7 +11,14 @@ license = "Apache-2.0"
 bytes = "1"
 parking_lot = "0.12"
 paste = "1.0"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 
 [dev-dependencies]
 rand = "0.8.5"
