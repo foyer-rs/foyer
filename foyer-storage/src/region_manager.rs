@@ -51,7 +51,7 @@ struct RegionManagerInner {
 pub struct RegionManager<D, E, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     inner: Arc<AsyncRwLock<RegionManagerInner>>,
@@ -71,7 +71,7 @@ where
 impl<D, E, EL> RegionManager<D, E, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub fn new(

@@ -39,7 +39,7 @@ pub struct Cache<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
+    E: EvictionPolicy<PointerOps = Arc<CacheItem<K, V, EL>>>,
     EL: Link,
 {
     shards: Vec<Mutex<CacheShard<K, V, E, EL>>>,
@@ -49,7 +49,7 @@ struct CacheShard<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
+    E: EvictionPolicy<PointerOps = Arc<CacheItem<K, V, EL>>>,
     EL: Link,
 {
     container: HashMap<K, V, CacheItemHmAdapter<K, V, EL>>,
@@ -112,7 +112,7 @@ impl<K, V, E, EL> Cache<K, V, E, EL>
 where
     K: Key,
     V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
+    E: EvictionPolicy<PointerOps = Arc<CacheItem<K, V, EL>>>,
     EL: Link,
 {
     pub fn new(config: CacheConfig<E>) -> Self {

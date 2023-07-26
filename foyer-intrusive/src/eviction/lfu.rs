@@ -127,7 +127,7 @@ intrusive_adapter! { LfuLinkMainDListAdapter = NonNull<LfuLink>: LfuLink { link_
 pub struct Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     /// tiny lru list
     lru_tiny: DList<LfuLinkTinyDListAdapter>,
@@ -159,7 +159,7 @@ where
 impl<A> Drop for Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     fn drop(&mut self) {
         let mut to_remove = vec![];
@@ -175,7 +175,7 @@ where
 impl<A> Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     pub fn new(config: LfuConfig) -> Self {
         let mut res = Self {
@@ -199,9 +199,9 @@ where
         res
     }
 
-    fn insert(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::PointerOps) {
         unsafe {
-            let item = self.adapter.pointer_ops().into_raw(ptr);
+            let item = A::PointerOps::into_raw(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LfuLink);
 
             assert!(!link.as_ref().is_linked());
@@ -231,10 +231,10 @@ where
 
     fn remove(
         &mut self,
-        ptr: &<A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+        ptr: &A::PointerOps,
+    ) -> A::PointerOps {
         unsafe {
-            let item = self.adapter.pointer_ops().as_ptr(ptr);
+            let item = A::PointerOps::as_ptr(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LfuLink);
 
             assert!(link.as_ref().is_linked());
@@ -243,13 +243,13 @@ where
 
             self.len -= 1;
 
-            self.adapter.pointer_ops().from_raw(item)
+            A::PointerOps::from_raw(item)
         }
     }
 
-    fn access(&mut self, ptr: &<A::PointerOps as PointerOps>::Pointer) {
+    fn access(&mut self, ptr: &A::PointerOps) {
         unsafe {
-            let item = self.adapter.pointer_ops().as_ptr(ptr);
+            let item = A::PointerOps::as_ptr(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LfuLink);
 
             assert!(link.as_ref().is_linked());
@@ -414,34 +414,34 @@ where
 pub struct LfuIter<'a, A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     lfu: &'a Lfu<A>,
     iter_tiny: DListIter<'a, LfuLinkTinyDListAdapter>,
     iter_main: DListIter<'a, LfuLinkMainDListAdapter>,
 
-    ptr: ManuallyDrop<Option<<<A as Adapter>::PointerOps as PointerOps>::Pointer>>,
+    ptr: ManuallyDrop<Option<<A as Adapter>::PointerOps>>,
 }
 
 impl<'a, A> LfuIter<'a, A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<LfuLink>) {
         std::mem::forget(self.ptr.take());
 
         let item = self.lfu.adapter.link2item(link.as_ptr());
-        let ptr = self.lfu.adapter.pointer_ops().from_raw(item);
+        let ptr = A::PointerOps::from_raw(item);
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 
-    unsafe fn ptr(&self) -> Option<&'a <<A as Adapter>::PointerOps as PointerOps>::Pointer> {
+    unsafe fn ptr(&self) -> Option<&'a <A as Adapter>::PointerOps> {
         if self.ptr.is_none() {
             return None;
         }
         let ptr = self.ptr.as_ref().unwrap();
-        let raw = ptr as *const <<A as Adapter>::PointerOps as PointerOps>::Pointer;
+        let raw = ptr as *const <A as Adapter>::PointerOps;
         Some(&*raw)
     }
 }
@@ -449,9 +449,9 @@ where
 impl<'a, A> Iterator for LfuIter<'a, A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
-    type Item = &'a <A::PointerOps as PointerOps>::Pointer;
+    type Item = &'a A::PointerOps;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -496,13 +496,13 @@ where
 unsafe impl<A> Send for Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 unsafe impl<A> Sync for Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
@@ -513,22 +513,23 @@ unsafe impl<'a, A> Send for LfuIter<'a, A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
 
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 unsafe impl<'a, A> Sync for LfuIter<'a, A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
 impl<A> EvictionPolicy for Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
-    type Adapter = A;
+
+    type PointerOps = A::PointerOps;
 
     type Config = LfuConfig;
 
@@ -536,18 +537,18 @@ where
         Self::new(config)
     }
 
-    fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::PointerOps) {
         self.insert(ptr)
     }
 
     fn remove(
         &mut self,
-        ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
-    ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
+        ptr: &A::PointerOps,
+    ) -> A::PointerOps {
         self.remove(ptr)
     }
 
-    fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+    fn access(&mut self, ptr: &A::PointerOps) {
         self.access(ptr)
     }
 
@@ -555,7 +556,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
+    fn iter(&self) -> impl Iterator<Item = &'_ A::PointerOps> {
         self.iter()
     }
 }

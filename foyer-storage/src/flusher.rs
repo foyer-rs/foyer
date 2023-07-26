@@ -23,11 +23,11 @@ use tokio::{
 };
 
 use crate::{
-    device::{BufferAllocator, Device},
+    device::Device,
     error::{Error, Result},
     metrics::Metrics,
     region::RegionId,
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::{RegionEpItem, RegionManager},
     slice::Slice,
 };
 
@@ -70,7 +70,7 @@ impl Flusher {
     ) -> Vec<JoinHandle<()>>
     where
         D: Device,
-        E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+        E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
         EL: Link,
     {
         let mut inner = self.inner.lock().await;
@@ -120,7 +120,7 @@ impl Flusher {
 struct Runner<D, E, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     task_rx: mpsc::UnboundedReceiver<FlushTask>,
@@ -138,7 +138,7 @@ where
 impl<D, E, EL> Runner<D, E, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     async fn run(mut self) -> Result<()> {

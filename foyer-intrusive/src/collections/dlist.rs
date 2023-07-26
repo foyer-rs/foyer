@@ -124,21 +124,21 @@ where
         }
     }
 
-    pub fn push_front(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    pub fn push_front(&mut self, ptr: A::PointerOps) {
         self.iter_mut().insert_after(ptr);
     }
 
-    pub fn push_back(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    pub fn push_back(&mut self, ptr: A::PointerOps) {
         self.iter_mut().insert_before(ptr);
     }
 
-    pub fn pop_front(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn pop_front(&mut self) -> Option<A::PointerOps> {
         let mut iter = self.iter_mut();
         iter.next();
         iter.remove()
     }
 
-    pub fn pop_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn pop_back(&mut self) -> Option<A::PointerOps> {
         let mut iter = self.iter_mut();
         iter.prev();
         iter.remove()
@@ -337,7 +337,7 @@ where
     }
 
     /// Removes the current item from [`DList`] and move next.
-    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn remove(&mut self) -> Option<A::PointerOps> {
         unsafe {
             if !self.is_valid() {
                 return None;
@@ -346,7 +346,7 @@ where
             let mut link = self.link.unwrap();
 
             let item = self.dlist.adapter.link2item(link.as_ptr());
-            let ptr = self.dlist.adapter.pointer_ops().from_raw(item);
+            let ptr = A::PointerOps::from_raw(item);
 
             // fix head and tail if node is either of that
             let mut prev = link.as_ref().prev;
@@ -381,9 +381,9 @@ where
     /// Link a new ptr before the current one.
     ///
     /// If iter is on null, link to tail.
-    pub fn insert_before(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    pub fn insert_before(&mut self, ptr: A::PointerOps) {
         unsafe {
-            let item_new = self.dlist.adapter.pointer_ops().into_raw(ptr);
+            let item_new = A::PointerOps::into_raw(ptr);
             let mut link_new =
                 NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
             assert!(!link_new.as_ref().is_linked());
@@ -409,9 +409,9 @@ where
     /// Link a new ptr after the current one.
     ///
     /// If iter is on null, link to head.
-    pub fn insert_after(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    pub fn insert_after(&mut self, ptr: A::PointerOps) {
         unsafe {
-            let item_new = self.dlist.adapter.pointer_ops().into_raw(ptr);
+            let item_new = A::PointerOps::into_raw(ptr);
             let mut link_new =
                 NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
             assert!(!link_new.as_ref().is_linked());

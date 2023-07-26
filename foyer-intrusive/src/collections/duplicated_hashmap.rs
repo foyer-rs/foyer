@@ -104,7 +104,7 @@ where
                     while iter_group.is_valid() {
                         let link_group = iter_group.remove().unwrap();
                         let item = self.adapter.link2item(link_group.as_ptr());
-                        let _ = self.adapter.pointer_ops().from_raw(item);
+                        let _ = A::PointerOps::from_raw(item);
                     }
                 }
             }
@@ -131,9 +131,9 @@ where
         }
     }
 
-    pub fn insert(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    pub fn insert(&mut self, ptr: A::PointerOps) {
         unsafe {
-            let item_new = self.adapter.pointer_ops().into_raw(ptr);
+            let item_new = A::PointerOps::into_raw(ptr);
             let mut link_new =
                 NonNull::new_unchecked(self.adapter.item2link(item_new) as *mut A::Link);
 
@@ -158,7 +158,7 @@ where
         }
     }
 
-    pub fn remove(&mut self, key: &K) -> Vec<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn remove(&mut self, key: &K) -> Vec<A::PointerOps> {
         unsafe {
             let hash = self.hash_key(key);
             let slot = (self.slots.len() - 1) & hash as usize;
@@ -173,7 +173,7 @@ where
                         let link = iter.remove().unwrap();
                         debug_assert!(!link.as_ref().is_linked());
                         let item = self.adapter.link2item(link.as_ptr());
-                        let ptr = self.adapter.pointer_ops().from_raw(item);
+                        let ptr = A::PointerOps::from_raw(item);
                         res.push(ptr);
                     }
                     debug_assert!(link.as_ref().group.is_empty());
@@ -223,7 +223,7 @@ where
     pub unsafe fn remove_in_place(
         &mut self,
         mut link: NonNull<DuplicatedHashMapLink>,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+    ) -> A::PointerOps {
         assert!(link.as_ref().is_linked());
         let item = self.adapter.link2item(link.as_ptr());
         let key = &*self.adapter.item2key(item);
@@ -276,7 +276,7 @@ where
         debug_assert!(!link.as_ref().group_link.is_linked());
         debug_assert!(link.as_ref().group.is_empty());
 
-        self.adapter.pointer_ops().from_raw(item)
+        A::PointerOps::from_raw(item)
     }
 
     /// # Safety

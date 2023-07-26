@@ -69,7 +69,7 @@ intrusive_adapter! { LruLinkAdapter = NonNull<LruLink>: LruLink { link_lru: DLis
 pub struct Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     /// lru list
     lru: DList<LruLinkAdapter>,
@@ -90,7 +90,7 @@ where
 impl<A> Drop for Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     fn drop(&mut self) {
         let mut to_remove = vec![];
@@ -106,7 +106,7 @@ where
 impl<A> Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     fn new(config: LruConfig) -> Self {
         Self {
@@ -124,9 +124,9 @@ where
         }
     }
 
-    fn insert(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::PointerOps) {
         unsafe {
-            let item = self.adapter.pointer_ops().into_raw(ptr);
+            let item = A::PointerOps::into_raw(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LruLink);
 
             assert!(!link.as_ref().is_linked());
@@ -139,12 +139,9 @@ where
         }
     }
 
-    fn remove(
-        &mut self,
-        ptr: &<A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         unsafe {
-            let item = self.adapter.pointer_ops().as_ptr(ptr);
+            let item = A::PointerOps::as_ptr(ptr);
             let mut link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LruLink);
 
             assert!(link.as_ref().is_linked());
@@ -161,13 +158,13 @@ where
 
             self.len -= 1;
 
-            self.adapter.pointer_ops().from_raw(item)
+            A::PointerOps::from_raw(item)
         }
     }
 
-    fn access(&mut self, ptr: &<A::PointerOps as PointerOps>::Pointer) {
+    fn access(&mut self, ptr: &A::PointerOps) {
         unsafe {
-            let item = self.adapter.pointer_ops().as_ptr(ptr);
+            let item = A::PointerOps::as_ptr(ptr);
             let mut link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LruLink);
 
             assert!(link.as_ref().is_linked());
@@ -290,33 +287,33 @@ where
 pub struct LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     lru: &'a Lru<A>,
     iter: DListIter<'a, LruLinkAdapter>,
 
-    ptr: ManuallyDrop<Option<<<A as Adapter>::PointerOps as PointerOps>::Pointer>>,
+    ptr: ManuallyDrop<Option<<A as Adapter>::PointerOps>>,
 }
 
 impl<'a, A> LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<LruLink>) {
         std::mem::forget(self.ptr.take());
 
         let item = self.lru.adapter.link2item(link.as_ptr());
-        let ptr = self.lru.adapter.pointer_ops().from_raw(item);
+        let ptr = A::PointerOps::from_raw(item);
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 
-    unsafe fn ptr(&self) -> Option<&'a <<A as Adapter>::PointerOps as PointerOps>::Pointer> {
+    unsafe fn ptr(&self) -> Option<&'a <A as Adapter>::PointerOps> {
         if self.ptr.is_none() {
             return None;
         }
         let ptr = self.ptr.as_ref().unwrap();
-        let raw = ptr as *const <<A as Adapter>::PointerOps as PointerOps>::Pointer;
+        let raw = ptr as *const <A as Adapter>::PointerOps;
         Some(&*raw)
     }
 }
@@ -324,9 +321,9 @@ where
 impl<'a, A> Iterator for LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
-    type Item = &'a <A::PointerOps as PointerOps>::Pointer;
+    type Item = &'a A::PointerOps;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -349,14 +346,14 @@ where
 unsafe impl<A> Send for Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
 unsafe impl<A> Sync for Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
@@ -367,23 +364,23 @@ unsafe impl Sync for LruLink {}
 unsafe impl<'a, A> Send for LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
 unsafe impl<'a, A> Sync for LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
 }
 
 impl<A> EvictionPolicy for Lru<A>
 where
     A: Adapter<Link = LruLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::PointerOps: Clone,
 {
-    type Adapter = A;
+    type PointerOps = A::PointerOps;
 
     type Config = LruConfig;
 
@@ -391,18 +388,15 @@ where
         Self::new(config)
     }
 
-    fn insert(&mut self, ptr: <<A>::PointerOps as PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::PointerOps) {
         self.insert(ptr)
     }
 
-    fn remove(
-        &mut self,
-        ptr: &<<A>::PointerOps as PointerOps>::Pointer,
-    ) -> <<A>::PointerOps as PointerOps>::Pointer {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         self.remove(ptr)
     }
 
-    fn access(&mut self, ptr: &<<A>::PointerOps as PointerOps>::Pointer) {
+    fn access(&mut self, ptr: &A::PointerOps) {
         self.access(ptr)
     }
 
@@ -410,7 +404,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
+    fn iter(&self) -> impl Iterator<Item = &'_ A::PointerOps> {
         self.iter()
     }
 }

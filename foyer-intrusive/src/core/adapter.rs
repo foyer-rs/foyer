@@ -47,8 +47,6 @@ pub unsafe trait Adapter: Send + Sync + 'static {
 
     fn new() -> Self;
 
-    fn pointer_ops(&self) -> &Self::PointerOps;
-
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
@@ -143,26 +141,20 @@ macro_rules! intrusive_adapter {
         $vis:vis $name:ident ($($args:tt),*) = $pointer:ty: $item:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         $vis struct $name<$($args),*> $($where_)* {
-            pointer_ops: $crate::core::pointer::DefaultPointerOps<$pointer>,
-            _marker: std::marker::PhantomData<($($args),*)>
+            _marker: std::marker::PhantomData<($pointer, $($args),*)>
         }
 
         unsafe impl<$($args),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args),*> Sync for $name<$($args),*> $($where_)* {}
 
         unsafe impl<$($args),*> $crate::core::adapter::Adapter for $name<$($args),*> $($where_)*{
-            type PointerOps = $crate::core::pointer::DefaultPointerOps<$pointer>;
+            type PointerOps = $pointer;
             type Link = $link;
 
             fn new() -> Self {
                 Self {
-                    pointer_ops: Default::default(),
                     _marker: std::marker::PhantomData,
                 }
-            }
-
-            fn pointer_ops(&self) -> &Self::PointerOps {
-                &self.pointer_ops
             }
 
             unsafe fn link2item(

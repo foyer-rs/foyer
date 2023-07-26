@@ -21,7 +21,7 @@ use crate::{
     indices::Indices,
     metrics::Metrics,
     region::RegionId,
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::{RegionManager},
     reinsertion::ReinsertionPolicy,
     store::Store,
 };
@@ -37,6 +37,7 @@ use tokio::{
     sync::{broadcast, mpsc, Mutex},
     task::JoinHandle,
 };
+use crate::region_manager::RegionEpItem;
 
 #[derive(Debug)]
 pub struct ReclaimTask {
@@ -85,7 +86,7 @@ impl Reclaimer {
         K: Key,
         V: Value,
         D: Device,
-        EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+        EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
         EL: Link,
     {
         let mut inner = self.inner.lock().await;
@@ -144,7 +145,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     task_rx: mpsc::Receiver<ReclaimTask>,
@@ -169,7 +170,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     async fn run(mut self) -> Result<()> {

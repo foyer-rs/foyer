@@ -79,7 +79,7 @@ where
                 while iter.is_valid() {
                     let link = iter.remove().unwrap();
                     let item = self.adapter.link2item(link.as_ptr());
-                    let _ = self.adapter.pointer_ops().from_raw(item);
+                    let _ = A::PointerOps::from_raw(item);
                 }
             }
         }
@@ -107,10 +107,10 @@ where
 
     pub fn insert(
         &mut self,
-        ptr: <A::PointerOps as PointerOps>::Pointer,
-    ) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        ptr: A::PointerOps,
+    ) -> Option<A::PointerOps> {
         unsafe {
-            let item_new = self.adapter.pointer_ops().into_raw(ptr);
+            let item_new = A::PointerOps::into_raw(ptr);
             let link_new = NonNull::new_unchecked(self.adapter.item2link(item_new) as *mut A::Link);
 
             let key_new = &*self.adapter.item2key(item_new);
@@ -130,7 +130,7 @@ where
         }
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn remove(&mut self, key: &K) -> Option<A::PointerOps> {
         unsafe {
             let hash = self.hash_key(key);
             let slot = (self.slots.len() - 1) & hash as usize;
@@ -177,7 +177,7 @@ where
     pub unsafe fn remove_in_place(
         &mut self,
         link: NonNull<HashMapLink>,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+    ) -> A::PointerOps {
         assert!(link.as_ref().is_linked());
         let item = self.adapter.link2item(link.as_ptr());
         let key = &*self.adapter.item2key(item);
@@ -187,7 +187,7 @@ where
             .iter_mut_from_raw(link.as_ref().dlist_link.raw())
             .remove();
         self.len -= 1;
-        self.adapter.pointer_ops().from_raw(item)
+        A::PointerOps::from_raw(item)
     }
 
     /// # Safety
@@ -239,12 +239,12 @@ where
         &mut self,
         key: &K,
         slot: usize,
-    ) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    ) -> Option<A::PointerOps> {
         match self.lookup_inner_mut(key, slot) {
             Some(mut iter) => {
                 let link = iter.remove().unwrap();
                 let item = self.adapter.link2item(link.as_ptr());
-                let ptr = self.adapter.pointer_ops().from_raw(item);
+                let ptr = A::PointerOps::from_raw(item);
                 Some(ptr)
             }
             None => None,

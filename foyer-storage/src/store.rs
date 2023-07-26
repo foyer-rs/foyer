@@ -39,12 +39,13 @@ use crate::{
     metrics::Metrics,
     reclaimer::Reclaimer,
     region::{Region, RegionId},
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::{RegionManager},
     reinsertion::ReinsertionPolicy,
 };
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
+use crate::region_manager::RegionEpItem;
 
 const REGION_MAGIC: u64 = 0x19970327;
 
@@ -102,7 +103,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     indices: Arc<Indices<K>>,
@@ -129,7 +130,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub async fn open(config: StoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
@@ -588,7 +589,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     store: &'a Store<K, V, D, EP, EL>,
@@ -613,7 +614,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     fn new(store: &'a Store<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
@@ -676,7 +677,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -695,7 +696,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     fn drop(&mut self) {

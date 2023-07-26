@@ -26,23 +26,22 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, pin::Pin, ptr::NonNull, rc::Rc, sync::Arc};
+use std::{fmt::Debug, pin::Pin, ptr::NonNull, rc::Rc, sync::Arc};
 
 /// # Safety
 ///
 /// Pointer operations MUST be valid.
 pub unsafe trait PointerOps {
     type Item: ?Sized;
-    type Pointer: Debug;
 
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
-    unsafe fn from_raw(&self, item: *const Self::Item) -> Self::Pointer;
+    unsafe fn from_raw(item: *const Self::Item) -> Self;
 
-    fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Item;
+    fn into_raw(self) -> *const Self::Item;
 
-    fn as_ptr(&self, ptr: &Self::Pointer) -> *const Self::Item;
+    fn as_ptr(&self) -> *const Self::Item;
 }
 
 /// # Safety
@@ -51,227 +50,191 @@ pub unsafe trait PointerOps {
 pub unsafe trait DowngradablePointerOps: PointerOps {
     type WeakPointer;
 
-    fn downgrade(&self, ptr: &<Self as PointerOps>::Pointer) -> Self::WeakPointer;
+    fn downgrade(&self) -> Self::WeakPointer;
 }
 
-#[derive(Debug)]
-pub struct DefaultPointerOps<Pointer>(PhantomData<Pointer>);
-
-impl<Pointer> DefaultPointerOps<Pointer> {
-    /// Constructs an instance of `DefaultPointerOps`.
-    #[inline]
-    pub const fn new() -> DefaultPointerOps<Pointer> {
-        DefaultPointerOps(PhantomData)
-    }
-}
-
-impl<Pointer> Clone for DefaultPointerOps<Pointer> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<Pointer> Copy for DefaultPointerOps<Pointer> {}
-
-impl<Pointer> Default for DefaultPointerOps<Pointer> {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-unsafe impl<'a, T: ?Sized + Debug> PointerOps for DefaultPointerOps<&'a T> {
+unsafe impl<'a, T: ?Sized + Debug> PointerOps for &'a T {
     type Item = T;
-    type Pointer = &'a T;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> &'a T {
+    unsafe fn from_raw(raw: *const T) -> &'a T {
         &*raw
     }
 
     #[inline]
-    fn into_raw(&self, ptr: &'a T) -> *const T {
-        ptr
+    fn into_raw(self) -> *const T {
+        self
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &&'a T) -> *const T {
-        *ptr as *const _
+    fn as_ptr(&self) -> *const T {
+        *self as *const _
     }
 }
 
-unsafe impl<'a, T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<&'a T>> {
+unsafe impl<'a, T: ?Sized + Debug> PointerOps for Pin<&'a T> {
     type Item = T;
-    type Pointer = Pin<&'a T>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Pin<&'a T> {
+    unsafe fn from_raw(raw: *const T) -> Pin<&'a T> {
         Pin::new_unchecked(&*raw)
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Pin<&'a T>) -> *const T {
-        unsafe { Pin::into_inner_unchecked(ptr) as *const T }
+    fn into_raw(self) -> *const T {
+        unsafe { Pin::into_inner_unchecked(self) as *const T }
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Pin<&'a T>) -> *const T {
-        ptr.get_ref() as *const _
+    fn as_ptr(&self) -> *const T {
+        self.get_ref() as *const _
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<NonNull<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for NonNull<T> {
     type Item = T;
-    type Pointer = NonNull<T>;
 
-    unsafe fn from_raw(&self, raw: *const T) -> NonNull<T> {
+    unsafe fn from_raw(raw: *const T) -> NonNull<T> {
         NonNull::new_unchecked(raw as *mut _)
     }
 
-    fn into_raw(&self, ptr: NonNull<T>) -> *const T {
-        ptr.as_ptr()
+    fn into_raw(self) -> *const T {
+        self.as_ptr()
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &NonNull<T>) -> *const T {
-        ptr.as_ptr()
+    fn as_ptr(&self) -> *const T {
+        self.clone().as_ptr()
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Box<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Box<T> {
     type Item = T;
-    type Pointer = Box<T>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Box<T> {
+    unsafe fn from_raw(raw: *const T) -> Box<T> {
         Box::from_raw(raw as *mut T)
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Box<T>) -> *const T {
-        Box::into_raw(ptr) as *const T
+    fn into_raw(self) -> *const T {
+        Box::into_raw(self) as *const T
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Box<T>) -> *const T {
-        ptr.as_ref() as *const _
+    fn as_ptr(&self) -> *const T {
+        self.as_ref() as *const _
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Box<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Box<T>> {
     type Item = T;
-    type Pointer = Pin<Box<T>>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Pin<Box<T>> {
+    unsafe fn from_raw(raw: *const T) -> Pin<Box<T>> {
         Pin::new_unchecked(Box::from_raw(raw as *mut T))
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Pin<Box<T>>) -> *const T {
-        Box::into_raw(unsafe { Pin::into_inner_unchecked(ptr) }) as *const T
+    fn into_raw(self) -> *const T {
+        Box::into_raw(unsafe { Pin::into_inner_unchecked(self) }) as *const T
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Pin<Box<T>>) -> *const T {
-        ptr.as_ref().get_ref() as *const _
+    fn as_ptr(&self) -> *const T {
+        self.as_ref().get_ref() as *const _
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Rc<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Rc<T> {
     type Item = T;
-    type Pointer = Rc<T>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Rc<T> {
+    unsafe fn from_raw(raw: *const T) -> Rc<T> {
         Rc::from_raw(raw)
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Rc<T>) -> *const T {
-        Rc::into_raw(ptr)
+    fn into_raw(self) -> *const T {
+        Rc::into_raw(self)
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Rc<T>) -> *const T {
-        Rc::as_ptr(ptr)
+    fn as_ptr(&self) -> *const T {
+        Rc::as_ptr(self)
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Rc<T>> {
     type Item = T;
-    type Pointer = Pin<Rc<T>>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Pin<Rc<T>> {
+    unsafe fn from_raw(raw: *const T) -> Pin<Rc<T>> {
         Pin::new_unchecked(Rc::from_raw(raw))
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Pin<Rc<T>>) -> *const T {
-        Rc::into_raw(unsafe { Pin::into_inner_unchecked(ptr) })
+    fn into_raw(self) -> *const T {
+        Rc::into_raw(unsafe { Pin::into_inner_unchecked(self) })
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Pin<Rc<T>>) -> *const T {
-        ptr.as_ref().get_ref() as *const _
+    fn as_ptr(&self) -> *const T {
+        self.as_ref().get_ref() as *const _
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Arc<T>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Arc<T> {
     type Item = T;
-    type Pointer = Arc<T>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Arc<T> {
+    unsafe fn from_raw(raw: *const T) -> Arc<T> {
         Arc::from_raw(raw)
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Arc<T>) -> *const T {
-        Arc::into_raw(ptr)
+    fn into_raw(self) -> *const T {
+        Arc::into_raw(self)
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Arc<T>) -> *const T {
-        Arc::as_ptr(ptr)
+    fn as_ptr(&self) -> *const T {
+        Arc::as_ptr(self)
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
+unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Arc<T>> {
     type Item = T;
-    type Pointer = Pin<Arc<T>>;
 
     #[inline]
-    unsafe fn from_raw(&self, raw: *const T) -> Pin<Arc<T>> {
+    unsafe fn from_raw(raw: *const T) -> Pin<Arc<T>> {
         Pin::new_unchecked(Arc::from_raw(raw))
     }
 
     #[inline]
-    fn into_raw(&self, ptr: Pin<Arc<T>>) -> *const T {
-        Arc::into_raw(unsafe { Pin::into_inner_unchecked(ptr) })
+    fn into_raw(self) -> *const T {
+        Arc::into_raw(unsafe { Pin::into_inner_unchecked(self) })
     }
 
     #[inline]
-    fn as_ptr(&self, ptr: &Pin<Arc<T>>) -> *const T {
-        ptr.as_ref().get_ref() as *const _
+    fn as_ptr(&self) -> *const T {
+        self.as_ref().get_ref() as *const _
     }
 }
 
-unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for DefaultPointerOps<Rc<T>> {
+unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for Rc<T> {
     type WeakPointer = std::rc::Weak<T>;
 
-    fn downgrade(&self, ptr: &<Self as PointerOps>::Pointer) -> Self::WeakPointer {
-        Rc::downgrade(ptr)
+    fn downgrade(&self) -> Self::WeakPointer {
+        Rc::downgrade(self)
     }
 }
 
-unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for DefaultPointerOps<Arc<T>> {
+unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for Arc<T> {
     type WeakPointer = std::sync::Weak<T>;
 
-    fn downgrade(&self, ptr: &<Self as PointerOps>::Pointer) -> Self::WeakPointer {
-        Arc::downgrade(ptr)
+    fn downgrade(&self) -> Self::WeakPointer {
+        Arc::downgrade(self)
     }
 }
 
