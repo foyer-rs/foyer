@@ -352,6 +352,7 @@ where
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
+
 unsafe impl<A> Sync for Lru<A>
 where
     A: Adapter<Link = LruLink>,
@@ -360,6 +361,7 @@ where
 }
 
 unsafe impl Send for LruLink {}
+
 unsafe impl Sync for LruLink {}
 
 unsafe impl<'a, A> Send for LruIter<'a, A>
@@ -368,6 +370,7 @@ where
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
 }
+
 unsafe impl<'a, A> Sync for LruIter<'a, A>
 where
     A: Adapter<Link = LruLink>,
@@ -375,16 +378,14 @@ where
 {
 }
 
-impl<A> EvictionPolicy<A> for Lru<A>
+impl<A> EvictionPolicy for Lru<A>
 where
     A: Adapter<Link = LruLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
-    type Link = LruLink;
+    type Adapter = A;
 
     type Config = LruConfig;
-
-    type E<'e> = LruIter<'e, A>;
 
     fn new(config: Self::Config) -> Self {
         Self::new(config)
@@ -409,7 +410,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> Self::E<'_> {
+    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
         self.iter()
     }
 }

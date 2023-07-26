@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use crate::{
-    device::{BufferAllocator, Device},
+    device::Device,
     error::{Error, Result},
     event::EventListener,
     indices::Indices,
@@ -69,10 +69,10 @@ impl Reclaimer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn run<K, V, A, D, EP, EL>(
+    pub async fn run<K, V, D, EP, EL>(
         &self,
-        store: Arc<Store<K, V, A, D, EP, EL>>,
-        region_manager: Arc<RegionManager<A, D, EP, EL>>,
+        store: Arc<Store<K, V, D, EP, EL>>,
+        region_manager: Arc<RegionManager<D, EP, EL>>,
         clean_regions: Arc<AsyncQueue<RegionId>>,
         reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
         indices: Arc<Indices<K>>,
@@ -84,9 +84,8 @@ impl Reclaimer {
     where
         K: Key,
         V: Value,
-        A: BufferAllocator,
-        D: Device<IoBufferAllocator = A>,
-        EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+        D: Device,
+        EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
         EL: Link,
     {
         let mut inner = self.inner.lock().await;
@@ -140,19 +139,18 @@ impl Reclaimer {
     }
 }
 
-struct Runner<K, V, A, D, EP, EL>
+struct Runner<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     task_rx: mpsc::Receiver<ReclaimTask>,
 
-    _store: Arc<Store<K, V, A, D, EP, EL>>,
-    region_manager: Arc<RegionManager<A, D, EP, EL>>,
+    _store: Arc<Store<K, V, D, EP, EL>>,
+    region_manager: Arc<RegionManager<D, EP, EL>>,
     clean_regions: Arc<AsyncQueue<RegionId>>,
     _reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     indices: Arc<Indices<K>>,
@@ -166,13 +164,12 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, A, D, EP, EL> Runner<K, V, A, D, EP, EL>
+impl<K, V, D, EP, EL> Runner<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    A: BufferAllocator,
-    D: Device<IoBufferAllocator = A>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     async fn run(mut self) -> Result<()> {
