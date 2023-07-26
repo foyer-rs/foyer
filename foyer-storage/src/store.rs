@@ -22,7 +22,7 @@ use std::{
 
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use foyer_intrusive::eviction::EvictionPolicy;
 use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -31,7 +31,7 @@ use twox_hash::XxHash64;
 
 use crate::{
     admission::{AdmissionPolicy, Judges},
-    device::{BufferAllocator, Device},
+    device::Device,
     error::{Error, Result},
     event::EventListener,
     flusher::Flusher,
@@ -43,6 +43,7 @@ use crate::{
     reinsertion::ReinsertionPolicy,
 };
 use foyer_common::code::{Key, Value};
+use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
@@ -55,13 +56,12 @@ pub struct PrometheusConfig {
     pub namespace: Option<String>,
 }
 
-pub struct StoreConfig<K, V, D, EP, EL>
+pub struct StoreConfig<K, V, D, EP>
 where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    EL: Link,
+    EP: EvictionPolicy,
 {
     pub eviction_config: EP::Config,
     pub device_config: D::Config,
@@ -77,13 +77,12 @@ where
     pub prometheus_config: PrometheusConfig,
 }
 
-impl<K, V, D, EP, EL> Debug for StoreConfig<K, V, D, EP, EL>
+impl<K, V, D, EP> Debug for StoreConfig<K, V, D, EP>
 where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
-    EL: Link,
+    EP: EvictionPolicy,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreConfig")
@@ -98,18 +97,17 @@ where
     }
 }
 
-pub struct Store<K, V, BA, D, EP, EL>
+pub struct Store<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     indices: Arc<Indices<K>>,
 
-    region_manager: Arc<RegionManager<BA, D, EP, EL>>,
+    region_manager: Arc<RegionManager<D, EP, EL>>,
 
     device: D,
 
@@ -126,16 +124,15 @@ where
     _marker: PhantomData<V>,
 }
 
-impl<K, V, BA, D, EP, EL> Store<K, V, BA, D, EP, EL>
+impl<K, V, D, EP, EL> Store<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    pub async fn open(config: StoreConfig<K, V, D, EP, EL>) -> Result<Arc<Self>> {
+    pub async fn open(config: StoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let device = D::open(config.device_config).await?;
@@ -334,7 +331,7 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    pub fn writer(&self, key: K, weight: usize) -> StoreWriter<'_, K, V, BA, D, EP, EL> {
+    pub fn writer(&self, key: K, weight: usize) -> StoreWriter<'_, K, V, D, EP, EL> {
         StoreWriter::new(self, key, weight)
     }
 
@@ -485,12 +482,12 @@ where
     /// return `true` if region is valid, otherwise `false`
     async fn recover_region(
         region_id: RegionId,
-        region_manager: Arc<RegionManager<BA, D, EP, EL>>,
+        region_manager: Arc<RegionManager<D, EP, EL>>,
         indices: Arc<Indices<K>>,
         event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     ) -> Result<bool> {
         let region = region_manager.region(&region_id).clone();
-        let res = if let Some(mut iter) = RegionEntryIter::<K, V, BA, D>::open(region).await? {
+        let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some(index) = iter.next().await? {
                 for listener in event_listeners.iter() {
                     listener.on_recover(&index.key).await?;
@@ -506,7 +503,7 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, BA, D, EP, EL>) -> Judges {
+    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, D, EP, EL>) -> Judges {
         let mut res = Judges::new();
         for (index, admission) in self.admissions.iter().enumerate() {
             let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
@@ -517,7 +514,7 @@ where
 
     async fn apply_writer(
         &self,
-        mut writer: StoreWriter<'_, K, V, BA, D, EP, EL>,
+        mut writer: StoreWriter<'_, K, V, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
         debug_assert!(!writer.inserted);
@@ -586,16 +583,15 @@ where
     }
 }
 
-pub struct StoreWriter<'a, K, V, BA, D, EP, EL>
+pub struct StoreWriter<'a, K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    store: &'a Store<K, V, BA, D, EP, EL>,
+    store: &'a Store<K, V, D, EP, EL>,
     key: K,
     weight: usize,
 
@@ -612,16 +608,15 @@ where
     inserted: bool,
 }
 
-impl<'a, K, V, BA, D, EP, EL> StoreWriter<'a, K, V, BA, D, EP, EL>
+impl<'a, K, V, D, EP, EL> StoreWriter<'a, K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    fn new(store: &'a Store<K, V, BA, D, EP, EL>, key: K, weight: usize) -> Self {
+    fn new(store: &'a Store<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
         Self {
             store,
             key,
@@ -676,13 +671,12 @@ where
     }
 }
 
-impl<'a, K, V, BA, D, EP, EL> Debug for StoreWriter<'a, K, V, BA, D, EP, EL>
+impl<'a, K, V, D, EP, EL> Debug for StoreWriter<'a, K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -696,13 +690,12 @@ where
     }
 }
 
-impl<'a, K, V, BA, D, EP, EL> Drop for StoreWriter<'a, K, V, BA, D, EP, EL>
+impl<'a, K, V, D, EP, EL> Drop for StoreWriter<'a, K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
-    EP: EvictionPolicy<RegionEpItemAdapter<EL>, Link = EL>,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     fn drop(&mut self) {
@@ -878,28 +871,26 @@ fn checksum(buf: &[u8]) -> u64 {
     hasher.finish()
 }
 
-struct RegionEntryIter<K, V, BA, D>
+struct RegionEntryIter<K, V, D>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
+    D: Device,
 {
-    region: Region<BA, D>,
+    region: Region<D>,
 
     cursor: usize,
 
     _marker: PhantomData<(K, V)>,
 }
 
-impl<K, V, BA, D> RegionEntryIter<K, V, BA, D>
+impl<K, V, D> RegionEntryIter<K, V, D>
 where
     K: Key,
     V: Value,
-    BA: BufferAllocator,
-    D: Device<IoBufferAllocator = BA>,
+    D: Device,
 {
-    async fn open(region: Region<BA, D>) -> Result<Option<Self>> {
+    async fn open(region: Region<D>) -> Result<Option<Self>> {
         let region_size = region.device().region_size();
         let align = region.device().align();
 
@@ -984,24 +975,13 @@ pub mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
-    use crate::device::{
-        allocator::AlignedAllocator,
-        fs::{FsDevice, FsDeviceConfig},
-    };
+    use crate::device::fs::{FsDevice, FsDeviceConfig};
 
     use super::*;
 
-    type TestStore = Store<
-        u64,
-        Vec<u8>,
-        AlignedAllocator,
-        FsDevice,
-        Fifo<RegionEpItemAdapter<FifoLink>>,
-        FifoLink,
-    >;
+    type TestStore = Store<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
-    type TestStoreConfig =
-        StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+    type TestStoreConfig = StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
     #[tokio::test]
     #[allow(clippy::identity_op)]
@@ -1102,7 +1082,6 @@ pub mod tests {
             'static,
             u64,
             Vec<u8>,
-            AlignedAllocator,
             FsDevice,
             Fifo<RegionEpItemAdapter<FifoLink>>,
             FifoLink,

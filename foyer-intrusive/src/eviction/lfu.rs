@@ -523,16 +523,14 @@ where
 {
 }
 
-impl<A> EvictionPolicy<A> for Lfu<A>
+impl<A> EvictionPolicy for Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
 {
-    type Link = LfuLink;
+    type Adapter = A;
 
     type Config = LfuConfig;
-
-    type E<'e> = LfuIter<'e, A>;
 
     fn new(config: Self::Config) -> Self {
         Self::new(config)
@@ -557,7 +555,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> Self::E<'_> {
+    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
         self.iter()
     }
 }
