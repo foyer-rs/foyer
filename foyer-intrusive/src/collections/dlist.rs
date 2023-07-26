@@ -507,7 +507,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::{core::pointer::DefaultPointerOps, intrusive_adapter};
+    use crate::intrusive_adapter;
 
     use super::*;
 
@@ -527,19 +527,15 @@ mod tests {
     }
 
     #[derive(Debug, Default)]
-    struct DListAdapter(DefaultPointerOps<Box<DListItem>>);
+    struct DListAdapter;
 
     unsafe impl Adapter for DListAdapter {
-        type PointerOps = DefaultPointerOps<Box<DListItem>>;
+        type PointerOps = Box<DListItem>;
 
         type Link = DListLink;
 
         fn new() -> Self {
-            Self::default()
-        }
-
-        fn pointer_ops(&self) -> &Self::PointerOps {
-            &self.0
+            Self
         }
 
         unsafe fn link2item(

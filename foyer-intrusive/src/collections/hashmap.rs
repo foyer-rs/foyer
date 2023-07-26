@@ -105,10 +105,7 @@ where
         }
     }
 
-    pub fn insert(
-        &mut self,
-        ptr: A::PointerOps,
-    ) -> Option<A::PointerOps> {
+    pub fn insert(&mut self, ptr: A::PointerOps) -> Option<A::PointerOps> {
         unsafe {
             let item_new = A::PointerOps::into_raw(ptr);
             let link_new = NonNull::new_unchecked(self.adapter.item2link(item_new) as *mut A::Link);
@@ -174,10 +171,7 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`HashMap`].
-    pub unsafe fn remove_in_place(
-        &mut self,
-        link: NonNull<HashMapLink>,
-    ) -> A::PointerOps {
+    pub unsafe fn remove_in_place(&mut self, link: NonNull<HashMapLink>) -> A::PointerOps {
         assert!(link.as_ref().is_linked());
         let item = self.adapter.link2item(link.as_ptr());
         let key = &*self.adapter.item2key(item);
@@ -235,11 +229,7 @@ where
     /// # Safety
     ///
     /// there must be at most one matches in the slot
-    unsafe fn remove_inner(
-        &mut self,
-        key: &K,
-        slot: usize,
-    ) -> Option<A::PointerOps> {
+    unsafe fn remove_inner(&mut self, key: &K, slot: usize) -> Option<A::PointerOps> {
         match self.lookup_inner_mut(key, slot) {
             Some(mut iter) => {
                 let link = iter.remove().unwrap();

@@ -176,10 +176,7 @@ where
         }
     }
 
-    fn remove(
-        &mut self,
-        ptr: &A::PointerOps,
-    ) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         unsafe {
             let item = A::PointerOps::as_ptr(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut FifoLink);
@@ -361,10 +358,7 @@ where
         self.insert(ptr)
     }
 
-    fn remove(
-        &mut self,
-        ptr: &A::PointerOps,
-    ) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         self.remove(ptr)
     }
 

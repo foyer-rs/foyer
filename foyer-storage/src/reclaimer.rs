@@ -21,7 +21,7 @@ use crate::{
     indices::Indices,
     metrics::Metrics,
     region::RegionId,
-    region_manager::{RegionManager},
+    region_manager::{RegionEpItem, RegionManager},
     reinsertion::ReinsertionPolicy,
     store::Store,
 };
@@ -37,7 +37,6 @@ use tokio::{
     sync::{broadcast, mpsc, Mutex},
     task::JoinHandle,
 };
-use crate::region_manager::RegionEpItem;
 
 #[derive(Debug)]
 pub struct ReclaimTask {

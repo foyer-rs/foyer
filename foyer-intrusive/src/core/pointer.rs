@@ -104,7 +104,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for NonNull<T> {
 
     #[inline]
     fn as_ptr(&self) -> *const T {
-        self.clone().as_ptr()
+        NonNull::as_ptr(*self)
     }
 }
 
@@ -248,38 +248,28 @@ mod tests {
     /// This method is only safe to call if the raw pointer is known to be
     /// managed by the provided `PointerOps` type.
     #[inline]
-    unsafe fn clone_pointer_from_raw<T: PointerOps>(
-        pointer_ops: &T,
-        ptr: *const T::Item,
-    ) -> T::Pointer
-    where
-        T::Pointer: Clone,
-    {
+    unsafe fn clone_pointer_from_raw<T: PointerOps + Clone>(ptr: *const T::Item) -> T {
         use std::{mem::ManuallyDrop, ops::Deref};
 
         /// Guard which converts an pointer back into its raw version
         /// when it gets dropped. This makes sure we also perform a full
         /// `from_raw` and `into_raw` round trip - even in the case of panics.
-        struct PointerGuard<'a, T: PointerOps> {
-            pointer: ManuallyDrop<T::Pointer>,
-            pointer_ops: &'a T,
+        struct PointerGuard<T: PointerOps> {
+            pointer: ManuallyDrop<T>,
         }
 
-        impl<'a, T: PointerOps> Drop for PointerGuard<'a, T> {
+        impl<T: PointerOps> Drop for PointerGuard<T> {
             #[inline]
             fn drop(&mut self) {
                 // Prevent shared pointers from being released by converting them
                 // back into the raw pointers
                 // SAFETY: `pointer` is never dropped. `ManuallyDrop::take` is not stable until 1.42.0.
-                let _ = self
-                    .pointer_ops
-                    .into_raw(unsafe { core::ptr::read(&*self.pointer) });
+                let _ = T::into_raw(unsafe { core::ptr::read(&*self.pointer) });
             }
         }
 
         let holder = PointerGuard {
-            pointer: ManuallyDrop::new(pointer_ops.from_raw(ptr)),
-            pointer_ops,
+            pointer: ManuallyDrop::new(T::from_raw(ptr)),
         };
         holder.pointer.deref().clone()
     }
@@ -287,12 +277,11 @@ mod tests {
     #[test]
     fn test_box() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Box<_>>::new();
             let p = Box::new(1);
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Box<i32> = pointer_ops.from_raw(r);
+            let p2: Box<i32> = <Box<i32> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -301,12 +290,11 @@ mod tests {
     #[test]
     fn test_rc() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
             let p = Rc::new(1);
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Rc<i32> = pointer_ops.from_raw(r);
+            let p2: Rc<i32> = <Rc<_> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -315,12 +303,11 @@ mod tests {
     #[test]
     fn test_arc() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
             let p = Arc::new(1);
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Arc<i32> = pointer_ops.from_raw(r);
+            let p2: Arc<i32> = <Arc<_> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -329,14 +316,13 @@ mod tests {
     #[test]
     fn test_box_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Box<_>>::new();
             let p = Box::new(1) as Box<dyn Debug>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Box<dyn Debug> = pointer_ops.from_raw(r);
+            let p2: Box<dyn Debug> = <Box<_> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -346,14 +332,13 @@ mod tests {
     #[test]
     fn test_rc_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
             let p = Rc::new(1) as Rc<dyn Debug>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Rc<dyn Debug> = pointer_ops.from_raw(r);
+            let p2: Rc<dyn Debug> = <Rc<_> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -363,14 +348,13 @@ mod tests {
     #[test]
     fn test_arc_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
             let p = Arc::new(1) as Arc<dyn Debug>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Arc<dyn Debug> = pointer_ops.from_raw(r);
+            let p2: Arc<dyn Debug> = <Arc<_> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -380,10 +364,9 @@ mod tests {
     #[test]
     fn clone_arc_from_raw() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
             let p = Arc::new(1);
             let raw = Arc::as_ptr(&p);
-            let p2: Arc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
+            let p2: Arc<i32> = clone_pointer_from_raw(raw);
             assert_eq!(2, Arc::strong_count(&p2));
         }
     }
@@ -391,10 +374,9 @@ mod tests {
     #[test]
     fn clone_rc_from_raw() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
             let p = Rc::new(1);
             let raw = Rc::as_ptr(&p);
-            let p2: Rc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
+            let p2: Rc<i32> = clone_pointer_from_raw(raw);
             assert_eq!(2, Rc::strong_count(&p2));
         }
     }
@@ -402,12 +384,11 @@ mod tests {
     #[test]
     fn test_pin_box() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Box<_>>>::new();
             let p = Pin::new(Box::new(1));
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Box<i32>> = pointer_ops.from_raw(r);
+            let p2: Pin<Box<i32>> = <Pin<Box<_>> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -416,12 +397,11 @@ mod tests {
     #[test]
     fn test_pin_rc() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
             let p = Pin::new(Rc::new(1));
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Rc<i32>> = pointer_ops.from_raw(r);
+            let p2: Pin<Rc<i32>> = <Pin<Rc<_>> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -430,12 +410,11 @@ mod tests {
     #[test]
     fn test_pin_arc() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
             let p = Pin::new(Arc::new(1));
             let a: *const i32 = &*p;
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Arc<i32>> = pointer_ops.from_raw(r);
+            let p2: Pin<Arc<i32>> = <Pin<Arc<_>> as PointerOps>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -444,14 +423,13 @@ mod tests {
     #[test]
     fn test_pin_box_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Box<_>>>::new();
             let p = Pin::new(Box::new(1)) as Pin<Box<dyn Debug>>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Box<dyn Debug>> = pointer_ops.from_raw(r);
+            let p2: Pin<Box<dyn Debug>> = <Pin<Box<_>> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -461,14 +439,13 @@ mod tests {
     #[test]
     fn test_pin_rc_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
             let p = Pin::new(Rc::new(1)) as Pin<Rc<dyn Debug>>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Rc<dyn Debug>> = pointer_ops.from_raw(r);
+            let p2: Pin<Rc<dyn Debug>> = <Pin<Rc<_>> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -478,14 +455,13 @@ mod tests {
     #[test]
     fn test_pin_arc_unsized() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
             let p = Pin::new(Arc::new(1)) as Pin<Arc<dyn Debug>>;
             let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
-            let r = pointer_ops.into_raw(p);
+            let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Arc<dyn Debug>> = pointer_ops.from_raw(r);
+            let p2: Pin<Arc<dyn Debug>> = <Pin<Arc<_>> as PointerOps>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -495,11 +471,10 @@ mod tests {
     #[test]
     fn clone_pin_arc_from_raw() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
             let p = Pin::new(Arc::new(1));
-            let raw = pointer_ops.into_raw(p);
-            let p2: Pin<Arc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
-            let _p = pointer_ops.from_raw(raw);
+            let raw = p.into_raw();
+            let p2: Pin<Arc<i32>> = clone_pointer_from_raw(raw);
+            let _p = <Pin<Arc<_>> as PointerOps>::from_raw(raw);
             assert_eq!(2, Arc::strong_count(&Pin::into_inner(p2)));
         }
     }
@@ -507,11 +482,10 @@ mod tests {
     #[test]
     fn clone_pin_rc_from_raw() {
         unsafe {
-            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
             let p = Pin::new(Rc::new(1));
-            let raw = pointer_ops.into_raw(p);
-            let p2: Pin<Rc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
-            let _p = pointer_ops.from_raw(raw);
+            let raw = p.into_raw();
+            let p2: Pin<Rc<i32>> = clone_pointer_from_raw(raw);
+            let _p = <Pin<Rc<_>> as PointerOps>::from_raw(raw);
             assert_eq!(2, Rc::strong_count(&Pin::into_inner(p2)));
         }
     }

@@ -39,13 +39,12 @@ use crate::{
     metrics::Metrics,
     reclaimer::Reclaimer,
     region::{Region, RegionId},
-    region_manager::{RegionManager},
+    region_manager::{RegionEpItem, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
-use crate::region_manager::RegionEpItem;
 
 const REGION_MAGIC: u64 = 0x19970327;
 
@@ -976,7 +975,10 @@ pub mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
-    use crate::device::fs::{FsDevice, FsDeviceConfig};
+    use crate::{
+        device::fs::{FsDevice, FsDeviceConfig},
+        region_manager::RegionEpItemAdapter,
+    };
 
     use super::*;
 

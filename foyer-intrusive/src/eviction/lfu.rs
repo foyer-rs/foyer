@@ -229,10 +229,7 @@ where
         }
     }
 
-    fn remove(
-        &mut self,
-        ptr: &A::PointerOps,
-    ) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         unsafe {
             let item = A::PointerOps::as_ptr(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut LfuLink);
@@ -528,7 +525,6 @@ where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <A as Adapter>::PointerOps: Clone,
 {
-
     type PointerOps = A::PointerOps;
 
     type Config = LfuConfig;
@@ -541,10 +537,7 @@ where
         self.insert(ptr)
     }
 
-    fn remove(
-        &mut self,
-        ptr: &A::PointerOps,
-    ) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
         self.remove(ptr)
     }
 
