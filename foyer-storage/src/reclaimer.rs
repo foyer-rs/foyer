@@ -19,11 +19,12 @@ use crate::{
     error::{Error, Result},
     event::EventListener,
     indices::Indices,
+    judge::Judges,
     metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
-    store::Store,
+    store::{RegionEntryIter, Store},
 };
 use bytes::BufMut;
 use foyer_common::{
@@ -102,12 +103,12 @@ impl Reclaimer {
             .zip_eq(stop_rxs.into_iter())
             .map(|(task_rx, stop_rx)| Runner {
                 task_rx,
-                _store: store.clone(),
+                store: store.clone(),
                 region_manager: region_manager.clone(),
                 clean_regions: clean_regions.clone(),
-                _reinsertions: reinsertions.clone(),
+                reinsertions: reinsertions.clone(),
                 indices: indices.clone(),
-                _rate_limiter: rate_limiter.clone(),
+                rate_limiter: rate_limiter.clone(),
                 stop_rx,
                 metrics: metrics.clone(),
                 event_listeners: event_listeners.clone(),
@@ -149,13 +150,13 @@ where
 {
     task_rx: mpsc::Receiver<ReclaimTask>,
 
-    _store: Arc<Store<K, V, D, EP, EL>>,
+    store: Arc<Store<K, V, D, EP, EL>>,
     region_manager: Arc<RegionManager<D, EP, EL>>,
     clean_regions: Arc<AsyncQueue<RegionId>>,
-    _reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
     indices: Arc<Indices<K>>,
 
-    _rate_limiter: Option<Arc<RateLimiter>>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
@@ -204,18 +205,78 @@ where
         }
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
-        let guard = region.exclusive(false, false, false).await;
-
-        tracing::trace!(
-            "[reclaimer] region {}, writers: {}, buffered readers: {}, physical readers: {}",
-            region.id(),
-            guard.writers(),
-            guard.buffered_readers(),
-            guard.physical_readers()
-        );
+        {
+            let guard = region.exclusive(false, false, false).await;
+            tracing::trace!(
+                "[reclaimer] region {}, writers: {}, buffered readers: {}, physical readers: {}",
+                region.id(),
+                guard.writers(),
+                guard.buffered_readers(),
+                guard.physical_readers()
+            );
+            drop(guard);
+        }
 
         // step 2: do reinsertion
-        // TODO(MrCroxx): do reinsertion
+        let reinsert = || {
+            let region = region.clone();
+            let metrics = self.metrics.clone();
+            let rate = self.rate_limiter.clone();
+            let reinsertions = self.reinsertions.clone();
+
+            tracing::info!("[reclaimer] begin reinsertion, region: {}", task.region_id);
+
+            async move {
+                let mut iter = match RegionEntryIter::<K, V, D>::open(region).await {
+                    Ok(Some(iter)) => iter,
+                    Ok(None) => return Ok(()),
+                    Err(e) => return Err(e),
+                };
+
+                while let Some((key, value)) = iter.next_kv().await? {
+                    let weight = key.serialized_len() + value.serialized_len();
+
+                    let mut judges = Judges::new(reinsertions.len());
+                    for (index, reinsertion) in reinsertions.iter().enumerate() {
+                        let judge = reinsertion.judge(&key, weight, &metrics);
+                        judges.set(index, judge);
+                    }
+                    if !judges.judge() {
+                        for (index, reinsertion) in reinsertions.iter().enumerate() {
+                            let judge = judges.get(index);
+                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                        }
+                        continue;
+                    }
+
+                    if let Some(rate) = rate.as_ref() && let Some(wait) = rate.consume(weight as f64) {
+                        tokio::time::sleep(wait).await;
+                    }
+
+                    if self.store.insert(key.clone(), value).await? {
+                        for (index, reinsertion) in reinsertions.iter().enumerate() {
+                            let judge = judges.get(index);
+                            reinsertion.on_insert(&key, weight, &metrics, judge);
+                        }
+                    } else {
+                        for (index, reinsertion) in reinsertions.iter().enumerate() {
+                            let judge = judges.get(index);
+                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                        }
+                    }
+
+                    metrics.bytes_reinsert.inc_by(weight as u64);
+                }
+
+                tracing::info!("[reclaimer] finish reinsertion, region: {}", task.region_id);
+
+                Ok(())
+            }
+        };
+
+        if  !self.reinsertions.is_empty() && let Err(e) = reinsert().await {
+            tracing::warn!("reinsert region {:?} error: {:?}", region, e);
+        }
 
         // step 3: set region last block zero
         let align = region.device().align();
@@ -229,8 +290,6 @@ where
 
         // step 4: send clean region
         self.clean_regions.release(task.region_id);
-
-        drop(guard);
 
         tracing::info!(
             "[reclaimer] finish reclaim task, region: {}",

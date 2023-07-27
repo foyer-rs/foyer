@@ -15,7 +15,6 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    ops::{BitAnd, BitOr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -30,12 +29,13 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::{AdmissionPolicy, Judges},
+    admission::AdmissionPolicy,
     device::Device,
     error::{Error, Result},
     event::EventListener,
     flusher::Flusher,
     indices::{Index, Indices},
+    judge::Judges,
     metrics::Metrics,
     reclaimer::Reclaimer,
     region::{Region, RegionId},
@@ -194,6 +194,13 @@ where
             _marker: PhantomData,
         });
 
+        for admission in store.admissions.iter() {
+            admission.init(&store.indices);
+        }
+        for reinsertion in config.reinsertions.iter() {
+            reinsertion.init(&store.indices);
+        }
+
         let flush_rate_limiter = match config.flush_rate_limit {
             0 => None,
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
@@ -247,14 +254,14 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, value))]
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         let weight = key.serialized_len() + value.serialized_len();
         let writer = StoreWriter::new(self, key, weight);
         writer.finish(value).await
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, value))]
     pub async fn insert_if_not_exists(&self, key: K, value: V) -> Result<bool> {
         if self.exists(&key)? {
             return Ok(false);
@@ -503,13 +510,12 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, D, EP, EL>) -> Judges {
-        let mut res = Judges::new();
+    fn judge_inner(&self, writer: &mut StoreWriter<'_, K, V, D, EP, EL>) {
         for (index, admission) in self.admissions.iter().enumerate() {
-            let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
-            res.set(index, admitted);
+            let judge = admission.judge(&writer.key, writer.weight, &self.metrics);
+            writer.judges.set(index, judge);
         }
-        res
+        writer.is_judged = true;
     }
 
     async fn apply_writer(
@@ -517,20 +523,19 @@ where
         mut writer: StoreWriter<'_, K, V, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
-        debug_assert!(!writer.inserted);
+        debug_assert!(!writer.is_inserted);
 
         let now = Instant::now();
 
         if !writer.judge() {
-            writer.duration += now.elapsed();
             return Ok(false);
         }
 
-        writer.inserted = true;
+        writer.is_inserted = true;
         let key = &writer.key;
 
         for (i, admission) in self.admissions.iter().enumerate() {
-            let judge = writer.judges.as_ref().unwrap().get(i);
+            let judge = writer.judges.get(i);
             admission.on_insert(key, writer.weight, &self.metrics, judge);
         }
 
@@ -595,17 +600,13 @@ where
     key: K,
     weight: usize,
 
-    /// 1: admit
-    /// 0: reject
-    judges: Option<Judges>,
-    /// 1: use
-    /// 0: ignore
-    mask: Judges,
+    judges: Judges,
+    is_judged: bool,
 
     /// judge duration
     duration: Duration,
 
-    inserted: bool,
+    is_inserted: bool,
 }
 
 impl<'a, K, V, D, EP, EL> StoreWriter<'a, K, V, D, EP, EL>
@@ -621,49 +622,21 @@ where
             store,
             key,
             weight,
-            judges: None,
-            mask: Judges::from_value((1 << store.admissions.len()) - 1),
+            judges: Judges::new(store.admissions.len()),
+            is_judged: false,
             duration: Duration::from_nanos(0),
-            inserted: false,
+            is_inserted: false,
         }
-    }
-
-    pub fn set_admission_mask(&mut self, mask: Judges) {
-        self.mask = mask.bitand(Judges::from_value((1 << self.store.admissions.len()) - 1));
-    }
-
-    pub fn all_admission(&mut self) {
-        self.mask = Judges::from_value((1 << self.store.admissions.len()) - 1);
-    }
-
-    pub fn ignore_admission(&mut self) {
-        self.mask = Judges::new();
     }
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub fn judge(&mut self) -> bool {
         let now = Instant::now();
-        if let Some(judges) = self.judges {
-            self.duration += now.elapsed();
-            return Self::is_admitted(&judges, &self.mask);
+        if !self.is_judged {
+            self.store.judge_inner(self);
         }
-        let judges = self.store.judge_inner(self);
-        self.judges = Some(judges);
         self.duration += now.elapsed();
-        Self::is_admitted(&judges, &self.mask)
-    }
-
-    /// judge | ( ~mask )
-    ///
-    /// | judge | mask | ~mask | result |
-    /// |   0   |  0   |   1   |    1   |
-    /// |   0   |  1   |   0   |    0   |
-    /// |   1   |  0   |   1   |    1   |
-    /// |   1   |  1   |   0   |    1   |
-    fn is_admitted(judges: &Judges, mask: &Judges) -> bool {
-        let mut umask = *mask;
-        umask.invert();
-        judges.bitor(umask).is_full()
+        self.judges.judge()
     }
 
     pub async fn finish(self, value: V) -> Result<bool> {
@@ -683,9 +656,10 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("judged", &self.judges)
+            .field("judges", &self.judges)
+            .field("is_judged", &self.is_judged)
             .field("duration", &self.duration)
-            .field("inserted", &self.inserted)
+            .field("inserted", &self.is_inserted)
             .finish()
     }
 }
@@ -699,15 +673,15 @@ where
     EL: Link,
 {
     fn drop(&mut self) {
-        if !self.inserted {
+        if !self.is_inserted {
             self.store
                 .metrics
                 .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
             let mut filtered = false;
-            if let Some(judge) = self.judges.as_ref() {
+            if self.is_judged {
                 for (i, admission) in self.store.admissions.iter().enumerate() {
-                    let judge = judge.get(i);
+                    let judge = self.judges.get(i);
                     admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
                 }
                 filtered = !self.judge();
@@ -871,7 +845,7 @@ fn checksum(buf: &[u8]) -> u64 {
     hasher.finish()
 }
 
-struct RegionEntryIter<K, V, D>
+pub struct RegionEntryIter<K, V, D>
 where
     K: Key,
     V: Value,
@@ -890,7 +864,7 @@ where
     V: Value,
     D: Device,
 {
-    async fn open(region: Region<D>) -> Result<Option<Self>> {
+    pub async fn open(region: Region<D>) -> Result<Option<Self>> {
         let region_size = region.device().region_size();
         let align = region.device().align();
 
@@ -913,7 +887,7 @@ where
         }))
     }
 
-    async fn next(&mut self) -> Result<Option<Index<K>>> {
+    pub async fn next(&mut self) -> Result<Option<Index<K>>> {
         if self.cursor == 0 {
             return Ok(None);
         }
@@ -967,11 +941,28 @@ where
             value_len: footer.value_len,
         }))
     }
+
+    pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
+        let index = match self.next().await {
+            Ok(Some(index)) => index,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
+        let start = index.offset as usize;
+        let end = start + index.len as usize;
+        let slice = self.region.load(start..end, 0).await?.unwrap();
+        let kv = read_entry::<K, V>(slice.as_ref());
+        slice.destroy().await;
+
+        Ok(kv)
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use std::path::PathBuf;
+    use std::{collections::HashSet, path::PathBuf};
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
@@ -983,6 +974,113 @@ pub mod tests {
 
     type TestStoreConfig = StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
+    #[derive(Debug, Clone)]
+    enum Record<K: Key> {
+        Admit(K),
+        Evict(K),
+    }
+
+    #[derive(Debug)]
+    struct JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        records: Mutex<Vec<Record<K>>>,
+        _marker: PhantomData<V>,
+    }
+
+    impl<K, V> JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        fn dump(&self) -> Vec<Record<K>> {
+            self.records.lock().clone()
+        }
+
+        fn remains(&self) -> HashSet<K> {
+            let records = self.dump();
+            let mut res = HashSet::default();
+            for record in records {
+                match record {
+                    Record::Admit(key) => {
+                        res.insert(key);
+                    }
+                    Record::Evict(key) => {
+                        res.remove(&key);
+                    }
+                }
+            }
+            res
+        }
+    }
+
+    impl<K, V> Default for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        fn default() -> Self {
+            Self {
+                records: Mutex::new(Vec::default()),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        type Key = K;
+
+        type Value = V;
+
+        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+            self.records.lock().push(Record::Admit(key.clone()));
+            true
+        }
+
+        fn on_insert(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+
+        fn on_drop(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+    }
+
+    impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        type Key = K;
+
+        type Value = V;
+
+        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+            self.records.lock().push(Record::Evict(key.clone()));
+            false
+        }
+
+        fn on_insert(
+            &self,
+            _key: &Self::Key,
+            _weight: usize,
+            _metrics: &Arc<crate::metrics::Metrics>,
+            _judge: bool,
+        ) {
+        }
+
+        fn on_drop(
+            &self,
+            _key: &Self::Key,
+            _weight: usize,
+            _metrics: &Arc<crate::metrics::Metrics>,
+            _judge: bool,
+        ) {
+        }
+    }
+
     #[tokio::test]
     #[allow(clippy::identity_op)]
     async fn test_recovery() {
@@ -990,6 +1088,12 @@ pub mod tests {
         const MB: usize = 1024 * 1024;
 
         let tempdir = tempfile::tempdir().unwrap();
+
+        let recorder = Arc::new(JudgeRecorder::default());
+        let admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> =
+            vec![recorder.clone()];
+        let reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> =
+            vec![recorder.clone()];
 
         let config = TestStoreConfig {
             eviction_config: FifoConfig {
@@ -1002,8 +1106,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admissions: vec![],
-            reinsertions: vec![],
+            admissions,
+            reinsertions,
             buffer_pool_size: 8 * MB,
             flushers: 1,
             flush_rate_limit: 0,
@@ -1017,7 +1121,7 @@ pub mod tests {
         let store = TestStore::open(config).await.unwrap();
 
         // files:
-        // [0, 1, 2] (evicted)
+        // [0, 1, 2]
         // [3, 4, 5]
         // [6, 7, 8]
         // [9, 10, 11]
@@ -1025,17 +1129,21 @@ pub mod tests {
             store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
         }
 
-        for i in 0..3 {
-            assert!(store.lookup(&i).await.unwrap().is_none());
-        }
-        for i in 3..12 {
-            assert_eq!(
-                store.lookup(&i).await.unwrap().unwrap(),
-                vec![i as u8; 1 * MB],
-            );
+        store.shutdown_runners().await.unwrap();
+
+        let remains = recorder.remains();
+
+        for i in 0..12 {
+            if remains.contains(&i) {
+                assert_eq!(
+                    store.lookup(&i).await.unwrap().unwrap(),
+                    vec![i as u8; 1 * MB],
+                );
+            } else {
+                assert!(store.lookup(&i).await.unwrap().is_none());
+            }
         }
 
-        store.shutdown_runners().await.unwrap();
         drop(store);
 
         let config = TestStoreConfig {
@@ -1062,43 +1170,19 @@ pub mod tests {
         };
         let store = TestStore::open(config).await.unwrap();
 
-        for i in 0..3 {
-            assert!(store.lookup(&i).await.unwrap().is_none());
-        }
-        for i in 3..12 {
-            assert_eq!(
-                store.lookup(&i).await.unwrap().unwrap(),
-                vec![i as u8; 1 * MB],
-            );
-        }
-
         store.shutdown_runners().await.unwrap();
+
+        for i in 0..12 {
+            if remains.contains(&i) {
+                assert_eq!(
+                    store.lookup(&i).await.unwrap().unwrap(),
+                    vec![i as u8; 1 * MB],
+                );
+            } else {
+                assert!(store.lookup(&i).await.unwrap().is_none());
+            }
+        }
+
         drop(store);
-    }
-
-    #[test]
-    fn test_admission_mask() {
-        type T = StoreWriter<
-            'static,
-            u64,
-            Vec<u8>,
-            FsDevice,
-            Fifo<RegionEpItemAdapter<FifoLink>>,
-            FifoLink,
-        >;
-
-        let mask = Judges::from_value(0b_0011);
-
-        assert!(mask.get(0));
-        assert!(mask.get(1));
-        assert!(!mask.get(2));
-        assert!(!mask.get(3));
-
-        let j1 = Judges::from_value(0b_0011);
-        let j2 = Judges::from_value(0b_1011);
-        let j3 = Judges::from_value(0b_1010);
-        assert!(T::is_admitted(&j1, &mask));
-        assert!(T::is_admitted(&j2, &mask));
-        assert!(!T::is_admitted(&j3, &mask));
     }
 }

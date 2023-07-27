@@ -21,10 +21,10 @@ use foyer_common::{
 
 use crate::metrics::Metrics;
 
-use super::AdmissionPolicy;
+use super::ReinsertionPolicy;
 
 #[derive(Debug)]
-pub struct RatedRandomAdmissionPolicy<K, V>
+pub struct RatedRandomReinsertionPolicy<K, V>
 where
     K: Key,
     V: Value,
@@ -32,7 +32,7 @@ where
     inner: RatedRandom<K, V>,
 }
 
-impl<K, V> RatedRandomAdmissionPolicy<K, V>
+impl<K, V> RatedRandomReinsertionPolicy<K, V>
 where
     K: Key,
     V: Value,
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<K, V> AdmissionPolicy for RatedRandomAdmissionPolicy<K, V>
+impl<K, V> ReinsertionPolicy for RatedRandomReinsertionPolicy<K, V>
 where
     K: Key,
     V: Value,
