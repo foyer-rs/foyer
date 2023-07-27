@@ -18,3 +18,4 @@ pub mod bits;
 pub mod code;
 pub mod queue;
 pub mod rate;
+pub mod rated_random;

@@ -14,11 +14,22 @@
 
 use foyer_common::code::{Key, Value};
 
-use std::fmt::Debug;
+use crate::{indices::Indices, metrics::Metrics};
+use std::{fmt::Debug, sync::Arc};
 
+#[allow(unused_variables)]
 pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn judge(&self, key: &Self::Key, value: &Self::Value) -> bool;
+    fn init(&self, indices: &Arc<Indices<Self::Key>>) {}
+
+    fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
+
+    fn on_insert(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+
+    fn on_drop(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
 }
+
+pub mod exist;
+pub mod rated_random;

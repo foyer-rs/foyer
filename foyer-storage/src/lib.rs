@@ -25,6 +25,7 @@ pub mod error;
 pub mod event;
 pub mod flusher;
 pub mod indices;
+pub mod judge;
 pub mod metrics;
 pub mod reclaimer;
 pub mod region;

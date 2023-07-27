@@ -11,6 +11,7 @@ license = "Apache-2.0"
 bytes = "1"
 parking_lot = "0.12"
 paste = "1.0"
+rand = "0.8.5"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -19,6 +20,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tracing = "0.1"
 
 [dev-dependencies]
-rand = "0.8.5"
+itertools = "0.10.5"
