@@ -33,8 +33,9 @@ use clap::Parser;
 
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::{rated_random::RatedRandom, AdmissionPolicy},
+    admission::{rated_random::RatedRandomAdmissionPolicy, AdmissionPolicy},
     device::fs::FsDeviceConfig,
+    reinsertion::{rated_random::RatedRandomReinsertionPolicy, ReinsertionPolicy},
     store::{PrometheusConfig, StoreConfig},
     LfuFsStore,
 };
@@ -119,7 +120,12 @@ pub struct Args {
     /// enable rated random admission policy if `rated_random` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    rated_random: usize,
+    rated_random_admission: usize,
+
+    /// enable rated random admission policy if `rated_random` > 0
+    /// (MiB/s)
+    #[arg(long, default_value_t = 0)]
+    rated_random_reinsertion: usize,
 
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
@@ -221,16 +227,27 @@ async fn main() {
     };
 
     let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    if args.rated_random > 0 {
-        let rr = RatedRandom::new(args.rated_random * 1024 * 1024, Duration::from_millis(100));
+    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
+    if args.rated_random_admission > 0 {
+        let rr = RatedRandomAdmissionPolicy::new(
+            args.rated_random_admission * 1024 * 1024,
+            Duration::from_millis(100),
+        );
         admissions.push(Arc::new(rr));
+    }
+    if args.rated_random_reinsertion > 0 {
+        let rr = RatedRandomReinsertionPolicy::new(
+            args.rated_random_reinsertion * 1024 * 1024,
+            Duration::from_millis(100),
+        );
+        reinsertions.push(Arc::new(rr));
     }
 
     let config = StoreConfig {
         eviction_config,
         device_config,
         admissions,
-        reinsertions: vec![],
+        reinsertions,
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
         flushers: args.flushers,
         flush_rate_limit: args.flush_rate_limit * 1024 * 1024,

@@ -12,19 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use bitmaps::Bitmap;
 use foyer_common::code::{Key, Value};
 
 use std::{fmt::Debug, sync::Arc};
 
-use crate::metrics::Metrics;
-
-pub type Judges = Bitmap<64>;
+use crate::{indices::Indices, metrics::Metrics};
 
 #[allow(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
+
+    fn init(&self, indices: &Arc<Indices<Self::Key>>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
 

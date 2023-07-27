@@ -36,6 +36,21 @@ impl<T: Debug> AsyncQueue<T> {
         }
     }
 
+    pub fn try_acquire(&self) -> Option<T> {
+        let mut guard = self.queue.write();
+        if let Some(item) = guard.pop_front() {
+            if !guard.is_empty() {
+                // Since in `release` we use `notify_one`, not all waiters
+                // will be waken up. Therefore if we figure out that the queue is not empty,
+                // we call `notify_one` to awake the next pending `acquire`.
+                self.notified.notify_one();
+            }
+            Some(item)
+        } else {
+            None
+        }
+    }
+
     pub async fn acquire(&self) -> T {
         loop {
             let notified = self.notified.notified();
