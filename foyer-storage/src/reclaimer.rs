@@ -12,135 +12,27 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     device::Device,
-    error::{Error, Result},
+    error::Result,
     event::EventListener,
-    indices::Indices,
     judge::Judges,
     metrics::Metrics,
-    region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    reinsertion::ReinsertionPolicy,
     store::{RegionEntryIter, Store},
 };
 use bytes::BufMut;
 use foyer_common::{
     code::{Key, Value},
-    queue::AsyncQueue,
     rate::RateLimiter,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use itertools::Itertools;
-use tokio::{
-    sync::{broadcast, mpsc, Mutex},
-    task::JoinHandle,
-};
+use tokio::sync::broadcast;
 
 #[derive(Debug)]
-pub struct ReclaimTask {
-    pub region_id: RegionId,
-}
-
-struct ReclaimerInner {
-    sequence: usize,
-
-    task_txs: Vec<mpsc::Sender<ReclaimTask>>,
-}
-
-pub struct Reclaimer {
-    runners: usize,
-
-    inner: Mutex<ReclaimerInner>,
-}
-
-impl Reclaimer {
-    pub fn new(runners: usize) -> Self {
-        let inner = ReclaimerInner {
-            sequence: 0,
-            task_txs: Vec::with_capacity(runners),
-        };
-
-        Self {
-            runners,
-            inner: Mutex::new(inner),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn run<K, V, D, EP, EL>(
-        &self,
-        store: Arc<Store<K, V, D, EP, EL>>,
-        region_manager: Arc<RegionManager<D, EP, EL>>,
-        clean_regions: Arc<AsyncQueue<RegionId>>,
-        reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
-        indices: Arc<Indices<K>>,
-        rate_limiter: Option<Arc<RateLimiter>>,
-        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
-        stop_rxs: Vec<broadcast::Receiver<()>>,
-        metrics: Arc<Metrics>,
-    ) -> Vec<JoinHandle<()>>
-    where
-        K: Key,
-        V: Value,
-        D: Device,
-        EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-        EL: Link,
-    {
-        let mut inner = self.inner.lock().await;
-
-        #[allow(clippy::type_complexity)]
-        let (mut txs, rxs): (
-            Vec<mpsc::Sender<ReclaimTask>>,
-            Vec<mpsc::Receiver<ReclaimTask>>,
-        ) = (0..self.runners).map(|_| mpsc::channel(1)).unzip();
-        inner.task_txs.append(&mut txs);
-
-        let runners = rxs
-            .into_iter()
-            .zip_eq(stop_rxs.into_iter())
-            .map(|(task_rx, stop_rx)| Runner {
-                task_rx,
-                store: store.clone(),
-                region_manager: region_manager.clone(),
-                clean_regions: clean_regions.clone(),
-                reinsertions: reinsertions.clone(),
-                indices: indices.clone(),
-                rate_limiter: rate_limiter.clone(),
-                stop_rx,
-                metrics: metrics.clone(),
-                event_listeners: event_listeners.clone(),
-            })
-            .collect_vec();
-
-        let mut handles = vec![];
-        for runner in runners {
-            let handle = tokio::spawn(async move {
-                runner.run().await.unwrap();
-            });
-            handles.push(handle);
-        }
-        handles
-    }
-
-    pub fn runners(&self) -> usize {
-        self.runners
-    }
-
-    pub async fn submit(&self, task: ReclaimTask) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        let submittee = inner.sequence % inner.task_txs.len();
-        inner.sequence += 1;
-        inner.task_txs[submittee]
-            .send(task)
-            .await
-            .map_err(Error::other)
-    }
-}
-
-struct Runner<K, V, D, EP, EL>
+pub struct Reclaimer<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -148,24 +40,22 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    task_rx: mpsc::Receiver<ReclaimTask>,
+    threshold: usize,
 
     store: Arc<Store<K, V, D, EP, EL>>,
+
     region_manager: Arc<RegionManager<D, EP, EL>>,
-    clean_regions: Arc<AsyncQueue<RegionId>>,
-    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
-    indices: Arc<Indices<K>>,
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
-    stop_rx: broadcast::Receiver<()>,
-
     metrics: Arc<Metrics>,
+
+    stop_rx: broadcast::Receiver<()>,
 }
 
-impl<K, V, D, EP, EL> Runner<K, V, D, EP, EL>
+impl<K, V, D, EP, EL> Reclaimer<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -173,12 +63,33 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    async fn run(mut self) -> Result<()> {
+    pub fn new(
+        threshold: usize,
+        store: Arc<Store<K, V, D, EP, EL>>,
+        region_manager: Arc<RegionManager<D, EP, EL>>,
+        rate_limiter: Option<Arc<RateLimiter>>,
+        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
+        metrics: Arc<Metrics>,
+        stop_rx: broadcast::Receiver<()>,
+    ) -> Self {
+        Self {
+            threshold,
+            store,
+            region_manager,
+            rate_limiter,
+            event_listeners,
+            metrics,
+            stop_rx,
+        }
+    }
+
+    pub async fn run(mut self) -> Result<()> {
+        let mut watch = self.region_manager.clean_regions().watch();
         loop {
             tokio::select! {
                 biased;
-                Some(task) = self.task_rx.recv() => {
-                    self.handle(task).await?;
+                Ok(()) = watch.changed() => {
+                    self.handle().await?;
                 }
                 _ = self.stop_rx.recv() => {
                     tracing::info!("[reclaimer] exit");
@@ -188,16 +99,22 @@ where
         }
     }
 
-    async fn handle(&self, task: ReclaimTask) -> Result<()> {
-        tracing::info!(
-            "[reclaimer] receive reclaim task, region: {}",
-            task.region_id
-        );
+    async fn handle(&self) -> Result<()> {
+        if self.region_manager.clean_regions().len() >= self.threshold {
+            return Ok(());
+        }
 
-        let region = self.region_manager.region(&task.region_id);
+        // TODO(MrCroxx): subscribe evictable region changes.
+        let region_id = loop {
+            match self.region_manager.eviction_pop() {
+                Some(id) => break id,
+                None => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        };
+        let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
-        let indices = self.indices.take_region(&task.region_id);
+        let indices = self.store.indices().take_region(&region_id);
         for index in indices.iter() {
             for listener in self.event_listeners.iter() {
                 listener.on_evict(&index.key).await?;
@@ -222,9 +139,9 @@ where
             let region = region.clone();
             let metrics = self.metrics.clone();
             let rate = self.rate_limiter.clone();
-            let reinsertions = self.reinsertions.clone();
+            let reinsertions = self.store.reinsertions().clone();
 
-            tracing::info!("[reclaimer] begin reinsertion, region: {}", task.region_id);
+            tracing::info!("[reclaimer] begin reinsertion, region: {}", region_id);
 
             async move {
                 let mut iter = match RegionEntryIter::<K, V, D>::open(region).await {
@@ -268,13 +185,13 @@ where
                     metrics.bytes_reinsert.inc_by(weight as u64);
                 }
 
-                tracing::info!("[reclaimer] finish reinsertion, region: {}", task.region_id);
+                tracing::info!("[reclaimer] finish reinsertion, region: {}", region_id);
 
                 Ok(())
             }
         };
 
-        if  !self.reinsertions.is_empty() && let Err(e) = reinsert().await {
+        if  !self.store.reinsertions().is_empty() && let Err(e) = reinsert().await {
             tracing::warn!("reinsert region {:?} error: {:?}", region, e);
         }
 
@@ -285,16 +202,13 @@ where
         (&mut buf[..]).put_slice(&vec![0; align]);
         region
             .device()
-            .write(buf, task.region_id, (region_size - align) as u64, align)
+            .write(buf, region_id, (region_size - align) as u64, align)
             .await?;
 
         // step 4: send clean region
-        self.clean_regions.release(task.region_id);
+        self.region_manager.clean_regions().release(region_id);
 
-        tracing::info!(
-            "[reclaimer] finish reclaim task, region: {}",
-            task.region_id
-        );
+        tracing::info!("[reclaimer] finish reclaim task, region: {}", region_id);
 
         self.metrics
             .bytes_reclaim

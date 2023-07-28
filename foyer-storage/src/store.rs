@@ -37,7 +37,7 @@ use crate::{
     indices::{Index, Indices},
     judge::Judges,
     metrics::Metrics,
-    reclaimer_v2::Reclaimer,
+    reclaimer::Reclaimer,
     region::{Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
