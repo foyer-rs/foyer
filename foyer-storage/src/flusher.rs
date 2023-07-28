@@ -28,6 +28,7 @@ use crate::{
     slice::Slice,
 };
 
+#[derive(Debug)]
 pub struct Flusher<D, EP, EL>
 where
     D: Device,
@@ -125,7 +126,7 @@ where
 
         // step 3: release buffer
         self.region_manager.buffers().release(buffer);
-        self.region_manager.set_region_evictable(&region.id()).await;
+        self.region_manager.eviction_push(region.id());
 
         tracing::info!("[flusher] finish flush task, region: {}", region_id);
 

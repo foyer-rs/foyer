@@ -37,7 +37,7 @@ use crate::{
     indices::{Index, Indices},
     judge::Judges,
     metrics::Metrics,
-    reclaimer::Reclaimer,
+    reclaimer_v2::Reclaimer,
     region::{Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
@@ -75,6 +75,7 @@ where
     pub recover_concurrency: usize,
     pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub prometheus_config: PrometheusConfig,
+    pub clean_region_threshold: usize,
 }
 
 impl<K, V, D, EP> Debug for StoreConfig<K, V, D, EP>
@@ -97,6 +98,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Store<K, V, D, EP, EL>
 where
     K: Key,
@@ -112,6 +114,7 @@ where
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
@@ -146,15 +149,12 @@ where
 
         let clean_regions = Arc::new(AsyncQueue::new());
 
-        let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
-
         let region_manager = Arc::new(RegionManager::new(
             device.regions(),
             config.eviction_config,
             buffers.clone(),
             clean_regions.clone(),
             device.clone(),
-            reclaimer.clone(),
         ));
 
         let indices = Arc::new(Indices::new(device.regions()));
@@ -185,6 +185,7 @@ where
             region_manager: region_manager.clone(),
             device: device.clone(),
             admissions: config.admissions,
+            reinsertions: config.reinsertions,
             event_listeners: config.event_listeners.clone(),
             handles: Mutex::new(vec![]),
             stop_tx,
@@ -195,7 +196,7 @@ where
         for admission in store.admissions.iter() {
             admission.init(&store.indices);
         }
-        for reinsertion in config.reinsertions.iter() {
+        for reinsertion in store.reinsertions.iter() {
             reinsertion.init(&store.indices);
         }
 
@@ -219,6 +220,20 @@ where
                 )
             })
             .collect_vec();
+        let reclaimers = reclaimer_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Reclaimer::new(
+                    config.clean_region_threshold,
+                    store.clone(),
+                    region_manager.clone(),
+                    reclaim_rate_limiter.clone(),
+                    config.event_listeners.clone(),
+                    metrics.clone(),
+                    stop_rx,
+                )
+            })
+            .collect_vec();
 
         let mut handles = vec![];
         handles.append(
@@ -228,19 +243,10 @@ where
                 .collect_vec(),
         );
         handles.append(
-            &mut reclaimer
-                .run(
-                    store.clone(),
-                    region_manager,
-                    clean_regions,
-                    config.reinsertions,
-                    indices,
-                    reclaim_rate_limiter,
-                    config.event_listeners,
-                    reclaimer_stop_rxs,
-                    metrics,
-                )
-                .await,
+            &mut reclaimers
+                .into_iter()
+                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+                .collect_vec(),
         );
         store.handles.lock().append(&mut handles);
 
@@ -426,6 +432,14 @@ where
         Ok(())
     }
 
+    pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
+        &self.indices
+    }
+
+    pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
+        &self.reinsertions
+    }
+
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
             key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
@@ -506,7 +520,7 @@ where
                 }
                 indices.insert(index);
             }
-            region_manager.set_region_evictable(&region_id).await;
+            region_manager.eviction_push(region_id);
             true
         } else {
             region_manager.clean_regions().release(region_id);
@@ -1121,6 +1135,7 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -1172,6 +1187,7 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
         let store = TestStore::open(config).await.unwrap();
 

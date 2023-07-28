@@ -28,6 +28,7 @@ pub mod indices;
 pub mod judge;
 pub mod metrics;
 pub mod reclaimer;
+pub mod reclaimer_v2;
 pub mod region;
 pub mod region_manager;
 pub mod reinsertion;
