@@ -146,7 +146,6 @@ where
 
         let clean_regions = Arc::new(AsyncQueue::new());
 
-        let flusher = Arc::new(Flusher::new(config.flushers));
         let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
 
         let region_manager = Arc::new(RegionManager::new(
@@ -155,7 +154,6 @@ where
             buffers.clone(),
             clean_regions.clone(),
             device.clone(),
-            flusher.clone(),
             reclaimer.clone(),
         ));
 
@@ -210,17 +208,24 @@ where
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
         };
 
+        let flushers = flusher_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Flusher::new(
+                    region_manager.clone(),
+                    flush_rate_limiter.clone(),
+                    metrics.clone(),
+                    stop_rx,
+                )
+            })
+            .collect_vec();
+
         let mut handles = vec![];
         handles.append(
-            &mut flusher
-                .run(
-                    buffers,
-                    region_manager.clone(),
-                    flush_rate_limiter,
-                    flusher_stop_rxs,
-                    metrics.clone(),
-                )
-                .await,
+            &mut flushers
+                .into_iter()
+                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+                .collect_vec(),
         );
         handles.append(
             &mut reclaimer

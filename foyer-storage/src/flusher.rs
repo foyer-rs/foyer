@@ -14,139 +14,61 @@
 
 use std::sync::Arc;
 
-use foyer_common::{queue::AsyncQueue, rate::RateLimiter};
+use foyer_common::rate::RateLimiter;
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use itertools::Itertools;
-use tokio::{
-    sync::{broadcast, mpsc, Mutex},
-    task::JoinHandle,
-};
+
+use tokio::sync::broadcast;
 
 use crate::{
-    device::{BufferAllocator, Device},
-    error::{Error, Result},
+    device::Device,
+    error::Result,
     metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
     slice::Slice,
 };
 
-#[derive(Debug)]
-pub struct FlushTask {
-    pub region_id: RegionId,
-}
-
-struct FlusherInner {
-    sequence: usize,
-
-    task_txs: Vec<mpsc::UnboundedSender<FlushTask>>,
-}
-
-pub struct Flusher {
-    runners: usize,
-
-    inner: Mutex<FlusherInner>,
-}
-
-impl Flusher {
-    pub fn new(runners: usize) -> Self {
-        let inner = FlusherInner {
-            sequence: 0,
-            task_txs: Vec::with_capacity(runners),
-        };
-        Self {
-            runners,
-            inner: Mutex::new(inner),
-        }
-    }
-
-    pub async fn run<D, E, EL>(
-        &self,
-        buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
-        region_manager: Arc<RegionManager<D, E, EL>>,
-        rate_limiter: Option<Arc<RateLimiter>>,
-        stop_rxs: Vec<broadcast::Receiver<()>>,
-        metrics: Arc<Metrics>,
-    ) -> Vec<JoinHandle<()>>
-    where
-        D: Device,
-        E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-        EL: Link,
-    {
-        let mut inner = self.inner.lock().await;
-
-        #[allow(clippy::type_complexity)]
-        let (mut txs, rxs): (
-            Vec<mpsc::UnboundedSender<FlushTask>>,
-            Vec<mpsc::UnboundedReceiver<FlushTask>>,
-        ) = (0..self.runners).map(|_| mpsc::unbounded_channel()).unzip();
-        inner.task_txs.append(&mut txs);
-
-        let runners = rxs
-            .into_iter()
-            .zip_eq(stop_rxs.into_iter())
-            .map(|(task_rx, stop_rx)| Runner {
-                task_rx,
-                buffers: buffers.clone(),
-                region_manager: region_manager.clone(),
-                rate_limiter: rate_limiter.clone(),
-                stop_rx,
-                metrics: metrics.clone(),
-            })
-            .collect_vec();
-
-        let mut handles = vec![];
-        for runner in runners {
-            let handle = tokio::spawn(async move {
-                runner.run().await.unwrap();
-            });
-            handles.push(handle);
-        }
-        handles
-    }
-
-    pub fn runners(&self) -> usize {
-        self.runners
-    }
-
-    pub async fn submit(&self, task: FlushTask) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        let submittee = inner.sequence % inner.task_txs.len();
-        inner.sequence += 1;
-        inner.task_txs[submittee].send(task).map_err(Error::other)
-    }
-}
-
-struct Runner<D, E, EL>
+pub struct Flusher<D, EP, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    task_rx: mpsc::UnboundedReceiver<FlushTask>,
-    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
-
-    region_manager: Arc<RegionManager<D, E, EL>>,
+    region_manager: Arc<RegionManager<D, EP, EL>>,
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
-    stop_rx: broadcast::Receiver<()>,
-
     metrics: Arc<Metrics>,
+
+    stop_rx: broadcast::Receiver<()>,
 }
 
-impl<D, E, EL> Runner<D, E, EL>
+impl<D, EP, EL> Flusher<D, EP, EL>
 where
     D: Device,
-    E: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    async fn run(mut self) -> Result<()> {
+    pub fn new(
+        region_manager: Arc<RegionManager<D, EP, EL>>,
+        rate_limiter: Option<Arc<RateLimiter>>,
+        metrics: Arc<Metrics>,
+        stop_rx: broadcast::Receiver<()>,
+    ) -> Self {
+        Self {
+            region_manager,
+            rate_limiter,
+            metrics,
+            stop_rx,
+        }
+    }
+
+    pub async fn run(mut self) -> Result<()> {
         loop {
             tokio::select! {
                 biased;
-                Some(task) = self.task_rx.recv() => {
-                    self.handle(task).await?;
+                region_id = self.region_manager.dirty_regions().acquire() => {
+                    self.handle(region_id).await?;
                 }
                 _ = self.stop_rx.recv() => {
                     tracing::info!("[flusher] exit");
@@ -156,10 +78,10 @@ where
         }
     }
 
-    async fn handle(&self, task: FlushTask) -> Result<()> {
-        tracing::info!("[flusher] receive flush task, region: {}", task.region_id);
+    async fn handle(&self, region_id: RegionId) -> Result<()> {
+        tracing::info!("[flusher] receive flush task, region: {}", region_id);
 
-        let region = self.region_manager.region(&task.region_id);
+        let region = self.region_manager.region(&region_id);
 
         tracing::trace!("[flusher] step 1");
 
@@ -171,7 +93,7 @@ where
             let _ = region.exclusive(false, true, false).await;
         }
 
-        tracing::trace!("[flusher] write region {} back to device", task.region_id);
+        tracing::trace!("[flusher] write region {} back to device", region_id);
 
         let mut offset = 0;
         let len = region.device().io_size();
@@ -202,10 +124,10 @@ where
         tracing::trace!("[flusher] step 3");
 
         // step 3: release buffer
-        self.buffers.release(buffer);
+        self.region_manager.buffers().release(buffer);
         self.region_manager.set_region_evictable(&region.id()).await;
 
-        tracing::info!("[flusher] finish flush task, region: {}", task.region_id);
+        tracing::info!("[flusher] finish flush task, region: {}", region_id);
 
         self.metrics
             .bytes_flush

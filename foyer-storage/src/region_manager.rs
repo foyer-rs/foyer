@@ -25,7 +25,6 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::{
     device::Device,
-    flusher::{FlushTask, Flusher},
     reclaimer::{ReclaimTask, Reclaimer},
     region::{AllocateResult, Region, RegionId},
 };
@@ -48,6 +47,7 @@ struct RegionManagerInner {
     current: Option<RegionId>,
 }
 
+/// Manager of regions and buffer pools.
 pub struct RegionManager<D, E, EL>
 where
     D: Device,
@@ -57,12 +57,16 @@ where
     inner: Arc<AsyncRwLock<RegionManagerInner>>,
 
     buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
+
+    /// Empty regions.
     clean_regions: Arc<AsyncQueue<RegionId>>,
+
+    /// Regions with dirty buffer waiting for flushing.
+    dirty_regions: Arc<AsyncQueue<RegionId>>,
 
     regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
 
-    flusher: Arc<Flusher>,
     reclaimer: Arc<Reclaimer>,
 
     eviction: RwLock<E>,
@@ -80,10 +84,10 @@ where
         buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
         clean_regions: Arc<AsyncQueue<RegionId>>,
         device: D,
-        flusher: Arc<Flusher>,
         reclaimer: Arc<Reclaimer>,
     ) -> Self {
         let eviction = E::new(eviction_config);
+        let dirty_regions = Arc::new(AsyncQueue::new());
 
         let mut regions = Vec::with_capacity(region_nums);
         let mut items = Vec::with_capacity(region_nums);
@@ -106,9 +110,9 @@ where
             inner: Arc::new(AsyncRwLock::new(inner)),
             buffers,
             clean_regions,
+            dirty_regions,
             regions,
             items,
-            flusher,
             reclaimer,
             eviction: RwLock::new(eviction),
         }
@@ -127,8 +131,8 @@ where
                     return AllocateResult::Ok(slice);
                 }
                 AllocateResult::Full { slice, remain } => {
-                    // current region is full, schedule flushing
-                    self.submit_flush_task(FlushTask { region_id }).await;
+                    // current region is full, append dirty regions
+                    self.dirty_regions.release(region_id);
                     inner.current = None;
                     return AllocateResult::Full { slice, remain };
                 }
@@ -197,18 +201,20 @@ where
         }
     }
 
+    pub fn buffers(&self) -> &AsyncQueue<Vec<u8, D::IoBufferAllocator>> {
+        &self.buffers
+    }
+
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
         &self.clean_regions
     }
 
-    async fn submit_reclaim_task(&self, task: ReclaimTask) {
-        if let Err(e) = self.reclaimer.submit(task).await {
-            tracing::warn!("fail to submit reclaim task: {:?}", e);
-        }
+    pub fn dirty_regions(&self) -> &AsyncQueue<RegionId> {
+        &self.dirty_regions
     }
 
-    async fn submit_flush_task(&self, task: FlushTask) {
-        if let Err(e) = self.flusher.submit(task).await {
+    async fn submit_reclaim_task(&self, task: ReclaimTask) {
+        if let Err(e) = self.reclaimer.submit(task).await {
             tracing::warn!("fail to submit reclaim task: {:?}", e);
         }
     }
