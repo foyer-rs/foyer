@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
+
 use async_trait::async_trait;
 use foyer_common::code::{Key, Value};
 
@@ -19,7 +21,7 @@ use crate::error::Result;
 
 #[allow(unused_variables)]
 #[async_trait]
-pub trait EventListener: Send + Sync + 'static {
+pub trait EventListener: Send + Sync + 'static + Debug {
     type K: Key;
     type V: Value;
 

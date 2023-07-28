@@ -16,11 +16,13 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
+#[derive(Debug)]
 pub struct RateLimiter {
     inner: Mutex<Inner>,
     rate: f64,
 }
 
+#[derive(Debug)]
 struct Inner {
     quota: f64,
 

@@ -20,7 +20,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
+use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
 use futures::Future;
 use itertools::Itertools;
@@ -63,17 +63,45 @@ where
     D: Device,
     EP: EvictionPolicy,
 {
+    /// Evictino policy configurations.
     pub eviction_config: EP::Config,
+
+    /// Device configurations.
     pub device_config: D::Config,
+
+    /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+
+    /// Reinsertion policies.
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+
+    /// Buffer pool size, should be a multiplier of device region size.
     pub buffer_pool_size: usize,
+
+    /// Count of flushers.
     pub flushers: usize,
+
+    /// Flush rate limits.
     pub flush_rate_limit: usize,
+
+    /// Count of reclaimers.
     pub reclaimers: usize,
+
+    /// Flush rate limits.
     pub reclaim_rate_limit: usize,
+
+    /// Clean region count threshold to trigger reclamation.
+    ///
+    /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
+    pub clean_region_threshold: usize,
+
+    /// Concurrency of recovery.
     pub recover_concurrency: usize,
+
+    /// Event listsners.
     pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
+
+    /// Prometheus configuration.
     pub prometheus_config: PrometheusConfig,
 }
 
@@ -97,6 +125,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Store<K, V, D, EP, EL>
 where
     K: Key,
@@ -112,6 +141,7 @@ where
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
@@ -137,26 +167,13 @@ where
 
         let device = D::open(config.device_config).await?;
 
-        let buffers = Arc::new(AsyncQueue::new());
-        for _ in 0..(config.buffer_pool_size / device.region_size()) {
-            let len = device.region_size();
-            let buffer = device.io_buffer(len, len);
-            buffers.release(buffer);
-        }
-
-        let clean_regions = Arc::new(AsyncQueue::new());
-
-        let flusher = Arc::new(Flusher::new(config.flushers));
-        let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
+        let buffer_count = config.buffer_pool_size / device.region_size();
 
         let region_manager = Arc::new(RegionManager::new(
+            buffer_count,
             device.regions(),
             config.eviction_config,
-            buffers.clone(),
-            clean_regions.clone(),
             device.clone(),
-            flusher.clone(),
-            reclaimer.clone(),
         ));
 
         let indices = Arc::new(Indices::new(device.regions()));
@@ -187,6 +204,7 @@ where
             region_manager: region_manager.clone(),
             device: device.clone(),
             admissions: config.admissions,
+            reinsertions: config.reinsertions,
             event_listeners: config.event_listeners.clone(),
             handles: Mutex::new(vec![]),
             stop_tx,
@@ -197,7 +215,7 @@ where
         for admission in store.admissions.iter() {
             admission.init(&store.indices);
         }
-        for reinsertion in config.reinsertions.iter() {
+        for reinsertion in store.reinsertions.iter() {
             reinsertion.init(&store.indices);
         }
 
@@ -210,32 +228,44 @@ where
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
         };
 
+        let flushers = flusher_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Flusher::new(
+                    region_manager.clone(),
+                    flush_rate_limiter.clone(),
+                    metrics.clone(),
+                    stop_rx,
+                )
+            })
+            .collect_vec();
+        let reclaimers = reclaimer_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Reclaimer::new(
+                    config.clean_region_threshold,
+                    store.clone(),
+                    region_manager.clone(),
+                    reclaim_rate_limiter.clone(),
+                    config.event_listeners.clone(),
+                    metrics.clone(),
+                    stop_rx,
+                )
+            })
+            .collect_vec();
+
         let mut handles = vec![];
         handles.append(
-            &mut flusher
-                .run(
-                    buffers,
-                    region_manager.clone(),
-                    flush_rate_limiter,
-                    flusher_stop_rxs,
-                    metrics.clone(),
-                )
-                .await,
+            &mut flushers
+                .into_iter()
+                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+                .collect_vec(),
         );
         handles.append(
-            &mut reclaimer
-                .run(
-                    store.clone(),
-                    region_manager,
-                    clean_regions,
-                    config.reinsertions,
-                    indices,
-                    reclaim_rate_limiter,
-                    config.event_listeners,
-                    reclaimer_stop_rxs,
-                    metrics,
-                )
-                .await,
+            &mut reclaimers
+                .into_iter()
+                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+                .collect_vec(),
         );
         store.handles.lock().append(&mut handles);
 
@@ -421,6 +451,14 @@ where
         Ok(())
     }
 
+    pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
+        &self.indices
+    }
+
+    pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
+        &self.reinsertions
+    }
+
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
             key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
@@ -501,7 +539,7 @@ where
                 }
                 indices.insert(index);
             }
-            region_manager.set_region_evictable(&region_id).await;
+            region_manager.eviction_push(region_id);
             true
         } else {
             region_manager.clean_regions().release(region_id);
@@ -1116,6 +1154,7 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -1167,6 +1206,7 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
         let store = TestStore::open(config).await.unwrap();
 

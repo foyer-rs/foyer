@@ -134,6 +134,10 @@ pub struct Args {
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     reclaim_rate_limit: usize,
+
+    /// `0` means equal to reclaimer count.
+    #[arg(long, default_value_t = 0)]
+    clean_region_threshold: usize,
 }
 
 impl Args {
@@ -243,6 +247,12 @@ async fn main() {
         reinsertions.push(Arc::new(rr));
     }
 
+    let clean_region_threshold = if args.clean_region_threshold == 0 {
+        args.reclaimers
+    } else {
+        args.clean_region_threshold
+    };
+
     let config = StoreConfig {
         eviction_config,
         device_config,
@@ -256,6 +266,7 @@ async fn main() {
         recover_concurrency: args.recover_concurrency,
         event_listeners: vec![],
         prometheus_config: PrometheusConfig::default(),
+        clean_region_threshold,
     };
 
     println!("{:#?}", config);
