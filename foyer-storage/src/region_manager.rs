@@ -82,19 +82,26 @@ where
     EL: Link,
 {
     pub fn new(
-        region_nums: usize,
+        buffer_count: usize,
+        region_count: usize,
         eviction_config: EP::Config,
-        buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
-        clean_regions: Arc<AsyncQueue<RegionId>>,
         device: D,
     ) -> Self {
+        let buffers = Arc::new(AsyncQueue::new());
+        for _ in 0..buffer_count {
+            let len = device.region_size();
+            let buffer = device.io_buffer(len, len);
+            buffers.release(buffer);
+        }
+
         let eviction = EP::new(eviction_config);
+        let clean_regions = Arc::new(AsyncQueue::new());
         let dirty_regions = Arc::new(AsyncQueue::new());
 
-        let mut regions = Vec::with_capacity(region_nums);
-        let mut items = Vec::with_capacity(region_nums);
+        let mut regions = Vec::with_capacity(region_count);
+        let mut items = Vec::with_capacity(region_count);
 
-        for id in 0..region_nums as RegionId {
+        for id in 0..region_count as RegionId {
             let region = Region::new(id, device.clone());
             let item = Arc::new(RegionEpItem {
                 link: EL::default(),

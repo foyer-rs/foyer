@@ -20,7 +20,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
+use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
 use futures::Future;
 use itertools::Itertools;
@@ -63,19 +63,46 @@ where
     D: Device,
     EP: EvictionPolicy,
 {
+    /// Evictino policy configurations.
     pub eviction_config: EP::Config,
+
+    /// Device configurations.
     pub device_config: D::Config,
+
+    /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+
+    /// Reinsertion policies.
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+
+    /// Buffer pool size, should be a multiplier of device region size.
     pub buffer_pool_size: usize,
+
+    /// Count of flushers.
     pub flushers: usize,
+
+    /// Flush rate limits.
     pub flush_rate_limit: usize,
+
+    /// Count of reclaimers.
     pub reclaimers: usize,
+
+    /// Flush rate limits.
     pub reclaim_rate_limit: usize,
-    pub recover_concurrency: usize,
-    pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
-    pub prometheus_config: PrometheusConfig,
+
+    /// Clean region count threshold to trigger reclamation.
+    ///
+    /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
     pub clean_region_threshold: usize,
+
+    /// Concurrency of recovery.
+    pub recover_concurrency: usize,
+
+    /// Event listsners.
+    pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
+
+    /// Prometheus configuration.
+    pub prometheus_config: PrometheusConfig,
 }
 
 impl<K, V, D, EP> Debug for StoreConfig<K, V, D, EP>
@@ -140,20 +167,12 @@ where
 
         let device = D::open(config.device_config).await?;
 
-        let buffers = Arc::new(AsyncQueue::new());
-        for _ in 0..(config.buffer_pool_size / device.region_size()) {
-            let len = device.region_size();
-            let buffer = device.io_buffer(len, len);
-            buffers.release(buffer);
-        }
-
-        let clean_regions = Arc::new(AsyncQueue::new());
+        let buffer_count = config.buffer_pool_size / device.region_size();
 
         let region_manager = Arc::new(RegionManager::new(
+            buffer_count,
             device.regions(),
             config.eviction_config,
-            buffers.clone(),
-            clean_regions.clone(),
             device.clone(),
         ));
 
