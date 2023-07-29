@@ -44,7 +44,7 @@ use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use rate::RateLimiter;
-use tokio::sync::oneshot;
+use tokio::sync::broadcast;
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
 
 #[derive(Parser, Debug, Clone)]
@@ -273,8 +273,7 @@ async fn main() {
 
     let store = TStore::open(config).await.unwrap();
 
-    let (iostat_stop_tx, iostat_stop_rx) = oneshot::channel();
-    let (bench_stop_tx, bench_stop_rx) = oneshot::channel();
+    let (stop_tx, _) = broadcast::channel(4096);
 
     let handle_monitor = tokio::spawn({
         let iostat_path = iostat_path.clone();
@@ -284,24 +283,24 @@ async fn main() {
             iostat_path,
             Duration::from_secs(args.report_interval),
             metrics,
-            iostat_stop_rx,
+            stop_tx.subscribe(),
         )
     });
-    let handle_signal = tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.unwrap();
-        bench_stop_tx.send(()).unwrap();
-        iostat_stop_tx.send(()).unwrap();
-    });
+
     let handle_bench = tokio::spawn(bench(
         args.clone(),
         store.clone(),
         metrics.clone(),
-        bench_stop_rx,
+        stop_tx.clone(),
     ));
 
+    let handle_signal = tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.unwrap();
+        tracing::warn!("foyer-storage-bench is cancelled with CTRL-C");
+        stop_tx.send(()).unwrap();
+    });
+
     handle_bench.await.unwrap();
-    handle_monitor.abort();
-    handle_signal.abort();
 
     let iostat_end = iostat(&iostat_path);
     let metrics_dump_end = metrics.dump();
@@ -312,12 +311,16 @@ async fn main() {
         &metrics_dump_start,
         &metrics_dump_end,
     );
-    println!("\nTotal:\n{}", analysis);
 
-    store.shutdown_runners().await.unwrap();
+    store.close().await.unwrap();
+
+    handle_monitor.abort();
+    handle_signal.abort();
+
+    println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::Receiver<()>) {
+async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -331,14 +334,8 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::
 
     let index = Arc::new(AtomicU64::new(0));
 
-    let (w_stop_txs, w_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
-        (0..args.writers).map(|_| oneshot::channel()).unzip();
-    let (r_stop_txs, r_stop_rxs): (Vec<oneshot::Sender<()>>, Vec<oneshot::Receiver<()>>) =
-        (0..args.readers).map(|_| oneshot::channel()).unzip();
-
-    let w_handles = w_stop_rxs
-        .into_iter()
-        .map(|w_stop_rx| {
+    let w_handles = (0..args.writers)
+        .map(|_| {
             tokio::spawn(write(
                 args.entry_size,
                 w_rate,
@@ -346,13 +343,12 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::
                 store.clone(),
                 args.time,
                 metrics.clone(),
-                w_stop_rx,
+                stop_tx.subscribe(),
             ))
         })
         .collect_vec();
-    let r_handles = r_stop_rxs
-        .into_iter()
-        .map(|r_stop_rx| {
+    let r_handles = (0..args.readers)
+        .map(|_| {
             tokio::spawn(read(
                 args.entry_size,
                 r_rate,
@@ -360,22 +356,11 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop: oneshot::
                 store.clone(),
                 args.time,
                 metrics.clone(),
-                r_stop_rx,
+                stop_tx.subscribe(),
                 args.lookup_range,
             ))
         })
         .collect_vec();
-
-    tokio::spawn(async move {
-        if let Ok(()) = stop.await {
-            for w_stop_tx in w_stop_txs {
-                let _ = w_stop_tx.send(());
-            }
-            for r_stop_tx in r_stop_txs {
-                let _ = r_stop_tx.send(());
-            }
-        }
-    });
 
     join_all(w_handles).await;
     join_all(r_handles).await;
@@ -389,7 +374,7 @@ async fn write(
     store: Arc<TStore>,
     time: u64,
     metrics: Metrics,
-    mut stop: oneshot::Receiver<()>,
+    mut stop: broadcast::Receiver<()>,
 ) {
     let start = Instant::now();
 
@@ -397,7 +382,7 @@ async fn write(
 
     loop {
         match stop.try_recv() {
-            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed().as_secs() >= time {
@@ -433,7 +418,7 @@ async fn read(
     store: Arc<TStore>,
     time: u64,
     metrics: Metrics,
-    mut stop: oneshot::Receiver<()>,
+    mut stop: broadcast::Receiver<()>,
     look_up_range: u64,
 ) {
     let start = Instant::now();
@@ -444,7 +429,7 @@ async fn read(
 
     loop {
         match stop.try_recv() {
-            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed().as_secs() >= time {

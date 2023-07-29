@@ -1,8 +1,15 @@
 SHELL := /bin/bash
-.PHONY: proto check test
+.PHONY: proto check test deps
+
+deps:
+	cargo install cargo-hakari cargo-sort
 
 check:
-	cargo sort -w && cargo fmt --all && cargo clippy --all-targets
+	cargo hakari generate
+	cargo hakari manage-deps
+	cargo sort -w
+	cargo fmt --all
+	cargo clippy --all-targets
 
 test:
 	cargo test --all
