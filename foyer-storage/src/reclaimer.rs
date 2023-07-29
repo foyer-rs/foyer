@@ -170,7 +170,10 @@ where
                         tokio::time::sleep(wait).await;
                     }
 
-                    if self.store.insert(key.clone(), value).await? {
+                    let mut writer = self.store.writer(key.clone(), weight);
+                    writer.set_skippable();
+
+                    if writer.finish(value).await? {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
                             reinsertion.on_insert(&key, weight, &metrics, judge);

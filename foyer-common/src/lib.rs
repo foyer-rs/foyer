@@ -14,6 +14,7 @@
 
 #![feature(trait_alias)]
 
+pub mod batch;
 pub mod bits;
 pub mod code;
 pub mod queue;

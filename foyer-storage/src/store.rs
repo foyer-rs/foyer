@@ -38,7 +38,7 @@ use crate::{
     judge::Judges,
     metrics::Metrics,
     reclaimer::Reclaimer,
-    region::{Region, RegionId},
+    region::{AllocateResult, Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
@@ -254,6 +254,8 @@ where
             })
             .collect_vec();
 
+        store.recover(config.recover_concurrency).await?;
+
         let mut handles = vec![];
         handles.append(
             &mut flushers
@@ -268,8 +270,6 @@ where
                 .collect_vec(),
         );
         store.handles.lock().append(&mut handles);
-
-        store.recover(config.recover_concurrency).await?;
 
         Ok(store)
     }
@@ -468,10 +468,10 @@ where
     async fn seal(&self) -> Result<()> {
         match self
             .region_manager
-            .allocate(self.device.region_size() - self.device.align())
+            .allocate(self.device.region_size() - self.device.align(), true)
             .await
         {
-            crate::region::AllocateResult::Full { mut slice, remain } => {
+            AllocateResult::Full { mut slice, remain } => {
                 // current region is full, write region footer and try allocate again
                 let footer = RegionFooter {
                     magic: REGION_MAGIC,
@@ -480,10 +480,11 @@ where
                 footer.write(slice.as_mut());
                 slice.destroy().await;
             }
-            crate::region::AllocateResult::Ok(slice) => {
+            AllocateResult::Ok(slice) => {
                 // region is empty, skip
                 slice.destroy().await
             }
+            AllocateResult::None => unreachable!(),
         }
         Ok(())
     }
@@ -521,10 +522,15 @@ where
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
 
+        // Force trigger reclamation.
+        if recovered == self.device.regions() {
+            self.region_manager.clean_regions().flash();
+        }
+
         Ok(())
     }
 
-    /// return `true` if region is valid, otherwise `false`
+    /// Return `true` if region is valid, otherwise `false`
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
@@ -582,17 +588,23 @@ where
 
         self.metrics.bytes_insert.inc_by(serialized_len as u64);
 
-        let mut slice = match self.region_manager.allocate(serialized_len).await {
-            crate::region::AllocateResult::Ok(slice) => slice,
-            crate::region::AllocateResult::Full { mut slice, remain } => {
-                // current region is full, write region footer and try allocate again
-                let footer = RegionFooter {
-                    magic: REGION_MAGIC,
-                    padding: remain as u64,
-                };
-                footer.write(slice.as_mut());
-                slice.destroy().await;
-                self.region_manager.allocate(serialized_len).await.unwrap()
+        let mut slice = loop {
+            match self
+                .region_manager
+                .allocate(serialized_len, !writer.is_skippable)
+                .await
+            {
+                AllocateResult::Ok(slice) => break slice,
+                AllocateResult::Full { mut slice, remain } => {
+                    // current region is full, write region footer and try allocate again
+                    let footer = RegionFooter {
+                        magic: REGION_MAGIC,
+                        padding: remain as u64,
+                    };
+                    footer.write(slice.as_mut());
+                    slice.destroy().await;
+                }
+                AllocateResult::None => return Ok(false),
             }
         };
 
@@ -645,6 +657,7 @@ where
     duration: Duration,
 
     is_inserted: bool,
+    is_skippable: bool,
 }
 
 impl<'a, K, V, D, EP, EL> StoreWriter<'a, K, V, D, EP, EL>
@@ -664,6 +677,7 @@ where
             is_judged: false,
             duration: Duration::from_nanos(0),
             is_inserted: false,
+            is_skippable: false,
         }
     }
 
@@ -679,6 +693,10 @@ where
 
     pub async fn finish(self, value: V) -> Result<bool> {
         self.store.apply_writer(self, value).await
+    }
+
+    pub fn set_skippable(&mut self) {
+        self.is_skippable = true
     }
 }
 

@@ -95,6 +95,10 @@ impl<T: Debug> AsyncQueue<T> {
     pub fn watch(&self) -> watch::Receiver<usize> {
         self.watch_rx.clone()
     }
+
+    pub fn flash(&self) {
+        self.watch_tx.send(self.len()).unwrap();
+    }
 }
 
 #[cfg(test)]
