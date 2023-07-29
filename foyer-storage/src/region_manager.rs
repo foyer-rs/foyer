@@ -45,11 +45,6 @@ intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEp
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
 priority_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { priority: usize } where L: Link }
 
-#[derive(Debug)]
-struct RegionManagerInner {
-    current: Option<RegionId>,
-}
-
 /// Manager of regions and buffer pools.
 ///
 /// # Region Lifetime
@@ -62,7 +57,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    inner: AsyncRwLock<RegionManagerInner>,
+    current: AsyncRwLock<Option<RegionId>>,
     rotate_batch: Batch<(), ()>,
 
     /// Buffer pool for dirty buffers.
@@ -119,10 +114,8 @@ where
             items.push(item);
         }
 
-        let inner = RegionManagerInner { current: None };
-
         Self {
-            inner: AsyncRwLock::new(inner),
+            current: AsyncRwLock::new(None),
             rotate_batch: Batch::new(),
             buffers,
             clean_regions,
@@ -148,15 +141,15 @@ where
     }
 
     pub async fn allocate_inner(&self, size: usize) -> AllocateResult {
-        let mut inner = self.inner.write().await;
-        if let Some(region_id) = inner.current {
+        let mut current = self.current.write().await;
+        if let Some(region_id) = *current {
             let region = self.region(&region_id);
             match region.allocate(size).await {
                 AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
                 AllocateResult::Full { slice, remain } => {
                     // current region is full, append dirty regions
                     self.dirty_regions.release(region_id);
-                    inner.current = None;
+                    *current = None;
                     AllocateResult::Full { slice, remain }
                 }
                 AllocateResult::None => unreachable!(),
@@ -180,7 +173,7 @@ where
                 let buffer = self.buffers.acquire().await;
                 region.attach_buffer(buffer).await;
 
-                self.inner.write().await.current = Some(region_id);
+                *self.current.write().await = Some(region_id);
 
                 // Notify the batch to advance.
                 let items = self.rotate_batch.rotate();
