@@ -62,6 +62,10 @@ jobs:
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets -- -D warnings
+      - name: Run hakari check
+        run: |
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'

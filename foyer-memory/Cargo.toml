@@ -15,6 +15,7 @@ bytes = "1"
 cmsketch = "0.1"
 foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
+foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.10.5"
 libc = "0.2"

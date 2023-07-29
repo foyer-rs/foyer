@@ -47,6 +47,7 @@ use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
+const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
@@ -145,9 +146,11 @@ where
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
-    handles: Mutex<Vec<JoinHandle<()>>>,
+    flusher_handles: Mutex<Vec<JoinHandle<()>>>,
+    flushers_stop_tx: broadcast::Sender<()>,
 
-    stop_tx: broadcast::Sender<()>,
+    reclaimer_handles: Mutex<Vec<JoinHandle<()>>>,
+    reclaimers_stop_tx: broadcast::Sender<()>,
 
     metrics: Arc<Metrics>,
 
@@ -178,12 +181,14 @@ where
 
         let indices = Arc::new(Indices::new(device.regions()));
 
-        let (stop_tx, _stop_rx) = broadcast::channel(config.flushers + config.reclaimers + 1);
+        let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+        let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+
         let flusher_stop_rxs = (0..config.flushers)
-            .map(|_| stop_tx.subscribe())
+            .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
         let reclaimer_stop_rxs = (0..config.reclaimers)
-            .map(|_| stop_tx.subscribe())
+            .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
 
         let metrics = match (
@@ -206,8 +211,10 @@ where
             admissions: config.admissions,
             reinsertions: config.reinsertions,
             event_listeners: config.event_listeners.clone(),
-            handles: Mutex::new(vec![]),
-            stop_tx,
+            flusher_handles: Mutex::new(vec![]),
+            reclaimer_handles: Mutex::new(vec![]),
+            flushers_stop_tx,
+            reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
         });
@@ -256,31 +263,44 @@ where
 
         store.recover(config.recover_concurrency).await?;
 
-        let mut handles = vec![];
-        handles.append(
-            &mut flushers
-                .into_iter()
-                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
-                .collect_vec(),
-        );
-        handles.append(
-            &mut reclaimers
-                .into_iter()
-                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
-                .collect_vec(),
-        );
-        store.handles.lock().append(&mut handles);
+        let flusher_handles = flushers
+            .into_iter()
+            .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+            .collect_vec();
+
+        let reclaimer_handles = reclaimers
+            .into_iter()
+            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+            .collect_vec();
+
+        *store.flusher_handles.lock() = flusher_handles;
+        *store.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
 
     pub async fn shutdown_runners(&self) -> Result<()> {
+        // seal current dirty buffer and trigger flushing
         self.seal().await?;
-        self.stop_tx.send(()).unwrap();
-        let handles = self.handles.lock().drain(..).collect_vec();
+
+        // stop and wait for reclaimers
+        let handles = self.reclaimer_handles.lock().drain(..).collect_vec();
+        if !handles.is_empty() {
+            self.reclaimers_stop_tx.send(()).unwrap();
+        }
         for handle in handles {
             handle.await.unwrap();
         }
+
+        // stop and wait for flushers
+        let handles = self.flusher_handles.lock().drain(..).collect_vec();
+        if !handles.is_empty() {
+            self.flushers_stop_tx.send(()).unwrap();
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
         Ok(())
     }
 
@@ -1228,8 +1248,6 @@ pub mod tests {
         };
         let store = TestStore::open(config).await.unwrap();
 
-        store.shutdown_runners().await.unwrap();
-
         for i in 0..12 {
             if remains.contains(&i) {
                 assert_eq!(
@@ -1240,6 +1258,8 @@ pub mod tests {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }
         }
+
+        store.shutdown_runners().await.unwrap();
 
         drop(store);
     }

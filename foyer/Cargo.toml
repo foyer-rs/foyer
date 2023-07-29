@@ -15,6 +15,7 @@ crossbeam = "0.8"
 foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-storage = { path = "../foyer-storage" }
+foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.10.5"
 libc = "0.2"
