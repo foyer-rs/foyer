@@ -312,7 +312,7 @@ async fn main() {
         &metrics_dump_end,
     );
 
-    store.shutdown_runners().await.unwrap();
+    store.close().await.unwrap();
 
     handle_monitor.abort();
     handle_signal.abort();

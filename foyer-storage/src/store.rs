@@ -279,7 +279,7 @@ where
         Ok(store)
     }
 
-    pub async fn shutdown_runners(&self) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
         // seal current dirty buffer and trigger flushing
         self.seal().await?;
 
@@ -1206,7 +1206,7 @@ pub mod tests {
             store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
         }
 
-        store.shutdown_runners().await.unwrap();
+        store.close().await.unwrap();
 
         let remains = recorder.remains();
 
@@ -1259,7 +1259,7 @@ pub mod tests {
             }
         }
 
-        store.shutdown_runners().await.unwrap();
+        store.close().await.unwrap();
 
         drop(store);
     }
