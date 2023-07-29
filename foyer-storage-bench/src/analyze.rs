@@ -38,7 +38,7 @@ use std::{
 use bytesize::ByteSize;
 use hdrhistogram::Histogram;
 use parking_lot::RwLock;
-use tokio::sync::oneshot;
+use tokio::sync::broadcast;
 
 use crate::utils::{iostat, IoStat};
 
@@ -249,14 +249,14 @@ pub async fn monitor(
     iostat_path: impl AsRef<Path>,
     interval: Duration,
     metrics: Metrics,
-    mut stop: oneshot::Receiver<()>,
+    mut stop: broadcast::Receiver<()>,
 ) {
     let mut stat = iostat(&iostat_path);
     let mut metrics_dump = metrics.dump();
     loop {
         let start = Instant::now();
         match stop.try_recv() {
-            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
 

@@ -47,10 +47,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}
-      - name: Install cargo-sort
+      - name: Install cargo tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-sort
+          cargo install cargo-sort cargo-hakari
       - name: Run rust cargo-sort check
         run: |
           cargo sort -w -c
@@ -62,6 +62,10 @@ jobs:
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets -- -D warnings
+      - name: Run hakari check
+        run: |
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
