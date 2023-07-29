@@ -14,7 +14,10 @@
 
 use std::sync::Arc;
 
-use foyer_common::queue::AsyncQueue;
+use foyer_common::{
+    batch::{Batch, Identity},
+    queue::AsyncQueue,
+};
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},
@@ -42,11 +45,6 @@ intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEp
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
 priority_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { priority: usize } where L: Link }
 
-#[derive(Debug)]
-struct RegionManagerInner {
-    current: Option<RegionId>,
-}
-
 /// Manager of regions and buffer pools.
 ///
 /// # Region Lifetime
@@ -59,19 +57,22 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    inner: Arc<AsyncRwLock<RegionManagerInner>>,
+    current: AsyncRwLock<Option<RegionId>>,
+    rotate_batch: Batch<(), ()>,
 
-    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
+    /// Buffer pool for dirty buffers.
+    buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
 
     /// Empty regions.
-    clean_regions: Arc<AsyncQueue<RegionId>>,
+    clean_regions: AsyncQueue<RegionId>,
 
     /// Regions with dirty buffer waiting for flushing.
-    dirty_regions: Arc<AsyncQueue<RegionId>>,
+    dirty_regions: AsyncQueue<RegionId>,
 
     regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
 
+    /// Eviction policy.
     eviction: RwLock<EP>,
 }
 
@@ -87,7 +88,7 @@ where
         eviction_config: EP::Config,
         device: D,
     ) -> Self {
-        let buffers = Arc::new(AsyncQueue::new());
+        let buffers = AsyncQueue::new();
         for _ in 0..buffer_count {
             let len = device.region_size();
             let buffer = device.io_buffer(len, len);
@@ -95,8 +96,8 @@ where
         }
 
         let eviction = EP::new(eviction_config);
-        let clean_regions = Arc::new(AsyncQueue::new());
-        let dirty_regions = Arc::new(AsyncQueue::new());
+        let clean_regions = AsyncQueue::new();
+        let dirty_regions = AsyncQueue::new();
 
         let mut regions = Vec::with_capacity(region_count);
         let mut items = Vec::with_capacity(region_count);
@@ -113,10 +114,9 @@ where
             items.push(item);
         }
 
-        let inner = RegionManagerInner { current: None };
-
         Self {
-            inner: Arc::new(AsyncRwLock::new(inner)),
+            current: AsyncRwLock::new(None),
+            rotate_batch: Batch::new(),
             buffers,
             clean_regions,
             dirty_regions,
@@ -128,41 +128,62 @@ where
 
     /// Allocate a buffer slice with given size in an active region to write.
     #[tracing::instrument(skip(self))]
-    pub async fn allocate(&self, size: usize) -> AllocateResult {
-        let mut inner = self.inner.write().await;
+    pub async fn allocate(&self, size: usize, must_allocate: bool) -> AllocateResult {
+        loop {
+            let res = self.allocate_inner(size).await;
 
-        // try allocate from current region
-        if let Some(region_id) = inner.current {
+            if !must_allocate || !matches!(res, AllocateResult::None) {
+                return res;
+            }
+
+            self.rotate().await;
+        }
+    }
+
+    pub async fn allocate_inner(&self, size: usize) -> AllocateResult {
+        let mut current = self.current.write().await;
+        if let Some(region_id) = *current {
             let region = self.region(&region_id);
             match region.allocate(size).await {
-                AllocateResult::Ok(slice) => {
-                    return AllocateResult::Ok(slice);
-                }
+                AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
                 AllocateResult::Full { slice, remain } => {
                     // current region is full, append dirty regions
                     self.dirty_regions.release(region_id);
-                    inner.current = None;
-                    return AllocateResult::Full { slice, remain };
+                    *current = None;
+                    AllocateResult::Full { slice, remain }
                 }
+                AllocateResult::None => unreachable!(),
             }
+        } else {
+            AllocateResult::None
         }
+    }
 
-        assert!(inner.current.is_none());
+    pub async fn rotate(&self) {
+        match self.rotate_batch.push(()) {
+            Identity::Leader(rx) => {
+                // Wait a clean region to be released.
+                let region_id = self.clean_regions.acquire().await;
 
-        let region_id = self.clean_regions.acquire().await;
-        tracing::info!("switch to clean region: {}", region_id);
+                tracing::info!("switch to clean region: {}", region_id);
 
-        let region = self.region(&region_id);
-        region.advance().await;
+                let region = self.region(&region_id);
+                region.advance().await;
 
-        let buffer = self.buffers.acquire().await;
-        region.attach_buffer(buffer).await;
+                let buffer = self.buffers.acquire().await;
+                region.attach_buffer(buffer).await;
 
-        let slice = region.allocate(size).await.unwrap();
+                *self.current.write().await = Some(region_id);
 
-        inner.current = Some(region_id);
-
-        AllocateResult::Ok(slice)
+                // Notify the batch to advance.
+                let items = self.rotate_batch.rotate();
+                for item in items {
+                    item.tx.send(()).unwrap();
+                }
+                rx.await.unwrap();
+            }
+            Identity::Follower(rx) => rx.await.unwrap(),
+        }
     }
 
     #[tracing::instrument(skip(self))]
