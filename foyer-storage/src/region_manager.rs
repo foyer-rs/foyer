@@ -62,17 +62,17 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    inner: Arc<AsyncRwLock<RegionManagerInner>>,
+    inner: AsyncRwLock<RegionManagerInner>,
     rotate_batch: Batch<(), ()>,
 
     /// Buffer pool for dirty buffers.
-    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
+    buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
 
     /// Empty regions.
-    clean_regions: Arc<AsyncQueue<RegionId>>,
+    clean_regions: AsyncQueue<RegionId>,
 
     /// Regions with dirty buffer waiting for flushing.
-    dirty_regions: Arc<AsyncQueue<RegionId>>,
+    dirty_regions: AsyncQueue<RegionId>,
 
     regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
@@ -93,7 +93,7 @@ where
         eviction_config: EP::Config,
         device: D,
     ) -> Self {
-        let buffers = Arc::new(AsyncQueue::new());
+        let buffers = AsyncQueue::new();
         for _ in 0..buffer_count {
             let len = device.region_size();
             let buffer = device.io_buffer(len, len);
@@ -101,8 +101,8 @@ where
         }
 
         let eviction = EP::new(eviction_config);
-        let clean_regions = Arc::new(AsyncQueue::new());
-        let dirty_regions = Arc::new(AsyncQueue::new());
+        let clean_regions = AsyncQueue::new();
+        let dirty_regions = AsyncQueue::new();
 
         let mut regions = Vec::with_capacity(region_count);
         let mut items = Vec::with_capacity(region_count);
@@ -122,7 +122,7 @@ where
         let inner = RegionManagerInner { current: None };
 
         Self {
-            inner: Arc::new(AsyncRwLock::new(inner)),
+            inner: AsyncRwLock::new(inner),
             rotate_batch: Batch::new(),
             buffers,
             clean_regions,
