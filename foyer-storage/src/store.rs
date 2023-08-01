@@ -22,7 +22,7 @@ use std::{
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
-use futures::Future;
+use futures::{future::try_join_all, Future};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -31,7 +31,7 @@ use twox_hash::XxHash64;
 use crate::{
     admission::AdmissionPolicy,
     device::Device,
-    error::{Error, Result},
+    error::Result,
     event::EventListener,
     flusher::Flusher,
     indices::{Index, Indices},
@@ -334,7 +334,13 @@ where
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f().map_err(Error::fetch_value)?;
+        let value = match f() {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
         writer.finish(value).await
     }
 
@@ -354,7 +360,13 @@ where
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f().await.map_err(Error::fetch_value)?;
+        let value = match f().await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
         writer.finish(value).await
     }
 
@@ -533,10 +545,13 @@ where
         }
 
         let mut recovered = 0;
-        for (region_id, handle) in handles.into_iter().enumerate() {
-            if handle.await.map_err(Error::other)?? {
+
+        let results = try_join_all(handles).await.map_err(anyhow::Error::from)?;
+
+        for (region_id, result) in results.into_iter().enumerate() {
+            if result? {
                 tracing::debug!("region {} is recovered", region_id);
-                recovered += 1;
+                recovered += 1
             }
         }
 
@@ -604,7 +619,12 @@ where
         }
 
         let serialized_len = self.serialized_len(key, &value);
-        assert_eq!(key.serialized_len() + value.serialized_len(), writer.weight);
+        if key.serialized_len() + value.serialized_len() == writer.weight {
+            tracing::error!(
+                "weight != key.serialized_len() + value.serialized_len(), weight: {}, key size: {}, value size: {}, key: {:?}",
+                writer.weight, key.serialized_len(), value.serialized_len(), key
+            );
+        }
 
         self.metrics.bytes_insert.inc_by(serialized_len as u64);
 
@@ -903,11 +923,9 @@ where
     let checksum = checksum(&buf[..offset]);
     if checksum != footer.checksum {
         tracing::warn!(
-            "read entry error: {}",
-            Error::ChecksumMismatch {
-                checksum,
-                expected: footer.checksum,
-            }
+            "checksum mismatch, checksum: {}, expected: {}",
+            checksum,
+            footer.checksum
         );
         return None;
     }

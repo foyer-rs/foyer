@@ -12,42 +12,55 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::backtrace::Backtrace;
+
+use crate::device::error::DeviceError;
+
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+#[error("{0}")]
+pub struct Error(Box<ErrorInner>);
+
+#[derive(thiserror::Error, Debug)]
+#[error("{source}")]
+struct ErrorInner {
+    source: ErrorKind,
+    backtrace: Backtrace,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ErrorKind {
     #[error("device error: {0}")]
-    Device(#[from] super::device::error::Error),
-    #[error("entry too large: {len} > {capacity}")]
-    EntryTooLarge { len: usize, capacity: usize },
-    #[error("checksum mismatch, checksum: {checksum}, expected: {expected}")]
-    ChecksumMismatch { checksum: u64, expected: u64 },
-    #[error("channel full")]
-    ChannelFull,
-    #[error("event listener error: {0}")]
-    EventListener(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("fetch value error: {0}")]
-    FetchValue(anyhow::Error),
+    Device(#[from] DeviceError),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
 
-impl Error {
-    pub fn device(e: super::device::error::Error) -> Self {
-        Self::Device(e)
+impl From<ErrorKind> for Error {
+    fn from(value: ErrorKind) -> Self {
+        value.into()
     }
+}
 
-    pub fn fetch_value(e: impl Into<anyhow::Error>) -> Self {
-        Self::Other(e.into())
+impl From<DeviceError> for Error {
+    fn from(value: DeviceError) -> Self {
+        value.into()
     }
+}
 
-    pub fn other(e: impl Into<anyhow::Error>) -> Self {
-        Self::Other(e.into())
-    }
-
-    pub fn event_listener(
-        e: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    ) -> Self {
-        Self::EventListener(e.into())
+impl From<anyhow::Error> for Error {
+    fn from(value: anyhow::Error) -> Self {
+        value.into()
     }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_size() {
+        assert_eq!(std::mem::size_of::<Error>(), std::mem::size_of::<usize>());
+    }
+}
