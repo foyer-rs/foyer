@@ -12,4 +12,4 @@ check:
 	cargo clippy --all-targets
 
 test:
-	cargo test --all
+	RUST_BACKTRACE=1 cargo test --all
