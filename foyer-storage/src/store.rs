@@ -432,6 +432,8 @@ where
         let slice = match region.load(start..end, index.version).await? {
             Some(slice) => slice,
             None => {
+                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                self.indices.remove(key);
                 self.metrics
                     .latency_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
@@ -442,7 +444,11 @@ where
 
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
-            None => Ok(None),
+            None => {
+                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                self.indices.remove(key);
+                Ok(None)
+            }
         };
         slice.destroy().await;
 
