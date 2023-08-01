@@ -206,7 +206,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
+    use foyer_intrusive::eviction::sfifo::{SegmentedFifo, SegmentedFifoConfig, SegmentedFifoLink};
 
     use super::*;
 
@@ -228,8 +228,9 @@ mod tests {
         }
     }
 
-    type FifoCacheConfig = CacheConfig<Fifo<CacheItemEpAdapter<K, V, FifoLink>>>;
-    type FifoCache = Cache<K, V, Fifo<CacheItemEpAdapter<K, V, FifoLink>>, FifoLink>;
+    type FifoCacheConfig = CacheConfig<SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>>;
+    type FifoCache =
+        Cache<K, V, SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>, SegmentedFifoLink>;
 
     #[test]
     fn test_fifo_cache_simple() {
@@ -237,7 +238,7 @@ mod tests {
             capacity: 10,
             shard_bits: 0, // 1 shard
             hashmap_bits: 6,
-            eviction_config: FifoConfig {
+            eviction_config: SegmentedFifoConfig {
                 segment_ratios: vec![1],
             },
         };
