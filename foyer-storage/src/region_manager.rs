@@ -21,7 +21,7 @@ use foyer_common::{
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},
-    intrusive_adapter, key_adapter, priority_adapter,
+    intrusive_adapter, key_adapter,
 };
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -38,12 +38,10 @@ where
 {
     link: L,
     id: RegionId,
-    priority: usize,
 }
 
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
-priority_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { priority: usize } where L: Link }
 
 /// Manager of regions and buffer pools.
 ///
@@ -107,7 +105,6 @@ where
             let item = Arc::new(RegionEpItem {
                 link: EL::default(),
                 id,
-                priority: 0,
             });
 
             regions.push(region);
