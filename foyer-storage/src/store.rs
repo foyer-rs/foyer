@@ -1190,9 +1190,7 @@ pub mod tests {
             vec![recorder.clone()];
 
         let config = TestStoreConfig {
-            eviction_config: FifoConfig {
-                segment_ratios: vec![1],
-            },
+            eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1242,9 +1240,7 @@ pub mod tests {
         drop(store);
 
         let config = TestStoreConfig {
-            eviction_config: FifoConfig {
-                segment_ratios: vec![1],
-            },
+            eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
