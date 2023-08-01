@@ -619,7 +619,7 @@ where
         }
 
         let serialized_len = self.serialized_len(key, &value);
-        if key.serialized_len() + value.serialized_len() == writer.weight {
+        if key.serialized_len() + value.serialized_len() != writer.weight {
             tracing::error!(
                 "weight != key.serialized_len() + value.serialized_len(), weight: {}, key size: {}, value size: {}, key: {:?}",
                 writer.weight, key.serialized_len(), value.serialized_len(), key
