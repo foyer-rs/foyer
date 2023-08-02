@@ -17,6 +17,8 @@
 #![feature(trait_alias)]
 #![feature(get_mut_unchecked)]
 #![feature(let_chains)]
+#![feature(provide_any)]
+#![feature(error_generic_member_access)]
 #![allow(clippy::type_complexity)]
 
 pub mod admission;
@@ -25,6 +27,7 @@ pub mod error;
 pub mod event;
 pub mod flusher;
 pub mod indices;
+pub mod judge;
 pub mod metrics;
 pub mod reclaimer;
 pub mod region;
@@ -71,21 +74,21 @@ pub type LfuFsStoreConfig<K, V> = store::StoreConfig<
     >,
 >;
 
-pub type FifoFsStore<K, V> = store::Store<
+pub type SegmentedFifoFsStore<K, V> = store::Store<
     K,
     V,
     device::fs::FsDevice,
-    foyer_intrusive::eviction::fifo::Fifo<
-        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
+    foyer_intrusive::eviction::sfifo::SegmentedFifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::sfifo::SegmentedFifoLink>,
     >,
-    foyer_intrusive::eviction::fifo::FifoLink,
+    foyer_intrusive::eviction::sfifo::SegmentedFifoLink,
 >;
 
-pub type FifoFsStoreConfig<K, V> = store::StoreConfig<
+pub type SegmentedFifoFsStoreConfig<K, V> = store::StoreConfig<
     K,
     V,
     device::fs::FsDevice,
-    foyer_intrusive::eviction::fifo::Fifo<
-        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
+    foyer_intrusive::eviction::sfifo::SegmentedFifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::sfifo::SegmentedFifoLink>,
     >,
 >;

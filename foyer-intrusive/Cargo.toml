@@ -12,6 +12,7 @@ license = "Apache-2.0"
 bytes = "1"
 cmsketch = "0.1"
 foyer-common = { path = "../foyer-common" }
+foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 itertools = "0.10.5"
 memoffset = "0.8"
 parking_lot = "0.12"

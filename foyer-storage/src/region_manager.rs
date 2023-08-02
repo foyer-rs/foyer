@@ -14,19 +14,20 @@
 
 use std::sync::Arc;
 
-use foyer_common::queue::AsyncQueue;
+use foyer_common::{
+    batch::{Batch, Identity},
+    queue::AsyncQueue,
+};
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},
-    intrusive_adapter, key_adapter, priority_adapter,
+    intrusive_adapter, key_adapter,
 };
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::{
     device::Device,
-    flusher::{FlushTask, Flusher},
-    reclaimer::{ReclaimTask, Reclaimer},
     region::{AllocateResult, Region, RegionId},
 };
 
@@ -37,129 +38,149 @@ where
 {
     link: L,
     id: RegionId,
-    priority: usize,
 }
 
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
-priority_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { priority: usize } where L: Link }
 
-struct RegionManagerInner {
-    current: Option<RegionId>,
-}
-
-pub struct RegionManager<D, E, EL>
+/// Manager of regions and buffer pools.
+///
+/// # Region Lifetime
+///
+/// `clean` ==(allocate)=> `dirty` ==(flush)=> `evictable` ==(reclaim)=> `clean`
+#[derive(Debug)]
+pub struct RegionManager<D, EP, EL>
 where
     D: Device,
-    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
-    inner: Arc<AsyncRwLock<RegionManagerInner>>,
+    current: AsyncRwLock<Option<RegionId>>,
+    rotate_batch: Batch<(), ()>,
 
-    buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
-    clean_regions: Arc<AsyncQueue<RegionId>>,
+    /// Buffer pool for dirty buffers.
+    buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
+
+    /// Empty regions.
+    clean_regions: AsyncQueue<RegionId>,
+
+    /// Regions with dirty buffer waiting for flushing.
+    dirty_regions: AsyncQueue<RegionId>,
 
     regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
 
-    flusher: Arc<Flusher>,
-    reclaimer: Arc<Reclaimer>,
-
-    eviction: RwLock<E>,
+    /// Eviction policy.
+    eviction: RwLock<EP>,
 }
 
-impl<D, E, EL> RegionManager<D, E, EL>
+impl<D, EP, EL> RegionManager<D, EP, EL>
 where
     D: Device,
-    E: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub fn new(
-        region_nums: usize,
-        eviction_config: E::Config,
-        buffers: Arc<AsyncQueue<Vec<u8, D::IoBufferAllocator>>>,
-        clean_regions: Arc<AsyncQueue<RegionId>>,
+        buffer_count: usize,
+        region_count: usize,
+        eviction_config: EP::Config,
         device: D,
-        flusher: Arc<Flusher>,
-        reclaimer: Arc<Reclaimer>,
     ) -> Self {
-        let eviction = E::new(eviction_config);
+        let buffers = AsyncQueue::new();
+        for _ in 0..buffer_count {
+            let len = device.region_size();
+            let buffer = device.io_buffer(len, len);
+            buffers.release(buffer);
+        }
 
-        let mut regions = Vec::with_capacity(region_nums);
-        let mut items = Vec::with_capacity(region_nums);
+        let eviction = EP::new(eviction_config);
+        let clean_regions = AsyncQueue::new();
+        let dirty_regions = AsyncQueue::new();
 
-        for id in 0..region_nums as RegionId {
+        let mut regions = Vec::with_capacity(region_count);
+        let mut items = Vec::with_capacity(region_count);
+
+        for id in 0..region_count as RegionId {
             let region = Region::new(id, device.clone());
             let item = Arc::new(RegionEpItem {
                 link: EL::default(),
                 id,
-                priority: 0,
             });
 
             regions.push(region);
             items.push(item);
         }
 
-        let inner = RegionManagerInner { current: None };
-
         Self {
-            inner: Arc::new(AsyncRwLock::new(inner)),
+            current: AsyncRwLock::new(None),
+            rotate_batch: Batch::new(),
             buffers,
             clean_regions,
+            dirty_regions,
             regions,
             items,
-            flusher,
-            reclaimer,
             eviction: RwLock::new(eviction),
         }
     }
 
     /// Allocate a buffer slice with given size in an active region to write.
     #[tracing::instrument(skip(self))]
-    pub async fn allocate(&self, size: usize) -> AllocateResult {
-        let mut inner = self.inner.write().await;
+    pub async fn allocate(&self, size: usize, must_allocate: bool) -> AllocateResult {
+        loop {
+            let res = self.allocate_inner(size).await;
 
-        // try allocate from current region
-        if let Some(region_id) = inner.current {
+            if !must_allocate || !matches!(res, AllocateResult::None) {
+                return res;
+            }
+
+            self.rotate().await;
+        }
+    }
+
+    pub async fn allocate_inner(&self, size: usize) -> AllocateResult {
+        let mut current = self.current.write().await;
+        if let Some(region_id) = *current {
             let region = self.region(&region_id);
             match region.allocate(size).await {
-                AllocateResult::Ok(slice) => {
-                    return AllocateResult::Ok(slice);
-                }
+                AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
                 AllocateResult::Full { slice, remain } => {
-                    // current region is full, schedule flushing
-                    self.submit_flush_task(FlushTask { region_id }).await;
-                    inner.current = None;
-                    return AllocateResult::Full { slice, remain };
+                    // current region is full, append dirty regions
+                    self.dirty_regions.release(region_id);
+                    *current = None;
+                    AllocateResult::Full { slice, remain }
                 }
+                AllocateResult::None => unreachable!(),
             }
+        } else {
+            AllocateResult::None
         }
+    }
 
-        assert!(inner.current.is_none());
+    pub async fn rotate(&self) {
+        match self.rotate_batch.push(()) {
+            Identity::Leader(rx) => {
+                // Wait a clean region to be released.
+                let region_id = self.clean_regions.acquire().await;
 
-        tracing::debug!("clean regions: {}", self.clean_regions.len());
-        if self.clean_regions.len() < self.reclaimer.runners() {
-            let item = self.eviction.write().pop();
-            if let Some(item) = item {
-                self.submit_reclaim_task(ReclaimTask { region_id: item.id })
-                    .await;
+                tracing::info!("switch to clean region: {}", region_id);
+
+                let region = self.region(&region_id);
+                region.advance().await;
+
+                let buffer = self.buffers.acquire().await;
+                region.attach_buffer(buffer).await;
+
+                *self.current.write().await = Some(region_id);
+
+                // Notify the batch to advance.
+                let items = self.rotate_batch.rotate();
+                for item in items {
+                    item.tx.send(()).unwrap();
+                }
+                rx.await.unwrap();
             }
+            Identity::Follower(rx) => rx.await.unwrap(),
         }
-
-        let region_id = self.clean_regions.acquire().await;
-        tracing::info!("switch to clean region: {}", region_id);
-
-        let region = self.region(&region_id);
-        region.advance().await;
-
-        let buffer = self.buffers.acquire().await;
-        region.attach_buffer(buffer).await;
-
-        let slice = region.allocate(size).await.unwrap();
-
-        inner.current = Some(region_id);
-
-        AllocateResult::Ok(slice)
     }
 
     #[tracing::instrument(skip(self))]
@@ -176,40 +197,25 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn set_region_evictable(&self, id: &RegionId) {
-        let to_reclaim = {
-            let mut eviction = self.eviction.write();
-            let item = &self.items[*id as usize];
-            if !item.link.is_linked() {
-                eviction.push(item.clone());
-            }
-            if self.clean_regions.len() < self.reclaimer.runners() {
-                Some(eviction.pop().unwrap())
-            } else {
-                None
-            }
-        };
-
-        if let Some(item) = to_reclaim {
-            self.submit_reclaim_task(ReclaimTask { region_id: item.id })
-                .await
-        }
+    pub fn buffers(&self) -> &AsyncQueue<Vec<u8, D::IoBufferAllocator>> {
+        &self.buffers
     }
 
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
         &self.clean_regions
     }
 
-    async fn submit_reclaim_task(&self, task: ReclaimTask) {
-        if let Err(e) = self.reclaimer.submit(task).await {
-            tracing::warn!("fail to submit reclaim task: {:?}", e);
-        }
+    pub fn dirty_regions(&self) -> &AsyncQueue<RegionId> {
+        &self.dirty_regions
     }
 
-    async fn submit_flush_task(&self, task: FlushTask) {
-        if let Err(e) = self.flusher.submit(task).await {
-            tracing::warn!("fail to submit reclaim task: {:?}", e);
-        }
+    pub fn eviction_push(&self, region_id: RegionId) {
+        self.eviction
+            .write()
+            .push(self.items[region_id as usize].clone());
+    }
+
+    pub fn eviction_pop(&self) -> Option<RegionId> {
+        self.eviction.write().pop().map(|item| item.id)
     }
 }

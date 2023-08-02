@@ -17,11 +17,10 @@ pub mod error;
 pub mod fs;
 
 use async_trait::async_trait;
-use error::Result;
-
 use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
+use error::DeviceResult;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
@@ -32,7 +31,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
     type Config: Debug;
 
-    async fn open(config: Self::Config) -> Result<Self>;
+    async fn open(config: Self::Config) -> DeviceResult<Self>;
 
     async fn write(
         &self,
@@ -40,7 +39,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<usize>;
+    ) -> DeviceResult<usize>;
 
     async fn read(
         &self,
@@ -48,9 +47,9 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<usize>;
+    ) -> DeviceResult<usize>;
 
-    async fn flush(&self) -> Result<()>;
+    async fn flush(&self) -> DeviceResult<()>;
 
     fn capacity(&self) -> usize;
 
@@ -71,17 +70,14 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
 }
 
 #[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> error::Result<T>
+async fn asyncify<F, T>(f: F) -> DeviceResult<T>
 where
-    F: FnOnce() -> error::Result<T> + Send + 'static,
+    F: FnOnce() -> DeviceResult<T> + Send + 'static,
     T: Send + 'static,
 {
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => res,
-        Err(e) => Err(error::Error::Other(format!(
-            "background task failed: {:?}",
-            e,
-        ))),
+        Err(e) => Err(format!("background task failed: {:?}", e,).into()),
     }
 }
 
@@ -103,7 +99,7 @@ pub mod tests {
         type Config = usize;
         type IoBufferAllocator = AlignedAllocator;
 
-        async fn open(config: usize) -> Result<Self> {
+        async fn open(config: usize) -> DeviceResult<Self> {
             Ok(Self::new(config))
         }
 
@@ -113,7 +109,7 @@ pub mod tests {
             _region: RegionId,
             _offset: u64,
             _len: usize,
-        ) -> Result<usize> {
+        ) -> DeviceResult<usize> {
             Ok(0)
         }
 
@@ -123,11 +119,11 @@ pub mod tests {
             _region: RegionId,
             _offset: u64,
             _len: usize,
-        ) -> Result<usize> {
+        ) -> DeviceResult<usize> {
             Ok(0)
         }
 
-        async fn flush(&self) -> Result<()> {
+        async fn flush(&self) -> DeviceResult<()> {
             Ok(())
         }
 

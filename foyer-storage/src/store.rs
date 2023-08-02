@@ -15,30 +15,30 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    ops::{BitAnd, BitOr},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, queue::AsyncQueue, rate::RateLimiter};
+use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
-use futures::Future;
+use futures::{future::try_join_all, Future};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::broadcast, task::JoinHandle};
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::{AdmissionPolicy, Judges},
+    admission::AdmissionPolicy,
     device::Device,
-    error::{Error, Result},
+    error::Result,
     event::EventListener,
     flusher::Flusher,
     indices::{Index, Indices},
+    judge::Judges,
     metrics::Metrics,
     reclaimer::Reclaimer,
-    region::{Region, RegionId},
+    region::{AllocateResult, Region, RegionId},
     region_manager::{RegionEpItem, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
@@ -47,6 +47,7 @@ use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
 
 const REGION_MAGIC: u64 = 0x19970327;
+const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
@@ -63,17 +64,45 @@ where
     D: Device,
     EP: EvictionPolicy,
 {
+    /// Evictino policy configurations.
     pub eviction_config: EP::Config,
+
+    /// Device configurations.
     pub device_config: D::Config,
+
+    /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+
+    /// Reinsertion policies.
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+
+    /// Buffer pool size, should be a multiplier of device region size.
     pub buffer_pool_size: usize,
+
+    /// Count of flushers.
     pub flushers: usize,
+
+    /// Flush rate limits.
     pub flush_rate_limit: usize,
+
+    /// Count of reclaimers.
     pub reclaimers: usize,
+
+    /// Flush rate limits.
     pub reclaim_rate_limit: usize,
+
+    /// Clean region count threshold to trigger reclamation.
+    ///
+    /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
+    pub clean_region_threshold: usize,
+
+    /// Concurrency of recovery.
     pub recover_concurrency: usize,
+
+    /// Event listsners.
     pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
+
+    /// Prometheus configuration.
     pub prometheus_config: PrometheusConfig,
 }
 
@@ -97,6 +126,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Store<K, V, D, EP, EL>
 where
     K: Key,
@@ -112,12 +142,15 @@ where
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
     event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
-    handles: Mutex<Vec<JoinHandle<()>>>,
+    flusher_handles: Mutex<Vec<JoinHandle<()>>>,
+    flushers_stop_tx: broadcast::Sender<()>,
 
-    stop_tx: broadcast::Sender<()>,
+    reclaimer_handles: Mutex<Vec<JoinHandle<()>>>,
+    reclaimers_stop_tx: broadcast::Sender<()>,
 
     metrics: Arc<Metrics>,
 
@@ -137,36 +170,25 @@ where
 
         let device = D::open(config.device_config).await?;
 
-        let buffers = Arc::new(AsyncQueue::new());
-        for _ in 0..(config.buffer_pool_size / device.region_size()) {
-            let len = device.region_size();
-            let buffer = device.io_buffer(len, len);
-            buffers.release(buffer);
-        }
-
-        let clean_regions = Arc::new(AsyncQueue::new());
-
-        let flusher = Arc::new(Flusher::new(config.flushers));
-        let reclaimer = Arc::new(Reclaimer::new(config.reclaimers));
+        let buffer_count = config.buffer_pool_size / device.region_size();
 
         let region_manager = Arc::new(RegionManager::new(
+            buffer_count,
             device.regions(),
             config.eviction_config,
-            buffers.clone(),
-            clean_regions.clone(),
             device.clone(),
-            flusher.clone(),
-            reclaimer.clone(),
         ));
 
         let indices = Arc::new(Indices::new(device.regions()));
 
-        let (stop_tx, _stop_rx) = broadcast::channel(config.flushers + config.reclaimers + 1);
+        let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+        let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+
         let flusher_stop_rxs = (0..config.flushers)
-            .map(|_| stop_tx.subscribe())
+            .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
         let reclaimer_stop_rxs = (0..config.reclaimers)
-            .map(|_| stop_tx.subscribe())
+            .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
 
         let metrics = match (
@@ -187,12 +209,22 @@ where
             region_manager: region_manager.clone(),
             device: device.clone(),
             admissions: config.admissions,
+            reinsertions: config.reinsertions,
             event_listeners: config.event_listeners.clone(),
-            handles: Mutex::new(vec![]),
-            stop_tx,
+            flusher_handles: Mutex::new(vec![]),
+            reclaimer_handles: Mutex::new(vec![]),
+            flushers_stop_tx,
+            reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
         });
+
+        for admission in store.admissions.iter() {
+            admission.init(&store.indices);
+        }
+        for reinsertion in store.reinsertions.iter() {
+            reinsertion.init(&store.indices);
+        }
 
         let flush_rate_limiter = match config.flush_rate_limit {
             0 => None,
@@ -203,58 +235,83 @@ where
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
         };
 
-        let mut handles = vec![];
-        handles.append(
-            &mut flusher
-                .run(
-                    buffers,
+        let flushers = flusher_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Flusher::new(
                     region_manager.clone(),
-                    flush_rate_limiter,
-                    flusher_stop_rxs,
+                    flush_rate_limiter.clone(),
                     metrics.clone(),
+                    stop_rx,
                 )
-                .await,
-        );
-        handles.append(
-            &mut reclaimer
-                .run(
+            })
+            .collect_vec();
+        let reclaimers = reclaimer_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Reclaimer::new(
+                    config.clean_region_threshold,
                     store.clone(),
-                    region_manager,
-                    clean_regions,
-                    config.reinsertions,
-                    indices,
-                    reclaim_rate_limiter,
-                    config.event_listeners,
-                    reclaimer_stop_rxs,
-                    metrics,
+                    region_manager.clone(),
+                    reclaim_rate_limiter.clone(),
+                    config.event_listeners.clone(),
+                    metrics.clone(),
+                    stop_rx,
                 )
-                .await,
-        );
-        store.handles.lock().append(&mut handles);
+            })
+            .collect_vec();
 
         store.recover(config.recover_concurrency).await?;
+
+        let flusher_handles = flushers
+            .into_iter()
+            .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+            .collect_vec();
+
+        let reclaimer_handles = reclaimers
+            .into_iter()
+            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+            .collect_vec();
+
+        *store.flusher_handles.lock() = flusher_handles;
+        *store.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
 
-    pub async fn shutdown_runners(&self) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
+        // seal current dirty buffer and trigger flushing
         self.seal().await?;
-        self.stop_tx.send(()).unwrap();
-        let handles = self.handles.lock().drain(..).collect_vec();
+
+        // stop and wait for reclaimers
+        let handles = self.reclaimer_handles.lock().drain(..).collect_vec();
+        if !handles.is_empty() {
+            self.reclaimers_stop_tx.send(()).unwrap();
+        }
         for handle in handles {
             handle.await.unwrap();
         }
+
+        // stop and wait for flushers
+        let handles = self.flusher_handles.lock().drain(..).collect_vec();
+        if !handles.is_empty() {
+            self.flushers_stop_tx.send(()).unwrap();
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, value))]
     pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         let weight = key.serialized_len() + value.serialized_len();
         let writer = StoreWriter::new(self, key, weight);
         writer.finish(value).await
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, value))]
     pub async fn insert_if_not_exists(&self, key: K, value: V) -> Result<bool> {
         if self.exists(&key)? {
             return Ok(false);
@@ -277,7 +334,13 @@ where
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f().map_err(Error::fetch_value)?;
+        let value = match f() {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
         writer.finish(value).await
     }
 
@@ -297,7 +360,13 @@ where
         if !writer.judge() {
             return Ok(false);
         }
-        let value = f().await.map_err(Error::fetch_value)?;
+        let value = match f().await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
         writer.finish(value).await
     }
 
@@ -363,6 +432,8 @@ where
         let slice = match region.load(start..end, index.version).await? {
             Some(slice) => slice,
             None => {
+                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                self.indices.remove(key);
                 self.metrics
                     .latency_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
@@ -373,7 +444,11 @@ where
 
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
-            None => Ok(None),
+            None => {
+                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                self.indices.remove(key);
+                Ok(None)
+            }
         };
         slice.destroy().await;
 
@@ -414,6 +489,14 @@ where
         Ok(())
     }
 
+    pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
+        &self.indices
+    }
+
+    pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
+        &self.reinsertions
+    }
+
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
             key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
@@ -423,10 +506,10 @@ where
     async fn seal(&self) -> Result<()> {
         match self
             .region_manager
-            .allocate(self.device.region_size() - self.device.align())
+            .allocate(self.device.region_size() - self.device.align(), true)
             .await
         {
-            crate::region::AllocateResult::Full { mut slice, remain } => {
+            AllocateResult::Full { mut slice, remain } => {
                 // current region is full, write region footer and try allocate again
                 let footer = RegionFooter {
                     magic: REGION_MAGIC,
@@ -435,10 +518,11 @@ where
                 footer.write(slice.as_mut());
                 slice.destroy().await;
             }
-            crate::region::AllocateResult::Ok(slice) => {
+            AllocateResult::Ok(slice) => {
                 // region is empty, skip
                 slice.destroy().await
             }
+            AllocateResult::None => unreachable!(),
         }
         Ok(())
     }
@@ -467,19 +551,27 @@ where
         }
 
         let mut recovered = 0;
-        for (region_id, handle) in handles.into_iter().enumerate() {
-            if handle.await.map_err(Error::other)?? {
+
+        let results = try_join_all(handles).await.map_err(anyhow::Error::from)?;
+
+        for (region_id, result) in results.into_iter().enumerate() {
+            if result? {
                 tracing::debug!("region {} is recovered", region_id);
-                recovered += 1;
+                recovered += 1
             }
         }
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
 
+        // Force trigger reclamation.
+        if recovered == self.device.regions() {
+            self.region_manager.clean_regions().flash();
+        }
+
         Ok(())
     }
 
-    /// return `true` if region is valid, otherwise `false`
+    /// Return `true` if region is valid, otherwise `false`
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
@@ -494,7 +586,7 @@ where
                 }
                 indices.insert(index);
             }
-            region_manager.set_region_evictable(&region_id).await;
+            region_manager.eviction_push(region_id);
             true
         } else {
             region_manager.clean_regions().release(region_id);
@@ -503,13 +595,12 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &StoreWriter<'_, K, V, D, EP, EL>) -> Judges {
-        let mut res = Judges::new();
+    fn judge_inner(&self, writer: &mut StoreWriter<'_, K, V, D, EP, EL>) {
         for (index, admission) in self.admissions.iter().enumerate() {
-            let admitted = admission.judge(&writer.key, writer.weight, &self.metrics);
-            res.set(index, admitted);
+            let judge = admission.judge(&writer.key, writer.weight, &self.metrics);
+            writer.judges.set(index, judge);
         }
-        res
+        writer.is_judged = true;
     }
 
     async fn apply_writer(
@@ -517,39 +608,49 @@ where
         mut writer: StoreWriter<'_, K, V, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
-        debug_assert!(!writer.inserted);
+        debug_assert!(!writer.is_inserted);
 
         let now = Instant::now();
 
         if !writer.judge() {
-            writer.duration += now.elapsed();
             return Ok(false);
         }
 
-        writer.inserted = true;
+        writer.is_inserted = true;
         let key = &writer.key;
 
         for (i, admission) in self.admissions.iter().enumerate() {
-            let judge = writer.judges.as_ref().unwrap().get(i);
+            let judge = writer.judges.get(i);
             admission.on_insert(key, writer.weight, &self.metrics, judge);
         }
 
         let serialized_len = self.serialized_len(key, &value);
-        assert_eq!(key.serialized_len() + value.serialized_len(), writer.weight);
+        if key.serialized_len() + value.serialized_len() != writer.weight {
+            tracing::error!(
+                "weight != key.serialized_len() + value.serialized_len(), weight: {}, key size: {}, value size: {}, key: {:?}",
+                writer.weight, key.serialized_len(), value.serialized_len(), key
+            );
+        }
 
         self.metrics.bytes_insert.inc_by(serialized_len as u64);
 
-        let mut slice = match self.region_manager.allocate(serialized_len).await {
-            crate::region::AllocateResult::Ok(slice) => slice,
-            crate::region::AllocateResult::Full { mut slice, remain } => {
-                // current region is full, write region footer and try allocate again
-                let footer = RegionFooter {
-                    magic: REGION_MAGIC,
-                    padding: remain as u64,
-                };
-                footer.write(slice.as_mut());
-                slice.destroy().await;
-                self.region_manager.allocate(serialized_len).await.unwrap()
+        let mut slice = loop {
+            match self
+                .region_manager
+                .allocate(serialized_len, !writer.is_skippable)
+                .await
+            {
+                AllocateResult::Ok(slice) => break slice,
+                AllocateResult::Full { mut slice, remain } => {
+                    // current region is full, write region footer and try allocate again
+                    let footer = RegionFooter {
+                        magic: REGION_MAGIC,
+                        padding: remain as u64,
+                    };
+                    footer.write(slice.as_mut());
+                    slice.destroy().await;
+                }
+                AllocateResult::None => return Ok(false),
             }
         };
 
@@ -595,17 +696,14 @@ where
     key: K,
     weight: usize,
 
-    /// 1: admit
-    /// 0: reject
-    judges: Option<Judges>,
-    /// 1: use
-    /// 0: ignore
-    mask: Judges,
+    judges: Judges,
+    is_judged: bool,
 
     /// judge duration
     duration: Duration,
 
-    inserted: bool,
+    is_inserted: bool,
+    is_skippable: bool,
 }
 
 impl<'a, K, V, D, EP, EL> StoreWriter<'a, K, V, D, EP, EL>
@@ -621,53 +719,30 @@ where
             store,
             key,
             weight,
-            judges: None,
-            mask: Judges::from_value((1 << store.admissions.len()) - 1),
+            judges: Judges::new(store.admissions.len()),
+            is_judged: false,
             duration: Duration::from_nanos(0),
-            inserted: false,
+            is_inserted: false,
+            is_skippable: false,
         }
-    }
-
-    pub fn set_admission_mask(&mut self, mask: Judges) {
-        self.mask = mask.bitand(Judges::from_value((1 << self.store.admissions.len()) - 1));
-    }
-
-    pub fn all_admission(&mut self) {
-        self.mask = Judges::from_value((1 << self.store.admissions.len()) - 1);
-    }
-
-    pub fn ignore_admission(&mut self) {
-        self.mask = Judges::new();
     }
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub fn judge(&mut self) -> bool {
         let now = Instant::now();
-        if let Some(judges) = self.judges {
-            self.duration += now.elapsed();
-            return Self::is_admitted(&judges, &self.mask);
+        if !self.is_judged {
+            self.store.judge_inner(self);
         }
-        let judges = self.store.judge_inner(self);
-        self.judges = Some(judges);
         self.duration += now.elapsed();
-        Self::is_admitted(&judges, &self.mask)
-    }
-
-    /// judge | ( ~mask )
-    ///
-    /// | judge | mask | ~mask | result |
-    /// |   0   |  0   |   1   |    1   |
-    /// |   0   |  1   |   0   |    0   |
-    /// |   1   |  0   |   1   |    1   |
-    /// |   1   |  1   |   0   |    1   |
-    fn is_admitted(judges: &Judges, mask: &Judges) -> bool {
-        let mut umask = *mask;
-        umask.invert();
-        judges.bitor(umask).is_full()
+        self.judges.judge()
     }
 
     pub async fn finish(self, value: V) -> Result<bool> {
         self.store.apply_writer(self, value).await
+    }
+
+    pub fn set_skippable(&mut self) {
+        self.is_skippable = true
     }
 }
 
@@ -683,9 +758,10 @@ where
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
             .field("weight", &self.weight)
-            .field("judged", &self.judges)
+            .field("judges", &self.judges)
+            .field("is_judged", &self.is_judged)
             .field("duration", &self.duration)
-            .field("inserted", &self.inserted)
+            .field("inserted", &self.is_inserted)
             .finish()
     }
 }
@@ -699,15 +775,15 @@ where
     EL: Link,
 {
     fn drop(&mut self) {
-        if !self.inserted {
+        if !self.is_inserted {
             self.store
                 .metrics
                 .latency_insert_dropped
                 .observe(self.duration.as_secs_f64());
             let mut filtered = false;
-            if let Some(judge) = self.judges.as_ref() {
+            if self.is_judged {
                 for (i, admission) in self.store.admissions.iter().enumerate() {
-                    let judge = judge.get(i);
+                    let judge = self.judges.get(i);
                     admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
                 }
                 filtered = !self.judge();
@@ -853,11 +929,9 @@ where
     let checksum = checksum(&buf[..offset]);
     if checksum != footer.checksum {
         tracing::warn!(
-            "read entry error: {}",
-            Error::ChecksumMismatch {
-                checksum,
-                expected: footer.checksum,
-            }
+            "checksum mismatch, checksum: {}, expected: {}",
+            checksum,
+            footer.checksum
         );
         return None;
     }
@@ -871,7 +945,7 @@ fn checksum(buf: &[u8]) -> u64 {
     hasher.finish()
 }
 
-struct RegionEntryIter<K, V, D>
+pub struct RegionEntryIter<K, V, D>
 where
     K: Key,
     V: Value,
@@ -890,7 +964,7 @@ where
     V: Value,
     D: Device,
 {
-    async fn open(region: Region<D>) -> Result<Option<Self>> {
+    pub async fn open(region: Region<D>) -> Result<Option<Self>> {
         let region_size = region.device().region_size();
         let align = region.device().align();
 
@@ -913,7 +987,7 @@ where
         }))
     }
 
-    async fn next(&mut self) -> Result<Option<Index<K>>> {
+    pub async fn next(&mut self) -> Result<Option<Index<K>>> {
         if self.cursor == 0 {
             return Ok(None);
         }
@@ -967,11 +1041,28 @@ where
             value_len: footer.value_len,
         }))
     }
+
+    pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
+        let index = match self.next().await {
+            Ok(Some(index)) => index,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
+        let start = index.offset as usize;
+        let end = start + index.len as usize;
+        let slice = self.region.load(start..end, 0).await?.unwrap();
+        let kv = read_entry::<K, V>(slice.as_ref());
+        slice.destroy().await;
+
+        Ok(kv)
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use std::path::PathBuf;
+    use std::{collections::HashSet, path::PathBuf};
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
@@ -986,6 +1077,113 @@ pub mod tests {
 
     type TestStoreConfig = StoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
+    #[derive(Debug, Clone)]
+    enum Record<K: Key> {
+        Admit(K),
+        Evict(K),
+    }
+
+    #[derive(Debug)]
+    struct JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        records: Mutex<Vec<Record<K>>>,
+        _marker: PhantomData<V>,
+    }
+
+    impl<K, V> JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        fn dump(&self) -> Vec<Record<K>> {
+            self.records.lock().clone()
+        }
+
+        fn remains(&self) -> HashSet<K> {
+            let records = self.dump();
+            let mut res = HashSet::default();
+            for record in records {
+                match record {
+                    Record::Admit(key) => {
+                        res.insert(key);
+                    }
+                    Record::Evict(key) => {
+                        res.remove(&key);
+                    }
+                }
+            }
+            res
+        }
+    }
+
+    impl<K, V> Default for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        fn default() -> Self {
+            Self {
+                records: Mutex::new(Vec::default()),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        type Key = K;
+
+        type Value = V;
+
+        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+            self.records.lock().push(Record::Admit(key.clone()));
+            true
+        }
+
+        fn on_insert(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+
+        fn on_drop(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+    }
+
+    impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
+    where
+        K: Key,
+        V: Value,
+    {
+        type Key = K;
+
+        type Value = V;
+
+        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+            self.records.lock().push(Record::Evict(key.clone()));
+            false
+        }
+
+        fn on_insert(
+            &self,
+            _key: &Self::Key,
+            _weight: usize,
+            _metrics: &Arc<crate::metrics::Metrics>,
+            _judge: bool,
+        ) {
+        }
+
+        fn on_drop(
+            &self,
+            _key: &Self::Key,
+            _weight: usize,
+            _metrics: &Arc<crate::metrics::Metrics>,
+            _judge: bool,
+        ) {
+        }
+    }
+
     #[tokio::test]
     #[allow(clippy::identity_op)]
     async fn test_recovery() {
@@ -994,10 +1192,14 @@ pub mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
 
+        let recorder = Arc::new(JudgeRecorder::default());
+        let admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> =
+            vec![recorder.clone()];
+        let reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> =
+            vec![recorder.clone()];
+
         let config = TestStoreConfig {
-            eviction_config: FifoConfig {
-                segment_ratios: vec![1],
-            },
+            eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1005,8 +1207,8 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            admissions: vec![],
-            reinsertions: vec![],
+            admissions,
+            reinsertions,
             buffer_pool_size: 8 * MB,
             flushers: 1,
             flush_rate_limit: 0,
@@ -1015,12 +1217,13 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
 
         let store = TestStore::open(config).await.unwrap();
 
         // files:
-        // [0, 1, 2] (evicted)
+        // [0, 1, 2]
         // [3, 4, 5]
         // [6, 7, 8]
         // [9, 10, 11]
@@ -1028,23 +1231,25 @@ pub mod tests {
             store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
         }
 
-        for i in 0..3 {
-            assert!(store.lookup(&i).await.unwrap().is_none());
-        }
-        for i in 3..12 {
-            assert_eq!(
-                store.lookup(&i).await.unwrap().unwrap(),
-                vec![i as u8; 1 * MB],
-            );
+        store.close().await.unwrap();
+
+        let remains = recorder.remains();
+
+        for i in 0..12 {
+            if remains.contains(&i) {
+                assert_eq!(
+                    store.lookup(&i).await.unwrap().unwrap(),
+                    vec![i as u8; 1 * MB],
+                );
+            } else {
+                assert!(store.lookup(&i).await.unwrap().is_none());
+            }
         }
 
-        store.shutdown_runners().await.unwrap();
         drop(store);
 
         let config = TestStoreConfig {
-            eviction_config: FifoConfig {
-                segment_ratios: vec![1],
-            },
+            eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1062,46 +1267,23 @@ pub mod tests {
             recover_concurrency: 2,
             event_listeners: vec![],
             prometheus_config: PrometheusConfig::default(),
+            clean_region_threshold: 1,
         };
         let store = TestStore::open(config).await.unwrap();
 
-        for i in 0..3 {
-            assert!(store.lookup(&i).await.unwrap().is_none());
-        }
-        for i in 3..12 {
-            assert_eq!(
-                store.lookup(&i).await.unwrap().unwrap(),
-                vec![i as u8; 1 * MB],
-            );
+        for i in 0..12 {
+            if remains.contains(&i) {
+                assert_eq!(
+                    store.lookup(&i).await.unwrap().unwrap(),
+                    vec![i as u8; 1 * MB],
+                );
+            } else {
+                assert!(store.lookup(&i).await.unwrap().is_none());
+            }
         }
 
-        store.shutdown_runners().await.unwrap();
+        store.close().await.unwrap();
+
         drop(store);
-    }
-
-    #[test]
-    fn test_admission_mask() {
-        type T = StoreWriter<
-            'static,
-            u64,
-            Vec<u8>,
-            FsDevice,
-            Fifo<RegionEpItemAdapter<FifoLink>>,
-            FifoLink,
-        >;
-
-        let mask = Judges::from_value(0b_0011);
-
-        assert!(mask.get(0));
-        assert!(mask.get(1));
-        assert!(!mask.get(2));
-        assert!(!mask.get(3));
-
-        let j1 = Judges::from_value(0b_0011);
-        let j2 = Judges::from_value(0b_1011);
-        let j3 = Judges::from_value(0b_1010);
-        assert!(T::is_admitted(&j1, &mask));
-        assert!(T::is_admitted(&j2, &mask));
-        assert!(!T::is_admitted(&j3, &mask));
     }
 }

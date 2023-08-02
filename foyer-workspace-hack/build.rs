@@ -12,11 +12,5 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(trait_alias)]
-
-pub mod batch;
-pub mod bits;
-pub mod code;
-pub mod queue;
-pub mod rate;
-pub mod rated_random;
+// A build script is required for cargo to consider build dependencies.
+fn main() {}

@@ -1,5 +1,7 @@
 # foyer
 
+[![CI (main)](https://github.com/MrCroxx/foyer/actions/workflows/main.yml/badge.svg)](https://github.com/MrCroxx/foyer/actions/workflows/main.yml) [![License Checker](https://github.com/MrCroxx/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/MrCroxx/foyer/actions/workflows/license_check.yml)
+
 *foyer* aims to be a user-friendly hybrid cache lib in Rust. 
 
 *foyer* is inspired by [Facebook/CacheLib](https://github.com/facebook/cachelib), which is an excellent hybrid cache lib in C++. *foyer* is not only a 'rewrite in Rust project', but provide some features that *CacheLib* doesn't have for now.

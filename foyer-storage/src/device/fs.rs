@@ -24,7 +24,7 @@ use crate::region::RegionId;
 use super::{
     allocator::AlignedAllocator,
     asyncify,
-    error::{Error, Result},
+    error::{DeviceError, DeviceResult},
     Device, IoBuf, IoBufMut,
 };
 use async_trait::async_trait;
@@ -79,7 +79,7 @@ impl Device for FsDevice {
     type Config = FsDeviceConfig;
     type IoBufferAllocator = AlignedAllocator;
 
-    async fn open(config: FsDeviceConfig) -> Result<Self> {
+    async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
         Self::open(config).await
     }
 
@@ -90,7 +90,7 @@ impl Device for FsDevice {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<usize> {
+    ) -> DeviceResult<usize> {
         assert!(offset as usize + len <= self.inner.config.file_capacity);
 
         let fd = self.fd(region);
@@ -111,7 +111,7 @@ impl Device for FsDevice {
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> Result<usize> {
+    ) -> DeviceResult<usize> {
         assert!(offset as usize + len <= self.inner.config.file_capacity);
 
         let fd = self.fd(region);
@@ -126,7 +126,7 @@ impl Device for FsDevice {
     }
 
     #[cfg(target_os = "linux")]
-    async fn flush(&self) -> Result<()> {
+    async fn flush(&self) -> DeviceResult<()> {
         let fd = self.inner.dir.as_raw_fd();
         // Commit fs cache to disk. Linux waits for I/O completions.
         //
@@ -143,7 +143,7 @@ impl Device for FsDevice {
     }
 
     #[cfg(not(target_os = "linux"))]
-    async fn flush(&self) -> Result<()> {
+    async fn flush(&self) -> DeviceResult<()> {
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
 
         Ok(())
@@ -178,7 +178,7 @@ impl Device for FsDevice {
 }
 
 impl FsDevice {
-    pub async fn open(config: FsDeviceConfig) -> Result<Self> {
+    pub async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
         config.verify();
 
         // TODO(MrCroxx): write and read config to a manifest file for pinning
@@ -207,9 +207,9 @@ impl FsDevice {
                     #[cfg(target_os = "linux")]
                     opts.custom_flags(libc::O_DIRECT);
 
-                    let file = opts.open(path).map_err(Error::io)?;
+                    let file = opts.open(path)?;
 
-                    Ok::<File, Error>(file)
+                    Ok::<_, DeviceError>(file)
                 }
             })
             .collect_vec();

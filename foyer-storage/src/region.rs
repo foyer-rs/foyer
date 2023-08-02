@@ -31,6 +31,7 @@ pub type Version = u32;
 pub enum AllocateResult {
     Ok(WriteSlice),
     Full { slice: WriteSlice, remain: usize },
+    None,
 }
 
 impl AllocateResult {
@@ -38,6 +39,7 @@ impl AllocateResult {
         match self {
             AllocateResult::Ok(slice) => slice,
             AllocateResult::Full { .. } => unreachable!(),
+            AllocateResult::None => unreachable!(),
         }
     }
 }

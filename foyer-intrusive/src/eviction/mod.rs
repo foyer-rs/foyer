@@ -71,3 +71,4 @@ where
 pub mod fifo;
 pub mod lfu;
 pub mod lru;
+pub mod sfifo;
