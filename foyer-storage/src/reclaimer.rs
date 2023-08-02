@@ -37,7 +37,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     threshold: usize,
@@ -60,7 +60,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub fn new(

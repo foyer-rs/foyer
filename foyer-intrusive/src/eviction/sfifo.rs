@@ -34,7 +34,7 @@ use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
         adapter::{Adapter, Link, PriorityAdapter},
-        pointer::PointerOps,
+        pointer::Pointer,
     },
     intrusive_adapter,
 };
@@ -106,7 +106,7 @@ intrusive_adapter! { SegmentedFifoLinkAdapter = NonNull<SegmentedFifoLink>: Segm
 pub struct SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
     // Note: All queue share the same dlist link.
     segments: Vec<DList<SegmentedFifoLinkAdapter>>,
@@ -122,7 +122,7 @@ where
 impl<A> Drop for SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
     fn drop(&mut self) {
         let mut to_remove = vec![];
@@ -138,7 +138,7 @@ where
 impl<A> SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
     pub fn new(config: SegmentedFifoConfig) -> Self {
         let segments = (0..config.segment_ratios.len())
@@ -158,9 +158,9 @@ where
         }
     }
 
-    fn insert(&mut self, ptr: A::PointerOps) {
+    fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item = A::PointerOps::into_raw(ptr);
+            let item = A::Pointer::into_raw(ptr);
             let mut link =
                 NonNull::new_unchecked(self.adapter.item2link(item) as *mut SegmentedFifoLink);
 
@@ -177,9 +177,9 @@ where
         }
     }
 
-    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         unsafe {
-            let item = A::PointerOps::as_ptr(ptr);
+            let item = A::Pointer::as_ptr(ptr);
             let link =
                 NonNull::new_unchecked(self.adapter.item2link(item) as *mut SegmentedFifoLink);
 
@@ -195,11 +195,11 @@ where
 
             self.len -= 1;
 
-            A::PointerOps::from_raw(item)
+            A::Pointer::from_raw(item)
         }
     }
 
-    fn access(&mut self, _ptr: &A::PointerOps) {}
+    fn access(&mut self, _ptr: &A::Pointer) {}
 
     fn len(&self) -> usize {
         self.len
@@ -246,34 +246,34 @@ where
 pub struct SegmentedFifoIter<'a, A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
     sfifo: &'a SegmentedFifo<A>,
     iter_segments: Vec<DListIter<'a, SegmentedFifoLinkAdapter>>,
     segment: usize,
 
-    ptr: ManuallyDrop<Option<A::PointerOps>>,
+    ptr: ManuallyDrop<Option<A::Pointer>>,
 }
 
 impl<'a, A> SegmentedFifoIter<'a, A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<SegmentedFifoLink>) {
         std::mem::forget(self.ptr.take());
 
         let item = self.sfifo.adapter.link2item(link.as_ptr());
-        let ptr = A::PointerOps::from_raw(item);
+        let ptr = A::Pointer::from_raw(item);
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 
-    unsafe fn ptr(&self) -> Option<&'a A::PointerOps> {
+    unsafe fn ptr(&self) -> Option<&'a A::Pointer> {
         if self.ptr.is_none() {
             return None;
         }
         let ptr = self.ptr.as_ref().unwrap();
-        let raw = ptr as *const A::PointerOps;
+        let raw = ptr as *const A::Pointer;
         Some(&*raw)
     }
 }
@@ -281,9 +281,9 @@ where
 impl<'a, A> Iterator for SegmentedFifoIter<'a, A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
-    type Item = &'a A::PointerOps;
+    type Item = &'a A::Pointer;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -314,14 +314,14 @@ where
 unsafe impl<A> Send for SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
 }
 
 unsafe impl<A> Sync for SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
 }
 
@@ -332,23 +332,23 @@ unsafe impl Sync for SegmentedFifoLink {}
 unsafe impl<'a, A> Send for SegmentedFifoIter<'a, A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
 }
 
 unsafe impl<'a, A> Sync for SegmentedFifoIter<'a, A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
 }
 
 impl<A> EvictionPolicy for SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
-    A::PointerOps: Clone,
+    A::Pointer: Clone,
 {
-    type PointerOps = A::PointerOps;
+    type Pointer = A::Pointer;
 
     type Config = SegmentedFifoConfig;
 
@@ -356,15 +356,15 @@ where
         Self::new(config)
     }
 
-    fn insert(&mut self, ptr: A::PointerOps) {
+    fn insert(&mut self, ptr: A::Pointer) {
         self.insert(ptr)
     }
 
-    fn remove(&mut self, ptr: &A::PointerOps) -> A::PointerOps {
+    fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         self.remove(ptr)
     }
 
-    fn access(&mut self, ptr: &A::PointerOps) {
+    fn access(&mut self, ptr: &A::Pointer) {
         self.access(ptr)
     }
 
@@ -372,7 +372,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ A::PointerOps> {
+    fn iter(&self) -> impl Iterator<Item = &'_ A::Pointer> {
         self.iter()
     }
 }

@@ -32,7 +32,7 @@ use crate::{
 pub struct Flusher<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     region_manager: Arc<RegionManager<D, EP, EL>>,
@@ -47,7 +47,7 @@ where
 impl<D, EP, EL> Flusher<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub fn new(

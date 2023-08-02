@@ -16,7 +16,7 @@ use std::ptr::NonNull;
 
 use crate::core::{
     adapter::{Adapter, Link},
-    pointer::PointerOps,
+    pointer::Pointer,
 };
 
 #[derive(Debug, Default)]
@@ -90,7 +90,7 @@ where
         }
     }
 
-    pub fn front(&self) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn front(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
                 .map(|link| self.adapter.link2item(link.as_ptr()))
@@ -98,7 +98,7 @@ where
         }
     }
 
-    pub fn back(&self) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn back(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
                 .map(|link| self.adapter.link2item(link.as_ptr()))
@@ -106,7 +106,7 @@ where
         }
     }
 
-    pub fn front_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+    pub fn front_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
                 .map(|link| self.adapter.link2item(link.as_ptr()))
@@ -115,7 +115,7 @@ where
         }
     }
 
-    pub fn back_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+    pub fn back_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
                 .map(|link| self.adapter.link2item(link.as_ptr()))
@@ -124,21 +124,21 @@ where
         }
     }
 
-    pub fn push_front(&mut self, ptr: A::PointerOps) {
+    pub fn push_front(&mut self, ptr: A::Pointer) {
         self.iter_mut().insert_after(ptr);
     }
 
-    pub fn push_back(&mut self, ptr: A::PointerOps) {
+    pub fn push_back(&mut self, ptr: A::Pointer) {
         self.iter_mut().insert_before(ptr);
     }
 
-    pub fn pop_front(&mut self) -> Option<A::PointerOps> {
+    pub fn pop_front(&mut self) -> Option<A::Pointer> {
         let mut iter = self.iter_mut();
         iter.next();
         iter.remove()
     }
 
-    pub fn pop_back(&mut self) -> Option<A::PointerOps> {
+    pub fn pop_back(&mut self) -> Option<A::Pointer> {
         let mut iter = self.iter_mut();
         iter.prev();
         iter.remove()
@@ -224,7 +224,7 @@ where
         self.link.is_some()
     }
 
-    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { &*self.dlist.adapter.link2item(link.as_ptr()) })
     }
@@ -290,12 +290,12 @@ where
         self.link.is_some()
     }
 
-    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { &*self.dlist.adapter.link2item(link.as_ptr()) })
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+    pub fn get_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { &mut *(self.dlist.adapter.link2item(link.as_ptr()) as *mut _) })
     }
@@ -337,7 +337,7 @@ where
     }
 
     /// Removes the current item from [`DList`] and move next.
-    pub fn remove(&mut self) -> Option<A::PointerOps> {
+    pub fn remove(&mut self) -> Option<A::Pointer> {
         unsafe {
             if !self.is_valid() {
                 return None;
@@ -346,7 +346,7 @@ where
             let mut link = self.link.unwrap();
 
             let item = self.dlist.adapter.link2item(link.as_ptr());
-            let ptr = A::PointerOps::from_raw(item);
+            let ptr = A::Pointer::from_raw(item);
 
             // fix head and tail if node is either of that
             let mut prev = link.as_ref().prev;
@@ -381,9 +381,9 @@ where
     /// Link a new ptr before the current one.
     ///
     /// If iter is on null, link to tail.
-    pub fn insert_before(&mut self, ptr: A::PointerOps) {
+    pub fn insert_before(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = A::PointerOps::into_raw(ptr);
+            let item_new = A::Pointer::into_raw(ptr);
             let mut link_new =
                 NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
             assert!(!link_new.as_ref().is_linked());
@@ -409,9 +409,9 @@ where
     /// Link a new ptr after the current one.
     ///
     /// If iter is on null, link to head.
-    pub fn insert_after(&mut self, ptr: A::PointerOps) {
+    pub fn insert_after(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = A::PointerOps::into_raw(ptr);
+            let item_new = A::Pointer::into_raw(ptr);
             let mut link_new =
                 NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
             assert!(!link_new.as_ref().is_linked());
@@ -471,7 +471,7 @@ impl<'a, A> Iterator for DListIter<'a, A>
 where
     A: Adapter<Link = DListLink>,
 {
-    type Item = &'a <A::PointerOps as PointerOps>::Item;
+    type Item = &'a <A::Pointer as Pointer>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
@@ -486,7 +486,7 @@ impl<'a, A> Iterator for DListIterMut<'a, A>
 where
     A: Adapter<Link = DListLink>,
 {
-    type Item = &'a mut <A::PointerOps as PointerOps>::Item;
+    type Item = &'a mut <A::Pointer as Pointer>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
@@ -530,7 +530,7 @@ mod tests {
     struct DListAdapter;
 
     unsafe impl Adapter for DListAdapter {
-        type PointerOps = Box<DListItem>;
+        type Pointer = Box<DListItem>;
 
         type Link = DListLink;
 
@@ -541,13 +541,13 @@ mod tests {
         unsafe fn link2item(
             &self,
             link: *const Self::Link,
-        ) -> *const <Self::PointerOps as PointerOps>::Item {
+        ) -> *const <Self::Pointer as Pointer>::Item {
             crate::container_of!(link, DListItem, link)
         }
 
         unsafe fn item2link(
             &self,
-            item: *const <Self::PointerOps as PointerOps>::Item,
+            item: *const <Self::Pointer as Pointer>::Item,
         ) -> *const Self::Link {
             (item as *const u8).add(crate::offset_of!(DListItem, link)) as *const _
         }

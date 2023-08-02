@@ -31,7 +31,7 @@ use std::{fmt::Debug, pin::Pin, ptr::NonNull, rc::Rc, sync::Arc};
 /// # Safety
 ///
 /// Pointer operations MUST be valid.
-pub unsafe trait PointerOps {
+pub unsafe trait Pointer {
     type Item: ?Sized;
 
     /// # Safety
@@ -47,13 +47,13 @@ pub unsafe trait PointerOps {
 /// # Safety
 ///
 /// Pointer operations MUST be valid.
-pub unsafe trait DowngradablePointerOps: PointerOps {
+pub unsafe trait DowngradablePointerOps: Pointer {
     type WeakPointer;
 
     fn downgrade(&self) -> Self::WeakPointer;
 }
 
-unsafe impl<'a, T: ?Sized + Debug> PointerOps for &'a T {
+unsafe impl<'a, T: ?Sized + Debug> Pointer for &'a T {
     type Item = T;
 
     #[inline]
@@ -72,7 +72,7 @@ unsafe impl<'a, T: ?Sized + Debug> PointerOps for &'a T {
     }
 }
 
-unsafe impl<'a, T: ?Sized + Debug> PointerOps for Pin<&'a T> {
+unsafe impl<'a, T: ?Sized + Debug> Pointer for Pin<&'a T> {
     type Item = T;
 
     #[inline]
@@ -91,7 +91,7 @@ unsafe impl<'a, T: ?Sized + Debug> PointerOps for Pin<&'a T> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for NonNull<T> {
+unsafe impl<T: ?Sized + Debug> Pointer for NonNull<T> {
     type Item = T;
 
     unsafe fn from_raw(raw: *const T) -> NonNull<T> {
@@ -108,7 +108,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for NonNull<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Box<T> {
+unsafe impl<T: ?Sized + Debug> Pointer for Box<T> {
     type Item = T;
 
     #[inline]
@@ -127,7 +127,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for Box<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Box<T>> {
+unsafe impl<T: ?Sized + Debug> Pointer for Pin<Box<T>> {
     type Item = T;
 
     #[inline]
@@ -146,7 +146,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Box<T>> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Rc<T> {
+unsafe impl<T: ?Sized + Debug> Pointer for Rc<T> {
     type Item = T;
 
     #[inline]
@@ -165,7 +165,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for Rc<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Rc<T>> {
+unsafe impl<T: ?Sized + Debug> Pointer for Pin<Rc<T>> {
     type Item = T;
 
     #[inline]
@@ -184,7 +184,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Rc<T>> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Arc<T> {
+unsafe impl<T: ?Sized + Debug> Pointer for Arc<T> {
     type Item = T;
 
     #[inline]
@@ -203,7 +203,7 @@ unsafe impl<T: ?Sized + Debug> PointerOps for Arc<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Debug> PointerOps for Pin<Arc<T>> {
+unsafe impl<T: ?Sized + Debug> Pointer for Pin<Arc<T>> {
     type Item = T;
 
     #[inline]
@@ -243,22 +243,22 @@ mod tests {
     use super::*;
     use std::{boxed::Box, fmt::Debug, mem, pin::Pin, rc::Rc, sync::Arc};
 
-    /// Clones a `PointerOps::Pointer` from a `*const PointerOps::Value`
+    /// Clones a `Pointer` from a `*const Pointer::Value`
     ///
     /// This method is only safe to call if the raw pointer is known to be
-    /// managed by the provided `PointerOps` type.
+    /// managed by the provided `Pointer` type.
     #[inline]
-    unsafe fn clone_pointer_from_raw<T: PointerOps + Clone>(ptr: *const T::Item) -> T {
+    unsafe fn clone_pointer_from_raw<T: Pointer + Clone>(ptr: *const T::Item) -> T {
         use std::{mem::ManuallyDrop, ops::Deref};
 
         /// Guard which converts an pointer back into its raw version
         /// when it gets dropped. This makes sure we also perform a full
         /// `from_raw` and `into_raw` round trip - even in the case of panics.
-        struct PointerGuard<T: PointerOps> {
+        struct PointerGuard<T: Pointer> {
             pointer: ManuallyDrop<T>,
         }
 
-        impl<T: PointerOps> Drop for PointerGuard<T> {
+        impl<T: Pointer> Drop for PointerGuard<T> {
             #[inline]
             fn drop(&mut self) {
                 // Prevent shared pointers from being released by converting them
@@ -281,7 +281,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Box<i32> = <Box<i32> as PointerOps>::from_raw(r);
+            let p2: Box<i32> = <Box<i32> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -294,7 +294,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Rc<i32> = <Rc<_> as PointerOps>::from_raw(r);
+            let p2: Rc<i32> = <Rc<_> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -307,7 +307,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Arc<i32> = <Arc<_> as PointerOps>::from_raw(r);
+            let p2: Arc<i32> = <Arc<_> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -322,7 +322,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Box<dyn Debug> = <Box<_> as PointerOps>::from_raw(r);
+            let p2: Box<dyn Debug> = <Box<_> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -338,7 +338,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Rc<dyn Debug> = <Rc<_> as PointerOps>::from_raw(r);
+            let p2: Rc<dyn Debug> = <Rc<_> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -354,7 +354,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Arc<dyn Debug> = <Arc<_> as PointerOps>::from_raw(r);
+            let p2: Arc<dyn Debug> = <Arc<_> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -388,7 +388,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Box<i32>> = <Pin<Box<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Box<i32>> = <Pin<Box<_>> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -401,7 +401,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Rc<i32>> = <Pin<Rc<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Rc<i32>> = <Pin<Rc<_>> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -414,7 +414,7 @@ mod tests {
             let a: *const i32 = &*p;
             let r = p.into_raw();
             assert_eq!(a, r);
-            let p2: Pin<Arc<i32>> = <Pin<Arc<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Arc<i32>> = <Pin<Arc<_>> as Pointer>::from_raw(r);
             let a2: *const i32 = &*p2;
             assert_eq!(a, a2);
         }
@@ -429,7 +429,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Box<dyn Debug>> = <Pin<Box<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Box<dyn Debug>> = <Pin<Box<_>> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -445,7 +445,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Rc<dyn Debug>> = <Pin<Rc<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Rc<dyn Debug>> = <Pin<Rc<_>> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -461,7 +461,7 @@ mod tests {
             let r = p.into_raw();
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Pin<Arc<dyn Debug>> = <Pin<Arc<_>> as PointerOps>::from_raw(r);
+            let p2: Pin<Arc<dyn Debug>> = <Pin<Arc<_>> as Pointer>::from_raw(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
@@ -474,7 +474,7 @@ mod tests {
             let p = Pin::new(Arc::new(1));
             let raw = p.into_raw();
             let p2: Pin<Arc<i32>> = clone_pointer_from_raw(raw);
-            let _p = <Pin<Arc<_>> as PointerOps>::from_raw(raw);
+            let _p = <Pin<Arc<_>> as Pointer>::from_raw(raw);
             assert_eq!(2, Arc::strong_count(&Pin::into_inner(p2)));
         }
     }
@@ -485,7 +485,7 @@ mod tests {
             let p = Pin::new(Rc::new(1));
             let raw = p.into_raw();
             let p2: Pin<Rc<i32>> = clone_pointer_from_raw(raw);
-            let _p = <Pin<Rc<_>> as PointerOps>::from_raw(raw);
+            let _p = <Pin<Rc<_>> as Pointer>::from_raw(raw);
             assert_eq!(2, Rc::strong_count(&Pin::into_inner(p2)));
         }
     }

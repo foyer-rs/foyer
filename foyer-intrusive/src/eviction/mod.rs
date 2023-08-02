@@ -12,22 +12,22 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::core::pointer::PointerOps;
+use crate::core::pointer::Pointer;
 use std::fmt::Debug;
 
 pub trait Config = Send + Sync + 'static + Debug + Clone;
 
 pub trait EvictionPolicy: Send + Sync + 'static {
-    type PointerOps: PointerOps;
+    type Pointer: Pointer;
     type Config: Config;
 
     fn new(config: Self::Config) -> Self;
 
-    fn insert(&mut self, ptr: Self::PointerOps);
+    fn insert(&mut self, ptr: Self::Pointer);
 
-    fn remove(&mut self, ptr: &Self::PointerOps) -> Self::PointerOps;
+    fn remove(&mut self, ptr: &Self::Pointer) -> Self::Pointer;
 
-    fn access(&mut self, ptr: &Self::PointerOps);
+    fn access(&mut self, ptr: &Self::Pointer);
 
     fn len(&self) -> usize;
 
@@ -35,26 +35,26 @@ pub trait EvictionPolicy: Send + Sync + 'static {
         self.len() == 0
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ Self::PointerOps> + '_;
+    fn iter(&self) -> impl Iterator<Item = &'_ Self::Pointer> + '_;
 }
 
 pub trait EvictionPolicyExt: EvictionPolicy {
-    fn push(&mut self, ptr: Self::PointerOps);
+    fn push(&mut self, ptr: Self::Pointer);
 
-    fn pop(&mut self) -> Option<Self::PointerOps>;
+    fn pop(&mut self) -> Option<Self::Pointer>;
 
-    fn peek(&self) -> Option<&Self::PointerOps>;
+    fn peek(&self) -> Option<&Self::Pointer>;
 }
 
 impl<E: EvictionPolicy> EvictionPolicyExt for E
 where
-    <E as EvictionPolicy>::PointerOps: Clone,
+    <E as EvictionPolicy>::Pointer: Clone,
 {
-    fn push(&mut self, ptr: Self::PointerOps) {
+    fn push(&mut self, ptr: Self::Pointer) {
         self.insert(ptr)
     }
 
-    fn pop(&mut self) -> Option<<Self as EvictionPolicy>::PointerOps> {
+    fn pop(&mut self) -> Option<<Self as EvictionPolicy>::Pointer> {
         let ptr = {
             let mut iter = self.iter();
             let ptr = iter.next();
@@ -63,7 +63,7 @@ where
         ptr.map(|ptr| self.remove(&ptr))
     }
 
-    fn peek(&self) -> Option<&Self::PointerOps> {
+    fn peek(&self) -> Option<&Self::Pointer> {
         self.iter().next()
     }
 }

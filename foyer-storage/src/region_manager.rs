@@ -52,7 +52,7 @@ key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L
 pub struct RegionManager<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     current: AsyncRwLock<Option<RegionId>>,
@@ -77,7 +77,7 @@ where
 impl<D, EP, EL> RegionManager<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<PointerOps = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
     EL: Link,
 {
     pub fn new(
