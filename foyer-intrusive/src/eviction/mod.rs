@@ -12,22 +12,25 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::core::pointer::Pointer;
+use crate::core::adapter::Adapter;
 use std::fmt::Debug;
 
 pub trait Config = Send + Sync + 'static + Debug + Clone;
 
 pub trait EvictionPolicy: Send + Sync + 'static {
-    type Pointer: Pointer;
+    type Adapter: Adapter;
     type Config: Config;
 
     fn new(config: Self::Config) -> Self;
 
-    fn insert(&mut self, ptr: Self::Pointer);
+    fn insert(&mut self, ptr: <Self::Adapter as Adapter>::Pointer);
 
-    fn remove(&mut self, ptr: &Self::Pointer) -> Self::Pointer;
+    fn remove(
+        &mut self,
+        ptr: &<Self::Adapter as Adapter>::Pointer,
+    ) -> <Self::Adapter as Adapter>::Pointer;
 
-    fn access(&mut self, ptr: &Self::Pointer);
+    fn access(&mut self, ptr: &<Self::Adapter as Adapter>::Pointer);
 
     fn len(&self) -> usize;
 
@@ -35,26 +38,26 @@ pub trait EvictionPolicy: Send + Sync + 'static {
         self.len() == 0
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ Self::Pointer> + '_;
+    fn iter(&self) -> impl Iterator<Item = &'_ <Self::Adapter as Adapter>::Pointer> + '_;
 }
 
 pub trait EvictionPolicyExt: EvictionPolicy {
-    fn push(&mut self, ptr: Self::Pointer);
+    fn push(&mut self, ptr: <Self::Adapter as Adapter>::Pointer);
 
-    fn pop(&mut self) -> Option<Self::Pointer>;
+    fn pop(&mut self) -> Option<<Self::Adapter as Adapter>::Pointer>;
 
-    fn peek(&self) -> Option<&Self::Pointer>;
+    fn peek(&self) -> Option<&<Self::Adapter as Adapter>::Pointer>;
 }
 
 impl<E: EvictionPolicy> EvictionPolicyExt for E
 where
-    <E as EvictionPolicy>::Pointer: Clone,
+    <E::Adapter as Adapter>::Pointer: Clone,
 {
-    fn push(&mut self, ptr: Self::Pointer) {
+    fn push(&mut self, ptr: <Self::Adapter as Adapter>::Pointer) {
         self.insert(ptr)
     }
 
-    fn pop(&mut self) -> Option<<Self as EvictionPolicy>::Pointer> {
+    fn pop(&mut self) -> Option<<E::Adapter as Adapter>::Pointer> {
         let ptr = {
             let mut iter = self.iter();
             let ptr = iter.next();
@@ -63,7 +66,7 @@ where
         ptr.map(|ptr| self.remove(&ptr))
     }
 
-    fn peek(&self) -> Option<&Self::Pointer> {
+    fn peek(&self) -> Option<&<Self::Adapter as Adapter>::Pointer> {
         self.iter().next()
     }
 }

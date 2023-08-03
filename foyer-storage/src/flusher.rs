@@ -24,7 +24,7 @@ use crate::{
     error::Result,
     metrics::Metrics,
     region::RegionId,
-    region_manager::{RegionEpItem, RegionManager},
+    region_manager::{RegionEpItemAdapter, RegionManager},
     slice::Slice,
 };
 
@@ -32,7 +32,7 @@ use crate::{
 pub struct Flusher<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     region_manager: Arc<RegionManager<D, EP, EL>>,
@@ -47,7 +47,7 @@ where
 impl<D, EP, EL> Flusher<D, EP, EL>
 where
     D: Device,
-    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     pub fn new(

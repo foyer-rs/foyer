@@ -348,8 +348,7 @@ where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,
     A::Pointer: Clone,
 {
-    type Pointer = A::Pointer;
-
+    type Adapter = A;
     type Config = SegmentedFifoConfig;
 
     fn new(config: Self::Config) -> Self {

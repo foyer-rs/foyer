@@ -20,7 +20,7 @@ use crate::{
     event::EventListener,
     judge::Judges,
     metrics::Metrics,
-    region_manager::{RegionEpItem, RegionManager},
+    region_manager::{RegionEpItemAdapter, RegionManager},
     store::{RegionEntryIter, Store},
 };
 use bytes::BufMut;
@@ -37,7 +37,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     threshold: usize,
@@ -60,7 +60,7 @@ where
     K: Key,
     V: Value,
     D: Device,
-    EP: EvictionPolicy<Pointer = Arc<RegionEpItem<EL>>>,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     pub fn new(

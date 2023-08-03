@@ -255,8 +255,7 @@ where
     A: Adapter<Link = FifoLink>,
     <A as Adapter>::Pointer: Clone,
 {
-    type Pointer = A::Pointer;
-
+    type Adapter = A;
     type Config = FifoConfig;
 
     fn new(config: Self::Config) -> Self {

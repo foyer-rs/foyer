@@ -525,8 +525,7 @@ where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
     <A as Adapter>::Pointer: Clone,
 {
-    type Pointer = A::Pointer;
-
+    type Adapter = A;
     type Config = LfuConfig;
 
     fn new(config: Self::Config) -> Self {
