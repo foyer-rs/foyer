@@ -21,7 +21,7 @@ use twox_hash::XxHash64;
 use crate::{
     core::{
         adapter::{KeyAdapter, Link},
-        pointer::PointerOps,
+        pointer::Pointer,
     },
     intrusive_adapter,
 };
@@ -79,7 +79,7 @@ where
                 while iter.is_valid() {
                     let link = iter.remove().unwrap();
                     let item = self.adapter.link2item(link.as_ptr());
-                    let _ = self.adapter.pointer_ops().from_raw(item);
+                    let _ = A::Pointer::from_raw(item);
                 }
             }
         }
@@ -105,12 +105,9 @@ where
         }
     }
 
-    pub fn insert(
-        &mut self,
-        ptr: <A::PointerOps as PointerOps>::Pointer,
-    ) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn insert(&mut self, ptr: A::Pointer) -> Option<A::Pointer> {
         unsafe {
-            let item_new = self.adapter.pointer_ops().into_raw(ptr);
+            let item_new = A::Pointer::into_raw(ptr);
             let link_new = NonNull::new_unchecked(self.adapter.item2link(item_new) as *mut A::Link);
 
             let key_new = &*self.adapter.item2key(item_new);
@@ -130,7 +127,7 @@ where
         }
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    pub fn remove(&mut self, key: &K) -> Option<A::Pointer> {
         unsafe {
             let hash = self.hash_key(key);
             let slot = (self.slots.len() - 1) & hash as usize;
@@ -143,7 +140,7 @@ where
         }
     }
 
-    pub fn lookup(&self, key: &K) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn lookup(&self, key: &K) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             let hash = self.hash_key(key);
             let slot = (self.slots.len() - 1) & hash as usize;
@@ -174,10 +171,7 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`HashMap`].
-    pub unsafe fn remove_in_place(
-        &mut self,
-        link: NonNull<HashMapLink>,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+    pub unsafe fn remove_in_place(&mut self, link: NonNull<HashMapLink>) -> A::Pointer {
         assert!(link.as_ref().is_linked());
         let item = self.adapter.link2item(link.as_ptr());
         let key = &*self.adapter.item2key(item);
@@ -187,7 +181,7 @@ where
             .iter_mut_from_raw(link.as_ref().dlist_link.raw())
             .remove();
         self.len -= 1;
-        self.adapter.pointer_ops().from_raw(item)
+        A::Pointer::from_raw(item)
     }
 
     /// # Safety
@@ -235,16 +229,12 @@ where
     /// # Safety
     ///
     /// there must be at most one matches in the slot
-    unsafe fn remove_inner(
-        &mut self,
-        key: &K,
-        slot: usize,
-    ) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+    unsafe fn remove_inner(&mut self, key: &K, slot: usize) -> Option<A::Pointer> {
         match self.lookup_inner_mut(key, slot) {
             Some(mut iter) => {
                 let link = iter.remove().unwrap();
                 let item = self.adapter.link2item(link.as_ptr());
-                let ptr = self.adapter.pointer_ops().from_raw(item);
+                let ptr = A::Pointer::from_raw(item);
                 Some(ptr)
             }
             None => None,
@@ -296,13 +286,13 @@ where
         self.iters[self.slot].is_valid()
     }
 
-    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Item> {
+    pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.iters[self.slot]
             .get()
             .map(|link| unsafe { &*(self.adapter.link2item(link.raw().as_ptr()) as *const _) })
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut <A::PointerOps as PointerOps>::Item> {
+    pub fn get_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         self.iters[self.slot]
             .get()
             .map(|link| unsafe { &mut *(self.adapter.link2item(link.raw().as_ptr()) as *mut _) })
