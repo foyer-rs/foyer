@@ -32,7 +32,7 @@ use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
         adapter::{Adapter, Link},
-        pointer::PointerOps,
+        pointer::Pointer,
     },
     intrusive_adapter,
 };
@@ -65,7 +65,7 @@ intrusive_adapter! { FifoLinkAdapter = NonNull<FifoLink>: FifoLink { link: DList
 pub struct Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     queue: DList<FifoLinkAdapter>,
 
@@ -79,7 +79,7 @@ where
 impl<A> Drop for Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     fn drop(&mut self) {
         let mut to_remove = vec![];
@@ -95,7 +95,7 @@ where
 impl<A> Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     pub fn new(config: FifoConfig) -> Self {
         Self {
@@ -109,9 +109,9 @@ where
         }
     }
 
-    fn insert(&mut self, ptr: <A::PointerOps as PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item = self.adapter.pointer_ops().into_raw(ptr);
+            let item = A::Pointer::into_raw(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut FifoLink);
 
             assert!(!link.as_ref().is_linked());
@@ -122,12 +122,9 @@ where
         }
     }
 
-    fn remove(
-        &mut self,
-        ptr: &<A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::PointerOps as PointerOps>::Pointer {
+    fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         unsafe {
-            let item = self.adapter.pointer_ops().as_ptr(ptr);
+            let item = A::Pointer::as_ptr(ptr);
             let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut FifoLink);
 
             assert!(link.as_ref().is_linked());
@@ -139,11 +136,11 @@ where
 
             self.len -= 1;
 
-            self.adapter.pointer_ops().from_raw(item)
+            A::Pointer::from_raw(item)
         }
     }
 
-    fn access(&mut self, _ptr: &<A::PointerOps as PointerOps>::Pointer) {}
+    fn access(&mut self, _ptr: &A::Pointer) {}
 
     fn len(&self) -> usize {
         self.len
@@ -165,33 +162,33 @@ where
 pub struct FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     fifo: &'a Fifo<A>,
     iter: DListIter<'a, FifoLinkAdapter>,
 
-    ptr: ManuallyDrop<Option<<<A as Adapter>::PointerOps as PointerOps>::Pointer>>,
+    ptr: ManuallyDrop<Option<<A as Adapter>::Pointer>>,
 }
 
 impl<'a, A> FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     unsafe fn update_ptr(&mut self, link: NonNull<FifoLink>) {
         std::mem::forget(self.ptr.take());
 
         let item = self.fifo.adapter.link2item(link.as_ptr());
-        let ptr = self.fifo.adapter.pointer_ops().from_raw(item);
+        let ptr = A::Pointer::from_raw(item);
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 
-    unsafe fn ptr(&self) -> Option<&'a <<A as Adapter>::PointerOps as PointerOps>::Pointer> {
+    unsafe fn ptr(&self) -> Option<&'a <A as Adapter>::Pointer> {
         if self.ptr.is_none() {
             return None;
         }
         let ptr = self.ptr.as_ref().unwrap();
-        let raw = ptr as *const <<A as Adapter>::PointerOps as PointerOps>::Pointer;
+        let raw = ptr as *const <A as Adapter>::Pointer;
         Some(&*raw)
     }
 }
@@ -199,9 +196,9 @@ where
 impl<'a, A> Iterator for FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
-    type Item = &'a <A::PointerOps as PointerOps>::Pointer;
+    type Item = &'a A::Pointer;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -224,14 +221,14 @@ where
 unsafe impl<A> Send for Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
 }
 
 unsafe impl<A> Sync for Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
 }
 
@@ -242,42 +239,38 @@ unsafe impl Sync for FifoLink {}
 unsafe impl<'a, A> Send for FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
 }
 
 unsafe impl<'a, A> Sync for FifoIter<'a, A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
 }
 
 impl<A> EvictionPolicy for Fifo<A>
 where
     A: Adapter<Link = FifoLink>,
-    <<A as Adapter>::PointerOps as PointerOps>::Pointer: Clone,
+    <A as Adapter>::Pointer: Clone,
 {
     type Adapter = A;
-
     type Config = FifoConfig;
 
     fn new(config: Self::Config) -> Self {
         Self::new(config)
     }
 
-    fn insert(&mut self, ptr: <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+    fn insert(&mut self, ptr: A::Pointer) {
         self.insert(ptr)
     }
 
-    fn remove(
-        &mut self,
-        ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer,
-    ) -> <<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer {
+    fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         self.remove(ptr)
     }
 
-    fn access(&mut self, ptr: &<<A>::PointerOps as crate::core::pointer::PointerOps>::Pointer) {
+    fn access(&mut self, ptr: &A::Pointer) {
         self.access(ptr)
     }
 
@@ -285,7 +278,7 @@ where
         self.len()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ <A::PointerOps as PointerOps>::Pointer> {
+    fn iter(&self) -> impl Iterator<Item = &'_ A::Pointer> {
         self.iter()
     }
 }
