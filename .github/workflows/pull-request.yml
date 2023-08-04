@@ -78,11 +78,12 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
         run: |
-          cargo llvm-cov --no-report test --package foyer-storage --lib -- admission::rated_random::tests --nocapture --ignored
+          cargo llvm-cov --no-report test --package foyer-common --lib -- rated_random::tests --nocapture --ignored
           cargo llvm-cov --no-report test --package foyer-common --lib -- rate::tests --nocapture --ignored
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info
+          cargo llvm-cov --no-report nextest
+          cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v2
   deadlock:
     name: run with single worker thread and deadlock detection
