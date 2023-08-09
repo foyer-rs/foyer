@@ -54,7 +54,7 @@ jobs:
       - name: Install cargo tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo binstall cargo-sort cargo-hakari
+          cargo binstall -y cargo-sort cargo-hakari
       - name: Run rust cargo-sort check
         run: |
           cargo sort -w -c
