@@ -17,7 +17,6 @@
 #![feature(trait_alias)]
 #![feature(get_mut_unchecked)]
 #![feature(let_chains)]
-#![feature(provide_any)]
 #![feature(error_generic_member_access)]
 #![allow(clippy::type_complexity)]
 
