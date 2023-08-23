@@ -14,7 +14,6 @@ Currently, *foyer* only finished few features, and is still under heavy developm
 
 - [ ] Better intrusive index collectios for memory cache.
 - [ ] Hybrid memory and disk cache.
-- [ ] Reinsertion for disk cache.
 - [ ] Raw device and single file device support.
 - [ ] More detailed metrics or statistics.
 
