@@ -610,11 +610,11 @@ where
     ) -> Result<bool> {
         debug_assert!(!writer.is_inserted);
 
-        let now = Instant::now();
-
         if !writer.judge() {
             return Ok(false);
         }
+
+        let now = Instant::now();
 
         writer.is_inserted = true;
         let key = &writer.key;
