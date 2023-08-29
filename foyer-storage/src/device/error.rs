@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::backtrace::Backtrace;
-
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
 pub struct DeviceError(Box<DeviceErrorInner>);
@@ -22,7 +20,8 @@ pub struct DeviceError(Box<DeviceErrorInner>);
 #[error("{source}")]
 struct DeviceErrorInner {
     source: DeviceErrorKind,
-    backtrace: Backtrace,
+    // https://github.com/dtolnay/thiserror/issues/204
+    // backtrace: Backtrace,
 }
 
 #[derive(thiserror::Error, Debug)]

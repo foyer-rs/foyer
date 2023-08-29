@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::backtrace::Backtrace;
-
 use crate::device::error::DeviceError;
 
 #[derive(thiserror::Error, Debug)]
@@ -24,7 +22,8 @@ pub struct Error(Box<ErrorInner>);
 #[error("{source}")]
 struct ErrorInner {
     source: ErrorKind,
-    backtrace: Backtrace,
+    // https://github.com/dtolnay/thiserror/issues/204
+    // backtrace: Backtrace,
 }
 
 #[derive(thiserror::Error, Debug)]
