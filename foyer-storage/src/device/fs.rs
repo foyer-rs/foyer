@@ -14,7 +14,7 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::fd::{AsRawFd, RawFd},
+    os::fd::{AsRawFd, BorrowedFd, RawFd},
     path::PathBuf,
     sync::Arc,
 };
@@ -96,6 +96,7 @@ impl Device for FsDevice {
         let fd = self.fd(region);
 
         let res = asyncify(move || {
+            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[..len], offset as i64)?;
             Ok(res)
         })
@@ -117,6 +118,7 @@ impl Device for FsDevice {
         let fd = self.fd(region);
 
         let res = asyncify(move || {
+            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
             let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[..len], offset as i64)?;
             Ok(res)
         })

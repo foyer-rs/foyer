@@ -20,6 +20,7 @@ futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
 futures-sink = { version = "0.3" }
 itertools = { version = "0.10" }
+nix = { version = "0.27", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }
