@@ -28,6 +28,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::{
     device::Device,
+    metrics::Metrics,
     region::{AllocateResult, Region, RegionId},
 };
 
@@ -72,6 +73,8 @@ where
 
     /// Eviction policy.
     eviction: RwLock<EP>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<D, EP, EL> RegionManager<D, EP, EL>
@@ -85,6 +88,7 @@ where
         region_count: usize,
         eviction_config: EP::Config,
         device: D,
+        metrics: Arc<Metrics>,
     ) -> Self {
         let buffers = AsyncQueue::new();
         for _ in 0..buffer_count {
@@ -120,6 +124,7 @@ where
             regions,
             items,
             eviction: RwLock::new(eviction),
+            metrics,
         }
     }
 
@@ -160,7 +165,12 @@ where
         match self.rotate_batch.push(()) {
             Identity::Leader(rx) => {
                 // Wait a clean region to be released.
+                let timer = self
+                    .metrics
+                    .inner_op_duration_acquire_clean_region
+                    .start_timer();
                 let region_id = self.clean_regions.acquire().await;
+                drop(timer);
 
                 tracing::info!("switch to clean region: {}", region_id);
 

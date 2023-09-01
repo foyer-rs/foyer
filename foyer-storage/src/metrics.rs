@@ -27,6 +27,8 @@ pub struct GlobalMetrics {
     op_duration: HistogramVec,
     op_bytes: IntCounterVec,
     total_bytes: IntGaugeVec,
+
+    inner_op_duration: HistogramVec,
 }
 
 impl Default for GlobalMetrics {
@@ -55,10 +57,20 @@ impl GlobalMetrics {
         let total_bytes =
             register_int_gauge_vec!("total_bytes", "total bytes", &["foyer"]).unwrap();
 
+        let inner_op_duration = register_histogram_vec!(
+            "foyer_storage_inner_op_duration",
+            "foyer storage inner op duration",
+            &["foyer", "op", "extra"],
+            vec![0.000001, 0.00001, 0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap();
+
         Self {
             op_duration,
             op_bytes,
             total_bytes,
+
+            inner_op_duration,
         }
     }
 
@@ -85,6 +97,8 @@ pub struct Metrics {
     pub op_bytes_reinsert: IntCounter,
 
     pub total_bytes: IntGauge,
+
+    pub inner_op_duration_acquire_clean_region: Histogram,
 }
 
 impl Metrics {
@@ -118,6 +132,11 @@ impl Metrics {
 
         let total_bytes = global.total_bytes.with_label_values(&[foyer]);
 
+        let inner_op_duration_acquire_clean_region =
+            global
+                .inner_op_duration
+                .with_label_values(&[foyer, "acquire_clean_region", ""]);
+
         Self {
             op_duration_insert_inserted,
             op_duration_insert_filtered,
@@ -127,12 +146,16 @@ impl Metrics {
             op_duration_remove,
             op_duration_flush,
             op_duration_reclaim,
+
             op_bytes_insert,
             op_bytes_lookup,
             op_bytes_flush,
             op_bytes_reclaim,
             op_bytes_reinsert,
+
             total_bytes,
+
+            inner_op_duration_acquire_clean_region,
         }
     }
 }

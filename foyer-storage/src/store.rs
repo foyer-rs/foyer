@@ -164,6 +164,8 @@ where
     pub async fn open(config: StoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
         tracing::info!("open store with config:\n{:#?}", config);
 
+        let metrics = Arc::new(METRICS.foyer(&config.name));
+
         let device = D::open(config.device_config).await?;
 
         let buffer_count = config.buffer_pool_size / device.region_size();
@@ -173,6 +175,7 @@ where
             device.regions(),
             config.eviction_config,
             device.clone(),
+            metrics.clone(),
         ));
 
         let indices = Arc::new(Indices::new(device.regions()));
@@ -186,8 +189,6 @@ where
         let reclaimer_stop_rxs = (0..config.reclaimers)
             .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
-
-        let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let store = Arc::new(Self {
             indices: indices.clone(),
