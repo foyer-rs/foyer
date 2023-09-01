@@ -12,98 +12,127 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramOpts, IntCounter, IntGauge, Opts,
-    Registry,
+    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
 };
 
+/// Multiple foyer instance will share the same global metrics with different label `foyer` name.
+pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::default);
+
 #[derive(Debug)]
-pub struct Metrics {
-    pub latency_insert_inserted: Histogram,
-    pub latency_insert_filtered: Histogram,
-    pub latency_insert_dropped: Histogram,
-    pub latency_lookup_hit: Histogram,
-    pub latency_lookup_miss: Histogram,
-    pub latency_remove: Histogram,
-
-    pub bytes_insert: IntCounter,
-    pub bytes_lookup: IntCounter,
-    pub bytes_flush: IntCounter,
-    pub bytes_reclaim: IntCounter,
-    pub bytes_reinsert: IntCounter,
-
-    pub size: IntGauge,
+pub struct GlobalMetrics {
+    op_duration: HistogramVec,
+    op_bytes: IntCounterVec,
+    total_bytes: IntGaugeVec,
 }
 
-impl Default for Metrics {
+impl Default for GlobalMetrics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Metrics {
+impl GlobalMetrics {
     pub fn new() -> Self {
-        Self::with_registry_namespace(Registry::default(), "")
-    }
+        let op_duration = register_histogram_vec!(
+            "foyer_storage_op_duration",
+            "foyer storage op duration",
+            &["foyer", "op", "extra"],
+            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap();
 
-    pub fn with_namespace(namespace: impl ToString) -> Self {
-        Self::with_registry_namespace(Registry::default(), namespace)
-    }
+        let op_bytes = register_int_counter_vec!(
+            "foyer_storage_op_bytes",
+            "foyer storage op bytes",
+            &["foyer", "op", "extra"]
+        )
+        .unwrap();
 
-    pub fn with_registry(registry: Registry) -> Self {
-        Self::with_registry_namespace(registry, "")
-    }
-
-    pub fn with_registry_namespace(registry: Registry, namespace: impl ToString) -> Self {
-        let latency = {
-            let opts = HistogramOpts::new("foyer_storage_latency", "foyer storage latency")
-                .namespace(namespace.to_string())
-                .buckets(vec![
-                    0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0,
-                ]);
-            register_histogram_vec_with_registry!(opts, &["op", "extra"], registry).unwrap()
-        };
-        let bytes = {
-            let opts = Opts::new("foyer_storage_bytes", "foyer storage bytes")
-                .namespace(namespace.to_string());
-            register_int_counter_vec_with_registry!(opts, &["op", "extra"], registry).unwrap()
-        };
-
-        let latency_insert_inserted = latency.with_label_values(&["insert", "inserted"]);
-        let latency_insert_filtered = latency.with_label_values(&["insert", "filtered"]);
-        let latency_insert_dropped = latency.with_label_values(&["insert", "dropped"]);
-        let latency_lookup_hit = latency.with_label_values(&["lookup", "hit"]);
-        let latency_lookup_miss = latency.with_label_values(&["lookup", "miss"]);
-        let latency_remove = latency.with_label_values(&["remove", ""]);
-
-        let bytes_insert = bytes.with_label_values(&["insert", ""]);
-        let bytes_lookup = bytes.with_label_values(&["lookup", ""]);
-        let bytes_flush = bytes.with_label_values(&["flush", ""]);
-        let bytes_reclaim = bytes.with_label_values(&["reclaim", ""]);
-        let bytes_reinsert = bytes.with_label_values(&["reinsert", ""]);
-
-        let size = {
-            let opts = Opts::new("foyer_storage_size", "foyer storage size")
-                .namespace(namespace.to_string());
-            register_int_gauge_with_registry!(opts, registry).unwrap()
-        };
+        let total_bytes =
+            register_int_gauge_vec!("total_bytes", "total bytes", &["foyer"]).unwrap();
 
         Self {
-            latency_insert_inserted,
-            latency_insert_filtered,
-            latency_insert_dropped,
-            latency_lookup_hit,
-            latency_lookup_miss,
-            latency_remove,
+            op_duration,
+            op_bytes,
+            total_bytes,
+        }
+    }
 
-            bytes_insert,
-            bytes_lookup,
-            bytes_flush,
-            bytes_reclaim,
-            bytes_reinsert,
+    pub fn foyer(&self, name: &str) -> Metrics {
+        Metrics::new(self, name)
+    }
+}
 
-            size,
+#[derive(Debug)]
+pub struct Metrics {
+    pub op_duration_insert_inserted: Histogram,
+    pub op_duration_insert_filtered: Histogram,
+    pub op_duration_insert_dropped: Histogram,
+    pub op_duration_lookup_hit: Histogram,
+    pub op_duration_lookup_miss: Histogram,
+    pub op_duration_remove: Histogram,
+    pub op_duration_flush: Histogram,
+    pub op_duration_reclaim: Histogram,
+
+    pub op_bytes_insert: IntCounter,
+    pub op_bytes_lookup: IntCounter,
+    pub op_bytes_flush: IntCounter,
+    pub op_bytes_reclaim: IntCounter,
+    pub op_bytes_reinsert: IntCounter,
+
+    pub total_bytes: IntGauge,
+}
+
+impl Metrics {
+    pub fn new(global: &GlobalMetrics, foyer: &str) -> Self {
+        let op_duration_insert_inserted = global
+            .op_duration
+            .with_label_values(&[foyer, "insert", "inserted"]);
+        let op_duration_insert_filtered = global
+            .op_duration
+            .with_label_values(&[foyer, "insert", "filtered"]);
+        let op_duration_insert_dropped = global
+            .op_duration
+            .with_label_values(&[foyer, "insert", "dropped"]);
+        let op_duration_lookup_hit = global
+            .op_duration
+            .with_label_values(&[foyer, "lookup", "hit"]);
+        let op_duration_lookup_miss = global
+            .op_duration
+            .with_label_values(&[foyer, "lookup", "miss"]);
+        let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
+        let op_duration_flush = global.op_duration.with_label_values(&[foyer, "flush", ""]);
+        let op_duration_reclaim = global
+            .op_duration
+            .with_label_values(&[foyer, "reclaim", ""]);
+
+        let op_bytes_insert = global.op_bytes.with_label_values(&[foyer, "insert", ""]);
+        let op_bytes_lookup = global.op_bytes.with_label_values(&[foyer, "lookup", ""]);
+        let op_bytes_flush = global.op_bytes.with_label_values(&[foyer, "flush", ""]);
+        let op_bytes_reclaim = global.op_bytes.with_label_values(&[foyer, "reclaim", ""]);
+        let op_bytes_reinsert = global.op_bytes.with_label_values(&[foyer, "reinsert", ""]);
+
+        let total_bytes = global.total_bytes.with_label_values(&[foyer]);
+
+        Self {
+            op_duration_insert_inserted,
+            op_duration_insert_filtered,
+            op_duration_insert_dropped,
+            op_duration_lookup_hit,
+            op_duration_lookup_miss,
+            op_duration_remove,
+            op_duration_flush,
+            op_duration_reclaim,
+            op_bytes_insert,
+            op_bytes_lookup,
+            op_bytes_flush,
+            op_bytes_reclaim,
+            op_bytes_reinsert,
+            total_bytes,
         }
     }
 }

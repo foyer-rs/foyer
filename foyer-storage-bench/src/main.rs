@@ -36,7 +36,7 @@ use foyer_storage::{
     admission::{rated_random::RatedRandomAdmissionPolicy, AdmissionPolicy},
     device::fs::FsDeviceConfig,
     reinsertion::{rated_random::RatedRandomReinsertionPolicy, ReinsertionPolicy},
-    store::{PrometheusConfig, StoreConfig},
+    store::StoreConfig,
     LfuFsStore,
 };
 use futures::future::join_all;
@@ -254,6 +254,7 @@ async fn main() {
     };
 
     let config = StoreConfig {
+        name: "".to_string(),
         eviction_config,
         device_config,
         admissions,
@@ -265,7 +266,6 @@ async fn main() {
         reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
         event_listeners: vec![],
-        prometheus_config: PrometheusConfig::default(),
         clean_region_threshold,
     };
 

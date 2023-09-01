@@ -111,6 +111,9 @@ where
                 None => tokio::time::sleep(Duration::from_millis(100)).await,
             }
         };
+
+        let _timer = self.metrics.op_duration_reclaim.start_timer();
+
         let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
@@ -185,7 +188,7 @@ where
                         }
                     }
 
-                    metrics.bytes_reinsert.inc_by(weight as u64);
+                    metrics.op_bytes_reinsert.inc_by(weight as u64);
                 }
 
                 tracing::info!("[reclaimer] finish reinsertion, region: {}", region_id);
@@ -214,9 +217,11 @@ where
         tracing::info!("[reclaimer] finish reclaim task, region: {}", region_id);
 
         self.metrics
-            .bytes_reclaim
+            .op_bytes_reclaim
             .inc_by(region.device().region_size() as u64);
-        self.metrics.size.sub(region.device().region_size() as i64);
+        self.metrics
+            .total_bytes
+            .sub(region.device().region_size() as i64);
 
         Ok(())
     }

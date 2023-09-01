@@ -18,7 +18,8 @@
 #![feature(get_mut_unchecked)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![allow(clippy::type_complexity)]
+#![feature(lazy_cell)]
+#![feature(lint_reasons)]
 
 pub mod admission;
 pub mod device;

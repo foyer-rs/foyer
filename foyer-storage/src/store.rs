@@ -36,7 +36,7 @@ use crate::{
     flusher::Flusher,
     indices::{Index, Indices},
     judge::Judges,
-    metrics::Metrics,
+    metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
     region::{AllocateResult, Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
@@ -51,12 +51,6 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
-#[derive(Debug, Default)]
-pub struct PrometheusConfig {
-    pub registry: Option<prometheus::Registry>,
-    pub namespace: Option<String>,
-}
-
 pub struct StoreConfig<K, V, D, EP>
 where
     K: Key,
@@ -64,6 +58,11 @@ where
     D: Device,
     EP: EvictionPolicy,
 {
+    /// For distinguish different foyer metrics.
+    ///
+    /// Metrics of this foyer instance has label `foyer = {{ name }}`.
+    pub name: String,
+
     /// Evictino policy configurations.
     pub eviction_config: EP::Config,
 
@@ -101,9 +100,6 @@ where
 
     /// Event listsners.
     pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
-
-    /// Prometheus configuration.
-    pub prometheus_config: PrometheusConfig,
 }
 
 impl<K, V, D, EP> Debug for StoreConfig<K, V, D, EP>
@@ -191,18 +187,7 @@ where
             .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
 
-        let metrics = match (
-            config.prometheus_config.registry,
-            config.prometheus_config.namespace,
-        ) {
-            (Some(registry), Some(namespace)) => {
-                Metrics::with_registry_namespace(registry, namespace)
-            }
-            (Some(registry), None) => Metrics::with_registry(registry),
-            (None, Some(namespace)) => Metrics::with_namespace(namespace),
-            (None, None) => Metrics::new(),
-        };
-        let metrics = Arc::new(metrics);
+        let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let store = Arc::new(Self {
             indices: indices.clone(),
@@ -417,7 +402,7 @@ where
             Some(index) => index,
             None => {
                 self.metrics
-                    .latency_lookup_miss
+                    .op_duration_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
@@ -435,12 +420,12 @@ where
                 // Remove index if the storage layer fails to lookup it (because of region version mismatch).
                 self.indices.remove(key);
                 self.metrics
-                    .latency_lookup_miss
+                    .op_duration_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
         };
-        self.metrics.bytes_lookup.inc_by(slice.len() as u64);
+        self.metrics.op_bytes_lookup.inc_by(slice.len() as u64);
 
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
@@ -453,7 +438,7 @@ where
         slice.destroy().await;
 
         self.metrics
-            .latency_lookup_hit
+            .op_duration_lookup_hit
             .observe(now.elapsed().as_secs_f64());
 
         res
@@ -461,7 +446,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn remove(&self, key: &K) -> Result<bool> {
-        let _timer = self.metrics.latency_remove.start_timer();
+        let _timer = self.metrics.op_duration_remove.start_timer();
 
         let res = self.indices.remove(key).is_some();
 
@@ -476,8 +461,6 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn clear(&self) -> Result<()> {
-        let _timer = self.metrics.latency_remove.start_timer();
-
         self.indices.clear();
 
         for listener in self.event_listeners.iter() {
@@ -632,7 +615,7 @@ where
             );
         }
 
-        self.metrics.bytes_insert.inc_by(serialized_len as u64);
+        self.metrics.op_bytes_insert.inc_by(serialized_len as u64);
 
         let mut slice = loop {
             match self
@@ -677,7 +660,7 @@ where
 
         let duration = now.elapsed() + writer.duration;
         self.metrics
-            .latency_insert_inserted
+            .op_duration_insert_inserted
             .observe(duration.as_secs_f64());
 
         Ok(true)
@@ -778,7 +761,7 @@ where
         if !self.is_inserted {
             self.store
                 .metrics
-                .latency_insert_dropped
+                .op_duration_insert_dropped
                 .observe(self.duration.as_secs_f64());
             let mut filtered = false;
             if self.is_judged {
@@ -791,12 +774,12 @@ where
             if filtered {
                 self.store
                     .metrics
-                    .latency_insert_filtered
+                    .op_duration_insert_filtered
                     .observe(self.duration.as_secs_f64());
             } else {
                 self.store
                     .metrics
-                    .latency_insert_dropped
+                    .op_duration_insert_dropped
                     .observe(self.duration.as_secs_f64());
             }
         }
@@ -1196,6 +1179,7 @@ pub mod tests {
             vec![recorder.clone()];
 
         let config = TestStoreConfig {
+            name: "".to_string(),
             eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
@@ -1213,7 +1197,6 @@ pub mod tests {
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
             event_listeners: vec![],
-            prometheus_config: PrometheusConfig::default(),
             clean_region_threshold: 1,
         };
 
@@ -1246,6 +1229,7 @@ pub mod tests {
         drop(store);
 
         let config = TestStoreConfig {
+            name: "".to_string(),
             eviction_config: FifoConfig,
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
@@ -1263,7 +1247,6 @@ pub mod tests {
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
             event_listeners: vec![],
-            prometheus_config: PrometheusConfig::default(),
             clean_region_threshold: 1,
         };
         let store = TestStore::open(config).await.unwrap();
