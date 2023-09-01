@@ -25,6 +25,7 @@ pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::defau
 #[derive(Debug)]
 pub struct GlobalMetrics {
     op_duration: HistogramVec,
+    slow_op_duration: HistogramVec,
     op_bytes: IntCounterVec,
     total_bytes: IntGaugeVec,
 
@@ -44,6 +45,14 @@ impl GlobalMetrics {
             "foyer storage op duration",
             &["foyer", "op", "extra"],
             vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap();
+
+        let slow_op_duration = register_histogram_vec!(
+            "foyer_storage_slow_op_duration",
+            "foyer storage slow op duration",
+            &["foyer", "op", "extra"],
+            vec![0.01, 0.1, 0.5, 0.77, 1.0, 2.5, 5.0, 7.5, 10.0],
         )
         .unwrap();
 
@@ -67,6 +76,7 @@ impl GlobalMetrics {
 
         Self {
             op_duration,
+            slow_op_duration,
             op_bytes,
             total_bytes,
 
@@ -87,8 +97,8 @@ pub struct Metrics {
     pub op_duration_lookup_hit: Histogram,
     pub op_duration_lookup_miss: Histogram,
     pub op_duration_remove: Histogram,
-    pub op_duration_flush: Histogram,
-    pub op_duration_reclaim: Histogram,
+    pub slow_op_duration_flush: Histogram,
+    pub slow_op_duration_reclaim: Histogram,
 
     pub op_bytes_insert: IntCounter,
     pub op_bytes_lookup: IntCounter,
@@ -119,9 +129,11 @@ impl Metrics {
             .op_duration
             .with_label_values(&[foyer, "lookup", "miss"]);
         let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
-        let op_duration_flush = global.op_duration.with_label_values(&[foyer, "flush", ""]);
-        let op_duration_reclaim = global
-            .op_duration
+        let slow_op_duration_flush = global
+            .slow_op_duration
+            .with_label_values(&[foyer, "flush", ""]);
+        let slow_op_duration_reclaim = global
+            .slow_op_duration
             .with_label_values(&[foyer, "reclaim", ""]);
 
         let op_bytes_insert = global.op_bytes.with_label_values(&[foyer, "insert", ""]);
@@ -144,8 +156,8 @@ impl Metrics {
             op_duration_lookup_hit,
             op_duration_lookup_miss,
             op_duration_remove,
-            op_duration_flush,
-            op_duration_reclaim,
+            slow_op_duration_flush,
+            slow_op_duration_reclaim,
 
             op_bytes_insert,
             op_bytes_lookup,
