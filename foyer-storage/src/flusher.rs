@@ -80,6 +80,8 @@ where
     }
 
     async fn handle(&self, region_id: RegionId) -> Result<()> {
+        let _timer = self.metrics.op_duration_flush.start_timer();
+
         tracing::info!("[flusher] receive flush task, region: {}", region_id);
 
         let region = self.region_manager.region(&region_id);
@@ -131,9 +133,11 @@ where
         tracing::info!("[flusher] finish flush task, region: {}", region_id);
 
         self.metrics
-            .bytes_flush
+            .op_bytes_flush
             .inc_by(region.device().region_size() as u64);
-        self.metrics.size.add(region.device().region_size() as i64);
+        self.metrics
+            .total_bytes
+            .add(region.device().region_size() as i64);
 
         Ok(())
     }
