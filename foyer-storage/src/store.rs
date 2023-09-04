@@ -713,11 +713,11 @@ where
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub fn judge(&mut self) -> bool {
-        let now = Instant::now();
         if !self.is_judged {
+            let now = Instant::now();
             self.store.judge_inner(self);
+            self.duration = now.elapsed();
         }
-        self.duration += now.elapsed();
         self.judges.judge()
     }
 
