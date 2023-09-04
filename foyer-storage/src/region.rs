@@ -15,7 +15,9 @@
 use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, pin::Pin, sync::Arc, task::Waker};
 
 use futures::future::BoxFuture;
-use tokio::sync::{OwnedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{
+    lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
 use tracing::instrument;
 
 use crate::{
@@ -112,17 +114,17 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn allocate(&self, size: usize) -> AllocateResult {
+    pub fn allocate(&self, size: usize) -> AllocateResult {
         let future = {
             let inner = self.inner.clone();
             async move {
-                let mut guard = inner.write().await;
+                let mut guard = inner.write();
                 guard.writers -= 1;
                 guard.wake_all();
             }
         };
 
-        let mut inner = self.inner.write().await;
+        let mut inner = self.inner.write();
 
         inner.writers += 1;
         let version = inner.version;
@@ -183,7 +185,7 @@ where
 
         // restrict guard lifetime
         {
-            let mut inner = self.inner.write().await;
+            let mut inner = self.inner.write();
 
             if version != 0 && version != inner.version {
                 return Ok(None);
@@ -198,7 +200,7 @@ where
                 let future = {
                     let inner = self.inner.clone();
                     async move {
-                        let mut guard = inner.write().await;
+                        let mut guard = inner.write();
                         guard.buffered_readers -= 1;
                         guard.wake_all();
                     }
@@ -234,7 +236,7 @@ where
                 .await?
                 != len
             {
-                let mut inner = self.inner.write().await;
+                let mut inner = self.inner.write();
                 inner.physical_readers -= 1;
                 inner.wake_all();
                 return Ok(None);
@@ -245,7 +247,7 @@ where
         let future = {
             let inner = self.inner.clone();
             async move {
-                let mut guard = inner.write().await;
+                let mut guard = inner.write();
                 guard.physical_readers -= 1;
                 guard.wake_all();
             }
@@ -257,7 +259,7 @@ where
     }
 
     pub async fn attach_buffer(&self, buf: Vec<u8, D::IoBufferAllocator>) {
-        let mut inner = self.inner.write().await;
+        let mut inner = self.inner.write();
 
         assert_eq!(inner.writers, 0);
         assert_eq!(inner.buffered_readers, 0);
@@ -266,13 +268,13 @@ where
     }
 
     pub async fn detach_buffer(&self) -> Vec<u8, D::IoBufferAllocator> {
-        let mut inner = self.inner.write().await;
+        let mut inner = self.inner.write();
 
         inner.detach_buffer()
     }
 
     pub async fn has_buffer(&self) -> bool {
-        let inner = self.inner.read().await;
+        let inner = self.inner.read();
         inner.has_buffer()
     }
 
@@ -282,7 +284,7 @@ where
         can_write: bool,
         can_buffered_read: bool,
         can_physical_read: bool,
-    ) -> OwnedRwLockWriteGuard<RegionInner<D::IoBufferAllocator>> {
+    ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<D::IoBufferAllocator>> {
         self.inner
             .exclusive(can_write, can_buffered_read, can_physical_read)
             .await
@@ -297,11 +299,11 @@ where
     }
 
     pub async fn version(&self) -> Version {
-        self.inner.read().await.version
+        self.inner.read().version
     }
 
     pub async fn advance(&self) -> Version {
-        let mut inner = self.inner.write().await;
+        let mut inner = self.inner.write();
         let res = inner.version;
         inner.version += 1;
         res
@@ -558,12 +560,12 @@ impl<A: BufferAllocator> ErwLock<A> {
         }
     }
 
-    pub async fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
-        self.inner.read().await
+    pub fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
+        self.inner.read()
     }
 
-    pub async fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
-        self.inner.write().await
+    pub fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
+        self.inner.write()
     }
 
     pub async fn exclusive(
@@ -571,10 +573,10 @@ impl<A: BufferAllocator> ErwLock<A> {
         can_write: bool,
         can_buffered_read: bool,
         can_physical_read: bool,
-    ) -> OwnedRwLockWriteGuard<RegionInner<A>> {
+    ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<A>> {
         loop {
             {
-                let guard = self.inner.clone().write_owned().await;
+                let guard = self.inner.clone().write_arc();
                 let is_ready = (can_write || guard.writers == 0)
                     && (can_buffered_read || guard.buffered_readers == 0)
                     && (can_physical_read || guard.physical_readers == 0);
@@ -582,7 +584,7 @@ impl<A: BufferAllocator> ErwLock<A> {
                     return guard;
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     }
 }
