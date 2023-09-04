@@ -25,8 +25,11 @@ pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::defau
 #[derive(Debug)]
 pub struct GlobalMetrics {
     op_duration: HistogramVec,
+    slow_op_duration: HistogramVec,
     op_bytes: IntCounterVec,
     total_bytes: IntGaugeVec,
+
+    inner_op_duration: HistogramVec,
 }
 
 impl Default for GlobalMetrics {
@@ -45,6 +48,14 @@ impl GlobalMetrics {
         )
         .unwrap();
 
+        let slow_op_duration = register_histogram_vec!(
+            "foyer_storage_slow_op_duration",
+            "foyer storage slow op duration",
+            &["foyer", "op", "extra"],
+            vec![0.01, 0.1, 0.5, 0.77, 1.0, 2.5, 5.0, 7.5, 10.0],
+        )
+        .unwrap();
+
         let op_bytes = register_int_counter_vec!(
             "foyer_storage_op_bytes",
             "foyer storage op bytes",
@@ -55,10 +66,21 @@ impl GlobalMetrics {
         let total_bytes =
             register_int_gauge_vec!("total_bytes", "total bytes", &["foyer"]).unwrap();
 
+        let inner_op_duration = register_histogram_vec!(
+            "foyer_storage_inner_op_duration",
+            "foyer storage inner op duration",
+            &["foyer", "op", "extra"],
+            vec![0.000001, 0.00001, 0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+        )
+        .unwrap();
+
         Self {
             op_duration,
+            slow_op_duration,
             op_bytes,
             total_bytes,
+
+            inner_op_duration,
         }
     }
 
@@ -75,8 +97,8 @@ pub struct Metrics {
     pub op_duration_lookup_hit: Histogram,
     pub op_duration_lookup_miss: Histogram,
     pub op_duration_remove: Histogram,
-    pub op_duration_flush: Histogram,
-    pub op_duration_reclaim: Histogram,
+    pub slow_op_duration_flush: Histogram,
+    pub slow_op_duration_reclaim: Histogram,
 
     pub op_bytes_insert: IntCounter,
     pub op_bytes_lookup: IntCounter,
@@ -85,6 +107,8 @@ pub struct Metrics {
     pub op_bytes_reinsert: IntCounter,
 
     pub total_bytes: IntGauge,
+
+    pub inner_op_duration_acquire_clean_region: Histogram,
 }
 
 impl Metrics {
@@ -105,9 +129,11 @@ impl Metrics {
             .op_duration
             .with_label_values(&[foyer, "lookup", "miss"]);
         let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
-        let op_duration_flush = global.op_duration.with_label_values(&[foyer, "flush", ""]);
-        let op_duration_reclaim = global
-            .op_duration
+        let slow_op_duration_flush = global
+            .slow_op_duration
+            .with_label_values(&[foyer, "flush", ""]);
+        let slow_op_duration_reclaim = global
+            .slow_op_duration
             .with_label_values(&[foyer, "reclaim", ""]);
 
         let op_bytes_insert = global.op_bytes.with_label_values(&[foyer, "insert", ""]);
@@ -118,6 +144,11 @@ impl Metrics {
 
         let total_bytes = global.total_bytes.with_label_values(&[foyer]);
 
+        let inner_op_duration_acquire_clean_region =
+            global
+                .inner_op_duration
+                .with_label_values(&[foyer, "acquire_clean_region", ""]);
+
         Self {
             op_duration_insert_inserted,
             op_duration_insert_filtered,
@@ -125,14 +156,18 @@ impl Metrics {
             op_duration_lookup_hit,
             op_duration_lookup_miss,
             op_duration_remove,
-            op_duration_flush,
-            op_duration_reclaim,
+            slow_op_duration_flush,
+            slow_op_duration_reclaim,
+
             op_bytes_insert,
             op_bytes_lookup,
             op_bytes_flush,
             op_bytes_reclaim,
             op_bytes_reinsert,
+
             total_bytes,
+
+            inner_op_duration_acquire_clean_region,
         }
     }
 }

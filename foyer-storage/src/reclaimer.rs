@@ -112,7 +112,7 @@ where
             }
         };
 
-        let _timer = self.metrics.op_duration_reclaim.start_timer();
+        let _timer = self.metrics.slow_op_duration_reclaim.start_timer();
 
         let region = self.region_manager.region(&region_id);
 
