@@ -23,6 +23,7 @@ futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await-macro", "channel", "io", "sink"] }
 itertools = { version = "0.10" }
 lock_api = { version = "0.4", features = ["arc_lock"] }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 nix = { version = "0.27", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
