@@ -5,6 +5,7 @@ deps:
 	./scripts/install-deps.sh
 
 check:
+	shellcheck ./scripts/*
 	cargo hakari generate
 	cargo hakari manage-deps
 	cargo sort -w

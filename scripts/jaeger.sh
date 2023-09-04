@@ -2,10 +2,10 @@
 
 container="$(docker ps -q -f name=jaeger)"
 
-if [ $container ] ; then
+if [ "$container" ] ; then
     echo "Stop jaeger..."
-    docker stop $container > /dev/null
-    docker rm $container > /dev/null
+    docker stop "$container" > /dev/null
+    docker rm "$container" > /dev/null
 else
     echo "Start jaeger..."
     docker run -d --name jaeger \
