@@ -558,17 +558,14 @@ impl<A: BufferAllocator> ErwLock<A> {
         }
     }
 
-    #[tracing::instrument]
     pub async fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
         self.inner.read().await
     }
 
-    #[tracing::instrument]
     pub async fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
         self.inner.write().await
     }
 
-    #[tracing::instrument]
     pub async fn exclusive(
         &self,
         can_write: bool,
