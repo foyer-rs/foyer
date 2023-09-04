@@ -150,26 +150,58 @@ type TStore = LfuFsStore<u64, Vec<u8>>;
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
+#[cfg(feature = "tokio-console")]
+fn init_logger() {
+    console_subscriber::init();
+}
+
+#[cfg(feature = "trace")]
+fn init_logger() {
+    use tracing::Level;
+    use tracing_subscriber::{filter::Targets, prelude::*};
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+        .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
+            opentelemetry::sdk::Resource::new(vec![opentelemetry::KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                "foyer-storage-bench",
+            )]),
+        ))
+        .install_batch(opentelemetry::runtime::Tokio)
+        .unwrap();
+    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    tracing_subscriber::registry()
+        .with(
+            Targets::new()
+                .with_target("foyer_storage", Level::DEBUG)
+                .with_target("foyer_common", Level::DEBUG)
+                .with_target("foyer_intrusive", Level::DEBUG)
+                .with_target("foyer_storage_bench", Level::DEBUG),
+        )
+        .with(opentelemetry_layer)
+        .init();
+}
+
+#[cfg(not(any(feature = "tokio-console", feature = "trace")))]
+fn init_logger() {
+    use tracing_subscriber::{prelude::*, EnvFilter};
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                // .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .with_line_number(true),
+        )
+        .with(EnvFilter::from_default_env())
+        .init();
+}
+
 #[tokio::main]
 async fn main() {
     is_send_sync_static::<TStore>();
 
-    #[cfg(feature = "tokio-console")]
-    console_subscriber::init();
-
-    #[cfg(not(feature = "tokio-console"))]
-    {
-        use tracing_subscriber::{prelude::*, EnvFilter};
-
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    // .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .with_line_number(true),
-            )
-            .with(EnvFilter::from_default_env())
-            .init();
-    }
+    init_logger();
 
     #[cfg(feature = "deadlock")]
     {

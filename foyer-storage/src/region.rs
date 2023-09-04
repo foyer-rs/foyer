@@ -111,6 +111,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn allocate(&self, size: usize) -> AllocateResult {
         let future = {
             let inner = self.inner.clone();
