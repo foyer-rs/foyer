@@ -80,7 +80,7 @@ where
     }
 
     async fn handle(&self, region_id: RegionId) -> Result<()> {
-        let _timer = self.metrics.op_duration_flush.start_timer();
+        let _timer = self.metrics.slow_op_duration_flush.start_timer();
 
         tracing::info!("[flusher] receive flush task, region: {}", region_id);
 
