@@ -185,12 +185,12 @@ fn init_logger() {
 
 #[cfg(not(any(feature = "tokio-console", feature = "trace")))]
 fn init_logger() {
-    use tracing_subscriber::{fmt::format::FmtSpan, prelude::*, EnvFilter};
+    use tracing_subscriber::{prelude::*, EnvFilter};
 
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                // .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                 .with_line_number(true),
         )
         .with(EnvFilter::from_default_env())
