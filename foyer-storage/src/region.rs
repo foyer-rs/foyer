@@ -111,6 +111,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn allocate(&self, size: usize) -> AllocateResult {
         let future = {
             let inner = self.inner.clone();
@@ -557,14 +558,17 @@ impl<A: BufferAllocator> ErwLock<A> {
         }
     }
 
+    #[tracing::instrument]
     pub async fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
         self.inner.read().await
     }
 
+    #[tracing::instrument]
     pub async fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
         self.inner.write().await
     }
 
+    #[tracing::instrument]
     pub async fn exclusive(
         &self,
         can_write: bool,

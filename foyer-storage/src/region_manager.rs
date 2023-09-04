@@ -24,7 +24,8 @@ use foyer_intrusive::{
     intrusive_adapter, key_adapter,
 };
 use parking_lot::RwLock;
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::Mutex as AsyncMutex;
+use tracing::Instrument;
 
 use crate::{
     device::Device,
@@ -56,7 +57,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    current: AsyncRwLock<Option<RegionId>>,
+    current: AsyncMutex<Option<RegionId>>,
     rotate_batch: Batch<(), ()>,
 
     /// Buffer pool for dirty buffers.
@@ -116,7 +117,7 @@ where
         }
 
         Self {
-            current: AsyncRwLock::new(None),
+            current: AsyncMutex::new(None),
             rotate_batch: Batch::new(),
             buffers,
             clean_regions,
@@ -142,25 +143,36 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn allocate_inner(&self, size: usize) -> AllocateResult {
-        let mut current = self.current.write().await;
-        if let Some(region_id) = *current {
-            let region = self.region(&region_id);
-            match region.allocate(size).await {
-                AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
-                AllocateResult::Full { slice, remain } => {
-                    // current region is full, append dirty regions
-                    self.dirty_regions.release(region_id);
-                    *current = None;
-                    AllocateResult::Full { slice, remain }
+        let mut current = self
+            .current
+            .lock()
+            .instrument(tracing::debug_span!("lock_current"))
+            .await;
+
+        async {
+            if let Some(region_id) = *current {
+                let region = self.region(&region_id);
+                match region.allocate(size).await {
+                    AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
+                    AllocateResult::Full { slice, remain } => {
+                        // current region is full, append dirty regions
+                        self.dirty_regions.release(region_id);
+                        *current = None;
+                        AllocateResult::Full { slice, remain }
+                    }
+                    AllocateResult::None => unreachable!(),
                 }
-                AllocateResult::None => unreachable!(),
+            } else {
+                AllocateResult::None
             }
-        } else {
-            AllocateResult::None
         }
+        .instrument(tracing::debug_span!("lock_current_zone"))
+        .await
     }
 
+    #[tracing::instrument(skip(self), fields(followers))]
     pub async fn rotate(&self) {
         match self.rotate_batch.push(()) {
             Identity::Leader(rx) => {
@@ -180,10 +192,13 @@ where
                 let buffer = self.buffers.acquire().await;
                 region.attach_buffer(buffer).await;
 
-                *self.current.write().await = Some(region_id);
+                {
+                    *self.current.lock().await = Some(region_id);
+                }
 
                 // Notify the batch to advance.
                 let items = self.rotate_batch.rotate();
+                tracing::Span::current().record("followers", items.len());
                 for item in items {
                     item.tx.send(()).unwrap();
                 }
@@ -193,7 +208,6 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
     pub fn region(&self, id: &RegionId) -> &Region<D> {
         &self.regions[*id as usize]
     }
