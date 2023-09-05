@@ -12,9 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, pin::Pin, sync::Arc, task::Waker};
+use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, sync::Arc, task::Waker};
 
-use futures::future::BoxFuture;
 use parking_lot::{
     lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
@@ -115,13 +114,14 @@ where
 
     #[tracing::instrument(skip(self))]
     pub fn allocate(&self, size: usize) -> AllocateResult {
-        let future = {
+        let cleanup = {
             let inner = self.inner.clone();
-            async move {
+            let f = move || {
                 let mut guard = inner.write();
                 guard.writers -= 1;
                 guard.wake_all();
-            }
+            };
+            Box::new(f)
         };
 
         let mut inner = self.inner.write();
@@ -146,7 +146,7 @@ where
                 region_id,
                 version,
                 offset,
-                future: Some(Box::pin(future)),
+                cleanup: Some(cleanup),
             };
             AllocateResult::Full { slice, remain }
         } else {
@@ -160,7 +160,7 @@ where
                 region_id,
                 version,
                 offset,
-                future: Some(Box::pin(future)),
+                cleanup: Some(cleanup),
             };
             AllocateResult::Ok(slice)
         }
@@ -197,18 +197,19 @@ where
                 inner.buffered_readers += 1;
                 let allocator = inner.buffer.as_ref().unwrap().allocator().clone();
                 let slice = unsafe { Slice::new(&inner.buffer.as_ref().unwrap()[start..end]) };
-                let future = {
+                let cleanup = {
                     let inner = self.inner.clone();
-                    async move {
+                    let f = move || {
                         let mut guard = inner.write();
                         guard.buffered_readers -= 1;
                         guard.wake_all();
-                    }
+                    };
+                    Box::new(f)
                 };
                 return Ok(Some(ReadSlice::Slice {
                     slice,
                     allocator: Some(allocator),
-                    future: Some(Box::pin(future)),
+                    cleanup: Some(cleanup),
                 }));
             }
 
@@ -244,17 +245,18 @@ where
             offset += len;
         }
 
-        let future = {
+        let cleanup = {
             let inner = self.inner.clone();
-            async move {
+            let f = move || {
                 let mut guard = inner.write();
                 guard.physical_readers -= 1;
                 guard.wake_all();
-            }
+            };
+            Box::new(f)
         };
         Ok(Some(ReadSlice::Owned {
             buf: Some(buf),
-            future: Some(Box::pin(future)),
+            cleanup: Some(cleanup),
         }))
     }
 
@@ -351,14 +353,14 @@ where
 
 // read & write slice
 
-#[pin_project::pin_project(project = WriteSliceProj, PinnedDrop)]
+pub trait CleanupFn = FnOnce() + Send + Sync + 'static;
+
 pub struct WriteSlice {
     slice: SliceMut,
     region_id: RegionId,
     version: Version,
     offset: usize,
-    #[pin]
-    future: Option<BoxFuture<'static, ()>>,
+    cleanup: Option<Box<dyn CleanupFn>>,
 }
 
 impl Debug for WriteSlice {
@@ -392,15 +394,6 @@ impl WriteSlice {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// # Safety
-    ///
-    /// `destroy` MUST be called before actually drop if `future` is set.
-    pub async fn destroy(mut self) {
-        if let Some(future) = self.future.take() {
-            future.await;
-        }
-    }
 }
 
 impl AsRef<[u8]> for WriteSlice {
@@ -415,29 +408,14 @@ impl AsMut<[u8]> for WriteSlice {
     }
 }
 
-#[pin_project::pinned_drop]
-impl PinnedDrop for WriteSlice {
-    fn drop(self: Pin<&mut Self>) {
-        let mut this = self.project();
-        if let Some(future) = this.future.take() {
-            tracing::error!("future is not consumed. This may be caused by error early return. If there's not, check if there's slice not destroyed. {:?}", this);
-            tokio::spawn(future);
+impl Drop for WriteSlice {
+    fn drop(&mut self) {
+        if let Some(f) = self.cleanup.take() {
+            f()
         }
     }
 }
 
-impl<'pin> Debug for WriteSliceProj<'pin> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WriteSlice")
-            .field("slice", &self.slice)
-            .field("region_id", &self.region_id)
-            .field("version", &self.version)
-            .field("offset", &self.offset)
-            .finish()
-    }
-}
-
-#[pin_project::pin_project(project = ReadSliceProj, PinnedDrop)]
 pub enum ReadSlice<A>
 where
     A: BufferAllocator,
@@ -445,13 +423,11 @@ where
     Slice {
         slice: Slice,
         allocator: Option<A>,
-        #[pin]
-        future: Option<BoxFuture<'static, ()>>,
+        cleanup: Option<Box<dyn CleanupFn>>,
     },
     Owned {
         buf: Option<Vec<u8, A>>,
-        #[pin]
-        future: Option<BoxFuture<'static, ()>>,
+        cleanup: Option<Box<dyn CleanupFn>>,
     },
 }
 
@@ -490,18 +466,6 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// # Safety
-    ///
-    /// `destroy` MUST be called before actually drop if `future` is set.
-    pub async fn destroy(mut self) {
-        if let Some(future) = match &mut self {
-            ReadSlice::Slice { future, .. } => future.take(),
-            ReadSlice::Owned { future, .. } => future.take(),
-        } {
-            future.await;
-        }
-    }
 }
 
 impl<A> AsRef<[u8]> for ReadSlice<A>
@@ -516,34 +480,16 @@ where
     }
 }
 
-#[pin_project::pinned_drop]
-impl<A> PinnedDrop for ReadSlice<A>
+impl<A> Drop for ReadSlice<A>
 where
     A: BufferAllocator,
 {
-    fn drop(self: Pin<&mut Self>) {
-        let mut this = self.project();
-        if let Some(future) = match &mut this {
-            ReadSliceProj::Slice { future, .. } => future.take(),
-            ReadSliceProj::Owned { future, .. } => future.take(),
+    fn drop(&mut self) {
+        if let Some(f) = match self {
+            ReadSlice::Slice { cleanup, .. } => cleanup.take(),
+            ReadSlice::Owned { cleanup, .. } => cleanup.take(),
         } {
-            tracing::error!("future is not consumed. This may be caused by error early return. If there's not, check if there's slice not destroyed. {:?}", this);
-            tokio::spawn(future);
-        }
-    }
-}
-
-impl<'pin, A: BufferAllocator> Debug for ReadSliceProj<'pin, A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Slice {
-                slice, allocator, ..
-            } => f
-                .debug_struct("Slice")
-                .field("slice", slice)
-                .field("allocator", allocator)
-                .finish(),
-            Self::Owned { buf, .. } => f.debug_struct("Owned").field("buf", buf).finish(),
+            f();
         }
     }
 }
