@@ -57,15 +57,18 @@ pub struct Analysis {
     insert_lat_p50: u64,
     insert_lat_p90: u64,
     insert_lat_p99: u64,
+    insert_lat_pmax: u64,
 
     get_iops: f64,
     get_miss: f64,
     get_miss_lat_p50: u64,
     get_miss_lat_p90: u64,
     get_miss_lat_p99: u64,
+    get_miss_lat_pmax: u64,
     get_hit_lat_p50: u64,
     get_hit_lat_p90: u64,
     get_hit_lat_p99: u64,
+    get_hit_lat_pmax: u64,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -75,15 +78,18 @@ pub struct MetricsDump {
     pub insert_lat_p50: u64,
     pub insert_lat_p90: u64,
     pub insert_lat_p99: u64,
+    pub insert_lat_pmax: u64,
 
     pub get_ios: usize,
     pub get_miss_ios: usize,
     pub get_hit_lat_p50: u64,
     pub get_hit_lat_p90: u64,
     pub get_hit_lat_p99: u64,
+    pub get_hit_lat_pmax: u64,
     pub get_miss_lat_p50: u64,
     pub get_miss_lat_p90: u64,
     pub get_miss_lat_p99: u64,
+    pub get_miss_lat_pmax: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -124,21 +130,25 @@ impl Metrics {
         let insert_lats = self.insert_lats.read();
         let get_hit_lats = self.get_hit_lats.read();
         let get_miss_lats = self.get_miss_lats.read();
+
         MetricsDump {
             insert_ios: self.insert_ios.load(Ordering::Relaxed),
             insert_bytes: self.insert_bytes.load(Ordering::Relaxed),
             insert_lat_p50: insert_lats.value_at_quantile(0.5),
             insert_lat_p90: insert_lats.value_at_quantile(0.9),
             insert_lat_p99: insert_lats.value_at_quantile(0.99),
+            insert_lat_pmax: insert_lats.max(),
 
             get_ios: self.get_ios.load(Ordering::Relaxed),
             get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
             get_hit_lat_p50: get_hit_lats.value_at_quantile(0.5),
             get_hit_lat_p90: get_hit_lats.value_at_quantile(0.9),
             get_hit_lat_p99: get_hit_lats.value_at_quantile(0.99),
+            get_hit_lat_pmax: get_hit_lats.max(),
             get_miss_lat_p50: get_miss_lats.value_at_quantile(0.5),
             get_miss_lat_p90: get_miss_lats.value_at_quantile(0.9),
             get_miss_lat_p99: get_miss_lats.value_at_quantile(0.99),
+            get_miss_lat_pmax: get_miss_lats.max(),
         }
     }
 }
@@ -184,6 +194,7 @@ impl std::fmt::Display for Analysis {
         writeln!(f, "insert lat p50: {}us", self.insert_lat_p50)?;
         writeln!(f, "insert lat p90: {}us", self.insert_lat_p90)?;
         writeln!(f, "insert lat p99: {}us", self.insert_lat_p99)?;
+        writeln!(f, "insert lat pmax: {}us", self.insert_lat_pmax)?;
 
         // get statics
         writeln!(f, "get iops: {:.1}/s", self.get_iops)?;
@@ -191,9 +202,11 @@ impl std::fmt::Display for Analysis {
         writeln!(f, "get hit lat p50: {}us", self.get_hit_lat_p50)?;
         writeln!(f, "get hit lat p90: {}us", self.get_hit_lat_p90)?;
         writeln!(f, "get hit lat p99: {}us", self.get_hit_lat_p99)?;
+        writeln!(f, "get hit lat pmax: {}us", self.get_hit_lat_pmax)?;
         writeln!(f, "get miss lat p50: {}us", self.get_miss_lat_p50)?;
         writeln!(f, "get miss lat p90: {}us", self.get_miss_lat_p90)?;
         writeln!(f, "get miss lat p99: {}us", self.get_miss_lat_p99)?;
+        writeln!(f, "get miss lat pmax: {}us", self.get_miss_lat_pmax)?;
 
         Ok(())
     }
@@ -233,15 +246,18 @@ pub fn analyze(
         insert_lat_p50: metrics_dump_end.insert_lat_p50,
         insert_lat_p90: metrics_dump_end.insert_lat_p90,
         insert_lat_p99: metrics_dump_end.insert_lat_p99,
+        insert_lat_pmax: metrics_dump_end.insert_lat_pmax,
 
         get_iops,
         get_miss,
         get_hit_lat_p50: metrics_dump_end.get_hit_lat_p50,
         get_hit_lat_p90: metrics_dump_end.get_hit_lat_p90,
         get_hit_lat_p99: metrics_dump_end.get_hit_lat_p99,
+        get_hit_lat_pmax: metrics_dump_end.get_hit_lat_pmax,
         get_miss_lat_p50: metrics_dump_end.get_miss_lat_p50,
         get_miss_lat_p90: metrics_dump_end.get_miss_lat_p90,
         get_miss_lat_p99: metrics_dump_end.get_miss_lat_p99,
+        get_miss_lat_pmax: metrics_dump_end.get_miss_lat_pmax,
     }
 }
 
