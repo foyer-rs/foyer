@@ -157,17 +157,29 @@ fn init_logger() {
 
 #[cfg(feature = "trace")]
 fn init_logger() {
+    use opentelemetry::sdk::{
+        trace::{BatchConfig, Config},
+        Resource,
+    };
+    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
     use tracing::Level;
     use tracing_subscriber::{filter::Targets, prelude::*};
+
+    let trace_config =
+        Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
+            SERVICE_NAME,
+            "foyer-storage-bench",
+        )]));
+    let batch_config = BatchConfig::default()
+        .with_max_queue_size(1048576)
+        .with_max_export_batch_size(1024)
+        .with_max_concurrent_exports(4);
+
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
-            opentelemetry::sdk::Resource::new(vec![opentelemetry::KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                "foyer-storage-bench",
-            )]),
-        ))
+        .with_trace_config(trace_config)
+        .with_batch_config(batch_config)
         .install_batch(opentelemetry::runtime::Tokio)
         .unwrap();
     let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
