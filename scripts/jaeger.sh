@@ -1,6 +1,6 @@
 #!/bin/bash
 
-container="$(docker ps -q -f name=jaeger)"
+container="$(docker ps -a -q -f name=jaeger)"
 
 if [ "$container" ] ; then
     echo "Stop jaeger..."

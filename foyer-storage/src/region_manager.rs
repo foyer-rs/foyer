@@ -24,6 +24,7 @@ use foyer_intrusive::{
     intrusive_adapter, key_adapter,
 };
 use parking_lot::{Mutex, RwLock};
+use tracing::Instrument;
 
 use crate::{
     device::Device,
@@ -141,6 +142,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn allocate_inner(&self, size: usize) -> AllocateResult {
         let mut current = self.current.lock();
 
@@ -161,6 +163,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn rotate(&self) {
         match self.rotate_batch.push(()) {
             Identity::Leader(rx) => {
@@ -169,7 +172,11 @@ where
                     .metrics
                     .inner_op_duration_acquire_clean_region
                     .start_timer();
-                let region_id = self.clean_regions.acquire().await;
+                let region_id = self
+                    .clean_regions
+                    .acquire()
+                    .instrument(tracing::debug_span!("acquire_clean_region"))
+                    .await;
                 drop(timer);
 
                 tracing::info!("switch to clean region: {}", region_id);
@@ -177,7 +184,11 @@ where
                 let region = self.region(&region_id);
                 region.advance().await;
 
-                let buffer = self.buffers.acquire().await;
+                let buffer = self
+                    .buffers
+                    .acquire()
+                    .instrument(tracing::debug_span!("acquire_clean_buffer"))
+                    .await;
                 region.attach_buffer(buffer).await;
 
                 *self.current.lock() = Some(region_id);
