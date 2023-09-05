@@ -114,7 +114,7 @@ where
                 .await?;
             offset += len;
         }
-        slice.destroy().await;
+        drop(slice);
 
         tracing::trace!("[flusher] step 2");
 

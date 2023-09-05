@@ -16,7 +16,8 @@ check:
 	cargo clippy --all-targets
 
 test:
-	RUST_BACKTRACE=1 cargo test --all
-
+	RUST_BACKTRACE=1 cargo nextest run --all
+	RUST_BACKTRACE=1 cargo test --doc
+	
 jaeger:
 	./scripts/jaeger.sh
