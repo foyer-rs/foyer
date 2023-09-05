@@ -436,7 +436,7 @@ where
                 Ok(None)
             }
         };
-        slice.destroy().await;
+        drop(slice);
 
         self.metrics
             .op_duration_lookup_hit
@@ -500,11 +500,10 @@ where
                     padding: remain as u64,
                 };
                 footer.write(slice.as_mut());
-                slice.destroy().await;
             }
             AllocateResult::Ok(slice) => {
                 // region is empty, skip
-                slice.destroy().await
+                drop(slice);
             }
             AllocateResult::None => unreachable!(),
         }
@@ -632,7 +631,7 @@ where
                         padding: remain as u64,
                     };
                     footer.write(slice.as_mut());
-                    slice.destroy().await;
+                    drop(slice);
                 }
                 AllocateResult::None => return Ok(false),
             }
@@ -650,8 +649,7 @@ where
 
             key: key.clone(),
         };
-
-        slice.destroy().await;
+        drop(slice);
 
         self.indices.insert(index);
 
@@ -958,7 +956,7 @@ where
         };
 
         let footer = RegionFooter::read(slice.as_ref());
-        slice.destroy().await;
+        drop(slice);
 
         if footer.magic != REGION_MAGIC {
             return Ok(None);
@@ -1000,16 +998,16 @@ where
                 align - EntryFooter::serialized_len() - (footer.padding + footer.key_len) as usize;
             let rel_end = align - EntryFooter::serialized_len() - footer.padding as usize;
             let key = K::read(&slice.as_ref()[rel_start..rel_end]);
-            slice.destroy().await;
+            drop(slice);
             key
         } else {
-            slice.destroy().await;
+            drop(slice);
             let s = self.region.load(align_start..align_end, 0).await?.unwrap();
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
             let key = K::read(&s.as_ref()[rel_start..rel_end]);
-            s.destroy().await;
+            drop(s);
             key
         };
 
@@ -1038,7 +1036,7 @@ where
         let end = start + index.len as usize;
         let slice = self.region.load(start..end, 0).await?.unwrap();
         let kv = read_entry::<K, V>(slice.as_ref());
-        slice.destroy().await;
+        drop(slice);
 
         Ok(kv)
     }
