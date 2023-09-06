@@ -15,9 +15,12 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec, Registry,
 };
+
+pub static REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
 /// Multiple foyer instance will share the same global metrics with different label `foyer` name.
 pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::default);
@@ -34,47 +37,52 @@ pub struct GlobalMetrics {
 
 impl Default for GlobalMetrics {
     fn default() -> Self {
-        Self::new()
+        Self::new(&REGISTRY)
     }
 }
 
 impl GlobalMetrics {
-    pub fn new() -> Self {
-        let op_duration = register_histogram_vec!(
+    pub fn new(registry: &Registry) -> Self {
+        let op_duration = register_histogram_vec_with_registry!(
             "foyer_storage_op_duration",
             "foyer storage op duration",
             &["foyer", "op", "extra"],
             vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+            registry,
         )
         .unwrap();
 
-        let slow_op_duration = register_histogram_vec!(
+        let slow_op_duration = register_histogram_vec_with_registry!(
             "foyer_storage_slow_op_duration",
             "foyer storage slow op duration",
             &["foyer", "op", "extra"],
             vec![0.01, 0.1, 0.5, 0.77, 1.0, 2.5, 5.0, 7.5, 10.0],
+            registry,
         )
         .unwrap();
 
-        let op_bytes = register_int_counter_vec!(
+        let op_bytes = register_int_counter_vec_with_registry!(
             "foyer_storage_op_bytes",
             "foyer storage op bytes",
-            &["foyer", "op", "extra"]
+            &["foyer", "op", "extra"],
+            registry,
         )
         .unwrap();
 
-        let total_bytes = register_int_gauge_vec!(
+        let total_bytes = register_int_gauge_vec_with_registry!(
             "foyer_storage_total_bytes",
             "foyer storage total bytes",
-            &["foyer"]
+            &["foyer"],
+            registry,
         )
         .unwrap();
 
-        let inner_op_duration = register_histogram_vec!(
+        let inner_op_duration = register_histogram_vec_with_registry!(
             "foyer_storage_inner_op_duration",
             "foyer storage inner op duration",
             &["foyer", "op", "extra"],
             vec![0.000001, 0.00001, 0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+            registry,
         )
         .unwrap();
 

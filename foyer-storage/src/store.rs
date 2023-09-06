@@ -36,7 +36,7 @@ use crate::{
     flusher::Flusher,
     indices::{Index, Indices},
     judge::Judges,
-    metrics::{Metrics, METRICS},
+    metrics::{Metrics, METRICS, REGISTRY},
     reclaimer::Reclaimer,
     region::{AllocateResult, Region, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
@@ -471,6 +471,10 @@ where
         // TODO(MrCroxx): set all regions as clean?
 
         Ok(())
+    }
+
+    pub fn metrics_registry(&self) -> &prometheus::Registry {
+        &REGISTRY
     }
 
     pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
