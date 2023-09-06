@@ -15,7 +15,7 @@
 use bytes::{Buf, BufMut};
 use paste::paste;
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait Key:
     Sized
     + Send
@@ -50,7 +50,7 @@ pub trait Key:
     }
 }
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
     #[cfg_attr(coverage_nightly, no_coverage)]
     fn weight(&self) -> usize {

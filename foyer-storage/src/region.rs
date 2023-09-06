@@ -14,6 +14,7 @@
 
 use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, sync::Arc, task::Waker};
 
+use bytes::{Buf, BufMut};
 use parking_lot::{
     lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
@@ -29,6 +30,7 @@ pub type RegionId = u32;
 /// 0 matches any version
 pub type Version = u32;
 
+#[derive(Debug)]
 pub enum AllocateResult {
     Ok(WriteSlice),
     Full { slice: WriteSlice, remain: usize },
@@ -42,6 +44,25 @@ impl AllocateResult {
             AllocateResult::Full { .. } => unreachable!(),
             AllocateResult::None => unreachable!(),
         }
+    }
+}
+
+pub const REGION_MAGIC: u64 = 0x19970327;
+
+#[derive(Debug)]
+pub struct RegionHeader {
+    /// magic number to decide a valid region
+    pub magic: u64,
+}
+
+impl RegionHeader {
+    pub fn write(&self, buf: &mut [u8]) {
+        (&mut buf[..]).put_u64(self.magic);
+    }
+
+    pub fn read(buf: &[u8]) -> Self {
+        let magic = (&buf[..]).get_u64();
+        Self { magic }
     }
 }
 
@@ -267,6 +288,12 @@ where
         assert_eq!(inner.buffered_readers, 0);
 
         inner.attach_buffer(buf);
+        let buffer = inner.buffer.as_deref_mut().unwrap();
+        let header = RegionHeader {
+            magic: REGION_MAGIC,
+        };
+        header.write(buffer);
+        inner.len = self.device.align();
     }
 
     pub async fn detach_buffer(&self) -> Vec<u8, D::IoBufferAllocator> {

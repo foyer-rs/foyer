@@ -38,7 +38,7 @@ use crate::{
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
-    region::{AllocateResult, Region, RegionId},
+    region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
 };
@@ -46,7 +46,6 @@ use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
 
-const REGION_MAGIC: u64 = 0x19970327;
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
@@ -431,7 +430,7 @@ where
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
             None => {
-                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
                 self.indices.remove(key);
                 Ok(None)
             }
@@ -483,30 +482,16 @@ where
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
-            key.serialized_len() + value.serialized_len() + EntryFooter::serialized_len();
+            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
         bits::align_up(self.device.align(), unaligned)
     }
 
     async fn seal(&self) -> Result<()> {
-        match self
-            .region_manager
-            .allocate(self.device.region_size() - self.device.align(), true)
-            .await
-        {
-            AllocateResult::Full { mut slice, remain } => {
-                // current region is full, write region footer and try allocate again
-                let footer = RegionFooter {
-                    magic: REGION_MAGIC,
-                    padding: remain as u64,
-                };
-                footer.write(slice.as_mut());
-            }
-            AllocateResult::Ok(slice) => {
-                // region is empty, skip
-                drop(slice);
-            }
-            AllocateResult::None => unreachable!(),
-        }
+        // Try allocate the max size of a region to trigger flush.
+        // `max size == region size - region align` (first align block is reserved for region header)
+        self.region_manager
+            .allocate(self.device.region_size() - self.device.align(), false)
+            .await;
         Ok(())
     }
 
@@ -608,6 +593,7 @@ where
         }
 
         let serialized_len = self.serialized_len(key, &value);
+
         if key.serialized_len() + value.serialized_len() != writer.weight {
             tracing::error!(
                 "weight != key.serialized_len() + value.serialized_len(), weight: {}, key size: {}, value size: {}, key: {:?}",
@@ -617,24 +603,14 @@ where
 
         self.metrics.op_bytes_insert.inc_by(serialized_len as u64);
 
-        let mut slice = loop {
-            match self
-                .region_manager
-                .allocate(serialized_len, !writer.is_skippable)
-                .await
-            {
-                AllocateResult::Ok(slice) => break slice,
-                AllocateResult::Full { mut slice, remain } => {
-                    // current region is full, write region footer and try allocate again
-                    let footer = RegionFooter {
-                        magic: REGION_MAGIC,
-                        padding: remain as u64,
-                    };
-                    footer.write(slice.as_mut());
-                    drop(slice);
-                }
-                AllocateResult::None => return Ok(false),
-            }
+        let mut slice = match self
+            .region_manager
+            .allocate(serialized_len, !writer.is_skippable)
+            .await
+        {
+            Some(slice) => slice,
+            // Only reachable when writer is skippable.
+            None => return Ok(false),
         };
 
         write_entry(slice.as_mut(), key, &value);
@@ -785,76 +761,48 @@ where
     }
 }
 
+const ENTRY_MAGIC: u32 = 0x97_00_00_00;
+const ENTRY_MAGIC_MASK: u32 = 0xFF_00_00_00;
+
 #[derive(Debug)]
-struct EntryFooter {
+struct EntryHeader {
     key_len: u32,
     value_len: u32,
-    padding: u32,
     checksum: u64,
 }
 
-impl EntryFooter {
+impl EntryHeader {
     fn serialized_len() -> usize {
-        4 + 4 + 4 + 8
+        4 + 4 + 8
     }
 
     fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u32(self.key_len);
+        buf.put_u32(self.key_len | ENTRY_MAGIC);
         buf.put_u32(self.value_len);
-        buf.put_u32(self.padding);
         buf.put_u64(self.checksum);
     }
 
-    #[allow(dead_code)]
-    fn read(mut buf: &[u8]) -> Self {
-        let key_len = buf.get_u32();
+    fn read(mut buf: &[u8]) -> Option<Self> {
+        let head = buf.get_u32();
+        let magic = head & ENTRY_MAGIC_MASK;
+
+        if magic != ENTRY_MAGIC {
+            return None;
+        }
+
+        let key_len = head ^ ENTRY_MAGIC;
         let value_len = buf.get_u32();
-        let padding = buf.get_u32();
         let checksum = buf.get_u64();
 
-        Self {
+        Some(Self {
             key_len,
             value_len,
-            padding,
             checksum,
-        }
+        })
     }
 }
 
-#[derive(Debug)]
-struct RegionFooter {
-    /// magic number to decide a valid region
-    magic: u64,
-
-    /// padding from the end of the last entry footer to the end of region
-    padding: u64,
-}
-
-impl RegionFooter {
-    fn write(&self, buf: &mut [u8]) {
-        let mut offset = buf.len();
-
-        offset -= 8;
-        (&mut buf[offset..offset + 8]).put_u64(self.magic);
-
-        offset -= 8;
-        (&mut buf[offset..offset + 8]).put_u64(self.padding);
-    }
-
-    fn read(buf: &[u8]) -> Self {
-        let mut offset = buf.len();
-
-        offset -= 8;
-        let magic = (&buf[offset..offset + 8]).get_u64();
-
-        offset -= 8;
-        let padding = (&buf[offset..offset + 8]).get_u64();
-
-        Self { magic, padding }
-    }
-}
-
-/// | value | key | <padding> | footer |
+/// | header | value | key | <padding> |
 ///
 /// # Safety
 ///
@@ -864,29 +812,22 @@ where
     K: Key,
     V: Value,
 {
-    let mut offset = 0;
+    let mut offset = EntryHeader::serialized_len();
     value.write(&mut buf[offset..offset + value.serialized_len()]);
     offset += value.serialized_len();
     key.write(&mut buf[offset..offset + key.serialized_len()]);
     offset += key.serialized_len();
+    let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
 
-    let checksum = checksum(&buf[..offset]);
-    let padding = buf.len() as u32
-        - key.serialized_len() as u32
-        - value.serialized_len() as u32
-        - EntryFooter::serialized_len() as u32;
-
-    let footer = EntryFooter {
+    let header = EntryHeader {
         key_len: key.serialized_len() as u32,
         value_len: value.serialized_len() as u32,
-        padding,
         checksum,
     };
-    offset = buf.len() - EntryFooter::serialized_len();
-    footer.write(&mut buf[offset..]);
+    header.write(&mut buf[..EntryHeader::serialized_len()]);
 }
 
-/// | value | key | <padding> | footer |
+/// | header | value | key | <padding> |
 ///
 /// # Safety
 ///
@@ -896,24 +837,20 @@ where
     K: Key,
     V: Value,
 {
-    let mut offset = buf.len();
+    let header = EntryHeader::read(buf)?;
 
-    offset -= EntryFooter::serialized_len();
-    let footer = EntryFooter::read(&buf[offset..]);
+    let mut offset = EntryHeader::serialized_len();
+    let value = V::read(&buf[offset..offset + header.value_len as usize]);
+    offset += header.value_len as usize;
+    let key = K::read(&buf[offset..offset + header.key_len as usize]);
+    offset += header.key_len as usize;
 
-    offset = 0;
-    let value = V::read(&buf[offset..offset + footer.value_len as usize]);
-
-    offset += footer.value_len as usize;
-    let key = K::read(&buf[offset..offset + footer.key_len as usize]);
-
-    offset += footer.key_len as usize;
-    let checksum = checksum(&buf[..offset]);
-    if checksum != footer.checksum {
+    let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
+    if checksum != header.checksum {
         tracing::warn!(
             "checksum mismatch, checksum: {}, expected: {}",
             checksum,
-            footer.checksum
+            header.checksum,
         );
         return None;
     }
@@ -947,56 +884,67 @@ where
     D: Device,
 {
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
-        let region_size = region.device().region_size();
         let align = region.device().align();
 
-        let slice = match region.load(region_size - align..region_size, 0).await? {
+        let slice = match region.load(..align, 0).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
 
-        let footer = RegionFooter::read(slice.as_ref());
+        let header = RegionHeader::read(slice.as_ref());
         drop(slice);
 
-        if footer.magic != REGION_MAGIC {
+        if header.magic != REGION_MAGIC {
             return Ok(None);
         }
-        let cursor = region_size - footer.padding as usize;
+
         Ok(Some(Self {
             region,
-            cursor,
+            cursor: align,
             _marker: PhantomData,
         }))
     }
 
     pub async fn next(&mut self) -> Result<Option<Index<K>>> {
-        if self.cursor == 0 {
+        let region_size = self.region.device().region_size();
+        let align = self.region.device().align();
+
+        if self.cursor + align >= region_size {
             return Ok(None);
         }
 
-        let align = self.region.device().align();
-
         let slice = self
             .region
-            .load(self.cursor - align..self.cursor, 0)
+            .load(self.cursor..self.cursor + align, 0)
             .await?
             .unwrap();
 
-        let footer =
-            EntryFooter::read(&slice.as_ref()[align - EntryFooter::serialized_len()..align]);
-        let entry_len = (footer.value_len + footer.key_len + footer.padding) as usize
-            + EntryFooter::serialized_len();
+        let Some(header) = EntryHeader::read(slice.as_ref()) else {
+            return Ok(None)
+        };
 
-        let abs_start = self.cursor - entry_len + footer.value_len as usize;
-        let abs_end = self.cursor - entry_len + (footer.value_len + footer.key_len) as usize;
+        let entry_len = bits::align_up(
+            align,
+            (header.value_len + header.key_len) as usize + EntryHeader::serialized_len(),
+        );
+
+        let abs_start = self.cursor + EntryHeader::serialized_len() + header.value_len as usize;
+        let abs_end = self.cursor
+            + EntryHeader::serialized_len()
+            + (header.key_len + header.value_len) as usize;
+
+        if abs_start >= abs_end || abs_end > region_size {
+            // Double check wrong entry.
+            return Ok(None);
+        }
+
         let align_start = bits::align_down(align, abs_start);
         let align_end = bits::align_up(align, abs_end);
 
         let key = if align_start == self.cursor - align && align_end == self.cursor {
-            // key and foooter in the same block, read directly from slice
-            let rel_start =
-                align - EntryFooter::serialized_len() - (footer.padding + footer.key_len) as usize;
-            let rel_end = align - EntryFooter::serialized_len() - footer.padding as usize;
+            // header and key are in the same block, read directly from slice
+            let rel_start = EntryHeader::serialized_len() + header.value_len as usize;
+            let rel_end = rel_start + header.key_len as usize;
             let key = K::read(&slice.as_ref()[rel_start..rel_end]);
             drop(slice);
             key
@@ -1011,17 +959,19 @@ where
             key
         };
 
-        self.cursor -= entry_len;
-
-        Ok(Some(Index {
+        let index = Index {
             key,
             region: self.region.id(),
             version: 0,
             offset: self.cursor as u32,
             len: entry_len as u32,
-            key_len: footer.key_len,
-            value_len: footer.value_len,
-        }))
+            key_len: header.key_len,
+            value_len: header.value_len,
+        };
+
+        self.cursor += entry_len;
+
+        Ok(Some(index))
     }
 
     pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
@@ -1164,7 +1114,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::identity_op)]
+    #[expect(clippy::identity_op)]
     async fn test_recovery() {
         const KB: usize = 1024;
         const MB: usize = 1024 * 1024;
@@ -1206,7 +1156,7 @@ pub mod tests {
         // [3, 4, 5]
         // [6, 7, 8]
         // [9, 10, 11]
-        for i in 0..12 {
+        for i in 0..20 {
             store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
         }
 
@@ -1214,7 +1164,7 @@ pub mod tests {
 
         let remains = recorder.remains();
 
-        for i in 0..12 {
+        for i in 0..20 {
             if remains.contains(&i) {
                 assert_eq!(
                     store.lookup(&i).await.unwrap().unwrap(),

@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![feature(let_chains)]
+#![feature(lint_reasons)]
 
 mod analyze;
 mod rate;
@@ -410,7 +411,6 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadc
     join_all(r_handles).await;
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn write(
     entry_size: usize,
     rate: Option<f64>,
@@ -454,7 +454,7 @@ async fn write(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn read(
     entry_size: usize,
     rate: Option<f64>,

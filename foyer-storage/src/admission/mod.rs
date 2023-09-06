@@ -18,7 +18,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use crate::{indices::Indices, metrics::Metrics};
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
