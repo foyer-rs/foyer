@@ -17,7 +17,7 @@ use foyer_common::code::{Key, Value};
 use crate::{indices::Indices, metrics::Metrics};
 use std::{fmt::Debug, sync::Arc};
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
