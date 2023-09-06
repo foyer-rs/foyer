@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
@@ -20,7 +20,16 @@ use prometheus::{
     IntGauge, IntGaugeVec, Registry,
 };
 
-pub static REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
+pub static REGISTRY: OnceLock<Registry> = OnceLock::new();
+
+/// Set metrics registry for `foyer`.
+///
+/// Metrics registry must be set before `open`.
+///
+/// Return `true` if set succeeds.
+pub fn set_metrics_registry(registry: Registry) -> bool {
+    REGISTRY.set(registry).is_ok()
+}
 
 /// Multiple foyer instance will share the same global metrics with different label `foyer` name.
 pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::default);
@@ -37,7 +46,7 @@ pub struct GlobalMetrics {
 
 impl Default for GlobalMetrics {
     fn default() -> Self {
-        Self::new(&REGISTRY)
+        Self::new(REGISTRY.get_or_init(|| prometheus::default_registry().clone()))
     }
 }
 
