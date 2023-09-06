@@ -61,7 +61,6 @@ impl FsDeviceConfig {
 struct FsDeviceInner {
     config: FsDeviceConfig,
 
-    #[allow(dead_code)]
     dir: File,
 
     files: Vec<File>,

@@ -29,7 +29,7 @@ use tracing::Instrument;
 use crate::{
     device::Device,
     metrics::Metrics,
-    region::{AllocateResult, Region, RegionId},
+    region::{Region, RegionId, WriteSlice},
 };
 
 #[derive(Debug)]
@@ -130,11 +130,11 @@ where
 
     /// Allocate a buffer slice with given size in an active region to write.
     #[tracing::instrument(skip(self))]
-    pub async fn allocate(&self, size: usize, must_allocate: bool) -> AllocateResult {
+    pub async fn allocate(&self, size: usize, must_allocate: bool) -> Option<WriteSlice> {
         loop {
             let res = self.allocate_inner(size);
 
-            if !must_allocate || !matches!(res, AllocateResult::None) {
+            if res.is_some() || !must_allocate {
                 return res;
             }
 
@@ -143,23 +143,21 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn allocate_inner(&self, size: usize) -> AllocateResult {
+    pub fn allocate_inner(&self, size: usize) -> Option<WriteSlice> {
         let mut current = self.current.lock();
 
         if let Some(region_id) = *current {
-            let region = self.region(&region_id);
-            match region.allocate(size) {
-                AllocateResult::Ok(slice) => AllocateResult::Ok(slice),
-                AllocateResult::Full { slice, remain } => {
-                    // current region is full, append dirty regions
+            match self.region(&region_id).allocate(size) {
+                crate::region::AllocateResult::Ok(slice) => Some(slice),
+                crate::region::AllocateResult::Full { .. } => {
                     self.dirty_regions.release(region_id);
                     *current = None;
-                    AllocateResult::Full { slice, remain }
+                    None
                 }
-                AllocateResult::None => unreachable!(),
+                crate::region::AllocateResult::None => None,
             }
         } else {
-            AllocateResult::None
+            None
         }
     }
 

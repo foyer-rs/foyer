@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![feature(trait_alias)]
+#![feature(lint_reasons)]
 #![cfg_attr(coverage_nightly, feature(no_coverage))]
 
 pub mod batch;

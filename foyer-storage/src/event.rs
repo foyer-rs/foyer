@@ -19,7 +19,7 @@ use foyer_common::code::{Key, Value};
 
 use crate::error::Result;
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 #[async_trait]
 pub trait EventListener: Send + Sync + 'static + Debug {
     type K: Key;
