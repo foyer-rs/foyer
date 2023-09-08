@@ -21,3 +21,7 @@ test:
 	
 monitor:
 	./scripts/monitor.sh
+
+clear:
+	cargo clean
+	rm -rf .tmp
