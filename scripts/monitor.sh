@@ -8,9 +8,12 @@ version: '3'
 services:
     grafana:
         user: "${UID}"
+    prometheus:
+        user: "${UID}"
 EOF
 
 if [ "$compose" = 0 ] ; then
+    mkdir -p .tmp/prometheus
     docker compose up -d
 else
     docker compose down
