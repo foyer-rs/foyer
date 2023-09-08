@@ -20,7 +20,7 @@ use prometheus::{
     IntGauge, IntGaugeVec, Registry,
 };
 
-pub static REGISTRY: OnceLock<Registry> = OnceLock::new();
+static REGISTRY: OnceLock<Registry> = OnceLock::new();
 
 /// Set metrics registry for `foyer`.
 ///
@@ -29,6 +29,10 @@ pub static REGISTRY: OnceLock<Registry> = OnceLock::new();
 /// Return `true` if set succeeds.
 pub fn set_metrics_registry(registry: Registry) -> bool {
     REGISTRY.set(registry).is_ok()
+}
+
+pub fn get_metrics_registry() -> &'static Registry {
+    REGISTRY.get_or_init(|| prometheus::default_registry().clone())
 }
 
 /// Multiple foyer instance will share the same global metrics with different label `foyer` name.
@@ -46,7 +50,7 @@ pub struct GlobalMetrics {
 
 impl Default for GlobalMetrics {
     fn default() -> Self {
-        Self::new(REGISTRY.get_or_init(|| prometheus::default_registry().clone()))
+        Self::new(get_metrics_registry())
     }
 }
 
@@ -90,7 +94,7 @@ impl GlobalMetrics {
             "foyer_storage_inner_op_duration",
             "foyer storage inner op duration",
             &["foyer", "op", "extra"],
-            vec![0.000001, 0.00001, 0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+            vec![0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
             registry,
         )
         .unwrap();
