@@ -6,8 +6,6 @@ cat <<EOF > docker-compose.override.yaml
 version: '3'
 
 services:
-    grafana:
-        user: "${UID}"
     prometheus:
         user: "${UID}"
 EOF
