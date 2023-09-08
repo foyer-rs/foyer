@@ -1,0 +1,14 @@
+apiVersion: 1
+deleteDatasources:
+  - name: foyer
+datasources:
+  - name: foyer
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    withCredentials: false
+    tlsAuth: false
+    tlsAuthWithCACert: false
+    version: 1
+    editable: true
+    isDefault: true

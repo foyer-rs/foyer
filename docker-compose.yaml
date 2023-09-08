@@ -22,7 +22,7 @@ services:
     container_name: prometheus
     restart: unless-stopped
     volumes:
-      - ./etc/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./.tmp/prometheus:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -39,8 +39,9 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     volumes:
-      - ./etc/grafana:/var/lib/grafana
-      - ./etc/grafana.ini:/etc/grafana/grafana.ini
+      - ./etc/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./etc/grafana/provisioning:/etc/grafana/provisioning
+      - ./etc/grafana/dashboards:/var/lib/grafana/dashboards
     ports:
       - 3000:3000
     environment:
