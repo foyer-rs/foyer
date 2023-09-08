@@ -16,6 +16,7 @@
 #![feature(lint_reasons)]
 
 mod analyze;
+mod export;
 mod rate;
 mod utils;
 
@@ -44,6 +45,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
+use export::MetricsExporter;
 use rate::RateLimiter;
 use tokio::sync::broadcast;
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
@@ -239,6 +241,8 @@ async fn main() {
 
     let args = Args::parse();
     args.verify();
+
+    MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
 
     println!("{:#?}", args);
 
