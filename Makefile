@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: proto check test deps
+.PHONY: proto check test deps monitor
 
 deps:
 	./scripts/install-deps.sh
@@ -19,5 +19,5 @@ test:
 	RUST_BACKTRACE=1 cargo nextest run --all
 	RUST_BACKTRACE=1 cargo test --doc
 	
-jaeger:
-	./scripts/jaeger.sh
+monitor:
+	./scripts/monitor.sh
