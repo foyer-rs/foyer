@@ -6,3 +6,4 @@ Cargo.lock
 lcov.info
 
 docker-compose.override.yaml
+.tmp

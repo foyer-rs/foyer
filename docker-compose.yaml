@@ -23,6 +23,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./etc/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./.tmp/prometheus:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
