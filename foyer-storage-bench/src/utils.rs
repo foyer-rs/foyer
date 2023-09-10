@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use itertools::Itertools;
 use nix::{fcntl::readlink, sys::stat::stat};
 
-#[allow(dead_code)]
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
@@ -41,7 +41,7 @@ pub enum FsType {
     Others,
 }
 
-#[allow(unused_variables)]
+#[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
 pub fn detect_fs_type(path: impl AsRef<Path>) -> FsType {
     #[cfg(target_os = "linux")]
     {

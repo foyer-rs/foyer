@@ -920,7 +920,7 @@ where
             .unwrap();
 
         let Some(header) = EntryHeader::read(slice.as_ref()) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let entry_len = bits::align_up(
