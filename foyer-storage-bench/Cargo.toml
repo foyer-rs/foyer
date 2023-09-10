@@ -27,8 +27,6 @@ opentelemetry-semantic-conventions = { version = "0.12", optional = true }
 parking_lot = "0.12"
 prometheus = "0.13"
 rand = "0.8.5"
-rand_mt = "4.2.1"
-tempfile = "3"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
