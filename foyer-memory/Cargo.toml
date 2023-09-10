@@ -8,25 +8,17 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-channel = "1.8"
-async-trait = "0.1"
-bitflags = "2.3.1"
 bytes = "1"
 cmsketch = "0.1"
 foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
-futures = "0.3"
 itertools = "0.11.0"
 libc = "0.2"
 memoffset = "0.9"
-nix = { version = "0.27", features = ["fs", "mman"] }
 parking_lot = "0.12"
 paste = "1.0"
-pin-project = "1"
-prometheus = "0.13"
 rand = "0.8.5"
-thiserror = "1"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",

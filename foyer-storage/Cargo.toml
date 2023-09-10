@@ -25,7 +25,6 @@ memoffset = "0.9"
 nix = { version = "0.27", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
-pin-project = "1"
 prometheus = "0.13"
 rand = "0.8.5"
 thiserror = "1"
