@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: proto check test deps monitor
+.PHONY: proto check test deps monitor clear
 
 deps:
 	./scripts/install-deps.sh
