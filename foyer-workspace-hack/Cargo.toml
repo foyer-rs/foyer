@@ -23,6 +23,7 @@ futures-util = { version = "0.3", default-features = false, features = ["async-a
 hyper = { version = "0.14", features = ["full"] }
 itertools = { version = "0.10" }
 lock_api = { version = "0.4", features = ["arc_lock"] }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 nix = { version = "0.27", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
@@ -40,5 +41,13 @@ itertools = { version = "0.10" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 syn = { version = "2", features = ["extra-traits", "full", "visit-mut"] }
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+bitflags = { version = "2", default-features = false, features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits"] }
+
+[target.x86_64-apple-darwin.dependencies]
+bitflags = { version = "2", default-features = false, features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits"] }
 
 ### END HAKARI SECTION
