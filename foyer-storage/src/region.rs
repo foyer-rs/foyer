@@ -187,6 +187,13 @@ where
         }
     }
 
+    /// Load region data into a [`ReadSlice`].
+    ///
+    /// Data may be loaded ether from physical device or from dirty buffer.
+    ///
+    /// Use version `0` to skip version check.
+    ///
+    /// Returns `None` if verion mismatch or given range cannot be fully filled.
     #[tracing::instrument(skip(self, range), fields(start, end))]
     pub async fn load(
         &self,
