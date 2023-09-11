@@ -137,7 +137,7 @@ where
             .inc_by(region.device().region_size() as u64);
         self.metrics
             .total_bytes
-            .add(region.device().region_size() as i64);
+            .add(region.device().region_size() as u64);
 
         Ok(())
     }

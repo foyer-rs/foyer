@@ -15,10 +15,31 @@
 use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Registry,
+    core::{AtomicU64, GenericGauge, GenericGaugeVec},
+    opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, Registry,
 };
+type UintGaugeVec = GenericGaugeVec<AtomicU64>;
+type UintGauge = GenericGauge<AtomicU64>;
+
+macro_rules! register_gauge_vec {
+    ($TYPE:ident, $OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        let gauge_vec = $TYPE::new($OPTS, $LABELS_NAMES).unwrap();
+        $REGISTRY
+            .register(Box::new(gauge_vec.clone()))
+            .map(|_| gauge_vec)
+    }};
+}
+
+macro_rules! register_uint_gauge_vec_with_registry {
+    ($OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        register_gauge_vec!(UintGaugeVec, $OPTS, $LABELS_NAMES, $REGISTRY)
+    }};
+
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        register_uint_gauge_vec_with_registry!(opts!($NAME, $HELP), $LABELS_NAMES, $REGISTRY)
+    }};
+}
 
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
 
@@ -43,7 +64,7 @@ pub struct GlobalMetrics {
     op_duration: HistogramVec,
     slow_op_duration: HistogramVec,
     op_bytes: IntCounterVec,
-    total_bytes: IntGaugeVec,
+    total_bytes: UintGaugeVec,
 
     inner_op_duration: HistogramVec,
 }
@@ -82,7 +103,7 @@ impl GlobalMetrics {
         )
         .unwrap();
 
-        let total_bytes = register_int_gauge_vec_with_registry!(
+        let total_bytes = register_uint_gauge_vec_with_registry!(
             "foyer_storage_total_bytes",
             "foyer storage total bytes",
             &["foyer"],
@@ -131,7 +152,7 @@ pub struct Metrics {
     pub op_bytes_reclaim: IntCounter,
     pub op_bytes_reinsert: IntCounter,
 
-    pub total_bytes: IntGauge,
+    pub total_bytes: UintGauge,
 
     pub inner_op_duration_acquire_clean_region: Histogram,
     pub inner_op_duration_acquire_clean_buffer: Histogram,
