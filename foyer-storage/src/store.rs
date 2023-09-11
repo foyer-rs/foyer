@@ -953,7 +953,9 @@ where
             key
         } else {
             drop(slice);
-            let s = self.region.load(align_start..align_end, 0).await?.unwrap();
+            let Some(s) = self.region.load(align_start..align_end, 0).await? else {
+                return Ok(None);
+            };
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
@@ -987,7 +989,9 @@ where
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
         let start = index.offset as usize;
         let end = start + index.len as usize;
-        let slice = self.region.load(start..end, 0).await?.unwrap();
+        let Some(slice) = self.region.load(start..end, 0).await? else {
+            return Ok(None);
+        };
         let kv = read_entry::<K, V>(slice.as_ref());
         drop(slice);
 
