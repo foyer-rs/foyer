@@ -1,12 +1,6 @@
 ## What's changed and what's your intention?
 
-<!--
-
-**Please do not leave this empty!**
-
-Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
-
--->
+> Please explain **IN DETAIL** what the changes are in this PR and why they are needed. :D
 
 ## Checklist
 
