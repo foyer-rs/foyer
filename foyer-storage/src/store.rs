@@ -530,6 +530,9 @@ where
         }
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
+        self.metrics
+            .total_bytes
+            .set((recovered * self.device.region_size()) as u64);
 
         // Force trigger reclamation.
         if recovered == self.device.regions() {
