@@ -19,6 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
@@ -304,6 +305,16 @@ where
         self.insert(key, value).await
     }
 
+    #[tracing::instrument(skip(self, value))]
+    pub async fn insert_force(&self, key: K, value: V) -> Result<bool> {
+        let weight = key.serialized_len() + value.serialized_len();
+        let mut writer = StoreWriter::new(self, key, weight);
+        writer.set_force();
+        let inserted = writer.finish(value).await?;
+        assert!(inserted);
+        Ok(inserted)
+    }
+
     /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
     /// Then `f` will be called and entry will be inserted.
     ///
@@ -330,6 +341,34 @@ where
     }
 
     /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
+    /// Then `f` will be called and entry will be inserted.
+    ///
+    /// # Safety
+    ///
+    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_force_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    where
+        F: FnOnce() -> anyhow::Result<V>,
+    {
+        let mut writer = self.writer(key, weight);
+        writer.set_force();
+        if !writer.judge() {
+            return Ok(false);
+        }
+        let value = match f() {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
+        let inserted = writer.finish(value).await?;
+        assert!(inserted);
+        Ok(inserted)
+    }
+
+    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
     /// Then `f` will be called to fetch value, and entry will be inserted.
     ///
     /// # Safety
@@ -353,6 +392,35 @@ where
             }
         };
         writer.finish(value).await
+    }
+
+    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
+    /// Then `f` will be called to fetch value, and entry will be inserted.
+    ///
+    /// # Safety
+    ///
+    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
+    #[tracing::instrument(skip(self, f))]
+    pub async fn insert_force_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> Result<bool>
+    where
+        F: FnOnce() -> FU,
+        FU: FetchValueFuture<V>,
+    {
+        let mut writer = self.writer(key, weight);
+        writer.set_force();
+        if !writer.judge() {
+            return Ok(false);
+        }
+        let value = match f().await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("fetch value error: {:?}", e);
+                return Ok(false);
+            }
+        };
+        let inserted = writer.finish(value).await?;
+        assert!(inserted);
+        Ok(inserted)
     }
 
     #[tracing::instrument(skip(self, f))]
@@ -700,6 +768,14 @@ where
 
     pub async fn finish(self, value: V) -> Result<bool> {
         self.store.apply_writer(self, value).await
+    }
+
+    pub fn set_force(&mut self) {
+        self.judges.set_mask(Bitmap::new());
+    }
+
+    pub fn set_judge_mask(&mut self, mask: Bitmap<64>) {
+        self.judges.set_mask(mask);
     }
 
     pub fn set_skippable(&mut self) {
