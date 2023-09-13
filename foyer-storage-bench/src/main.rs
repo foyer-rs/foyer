@@ -469,16 +469,18 @@ async fn write(
         }
 
         let time = Instant::now();
-        store.insert(idx, data).await.unwrap();
+        let inserted = store.insert(idx, data).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
         if let Err(e) = metrics.insert_lats.write().record(lat) {
             tracing::error!("metrics error: {:?}, value: {}", e, lat);
         }
 
-        metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-        metrics
-            .insert_bytes
-            .fetch_add(entry_size, Ordering::Relaxed);
+        if inserted {
+            metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+            metrics
+                .insert_bytes
+                .fetch_add(entry_size, Ordering::Relaxed);
+        }
     }
 }
 
@@ -524,6 +526,7 @@ async fn read(
             if let Err(e) = metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
+            metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
         } else {
             if let Err(e) = metrics.get_miss_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
