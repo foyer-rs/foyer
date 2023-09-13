@@ -61,6 +61,7 @@ pub struct Analysis {
 
     get_iops: f64,
     get_miss: f64,
+    get_throughput: f64,
     get_miss_lat_p50: u64,
     get_miss_lat_p90: u64,
     get_miss_lat_p99: u64,
@@ -82,6 +83,7 @@ pub struct MetricsDump {
 
     pub get_ios: usize,
     pub get_miss_ios: usize,
+    pub get_bytes: usize,
     pub get_hit_lat_p50: u64,
     pub get_hit_lat_p90: u64,
     pub get_hit_lat_p99: u64,
@@ -99,6 +101,7 @@ pub struct Metrics {
     pub insert_lats: Arc<RwLock<Histogram<u64>>>,
 
     pub get_ios: Arc<AtomicUsize>,
+    pub get_bytes: Arc<AtomicUsize>,
     pub get_miss_ios: Arc<AtomicUsize>,
     pub get_hit_lats: Arc<RwLock<Histogram<u64>>>,
     pub get_miss_lats: Arc<RwLock<Histogram<u64>>>,
@@ -114,6 +117,7 @@ impl Default for Metrics {
             )),
 
             get_ios: Arc::new(AtomicUsize::new(0)),
+            get_bytes: Arc::new(AtomicUsize::new(0)),
             get_miss_ios: Arc::new(AtomicUsize::new(0)),
             get_hit_lats: Arc::new(RwLock::new(
                 Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
@@ -141,6 +145,7 @@ impl Metrics {
 
             get_ios: self.get_ios.load(Ordering::Relaxed),
             get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
+            get_bytes: self.get_bytes.load(Ordering::Relaxed),
             get_hit_lat_p50: get_hit_lats.value_at_quantile(0.5),
             get_hit_lat_p90: get_hit_lats.value_at_quantile(0.9),
             get_hit_lat_p99: get_hit_lats.value_at_quantile(0.99),
@@ -197,8 +202,10 @@ impl std::fmt::Display for Analysis {
         writeln!(f, "insert lat pmax: {}us", self.insert_lat_pmax)?;
 
         // get statics
+        let get_throughput = ByteSize::b(self.get_throughput as u64);
         writeln!(f, "get iops: {:.1}/s", self.get_iops)?;
         writeln!(f, "get miss: {:.2}% ", self.get_miss * 100f64)?;
+        writeln!(f, "get throughput: {}/s", get_throughput.to_string_as(true))?;
         writeln!(f, "get hit lat p50: {}us", self.get_hit_lat_p50)?;
         writeln!(f, "get hit lat p90: {}us", self.get_hit_lat_p90)?;
         writeln!(f, "get hit lat p99: {}us", self.get_hit_lat_p99)?;
@@ -234,6 +241,7 @@ pub fn analyze(
     let get_iops = (metrics_dump_end.get_ios - metrics_dump_start.get_ios) as f64 / secs;
     let get_miss = (metrics_dump_end.get_miss_ios - metrics_dump_start.get_miss_ios) as f64
         / (metrics_dump_end.get_ios - metrics_dump_start.get_ios) as f64;
+    let get_throughput = (metrics_dump_end.get_bytes - metrics_dump_start.get_bytes) as f64 / secs;
 
     Analysis {
         disk_read_iops,
@@ -250,6 +258,7 @@ pub fn analyze(
 
         get_iops,
         get_miss,
+        get_throughput,
         get_hit_lat_p50: metrics_dump_end.get_hit_lat_p50,
         get_hit_lat_p90: metrics_dump_end.get_hit_lat_p90,
         get_hit_lat_p99: metrics_dump_end.get_hit_lat_p99,
