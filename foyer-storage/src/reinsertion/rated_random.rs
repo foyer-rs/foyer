@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Duration};
 
 use foyer_common::{
     code::{Key, Value},
@@ -29,7 +29,9 @@ where
     K: Key,
     V: Value,
 {
-    inner: RatedRandom<K, V>,
+    inner: RatedRandom,
+
+    _marker: PhantomData<(K, V)>,
 }
 
 impl<K, V> RatedRandomReinsertionPolicy<K, V>
@@ -40,6 +42,7 @@ where
     pub fn new(rate: usize, update_interval: Duration) -> Self {
         Self {
             inner: RatedRandom::new(rate, update_interval),
+            _marker: PhantomData,
         }
     }
 }
@@ -53,15 +56,15 @@ where
 
     type Value = V;
 
-    fn judge(&self, key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>) -> bool {
-        self.inner.judge(key, weight)
+    fn judge(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+        self.inner.judge()
     }
 
-    fn on_insert(&self, key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
-        self.inner.on_insert(key, weight, judge)
+    fn on_insert(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
+        self.inner.on_insert(weight, judge)
     }
 
-    fn on_drop(&self, key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
-        self.inner.on_drop(key, weight, judge)
+    fn on_drop(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
+        self.inner.on_drop(weight, judge)
     }
 }

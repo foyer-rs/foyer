@@ -76,8 +76,7 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
         run: |
-          cargo llvm-cov --no-report test --package foyer-common --lib -- rated_random::tests --nocapture --ignored
-          cargo llvm-cov --no-report test --package foyer-common --lib -- rate::tests --nocapture --ignored
+          cargo llvm-cov --no-report test --package foyer-common -- --nocapture --ignored
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov --no-report nextest

@@ -33,3 +33,4 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
 }
 
 pub mod rated_random;
+pub mod rated_ticket;
