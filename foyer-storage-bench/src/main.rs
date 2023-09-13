@@ -35,9 +35,15 @@ use clap::Parser;
 
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::{rated_random::RatedRandomAdmissionPolicy, AdmissionPolicy},
+    admission::{
+        rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
+        AdmissionPolicy,
+    },
     device::fs::FsDeviceConfig,
-    reinsertion::{rated_random::RatedRandomReinsertionPolicy, ReinsertionPolicy},
+    reinsertion::{
+        rated_random::RatedRandomReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy,
+        ReinsertionPolicy,
+    },
     store::StoreConfig,
     LfuFsStore,
 };
@@ -125,10 +131,20 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     rated_random_admission: usize,
 
-    /// enable rated random admission policy if `rated_random` > 0
+    /// enable rated random reinsertion policy if `rated_random` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     rated_random_reinsertion: usize,
+
+    /// enable rated ticket admission policy if `rated_random` > 0
+    /// (MiB/s)
+    #[arg(long, default_value_t = 0)]
+    rated_ticket_admission: usize,
+
+    /// enable rated ticket reinsetion policy if `rated_random` > 0
+    /// (MiB/s)
+    #[arg(long, default_value_t = 0)]
+    rated_ticket_reinsertion: usize,
 
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
@@ -294,6 +310,14 @@ async fn main() {
             Duration::from_millis(100),
         );
         reinsertions.push(Arc::new(rr));
+    }
+    if args.rated_ticket_admission > 0 {
+        let rt = RatedTicketAdmissionPolicy::new(args.rated_ticket_admission * 1024 * 1024);
+        admissions.push(Arc::new(rt));
+    }
+    if args.rated_ticket_reinsertion > 0 {
+        let rt = RatedTicketReinsertionPolicy::new(args.rated_ticket_reinsertion * 1024 * 1024);
+        reinsertions.push(Arc::new(rt));
     }
 
     let clean_region_threshold = if args.clean_region_threshold == 0 {
