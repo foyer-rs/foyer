@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: proto check test deps monitor clear
+.PHONY: deps check test test-ignored test-all all monitor clear
 
 deps:
 	./scripts/install-deps.sh
@@ -18,7 +18,14 @@ check:
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all
 	RUST_BACKTRACE=1 cargo test --doc
-	
+
+test-ignored:
+	RUST_BACKTRACE=1 cargo test --package foyer-common -- --nocapture --ignored
+
+test-all: test test-ignored
+
+all: check test-all
+
 monitor:
 	./scripts/monitor.sh
 

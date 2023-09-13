@@ -14,12 +14,10 @@
 
 use std::{
     fmt::Debug,
-    marker::PhantomData,
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
 
-use crate::code::{Key, Value};
 use parking_lot::{Mutex, MutexGuard};
 use rand::{thread_rng, Rng};
 
@@ -51,11 +49,7 @@ const PRECISION: usize = 100000;
 ///
 /// p = ( rate * △t - △force_insert_bytes ) / △obey_bytes
 #[derive(Debug)]
-pub struct RatedRandom<K, V>
-where
-    K: Key,
-    V: Value,
-{
+pub struct RatedRandom {
     rate: usize,
     update_interval: Duration,
 
@@ -65,8 +59,6 @@ where
     probability: AtomicUsize,
 
     inner: Mutex<Inner>,
-
-    _marker: PhantomData<(K, V)>,
 }
 
 #[derive(Debug)]
@@ -76,11 +68,7 @@ struct Inner {
     last_force_insert_bytes: usize,
 }
 
-impl<K, V> RatedRandom<K, V>
-where
-    K: Key,
-    V: Value,
-{
+impl RatedRandom {
     pub fn new(rate: usize, update_interval: Duration) -> Self {
         Self {
             rate,
@@ -95,11 +83,10 @@ where
                 last_obey_bytes: 0,
                 last_force_insert_bytes: 0,
             }),
-            _marker: PhantomData,
         }
     }
 
-    pub fn judge(&self, _key: &K, _weight: usize) -> bool {
+    pub fn judge(&self) -> bool {
         if let Some(inner) = self.inner.try_lock() {
             self.update(inner);
         }
@@ -107,7 +94,7 @@ where
         thread_rng().gen_range(0..PRECISION) < self.probability.load(Ordering::Relaxed)
     }
 
-    pub fn on_insert(&self, _key: &K, weight: usize, judge: bool) {
+    pub fn on_insert(&self, weight: usize, judge: bool) {
         if judge {
             // obey
             self.obey_bytes.fetch_add(weight, Ordering::Relaxed);
@@ -117,7 +104,7 @@ where
         }
     }
 
-    pub fn on_drop(&self, _key: &K, weight: usize, judge: bool) {
+    pub fn on_drop(&self, weight: usize, judge: bool) {
         if !judge {
             // obey
             self.obey_bytes.fetch_add(weight, Ordering::Relaxed);
@@ -204,21 +191,18 @@ mod tests {
 
         let score = Arc::new(AtomicUsize::new(0));
 
-        let rr = Arc::new(RatedRandom::<u64, Vec<u8>>::new(
-            RATE,
-            Duration::from_millis(100),
-        ));
+        let rr = Arc::new(RatedRandom::new(RATE, Duration::from_millis(100)));
 
         // scope: CONCURRENCY * (1 / interval) * range
         // [1_000_000, 10_000_000]
         // FORCE: [100_000, 1_000_000]
 
-        async fn submit(rr: Arc<RatedRandom<u64, Vec<u8>>>, score: Arc<AtomicUsize>) {
+        async fn submit(rr: Arc<RatedRandom>, score: Arc<AtomicUsize>) {
             loop {
                 tokio::time::sleep(Duration::from_millis(1)).await;
                 let weight = thread_rng().gen_range(100..1000);
 
-                let judge = rr.judge(&0, weight);
+                let judge = rr.judge();
                 let p_other = thread_rng().gen_range(0.0..=1.0);
                 let p_force = thread_rng().gen_range(0.0..=1.0);
 
@@ -226,9 +210,9 @@ mod tests {
 
                 if insert {
                     score.fetch_add(weight, Ordering::Relaxed);
-                    rr.on_insert(&0, weight, judge);
+                    rr.on_insert(weight, judge);
                 } else {
-                    rr.on_drop(&0, weight, judge);
+                    rr.on_drop(weight, judge);
                 }
             }
         }

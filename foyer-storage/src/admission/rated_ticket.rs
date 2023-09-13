@@ -12,11 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
-    rated_random::RatedRandom,
+    rated_ticket::RatedTicket,
 };
 
 use crate::metrics::Metrics;
@@ -24,30 +24,30 @@ use crate::metrics::Metrics;
 use super::AdmissionPolicy;
 
 #[derive(Debug)]
-pub struct RatedRandomAdmissionPolicy<K, V>
+pub struct RatedTicketAdmissionPolicy<K, V>
 where
     K: Key,
     V: Value,
 {
-    inner: RatedRandom,
+    inner: RatedTicket,
 
     _marker: PhantomData<(K, V)>,
 }
 
-impl<K, V> RatedRandomAdmissionPolicy<K, V>
+impl<K, V> RatedTicketAdmissionPolicy<K, V>
 where
     K: Key,
     V: Value,
 {
-    pub fn new(rate: usize, update_interval: Duration) -> Self {
+    pub fn new(rate: usize) -> Self {
         Self {
-            inner: RatedRandom::new(rate, update_interval),
+            inner: RatedTicket::new(rate as f64),
             _marker: PhantomData,
         }
     }
 }
 
-impl<K, V> AdmissionPolicy for RatedRandomAdmissionPolicy<K, V>
+impl<K, V> AdmissionPolicy for RatedTicketAdmissionPolicy<K, V>
 where
     K: Key,
     V: Value,
@@ -57,14 +57,12 @@ where
     type Value = V;
 
     fn judge(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
-        self.inner.judge()
+        self.inner.probe()
     }
 
-    fn on_insert(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
-        self.inner.on_insert(weight, judge)
+    fn on_insert(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {
+        self.inner.reduce(weight as f64);
     }
 
-    fn on_drop(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
-        self.inner.on_drop(weight, judge)
-    }
+    fn on_drop(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
 }
