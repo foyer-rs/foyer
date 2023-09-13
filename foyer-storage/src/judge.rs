@@ -57,6 +57,11 @@ impl Judges {
         self.judge = judge;
     }
 
+    pub fn set_mask(&mut self, mut mask: Bitmap<64>) {
+        mask.invert();
+        self.umask = mask;
+    }
+
     /// judge | ( ~mask )
     ///
     /// | judge | mask | ~mask | result |
