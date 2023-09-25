@@ -53,16 +53,23 @@ pub const REGION_MAGIC: u64 = 0x19970327;
 pub struct RegionHeader {
     /// magic number to decide a valid region
     pub magic: u64,
+    pub version: u64,
 }
 
 impl RegionHeader {
     pub fn write(&self, buf: &mut [u8]) {
-        (&mut buf[..]).put_u64(self.magic);
+        let mut cursor = 0;
+        (&mut buf[cursor..]).put_u64(self.magic);
+        cursor += 8;
+        (&mut buf[cursor..]).put_u64(self.version);
     }
 
     pub fn read(buf: &[u8]) -> Self {
-        let magic = (&buf[..]).get_u64();
-        Self { magic }
+        let mut cursor = 0;
+        let magic = (&buf[cursor..]).get_u64();
+        cursor += 8;
+        let version = (&buf[cursor..]).get_u64();
+        Self { magic, version }
     }
 }
 
@@ -297,6 +304,7 @@ where
         let buffer = inner.buffer.as_deref_mut().unwrap();
         let header = RegionHeader {
             magic: REGION_MAGIC,
+            version: 1,
         };
         header.write(buffer);
         inner.len = self.device.align();
