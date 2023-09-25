@@ -90,6 +90,9 @@ where
     /// Flush rate limits.
     pub reclaim_rate_limit: usize,
 
+    /// Allocation timout for skippable writers.
+    pub allocation_timeout: Duration,
+
     /// Clean region count threshold to trigger reclamation.
     ///
     /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
@@ -175,6 +178,7 @@ where
             device.regions(),
             config.eviction_config,
             device.clone(),
+            config.allocation_timeout,
             metrics.clone(),
         ));
 
@@ -311,7 +315,6 @@ where
         let mut writer = StoreWriter::new(self, key, weight);
         writer.set_force();
         let inserted = writer.finish(value).await?;
-        assert!(inserted);
         Ok(inserted)
     }
 
@@ -364,7 +367,6 @@ where
             }
         };
         let inserted = writer.finish(value).await?;
-        assert!(inserted);
         Ok(inserted)
     }
 
@@ -419,7 +421,6 @@ where
             }
         };
         let inserted = writer.finish(value).await?;
-        assert!(inserted);
         Ok(inserted)
     }
 
@@ -1229,6 +1230,7 @@ pub mod tests {
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
             event_listeners: vec![],
+            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
         };
 
@@ -1279,6 +1281,7 @@ pub mod tests {
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
             event_listeners: vec![],
+            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
         };
         let store = TestStore::open(config).await.unwrap();

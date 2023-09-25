@@ -154,6 +154,10 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     reclaim_rate_limit: usize,
 
+    /// (ms)
+    #[arg(long, default_value_t = 10)]
+    allocation_timeout: usize,
+
     /// `0` means equal to reclaimer count.
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
@@ -339,6 +343,7 @@ async fn main() {
         reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
         event_listeners: vec![],
+        allocation_timeout: Duration::from_millis(args.allocation_timeout as u64),
         clean_region_threshold,
     };
 
