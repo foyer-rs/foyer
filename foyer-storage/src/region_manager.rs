@@ -12,24 +12,22 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use foyer_common::{
-    batch::{Batch, Identity},
-    queue::AsyncQueue,
-};
+use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},
     intrusive_adapter, key_adapter,
 };
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::Instrument;
 
 use crate::{
     device::Device,
     metrics::Metrics,
-    region::{Region, RegionId, WriteSlice},
+    region::{AllocateResult, Region, RegionId, WriteSlice},
 };
 
 #[derive(Debug)]
@@ -56,8 +54,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    current: Mutex<Option<RegionId>>,
-    rotate_batch: Batch<(), ()>,
+    current: AsyncMutex<Option<RegionId>>,
 
     /// Buffer pool for dirty buffers.
     buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
@@ -74,6 +71,8 @@ where
     /// Eviction policy.
     eviction: RwLock<EP>,
 
+    allocation_timeout: Duration,
+
     metrics: Arc<Metrics>,
 }
 
@@ -88,6 +87,7 @@ where
         region_count: usize,
         eviction_config: EP::Config,
         device: D,
+        allocation_timeout: Duration,
         metrics: Arc<Metrics>,
     ) -> Self {
         let buffers = AsyncQueue::new();
@@ -116,56 +116,45 @@ where
         }
 
         Self {
-            current: Mutex::new(None),
-            rotate_batch: Batch::new(),
+            current: AsyncMutex::new(None),
             buffers,
             clean_regions,
             dirty_regions,
             regions,
             items,
             eviction: RwLock::new(eviction),
+            allocation_timeout,
             metrics,
         }
     }
 
-    /// Allocate a buffer slice with given size in an active region to write.
     #[tracing::instrument(skip(self))]
     pub async fn allocate(&self, size: usize, must_allocate: bool) -> Option<WriteSlice> {
-        loop {
-            let res = self.allocate_inner(size);
-
-            if res.is_some() || !must_allocate {
-                return res;
-            }
-
-            self.rotate().await;
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub fn allocate_inner(&self, size: usize) -> Option<WriteSlice> {
-        let mut current = self.current.lock();
-
-        if let Some(region_id) = *current {
-            match self.region(&region_id).allocate(size) {
-                crate::region::AllocateResult::Ok(slice) => Some(slice),
-                crate::region::AllocateResult::Full { .. } => {
-                    self.dirty_regions.release(region_id);
-                    *current = None;
-                    None
-                }
-                crate::region::AllocateResult::None => None,
-            }
+        let mut current = if must_allocate {
+            self.current.lock().await
         } else {
-            None
-        }
-    }
+            match tokio::time::timeout(self.allocation_timeout, self.current.lock()).await {
+                Ok(current) => current,
+                Err(_) => return None,
+            }
+        };
 
-    #[tracing::instrument(skip(self))]
-    pub async fn rotate(&self) {
-        match self.rotate_batch.push(()) {
-            Identity::Leader(rx) => {
-                // Wait a clean region to be released.
+        loop {
+            if let Some(region_id) = *current {
+                match self.region(&region_id).allocate(size) {
+                    AllocateResult::Ok(slice) => return Some(slice),
+                    AllocateResult::Full { .. } => {
+                        self.dirty_regions.release(region_id);
+                        *current = None;
+                    }
+                    AllocateResult::None => {}
+                }
+            }
+
+            assert!(current.is_none());
+
+            // Wait a clean region to be released.
+            let region_id = {
                 let timer = self
                     .metrics
                     .inner_op_duration_acquire_clean_region
@@ -176,30 +165,21 @@ where
                     .instrument(tracing::debug_span!("acquire_clean_region"))
                     .await;
                 drop(timer);
+                region_id
+            };
 
-                tracing::info!("switch to clean region: {}", region_id);
+            tracing::info!("switch to clean region: {}", region_id);
 
-                let region = self.region(&region_id);
-                region.advance().await;
+            let region = self.region(&region_id);
+            region.advance().await;
+            let buffer = self
+                .buffers
+                .acquire()
+                .instrument(tracing::debug_span!("acquire_clean_buffer"))
+                .await;
+            region.attach_buffer(buffer).await;
 
-                let buffer = self
-                    .buffers
-                    .acquire()
-                    .instrument(tracing::debug_span!("acquire_clean_buffer"))
-                    .await;
-                region.attach_buffer(buffer).await;
-
-                *self.current.lock() = Some(region_id);
-
-                // Notify the batch to advance.
-                let items = self.rotate_batch.rotate();
-                tracing::Span::current().record("followers", items.len());
-                for item in items {
-                    item.tx.send(()).unwrap();
-                }
-                rx.await.unwrap();
-            }
-            Identity::Follower(rx) => rx.await.unwrap(),
+            *current = Some(region_id);
         }
     }
 
