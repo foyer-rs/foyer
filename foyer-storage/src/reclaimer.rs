@@ -149,7 +149,7 @@ where
             async move {
                 let mut iter = match RegionEntryIter::<K, V, D>::open(region).await {
                     Ok(Some(iter)) => iter,
-                    Ok(None) => return Ok(()),
+                    Ok(None) => return Ok(true),
                     Err(e) => return Err(e),
                 };
 
@@ -169,12 +169,17 @@ where
                         continue;
                     }
 
+                    // TODO(MrCroxx): Should reclaimer use wait if exceed limitation?
                     if let Some(rate) = rate.as_ref() && let Some(wait) = rate.consume(weight as f64) {
                         tokio::time::sleep(wait).await;
                     }
 
                     let mut writer = self.store.writer(key.clone(), weight);
                     writer.set_skippable();
+
+                    if !writer.judge() {
+                        continue;
+                    }
 
                     if writer.finish(value).await? {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
@@ -186,6 +191,10 @@ where
                             let judge = judges.get(index);
                             reinsertion.on_drop(&key, weight, &metrics, judge);
                         }
+                        // The writer is already been judged and admitted, but not inserted successfully and skipped.
+                        // That means allocating timeouts and there is no clean region available.
+                        // Reinsertion should be interrupted to make sure foreground insertion.
+                        return Ok(false);
                     }
 
                     metrics.op_bytes_reinsert.inc_by(weight as u64);
@@ -193,12 +202,20 @@ where
 
                 tracing::info!("[reclaimer] finish reinsertion, region: {}", region_id);
 
-                Ok(())
+                Ok(true)
             }
         };
 
-        if !self.store.reinsertions().is_empty() && let Err(e) = reinsert().await {
-            tracing::warn!("reinsert region {:?} error: {:?}", region, e);
+        if !self.store.reinsertions().is_empty() {
+            match reinsert().await {
+                Ok(true) => {
+                    tracing::info!("[reclaimer] reinsertion finish, region: {}", region_id)
+                }
+                Ok(false) => {
+                    tracing::info!("[reclaimer] reinsertion skipped, region: {}", region_id)
+                }
+                Err(e) => tracing::warn!("reinsert region {:?} error: {:?}", region, e),
+            }
         }
 
         // step 3: set region last block zero

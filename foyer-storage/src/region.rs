@@ -152,8 +152,7 @@ where
         let offset = inner.len;
         let region_id = self.id;
 
-        // reserve 1 align size for region footer
-        if inner.len + size + self.device.align() > inner.capacity {
+        if inner.len + size > inner.capacity {
             // if full, return the reserved 1 aligen write buf
             let remain = self.device.region_size() - inner.len;
             inner.len = self.device.region_size();
