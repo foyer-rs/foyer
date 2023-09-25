@@ -993,11 +993,13 @@ where
             return Ok(None);
         }
 
-        let slice = self
+        let Some(slice) = self
             .region
             .load(self.cursor..self.cursor + align, 0)
             .await?
-            .unwrap();
+        else {
+            return Ok(None);
+        };
 
         let Some(header) = EntryHeader::read(slice.as_ref()) else {
             return Ok(None);
