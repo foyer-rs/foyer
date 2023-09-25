@@ -22,6 +22,7 @@ mod utils;
 
 use std::{
     fs::create_dir_all,
+    ops::Range,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -49,7 +50,10 @@ use foyer_storage::{
 };
 use futures::future::join_all;
 use itertools::Itertools;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{
+    rngs::{OsRng, StdRng},
+    Rng, SeedableRng,
+};
 
 use export::MetricsExporter;
 use rate::RateLimiter;
@@ -92,7 +96,10 @@ pub struct Args {
     r_rate: f64,
 
     #[arg(long, default_value_t = 64 * 1024)]
-    entry_size: usize,
+    entry_size_min: usize,
+
+    #[arg(long, default_value_t = 64 * 1024)]
+    entry_size_max: usize,
 
     #[arg(long, default_value_t = 10000)]
     lookup_range: u64,
@@ -415,7 +422,7 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadc
     let w_handles = (0..args.writers)
         .map(|_| {
             tokio::spawn(write(
-                args.entry_size,
+                args.entry_size_min..args.entry_size_max + 1,
                 w_rate,
                 index.clone(),
                 store.clone(),
@@ -428,7 +435,6 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadc
     let r_handles = (0..args.readers)
         .map(|_| {
             tokio::spawn(read(
-                args.entry_size,
                 r_rate,
                 index.clone(),
                 store.clone(),
@@ -445,7 +451,7 @@ async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadc
 }
 
 async fn write(
-    entry_size: usize,
+    entry_size_range: Range<usize>,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
     store: Arc<TStore>,
@@ -468,6 +474,7 @@ async fn write(
 
         let idx = index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
+        let entry_size = OsRng.gen_range(entry_size_range.clone());
         let data = vec![idx as u8; entry_size];
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
@@ -489,9 +496,7 @@ async fn write(
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 async fn read(
-    entry_size: usize,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
     store: Arc<TStore>,
@@ -518,20 +523,21 @@ async fn read(
         let idx_max = index.load(Ordering::Relaxed);
         let idx = rng.gen_range(std::cmp::max(idx_max, look_up_range) - look_up_range..=idx_max);
 
-        if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
-            tokio::time::sleep(wait).await;
-        }
-
         let time = Instant::now();
         let res = store.lookup(&idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
-        if res.is_some() {
-            assert_eq!(vec![idx as u8; entry_size], res.unwrap());
+        if let Some(buf) = res {
+            let entry_size = buf.len();
+            assert_eq!(vec![idx as u8; entry_size], buf);
             if let Err(e) = metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
             metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
+
+            if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
+                tokio::time::sleep(wait).await;
+            }
         } else {
             if let Err(e) = metrics.get_miss_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
