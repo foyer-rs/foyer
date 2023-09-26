@@ -12,12 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, sync::Arc, task::Waker};
+use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, task::Waker};
 
 use bytes::{Buf, BufMut};
-use parking_lot::{
-    lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
+use foyer_common::erwlock::{ErwLock, ErwLockInner};
+use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock};
 use tracing::instrument;
 
 use crate::{
@@ -85,13 +84,30 @@ where
 }
 
 #[derive(Debug, Clone)]
+pub struct RegionInnerExclusiveRequire {
+    can_write: bool,
+    can_buffered_read: bool,
+    can_physical_read: bool,
+}
+
+impl<A: BufferAllocator> ErwLockInner for RegionInner<A> {
+    type R = RegionInnerExclusiveRequire;
+
+    fn is_exclusive(&self, require: &Self::R) -> bool {
+        (require.can_write || self.writers == 0)
+            && (require.can_buffered_read || self.buffered_readers == 0)
+            && (require.can_physical_read || self.physical_readers == 0)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Region<D>
 where
     D: Device,
 {
     id: RegionId,
 
-    inner: ErwLock<D::IoBufferAllocator>,
+    inner: ErwLock<RegionInner<D::IoBufferAllocator>>,
 
     device: D,
 }
@@ -320,7 +336,11 @@ where
         can_physical_read: bool,
     ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<D::IoBufferAllocator>> {
         self.inner
-            .exclusive(can_write, can_buffered_read, can_physical_read)
+            .exclusive(&RegionInnerExclusiveRequire {
+                can_write,
+                can_buffered_read,
+                can_physical_read,
+            })
             .await
     }
 
@@ -522,47 +542,6 @@ where
             ReadSlice::Owned { cleanup, .. } => cleanup.take(),
         } {
             f();
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ErwLock<A: BufferAllocator> {
-    inner: Arc<RwLock<RegionInner<A>>>,
-}
-
-impl<A: BufferAllocator> ErwLock<A> {
-    pub fn new(inner: RegionInner<A>) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-        }
-    }
-
-    pub fn read(&self) -> RwLockReadGuard<'_, RegionInner<A>> {
-        self.inner.read()
-    }
-
-    pub fn write(&self) -> RwLockWriteGuard<'_, RegionInner<A>> {
-        self.inner.write()
-    }
-
-    pub async fn exclusive(
-        &self,
-        can_write: bool,
-        can_buffered_read: bool,
-        can_physical_read: bool,
-    ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<A>> {
-        loop {
-            {
-                let guard = self.inner.clone().write_arc();
-                let is_ready = (can_write || guard.writers == 0)
-                    && (can_buffered_read || guard.buffered_readers == 0)
-                    && (can_physical_read || guard.physical_readers == 0);
-                if is_ready {
-                    return guard;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     }
 }
