@@ -74,10 +74,6 @@ pub struct Args {
     #[arg(short, long, default_value_t = 60)]
     time: u64,
 
-    /// must be power of 2
-    #[arg(long, default_value_t = 16)]
-    pools: usize,
-
     /// (s)
     #[arg(long, default_value_t = 2)]
     report_interval: u64,
@@ -168,12 +164,13 @@ pub struct Args {
     /// `0` means equal to reclaimer count.
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
-}
 
-impl Args {
-    fn verify(&self) {
-        assert!(self.pools.is_power_of_two());
-    }
+    /// The count of allocators is `2 ^ allocator bits`.
+    ///
+    /// Note: The count of allocators should be greater than buffer count.
+    ///       (buffer count = buffer pool size / device region size)
+    #[arg(long, default_value_t = 0)]
+    allocator_bits: usize,
 }
 
 type TStore = LfuFsStore<u64, Vec<u8>>;
@@ -202,7 +199,7 @@ fn init_logger() {
         )]));
     let batch_config = BatchConfig::default()
         .with_max_queue_size(1048576)
-        .with_max_export_batch_size(1024)
+        .with_max_export_batch_size(4096)
         .with_max_concurrent_exports(4);
 
     let tracer = opentelemetry_otlp::new_pipeline()
@@ -267,7 +264,6 @@ async fn main() {
     }
 
     let args = Args::parse();
-    args.verify();
 
     MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
 
@@ -341,6 +337,7 @@ async fn main() {
         name: "".to_string(),
         eviction_config,
         device_config,
+        allocator_bits: args.allocator_bits,
         admissions,
         reinsertions,
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
