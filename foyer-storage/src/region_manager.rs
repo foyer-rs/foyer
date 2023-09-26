@@ -12,7 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
@@ -20,6 +26,7 @@ use foyer_intrusive::{
     eviction::{EvictionPolicy, EvictionPolicyExt},
     intrusive_adapter, key_adapter,
 };
+use itertools::Itertools;
 use parking_lot::RwLock;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Instrument;
@@ -54,7 +61,9 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    current: AsyncMutex<Option<RegionId>>,
+    allocators: Vec<AsyncMutex<Option<Region<D>>>>,
+    allocator_bits: usize,
+    allocated: AtomicUsize,
 
     /// Buffer pool for dirty buffers.
     buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
@@ -83,6 +92,7 @@ where
     EL: Link,
 {
     pub fn new(
+        allocator_bits: usize,
         buffer_count: usize,
         region_count: usize,
         eviction_config: EP::Config,
@@ -115,8 +125,14 @@ where
             items.push(item);
         }
 
+        let allocators = (0..(1 << allocator_bits))
+            .map(|_| AsyncMutex::new(None))
+            .collect_vec();
+
         Self {
-            current: AsyncMutex::new(None),
+            allocators,
+            allocated: AtomicUsize::new(0),
+            allocator_bits,
             buffers,
             clean_regions,
             dirty_regions,
@@ -130,21 +146,25 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn allocate(&self, size: usize, must_allocate: bool) -> Option<WriteSlice> {
+        let allocated = self.allocated.fetch_add(1, Ordering::Relaxed);
+        let index = allocated & ((1 << self.allocator_bits) - 1);
+        let allocator = &self.allocators[index];
+
         let mut current = if must_allocate {
-            self.current.lock().await
+            allocator.lock().await
         } else {
-            match tokio::time::timeout(self.allocation_timeout, self.current.lock()).await {
+            match tokio::time::timeout(self.allocation_timeout, allocator.lock()).await {
                 Ok(current) => current,
                 Err(_) => return None,
             }
         };
 
         loop {
-            if let Some(region_id) = *current {
-                match self.region(&region_id).allocate(size) {
+            if let Some(region) = current.as_ref() {
+                match region.allocate(size) {
                     AllocateResult::Ok(slice) => return Some(slice),
                     AllocateResult::Full { .. } => {
-                        self.dirty_regions.release(region_id);
+                        self.dirty_regions.release(region.id());
                         *current = None;
                     }
                     AllocateResult::None => {}
@@ -168,7 +188,7 @@ where
                 region_id
             };
 
-            tracing::info!("switch to clean region: {}", region_id);
+            tracing::info!("allocator {} switch to clean region: {}", index, region_id);
 
             let region = self.region(&region_id);
             region.advance().await;
@@ -179,7 +199,17 @@ where
                 .await;
             region.attach_buffer(buffer).await;
 
-            *current = Some(region_id);
+            *current = Some(region.clone());
+        }
+    }
+
+    pub async fn seal(&self) {
+        for allocator in self.allocators.iter() {
+            let mut guard = allocator.lock().await;
+            if let Some(region) = guard.as_ref() {
+                self.dirty_regions.release(region.id());
+            }
+            *guard = None;
         }
     }
 
