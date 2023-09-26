@@ -149,16 +149,7 @@ where
         let allocated = self.allocated.fetch_add(1, Ordering::Relaxed);
         let index = allocated & ((1 << self.allocator_bits) - 1);
         let allocator = &self.allocators[index];
-        self.allocate_with(allocator, size, must_allocate).await
-    }
 
-    #[tracing::instrument(skip(self))]
-    async fn allocate_with(
-        &self,
-        allocator: &AsyncMutex<Option<Region<D>>>,
-        size: usize,
-        must_allocate: bool,
-    ) -> Option<WriteSlice> {
         let mut current = if must_allocate {
             allocator.lock().await
         } else {
@@ -197,7 +188,7 @@ where
                 region_id
             };
 
-            tracing::info!("switch to clean region: {}", region_id);
+            tracing::info!("allocator {} switch to clean region: {}", index, region_id);
 
             let region = self.region(&region_id);
             region.advance().await;

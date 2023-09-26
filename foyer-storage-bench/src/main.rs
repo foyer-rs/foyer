@@ -171,6 +171,10 @@ pub struct Args {
     ///       (buffer count = buffer pool size / device region size)
     #[arg(long, default_value_t = 0)]
     allocator_bits: usize,
+
+    /// Weigher to enable metrics exporter.
+    #[arg(long, default_value_t = false)]
+    metrics: bool,
 }
 
 type TStore = LfuFsStore<u64, Vec<u8>>;
@@ -265,7 +269,9 @@ async fn main() {
 
     let args = Args::parse();
 
-    MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
+    if args.metrics {
+        MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
+    }
 
     println!("{:#?}", args);
 

@@ -122,11 +122,18 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
+            .field("allocator_bits", &self.allocator_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("flushers", &self.flushers)
+            .field("flush_rate_limit", &self.flush_rate_limit)
             .field("reclaimers", &self.reclaimers)
+            .field("reclaim_rate_limit", &self.reclaim_rate_limit)
+            .field("allocation_timeout", &self.allocation_timeout)
+            .field("clean_region_threshold", &self.clean_region_threshold)
+            .field("recover_concurrency", &self.recover_concurrency)
+            .field("event_listeners", &self.event_listeners)
             .finish()
     }
 }
