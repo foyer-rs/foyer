@@ -69,6 +69,12 @@ where
     /// Device configurations.
     pub device_config: D::Config,
 
+    /// The count of allocators is `2 ^ allocator bits`.
+    ///
+    /// Note: The count of allocators should be greater than buffer count.
+    ///       (buffer count = buffer pool size / device region size)
+    pub allocator_bits: usize,
+
     /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
 
@@ -116,11 +122,18 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
+            .field("allocator_bits", &self.allocator_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("flushers", &self.flushers)
+            .field("flush_rate_limit", &self.flush_rate_limit)
             .field("reclaimers", &self.reclaimers)
+            .field("reclaim_rate_limit", &self.reclaim_rate_limit)
+            .field("allocation_timeout", &self.allocation_timeout)
+            .field("clean_region_threshold", &self.clean_region_threshold)
+            .field("recover_concurrency", &self.recover_concurrency)
+            .field("event_listeners", &self.event_listeners)
             .finish()
     }
 }
@@ -173,7 +186,15 @@ where
 
         let buffer_count = config.buffer_pool_size / device.region_size();
 
+        if buffer_count < (1 << config.allocator_bits) {
+            return Err(anyhow::anyhow!(
+                "The count of allocators shoule be greater than buffer count."
+            )
+            .into());
+        }
+
         let region_manager = Arc::new(RegionManager::new(
+            config.allocator_bits,
             buffer_count,
             device.regions(),
             config.eviction_config,
@@ -271,7 +292,7 @@ where
 
     pub async fn close(&self) -> Result<()> {
         // seal current dirty buffer and trigger flushing
-        self.seal().await?;
+        self.seal().await;
 
         // stop and wait for reclaimers
         let handles = self.reclaimer_handles.lock().drain(..).collect_vec();
@@ -555,13 +576,8 @@ where
         bits::align_up(self.device.align(), unaligned)
     }
 
-    async fn seal(&self) -> Result<()> {
-        // Try allocate the max size of a region to trigger flush.
-        // `max size == region size - region align` (first align block is reserved for region header)
-        self.region_manager
-            .allocate(self.device.region_size() - self.device.align(), false)
-            .await;
-        Ok(())
+    async fn seal(&self) {
+        self.region_manager.seal().await;
     }
 
     #[tracing::instrument(skip(self))]
@@ -1223,6 +1239,7 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
+            allocator_bits: 1,
             admissions,
             reinsertions,
             buffer_pool_size: 8 * MB,
@@ -1274,6 +1291,7 @@ pub mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
+            allocator_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
