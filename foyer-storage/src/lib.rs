@@ -20,6 +20,8 @@
 #![feature(error_generic_member_access)]
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
+#![feature(async_fn_in_trait)]
+#![feature(return_position_impl_trait_in_trait)]
 
 pub mod admission;
 pub mod device;
@@ -74,21 +76,21 @@ pub type LfuFsStoreConfig<K, V> = store::StoreConfig<
     >,
 >;
 
-pub type SegmentedFifoFsStore<K, V> = store::Store<
+pub type FifoFsStore<K, V> = store::Store<
     K,
     V,
     device::fs::FsDevice,
-    foyer_intrusive::eviction::sfifo::SegmentedFifo<
-        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::sfifo::SegmentedFifoLink>,
+    foyer_intrusive::eviction::fifo::Fifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
-    foyer_intrusive::eviction::sfifo::SegmentedFifoLink,
+    foyer_intrusive::eviction::fifo::FifoLink,
 >;
 
-pub type SegmentedFifoFsStoreConfig<K, V> = store::StoreConfig<
+pub type FifoFsStoreConfig<K, V> = store::StoreConfig<
     K,
     V,
     device::fs::FsDevice,
-    foyer_intrusive::eviction::sfifo::SegmentedFifo<
-        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::sfifo::SegmentedFifoLink>,
+    foyer_intrusive::eviction::fifo::Fifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
     >,
 >;

@@ -62,6 +62,7 @@ impl Link for FifoLink {
 intrusive_adapter! { FifoLinkAdapter = NonNull<FifoLink>: FifoLink { link: DListLink } }
 
 /// FIFO policy
+#[derive(Debug)]
 pub struct Fifo<A>
 where
     A: Adapter<Link = FifoLink>,

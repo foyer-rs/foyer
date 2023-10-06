@@ -124,6 +124,7 @@ intrusive_adapter! { LfuLinkMainDListAdapter = NonNull<LfuLink>: LfuLink { link_
 ///
 /// Tiny cache size:
 /// This default to 1%. There's no need to tune this parameter.
+#[derive(Debug)]
 pub struct Lfu<A>
 where
     A: Adapter<Link = LfuLink> + KeyAdapter<Link = LfuLink>,
