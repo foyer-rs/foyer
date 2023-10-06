@@ -66,6 +66,7 @@ impl Link for LruLink {
 
 intrusive_adapter! { LruLinkAdapter = NonNull<LruLink>: LruLink { link_lru: DListLink } }
 
+#[derive(Debug)]
 pub struct Lru<A>
 where
     A: Adapter<Link = LruLink>,

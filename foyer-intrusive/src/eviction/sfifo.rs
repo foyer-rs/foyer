@@ -103,6 +103,7 @@ intrusive_adapter! { SegmentedFifoLinkAdapter = NonNull<SegmentedFifoLink>: Segm
 /// of the system faster once it is beyond the pri-2 segment ratio. Segment
 /// ratio is put in place to prevent the lower segments getting so small a
 /// portion of the flash device.
+#[derive(Debug)]
 pub struct SegmentedFifo<A>
 where
     A: Adapter<Link = SegmentedFifoLink> + PriorityAdapter<Link = SegmentedFifoLink>,

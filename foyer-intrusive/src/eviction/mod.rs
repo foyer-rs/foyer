@@ -17,7 +17,7 @@ use std::fmt::Debug;
 
 pub trait Config = Send + Sync + 'static + Debug + Clone;
 
-pub trait EvictionPolicy: Send + Sync + 'static {
+pub trait EvictionPolicy: Send + Sync + Debug + 'static {
     type Adapter: Adapter;
     type Config: Config;
 
