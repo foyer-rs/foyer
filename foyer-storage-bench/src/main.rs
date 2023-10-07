@@ -41,12 +41,13 @@ use foyer_storage::{
         AdmissionPolicy,
     },
     device::fs::FsDeviceConfig,
+    generic::GenericStoreConfig,
     reinsertion::{
         rated_random::RatedRandomReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy,
         ReinsertionPolicy,
     },
-    store::StoreConfig,
-    LfuFsStore, Storage, StorageExt,
+    storage::{Storage, StorageExt},
+    store::LfuFsStore,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -339,7 +340,7 @@ async fn main() {
         args.clean_region_threshold
     };
 
-    let config = StoreConfig {
+    let config = GenericStoreConfig {
         name: "".to_string(),
         eviction_config,
         device_config,
