@@ -171,7 +171,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    pub async fn open(config: StoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
+    async fn open(config: StoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let metrics = Arc::new(METRICS.foyer(&config.name));
@@ -282,7 +282,7 @@ where
         Ok(store)
     }
 
-    pub async fn close(&self) -> Result<()> {
+    async fn close(&self) -> Result<()> {
         // seal current dirty buffer and trigger flushing
         self.seal().await;
 
@@ -309,17 +309,17 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    pub fn writer(&self, key: K, weight: usize) -> StoreWriter<'_, K, V, D, EP, EL> {
+    fn writer(&self, key: K, weight: usize) -> StoreWriter<'_, K, V, D, EP, EL> {
         StoreWriter::new(self, key, weight)
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn exists(&self, key: &K) -> Result<bool> {
+    fn exists(&self, key: &K) -> Result<bool> {
         Ok(self.indices.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
         let index = match self.indices.lookup(key) {
@@ -369,7 +369,7 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn remove(&self, key: &K) -> Result<bool> {
+    fn remove(&self, key: &K) -> Result<bool> {
         let _timer = self.metrics.op_duration_remove.start_timer();
 
         let res = self.indices.remove(key).is_some();
@@ -378,7 +378,7 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn clear(&self) -> Result<()> {
+    fn clear(&self) -> Result<()> {
         self.indices.clear();
 
         // TODO(MrCroxx): set all regions as clean?
@@ -960,7 +960,7 @@ where
     }
 
     async fn close(&self) -> Result<()> {
-        todo!()
+        self.close().await
     }
 
     fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
