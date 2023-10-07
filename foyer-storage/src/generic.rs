@@ -23,7 +23,7 @@ use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
-use futures::{future::try_join_all, Future};
+use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -48,8 +48,6 @@ use foyer_intrusive::core::adapter::Link;
 use std::hash::Hasher;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
-
-pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
 pub struct GenericStoreConfig<K, V, D, EP>
 where
