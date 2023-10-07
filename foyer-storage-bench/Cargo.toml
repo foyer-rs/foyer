@@ -7,6 +7,9 @@ description = "Hybrid cache for Rust"
 license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["foyer-workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 bytesize = "1"
