@@ -21,6 +21,7 @@ use crate::{
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
     store::{RegionEntryIter, Store},
+    Storage,
 };
 use bytes::BufMut;
 use foyer_common::{
