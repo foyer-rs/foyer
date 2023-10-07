@@ -416,33 +416,33 @@ where
     None,
 }
 
-impl<K, V> Into<StoreConfig<K, V>> for LruFsStoreConfig<K, V>
+impl<K, V> From<LruFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreConfig<K, V> {
-        StoreConfig::LruFsStoreConfig { config: self }
+    fn from(config: LruFsStoreConfig<K, V>) -> Self {
+        StoreConfig::LruFsStoreConfig { config }
     }
 }
 
-impl<K, V> Into<StoreConfig<K, V>> for LfuFsStoreConfig<K, V>
+impl<K, V> From<LfuFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreConfig<K, V> {
-        StoreConfig::LfuFsStoreConfig { config: self }
+    fn from(config: LfuFsStoreConfig<K, V>) -> Self {
+        StoreConfig::LfuFsStoreConfig { config }
     }
 }
 
-impl<K, V> Into<StoreConfig<K, V>> for FifoFsStoreConfig<K, V>
+impl<K, V> From<FifoFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreConfig<K, V> {
-        StoreConfig::FifoFsStoreConfig { config: self }
+    fn from(config: FifoFsStoreConfig<K, V>) -> Self {
+        StoreConfig::FifoFsStoreConfig { config }
     }
 }
 
@@ -458,33 +458,33 @@ where
     None,
 }
 
-impl<'a, K, V> Into<StoreWriter<'a, K, V>> for LruFsStoreWriter<'a, K, V>
+impl<'a, K, V> From<LruFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreWriter<'a, K, V> {
-        StoreWriter::LruFsStorWriter { writer: self }
+    fn from(writer: LruFsStoreWriter<'a, K, V>) -> Self {
+        StoreWriter::LruFsStorWriter { writer }
     }
 }
 
-impl<'a, K, V> Into<StoreWriter<'a, K, V>> for LfuFsStoreWriter<'a, K, V>
+impl<'a, K, V> From<LfuFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreWriter<'a, K, V> {
-        StoreWriter::LfuFsStorWriter { writer: self }
+    fn from(writer: LfuFsStoreWriter<'a, K, V>) -> Self {
+        StoreWriter::LfuFsStorWriter { writer }
     }
 }
 
-impl<'a, K, V> Into<StoreWriter<'a, K, V>> for FifoFsStoreWriter<'a, K, V>
+impl<'a, K, V> From<FifoFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
 where
     K: Key,
     V: Value,
 {
-    fn into(self) -> StoreWriter<'a, K, V> {
-        StoreWriter::FifoFsStoreWriter { writer: self }
+    fn from(writer: FifoFsStoreWriter<'a, K, V>) -> Self {
+        StoreWriter::FifoFsStoreWriter { writer }
     }
 }
 
