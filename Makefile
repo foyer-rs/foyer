@@ -14,6 +14,7 @@ check:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets
+	cargo udeps --workspace --exclude foyer-workspace-hack
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all
