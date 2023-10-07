@@ -33,7 +33,6 @@ use crate::{
     admission::AdmissionPolicy,
     device::Device,
     error::Result,
-    event::EventListener,
     flusher::Flusher,
     indices::{Index, Indices},
     judge::Judges,
@@ -42,6 +41,7 @@ use crate::{
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
+    ForceStorageWriter, Storage, StorageWriter,
 };
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
@@ -106,9 +106,6 @@ where
 
     /// Concurrency of recovery.
     pub recover_concurrency: usize,
-
-    /// Event listsners.
-    pub event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 }
 
 impl<K, V, D, EP> Debug for StoreConfig<K, V, D, EP>
@@ -133,7 +130,6 @@ where
             .field("allocation_timeout", &self.allocation_timeout)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
-            .field("event_listeners", &self.event_listeners)
             .finish()
     }
 }
@@ -155,8 +151,6 @@ where
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
-
-    event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 
     flusher_handles: Mutex<Vec<JoinHandle<()>>>,
     flushers_stop_tx: broadcast::Sender<()>,
@@ -221,7 +215,6 @@ where
             device: device.clone(),
             admissions: config.admissions,
             reinsertions: config.reinsertions,
-            event_listeners: config.event_listeners.clone(),
             flusher_handles: Mutex::new(vec![]),
             reclaimer_handles: Mutex::new(vec![]),
             flushers_stop_tx,
@@ -265,7 +258,6 @@ where
                     store.clone(),
                     region_manager.clone(),
                     reclaim_rate_limiter.clone(),
-                    config.event_listeners.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
@@ -313,164 +305,6 @@ where
         }
 
         Ok(())
-    }
-
-    #[tracing::instrument(skip(self, value))]
-    pub async fn insert(&self, key: K, value: V) -> Result<bool> {
-        let weight = key.serialized_len() + value.serialized_len();
-        let writer = StoreWriter::new(self, key, weight);
-        writer.finish(value).await
-    }
-
-    #[tracing::instrument(skip(self, value))]
-    pub async fn insert_if_not_exists(&self, key: K, value: V) -> Result<bool> {
-        if self.exists(&key)? {
-            return Ok(false);
-        }
-        self.insert(key, value).await
-    }
-
-    #[tracing::instrument(skip(self, value))]
-    pub async fn insert_force(&self, key: K, value: V) -> Result<bool> {
-        let weight = key.serialized_len() + value.serialized_len();
-        let mut writer = StoreWriter::new(self, key, weight);
-        writer.set_force();
-        let inserted = writer.finish(value).await?;
-        Ok(inserted)
-    }
-
-    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
-    /// Then `f` will be called and entry will be inserted.
-    ///
-    /// # Safety
-    ///
-    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
-    where
-        F: FnOnce() -> anyhow::Result<V>,
-    {
-        let mut writer = self.writer(key, weight);
-        if !writer.judge() {
-            return Ok(false);
-        }
-        let value = match f() {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("fetch value error: {:?}", e);
-                return Ok(false);
-            }
-        };
-        writer.finish(value).await
-    }
-
-    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
-    /// Then `f` will be called and entry will be inserted.
-    ///
-    /// # Safety
-    ///
-    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_force_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
-    where
-        F: FnOnce() -> anyhow::Result<V>,
-    {
-        let mut writer = self.writer(key, weight);
-        writer.set_force();
-        if !writer.judge() {
-            return Ok(false);
-        }
-        let value = match f() {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("fetch value error: {:?}", e);
-                return Ok(false);
-            }
-        };
-        let inserted = writer.finish(value).await?;
-        Ok(inserted)
-    }
-
-    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
-    /// Then `f` will be called to fetch value, and entry will be inserted.
-    ///
-    /// # Safety
-    ///
-    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> Result<bool>
-    where
-        F: FnOnce() -> FU,
-        FU: FetchValueFuture<V>,
-    {
-        let mut writer = self.writer(key, weight);
-        if !writer.judge() {
-            return Ok(false);
-        }
-        let value = match f().await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("fetch value error: {:?}", e);
-                return Ok(false);
-            }
-        };
-        writer.finish(value).await
-    }
-
-    /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
-    /// Then `f` will be called to fetch value, and entry will be inserted.
-    ///
-    /// # Safety
-    ///
-    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_force_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> Result<bool>
-    where
-        F: FnOnce() -> FU,
-        FU: FetchValueFuture<V>,
-    {
-        let mut writer = self.writer(key, weight);
-        writer.set_force();
-        if !writer.judge() {
-            return Ok(false);
-        }
-        let value = match f().await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("fetch value error: {:?}", e);
-                return Ok(false);
-            }
-        };
-        let inserted = writer.finish(value).await?;
-        Ok(inserted)
-    }
-
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> Result<bool>
-    where
-        F: FnOnce() -> anyhow::Result<V>,
-    {
-        if self.exists(&key)? {
-            return Ok(false);
-        }
-        self.insert_with(key, f, weight).await
-    }
-
-    #[tracing::instrument(skip(self, f))]
-    pub async fn insert_if_not_exists_with_future<F, FU>(
-        &self,
-        key: K,
-        f: F,
-        weight: usize,
-    ) -> Result<bool>
-    where
-        F: FnOnce() -> FU,
-        FU: FetchValueFuture<V>,
-    {
-        if self.exists(&key)? {
-            return Ok(false);
-        }
-        self.insert_with_future(key, f, weight).await
     }
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
@@ -535,27 +369,17 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, key: &K) -> Result<bool> {
+    pub fn remove(&self, key: &K) -> Result<bool> {
         let _timer = self.metrics.op_duration_remove.start_timer();
 
         let res = self.indices.remove(key).is_some();
-
-        if res {
-            for listener in self.event_listeners.iter() {
-                listener.on_remove(key).await?;
-            }
-        }
 
         Ok(res)
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn clear(&self) -> Result<()> {
+    pub fn clear(&self) -> Result<()> {
         self.indices.clear();
-
-        for listener in self.event_listeners.iter() {
-            listener.on_clear().await?;
-        }
 
         // TODO(MrCroxx): set all regions as clean?
 
@@ -592,11 +416,9 @@ where
             let irx = rx.clone();
             let region_manager = self.region_manager.clone();
             let indices = self.indices.clone();
-            let event_listeners = self.event_listeners.clone();
             let handle = tokio::spawn(async move {
                 itx.send(()).await.unwrap();
-                let res =
-                    Self::recover_region(region_id, region_manager, indices, event_listeners).await;
+                let res = Self::recover_region(region_id, region_manager, indices).await;
                 irx.recv().await.unwrap();
                 res
             });
@@ -632,14 +454,10 @@ where
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         indices: Arc<Indices<K>>,
-        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     ) -> Result<bool> {
         let region = region_manager.region(&region_id).clone();
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some(index) = iter.next().await? {
-                for listener in event_listeners.iter() {
-                    listener.on_recover(&index.key).await?;
-                }
                 indices.insert(index);
             }
             region_manager.eviction_push(region_id);
@@ -716,10 +534,6 @@ where
         drop(slice);
 
         self.indices.insert(index);
-
-        for listener in self.event_listeners.iter() {
-            listener.on_insert(key).await?;
-        }
 
         let duration = now.elapsed() + writer.duration;
         self.metrics
@@ -1094,13 +908,91 @@ where
     }
 }
 
+impl<'a, K, V, D, EP, EL> StorageWriter for StoreWriter<'a, K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    type Key = K;
+    type Value = V;
+
+    fn judge(&mut self) -> bool {
+        self.judge()
+    }
+
+    async fn finish(self, value: Self::Value) -> Result<bool> {
+        self.finish(value).await
+    }
+}
+
+impl<'a, K, V, D, EP, EL> ForceStorageWriter for StoreWriter<'a, K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    fn set_force(&mut self) {
+        self.set_force()
+    }
+}
+
+impl<K, V, D, EP, EL> Storage for Store<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    type Key = K;
+    type Value = V;
+    type Config = StoreConfig<K, V, D, EP>;
+    type Writer<'a> = StoreWriter<'a, K, V, D, EP, EL>;
+
+    async fn open(config: Self::Config) -> Result<Arc<Self>> {
+        Self::open(config).await
+    }
+
+    async fn close(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+        self.writer(key, weight)
+    }
+
+    fn exists(&self, key: &Self::Key) -> Result<bool> {
+        self.exists(key)
+    }
+
+    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+        self.lookup(key).await
+    }
+
+    fn remove(&self, key: &Self::Key) -> Result<bool> {
+        self.remove(key)
+    }
+
+    fn clear(&self) -> Result<()> {
+        self.clear()
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::{collections::HashSet, path::PathBuf};
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
-    use crate::device::fs::{FsDevice, FsDeviceConfig};
+    use crate::{
+        device::fs::{FsDevice, FsDeviceConfig},
+        StorageExt,
+    };
 
     use super::*;
 
@@ -1248,7 +1140,6 @@ pub mod tests {
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            event_listeners: vec![],
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
         };
@@ -1300,7 +1191,6 @@ pub mod tests {
             reclaimers: 0,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            event_listeners: vec![],
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
         };

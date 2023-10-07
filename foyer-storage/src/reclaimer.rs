@@ -17,7 +17,6 @@ use std::{sync::Arc, time::Duration};
 use crate::{
     device::Device,
     error::Result,
-    event::EventListener,
     judge::Judges,
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
@@ -48,8 +47,6 @@ where
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
-    event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
-
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
@@ -68,7 +65,6 @@ where
         store: Arc<Store<K, V, D, EP, EL>>,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         rate_limiter: Option<Arc<RateLimiter>>,
-        event_listeners: Vec<Arc<dyn EventListener<K = K, V = V>>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -77,7 +73,6 @@ where
             store,
             region_manager,
             rate_limiter,
-            event_listeners,
             metrics,
             stop_rx,
         }
@@ -117,12 +112,7 @@ where
         let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
-        let indices = self.store.indices().take_region(&region_id);
-        for index in indices.iter() {
-            for listener in self.event_listeners.iter() {
-                listener.on_evict(&index.key).await?;
-            }
-        }
+        let _indices = self.store.indices().take_region(&region_id);
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         {

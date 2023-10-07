@@ -27,7 +27,6 @@ use super::{
     error::{DeviceError, DeviceResult},
     Device, IoBuf, IoBufMut,
 };
-use async_trait::async_trait;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -74,7 +73,6 @@ pub struct FsDevice {
     inner: Arc<FsDeviceInner>,
 }
 
-#[async_trait]
 impl Device for FsDevice {
     type Config = FsDeviceConfig;
     type IoBufferAllocator = AlignedAllocator;

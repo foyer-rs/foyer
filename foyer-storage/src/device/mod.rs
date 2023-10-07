@@ -16,40 +16,43 @@ pub mod allocator;
 pub mod error;
 pub mod fs;
 
-use async_trait::async_trait;
 use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
 use error::DeviceResult;
+use futures::Future;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
 pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
 
-#[async_trait]
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
-    type Config: Debug;
+    type Config: Send + Debug;
 
-    async fn open(config: Self::Config) -> DeviceResult<Self>;
+    #[must_use]
+    fn open(config: Self::Config) -> impl Future<Output = DeviceResult<Self>> + Send;
 
-    async fn write(
+    #[must_use]
+    fn write(
         &self,
         buf: impl IoBuf,
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> DeviceResult<usize>;
+    ) -> impl Future<Output = DeviceResult<usize>> + Send;
 
-    async fn read(
+    #[must_use]
+    fn read(
         &self,
         buf: impl IoBufMut,
         region: RegionId,
         offset: u64,
         len: usize,
-    ) -> DeviceResult<usize>;
+    ) -> impl Future<Output = DeviceResult<usize>> + Send;
 
-    async fn flush(&self) -> DeviceResult<()>;
+    #[must_use]
+    fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
 
     fn capacity(&self) -> usize;
 
@@ -94,7 +97,6 @@ pub mod tests {
         }
     }
 
-    #[async_trait]
     impl Device for NullDevice {
         type Config = usize;
         type IoBufferAllocator = AlignedAllocator;
