@@ -82,6 +82,8 @@ jobs:
           cargo llvm-cov --no-report nextest
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v3
+        with:
+          verbose: true
   deadlock:
     name: run with single worker thread and deadlock detection
     runs-on: ubuntu-latest
