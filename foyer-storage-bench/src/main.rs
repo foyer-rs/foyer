@@ -46,7 +46,7 @@ use foyer_storage::{
         ReinsertionPolicy,
     },
     store::StoreConfig,
-    LfuFsStore,
+    LfuFsStore, StorageExt,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -352,7 +352,6 @@ async fn main() {
         reclaimers: args.reclaimers,
         reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
-        event_listeners: vec![],
         allocation_timeout: Duration::from_millis(args.allocation_timeout as u64),
         clean_region_threshold,
     };
