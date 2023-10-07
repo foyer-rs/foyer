@@ -22,7 +22,7 @@ use crate::{
 use foyer_common::code::{Key, Value};
 use futures::Future;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LazyStore<K, V>
 where
     K: Key,
@@ -30,6 +30,19 @@ where
 {
     once: Arc<OnceLock<Store<K, V>>>,
     none: Store<K, V>,
+}
+
+impl<K, V> Clone for LazyStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        Self {
+            once: Arc::clone(&self.once),
+            none: Store::None,
+        }
+    }
 }
 
 impl<K, V> LazyStore<K, V>
