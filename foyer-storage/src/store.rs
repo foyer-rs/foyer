@@ -952,9 +952,10 @@ where
     type Key = K;
     type Value = V;
     type Config = StoreConfig<K, V, D, EP>;
+    type Owned = Arc<Self>;
     type Writer<'a> = StoreWriter<'a, K, V, D, EP, EL>;
 
-    async fn open(config: Self::Config) -> Result<Arc<Self>> {
+    async fn open(config: Self::Config) -> Result<Self::Owned> {
         Self::open(config).await
     }
 

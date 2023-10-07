@@ -24,7 +24,10 @@
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(associated_type_defaults)]
 
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::Debug,
+    sync::{Arc, OnceLock},
+};
 
 use foyer_common::code::{Key, Value};
 
@@ -64,6 +67,17 @@ pub type LruFsStoreConfig<K, V> = store::StoreConfig<
     >,
 >;
 
+pub type LruFsStoreWriter<'w, K, V> = store::StoreWriter<
+    'w,
+    K,
+    V,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::lru::Lru<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lru::LruLink>,
+    >,
+    foyer_intrusive::eviction::lru::LruLink,
+>;
+
 pub type LfuFsStore<K, V> = store::Store<
     K,
     V,
@@ -81,6 +95,17 @@ pub type LfuFsStoreConfig<K, V> = store::StoreConfig<
     foyer_intrusive::eviction::lfu::Lfu<
         region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
     >,
+>;
+
+pub type LfuFsStoreWriter<'w, K, V> = store::StoreWriter<
+    'w,
+    K,
+    V,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::lfu::Lfu<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::lfu::LfuLink>,
+    >,
+    foyer_intrusive::eviction::lfu::LfuLink,
 >;
 
 pub type FifoFsStore<K, V> = store::Store<
@@ -102,6 +127,17 @@ pub type FifoFsStoreConfig<K, V> = store::StoreConfig<
     >,
 >;
 
+pub type FifoFsStoreWriter<'w, K, V> = store::StoreWriter<
+    'w,
+    K,
+    V,
+    device::fs::FsDevice,
+    foyer_intrusive::eviction::fifo::Fifo<
+        region_manager::RegionEpItemAdapter<foyer_intrusive::eviction::fifo::FifoLink>,
+    >,
+    foyer_intrusive::eviction::fifo::FifoLink,
+>;
+
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 
 pub trait StorageWriter: Send + Sync + Debug {
@@ -117,10 +153,11 @@ pub trait Storage: Send + Sync + Debug + 'static {
     type Key: Key;
     type Value: Value;
     type Config: Send + Debug;
+    type Owned: Send + Sync + Debug + 'static;
     type Writer<'a>: StorageWriter<Key = Self::Key, Value = Self::Value>;
 
     #[must_use]
-    fn open(config: Self::Config) -> impl Future<Output = Result<Arc<Self>>> + Send;
+    fn open(config: Self::Config) -> impl Future<Output = Result<Self::Owned>> + Send;
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
@@ -365,4 +402,350 @@ where
     S: Storage,
     for<'w> S::Writer<'w>: ForceStorageWriter,
 {
+}
+
+#[derive(Debug)]
+pub enum StoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    LruFsStoreConfig { config: LruFsStoreConfig<K, V> },
+    LfuFsStoreConfig { config: LfuFsStoreConfig<K, V> },
+    FifoFsStoreConfig { config: FifoFsStoreConfig<K, V> },
+    None,
+}
+
+impl<K, V> Into<StoreConfig<K, V>> for LruFsStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreConfig<K, V> {
+        StoreConfig::LruFsStoreConfig { config: self }
+    }
+}
+
+impl<K, V> Into<StoreConfig<K, V>> for LfuFsStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreConfig<K, V> {
+        StoreConfig::LfuFsStoreConfig { config: self }
+    }
+}
+
+impl<K, V> Into<StoreConfig<K, V>> for FifoFsStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreConfig<K, V> {
+        StoreConfig::FifoFsStoreConfig { config: self }
+    }
+}
+
+#[derive(Debug)]
+pub enum StoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    LruFsStorWriter { writer: LruFsStoreWriter<'a, K, V> },
+    LfuFsStorWriter { writer: LfuFsStoreWriter<'a, K, V> },
+    FifoFsStoreWriter { writer: FifoFsStoreWriter<'a, K, V> },
+    None,
+}
+
+impl<'a, K, V> Into<StoreWriter<'a, K, V>> for LruFsStoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreWriter<'a, K, V> {
+        StoreWriter::LruFsStorWriter { writer: self }
+    }
+}
+
+impl<'a, K, V> Into<StoreWriter<'a, K, V>> for LfuFsStoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreWriter<'a, K, V> {
+        StoreWriter::LfuFsStorWriter { writer: self }
+    }
+}
+
+impl<'a, K, V> Into<StoreWriter<'a, K, V>> for FifoFsStoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn into(self) -> StoreWriter<'a, K, V> {
+        StoreWriter::FifoFsStoreWriter { writer: self }
+    }
+}
+
+#[derive(Debug)]
+pub enum Store<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    LruFsStore { store: Arc<LruFsStore<K, V>> },
+    LfuFsStore { store: Arc<LfuFsStore<K, V>> },
+    FifoFsStore { store: Arc<FifoFsStore<K, V>> },
+    None,
+}
+
+impl<K, V> Clone for Store<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::LruFsStore { store } => Self::LruFsStore {
+                store: Arc::clone(store),
+            },
+            Self::LfuFsStore { store } => Self::LfuFsStore {
+                store: Arc::clone(store),
+            },
+            Self::FifoFsStore { store } => Self::FifoFsStore {
+                store: Arc::clone(store),
+            },
+            Self::None => Self::None,
+        }
+    }
+}
+
+impl<'a, K, V> StorageWriter for StoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+
+    fn judge(&mut self) -> bool {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.judge(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.judge(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.judge(),
+            StoreWriter::None => false,
+        }
+    }
+
+    async fn finish(self, value: Self::Value) -> Result<bool> {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.finish(value).await,
+            StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
+            StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
+            StoreWriter::None => Ok(false),
+        }
+    }
+}
+
+impl<'a, K, V> ForceStorageWriter for StoreWriter<'a, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn set_force(&mut self) {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.set_force(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.set_force(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.set_force(),
+            StoreWriter::None => {}
+        }
+    }
+}
+
+impl<K, V> Storage for Store<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+    type Config = StoreConfig<K, V>;
+    type Owned = Self;
+    type Writer<'a> = StoreWriter<'a, K, V>;
+
+    async fn open(config: Self::Config) -> Result<Self::Owned> {
+        match config {
+            StoreConfig::LruFsStoreConfig { config } => {
+                let store = LruFsStore::open(config).await?;
+                Ok(Self::LruFsStore { store })
+            }
+            StoreConfig::LfuFsStoreConfig { config } => {
+                let store = LfuFsStore::open(config).await?;
+                Ok(Self::LfuFsStore { store })
+            }
+            StoreConfig::FifoFsStoreConfig { config } => {
+                let store = FifoFsStore::open(config).await?;
+                Ok(Self::FifoFsStore { store })
+            }
+            StoreConfig::None => Ok(Self::None),
+        }
+    }
+
+    async fn close(&self) -> Result<()> {
+        match self {
+            Store::LruFsStore { store } => store.close().await,
+            Store::LfuFsStore { store } => store.close().await,
+            Store::FifoFsStore { store } => store.close().await,
+            Store::None => Ok(()),
+        }
+    }
+
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+        match self {
+            Store::LruFsStore { store } => store.writer(key, weight).into(),
+            Store::LfuFsStore { store } => store.writer(key, weight).into(),
+            Store::FifoFsStore { store } => store.writer(key, weight).into(),
+            Store::None => StoreWriter::None,
+        }
+    }
+
+    fn exists(&self, key: &Self::Key) -> Result<bool> {
+        match self {
+            Store::LruFsStore { store } => store.exists(key),
+            Store::LfuFsStore { store } => store.exists(key),
+            Store::FifoFsStore { store } => store.exists(key),
+            Store::None => Ok(false),
+        }
+    }
+
+    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+        match self {
+            Store::LruFsStore { store } => store.lookup(key).await,
+            Store::LfuFsStore { store } => store.lookup(key).await,
+            Store::FifoFsStore { store } => store.lookup(key).await,
+            Store::None => Ok(None),
+        }
+    }
+
+    fn remove(&self, key: &Self::Key) -> Result<bool> {
+        match self {
+            Store::LruFsStore { store } => store.remove(key),
+            Store::LfuFsStore { store } => store.remove(key),
+            Store::FifoFsStore { store } => store.remove(key),
+            Store::None => Ok(false),
+        }
+    }
+
+    fn clear(&self) -> Result<()> {
+        match self {
+            Store::LruFsStore { store } => store.clear(),
+            Store::LfuFsStore { store } => store.clear(),
+            Store::FifoFsStore { store } => store.clear(),
+            Store::None => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LazyStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    once: OnceLock<Store<K, V>>,
+    none: Store<K, V>,
+}
+
+impl<K, V> LazyStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub fn lazy(config: StoreConfig<K, V>) -> Self {
+        let once = OnceLock::new();
+
+        tokio::spawn({
+            let once = once.clone();
+            async move {
+                let store = match Store::open(config).await {
+                    Ok(store) => store,
+                    Err(e) => {
+                        tracing::error!("Lazy open store fail: {}", e);
+                        return;
+                    }
+                };
+                once.set(store).unwrap();
+            }
+        });
+
+        Self {
+            once,
+            none: Store::None,
+        }
+    }
+}
+
+impl<K, V> Storage for LazyStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+    type Config = StoreConfig<K, V>;
+    type Owned = Self;
+    type Writer<'a> = StoreWriter<'a, K, V>;
+
+    async fn open(config: Self::Config) -> Result<Self::Owned> {
+        let once = OnceLock::new();
+        let store = Store::open(config).await?;
+        once.set(store).unwrap();
+        Ok(Self {
+            once,
+            none: Store::None,
+        })
+    }
+
+    async fn close(&self) -> Result<()> {
+        match self.once.get() {
+            Some(store) => store.close().await,
+            None => self.none.close().await,
+        }
+    }
+
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+        match self.once.get() {
+            Some(store) => store.writer(key, weight),
+            None => self.none.writer(key, weight),
+        }
+    }
+
+    fn exists(&self, key: &Self::Key) -> Result<bool> {
+        match self.once.get() {
+            Some(store) => store.exists(key),
+            None => self.none.exists(key),
+        }
+    }
+
+    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+        match self.once.get() {
+            Some(store) => store.lookup(key).await,
+            None => self.none.lookup(key).await,
+        }
+    }
+
+    fn remove(&self, key: &Self::Key) -> Result<bool> {
+        match self.once.get() {
+            Some(store) => store.remove(key),
+            None => self.none.remove(key),
+        }
+    }
+
+    fn clear(&self) -> Result<()> {
+        match self.once.get() {
+            Some(store) => store.clear(),
+            None => self.none.clear(),
+        }
+    }
 }
