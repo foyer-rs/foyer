@@ -17,11 +17,11 @@ use std::{sync::Arc, time::Duration};
 use crate::{
     device::Device,
     error::Result,
+    generic::{GenericStore, RegionEntryIter},
     judge::Judges,
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    store::{RegionEntryIter, Store},
-    Storage,
+    storage::Storage,
 };
 use bytes::BufMut;
 use foyer_common::{
@@ -42,7 +42,7 @@ where
 {
     threshold: usize,
 
-    store: Arc<Store<K, V, D, EP, EL>>,
+    store: Arc<GenericStore<K, V, D, EP, EL>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
@@ -63,7 +63,7 @@ where
 {
     pub fn new(
         threshold: usize,
-        store: Arc<Store<K, V, D, EP, EL>>,
+        store: Arc<GenericStore<K, V, D, EP, EL>>,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         rate_limiter: Option<Arc<RateLimiter>>,
         metrics: Arc<Metrics>,
