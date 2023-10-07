@@ -653,7 +653,7 @@ where
     K: Key,
     V: Value,
 {
-    once: OnceLock<Store<K, V>>,
+    once: Arc<OnceLock<Store<K, V>>>,
     none: Store<K, V>,
 }
 
@@ -663,26 +663,39 @@ where
     V: Value,
 {
     pub fn lazy(config: StoreConfig<K, V>) -> Self {
-        let once = OnceLock::new();
+        let (res, task) = Self::lazy_with_task(config);
 
-        tokio::spawn({
+        tokio::spawn(task);
+
+        res
+    }
+
+    pub fn lazy_with_task(
+        config: StoreConfig<K, V>,
+    ) -> (Self, impl Future<Output = Result<Store<K, V>>> + Send) {
+        let once = Arc::new(OnceLock::new());
+
+        let task = {
             let once = once.clone();
             async move {
                 let store = match Store::open(config).await {
                     Ok(store) => store,
                     Err(e) => {
                         tracing::error!("Lazy open store fail: {}", e);
-                        return;
+                        return Err(e);
                     }
                 };
-                once.set(store).unwrap();
+                once.set(store.clone()).unwrap();
+                Ok(store)
             }
-        });
+        };
 
-        Self {
+        let res = Self {
             once,
             none: Store::None,
-        }
+        };
+
+        (res, task)
     }
 }
 
@@ -698,7 +711,7 @@ where
     type Writer<'a> = StoreWriter<'a, K, V>;
 
     async fn open(config: Self::Config) -> Result<Self::Owned> {
-        let once = OnceLock::new();
+        let once = Arc::new(OnceLock::new());
         let store = Store::open(config).await?;
         once.set(store).unwrap();
         Ok(Self {
@@ -747,5 +760,90 @@ where
             Some(store) => store.clear(),
             None => self.none.clear(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, time::Duration};
+
+    use foyer_intrusive::eviction::fifo::FifoConfig;
+
+    use crate::device::fs::FsDeviceConfig;
+
+    use super::*;
+
+    const KB: usize = 1024;
+    const MB: usize = 1024 * 1024;
+
+    #[tokio::test]
+    async fn test_lazy_store() {
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let config = FifoFsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig,
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_capacity: 4 * MB,
+                align: 4096,
+                io_size: 4096 * KB,
+            },
+            allocator_bits: 1,
+            admissions: vec![],
+            reinsertions: vec![],
+            buffer_pool_size: 8 * MB,
+            flushers: 1,
+            flush_rate_limit: 0,
+            reclaimers: 1,
+            reclaim_rate_limit: 0,
+            recover_concurrency: 2,
+            allocation_timeout: Duration::from_millis(10),
+            clean_region_threshold: 1,
+        };
+
+        let (store, task) = LazyStore::lazy_with_task(config.into());
+
+        assert!(!store.insert(100, 100).await.unwrap());
+
+        tokio::spawn(task).await.unwrap().unwrap();
+
+        assert!(store.insert(100, 100).await.unwrap());
+        assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let config = FifoFsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig,
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_capacity: 4 * MB,
+                align: 4096,
+                io_size: 4096 * KB,
+            },
+            allocator_bits: 1,
+            admissions: vec![],
+            reinsertions: vec![],
+            buffer_pool_size: 8 * MB,
+            flushers: 1,
+            flush_rate_limit: 0,
+            reclaimers: 1,
+            reclaim_rate_limit: 0,
+            recover_concurrency: 2,
+            allocation_timeout: Duration::from_millis(10),
+            clean_region_threshold: 1,
+        };
+
+        let (store, task) = LazyStore::lazy_with_task(config.into());
+
+        assert!(store.lookup(&100).await.unwrap().is_none());
+
+        tokio::spawn(task).await.unwrap().unwrap();
+
+        assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
     }
 }
