@@ -46,7 +46,7 @@ use foyer_storage::{
         ReinsertionPolicy,
     },
     store::StoreConfig,
-    LfuFsStore, StorageExt,
+    LfuFsStore, Storage, StorageExt,
 };
 use futures::future::join_all;
 use itertools::Itertools;
