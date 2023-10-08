@@ -22,6 +22,7 @@ use foyer_common::{
 use crate::{
     error::Result,
     storage::{Storage, StorageWriter},
+    store::Store,
 };
 
 #[derive(Debug, Clone)]
@@ -31,7 +32,7 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug)]
-pub struct RuntimeStoreConfig<K, V, S>
+pub struct RuntimeStorageConfig<K, V, S>
 where
     K: Key,
     V: Value,
@@ -41,7 +42,7 @@ where
     pub runtime: RuntimeConfig,
 }
 
-impl<K, V, S> Clone for RuntimeStoreConfig<K, V, S>
+impl<K, V, S> Clone for RuntimeStorageConfig<K, V, S>
 where
     K: Key,
     V: Value,
@@ -56,7 +57,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct RuntimeStoreWriter<K, V, S>
+pub struct RuntimeStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
@@ -66,7 +67,7 @@ where
     writer: S::Writer,
 }
 
-impl<K, V, S> StorageWriter for RuntimeStoreWriter<K, V, S>
+impl<K, V, S> StorageWriter for RuntimeStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
@@ -88,7 +89,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct RuntimeStore<K, V, S>
+pub struct RuntimeStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -98,7 +99,7 @@ where
     store: S,
 }
 
-impl<K, V, S> Clone for RuntimeStore<K, V, S>
+impl<K, V, S> Clone for RuntimeStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -112,7 +113,7 @@ where
     }
 }
 
-impl<K, V, S> Storage for RuntimeStore<K, V, S>
+impl<K, V, S> Storage for RuntimeStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -120,8 +121,8 @@ where
 {
     type Key = K;
     type Value = V;
-    type Config = RuntimeStoreConfig<K, V, S>;
-    type Writer = RuntimeStoreWriter<K, V, S>;
+    type Config = RuntimeStorageConfig<K, V, S>;
+    type Writer = RuntimeStorageWriter<K, V, S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -151,7 +152,7 @@ where
 
     fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         let writer = self.store.writer(key, weight);
-        RuntimeStoreWriter {
+        RuntimeStorageWriter {
             runtime: self.runtime.clone(),
             writer,
         }
@@ -178,3 +179,7 @@ where
         self.store.clear()
     }
 }
+
+pub type RuntimeStore<K, V> = RuntimeStorage<K, V, Store<K, V>>;
+pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<K, V, Store<K, V>>;
+pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<K, V, Store<K, V>>;

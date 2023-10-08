@@ -20,6 +20,7 @@ use std::{
 use crate::{
     error::Result,
     storage::{Storage, StorageWriter},
+    store::Store,
 };
 use foyer_common::code::{Key, Value};
 use futures::Future;
@@ -86,7 +87,7 @@ impl<K: Key, V: Value> Storage for NoneStore<K, V> {
 }
 
 #[derive(Debug)]
-pub enum LazyStoreWriter<K, V, S>
+pub enum LazyStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
@@ -96,7 +97,7 @@ where
     None { writer: NoneStoreWriter<K, V> },
 }
 
-impl<K, V, S> StorageWriter for LazyStoreWriter<K, V, S>
+impl<K, V, S> StorageWriter for LazyStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
@@ -107,21 +108,21 @@ where
 
     fn judge(&mut self) -> bool {
         match self {
-            LazyStoreWriter::Store { writer } => writer.judge(),
-            LazyStoreWriter::None { writer } => writer.judge(),
+            LazyStorageWriter::Store { writer } => writer.judge(),
+            LazyStorageWriter::None { writer } => writer.judge(),
         }
     }
 
     async fn finish(self, value: Self::Value) -> Result<bool> {
         match self {
-            LazyStoreWriter::Store { writer } => writer.finish(value).await,
-            LazyStoreWriter::None { writer } => writer.finish(value).await,
+            LazyStorageWriter::Store { writer } => writer.finish(value).await,
+            LazyStorageWriter::None { writer } => writer.finish(value).await,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct LazyStore<K, V, S>
+pub struct LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -131,7 +132,7 @@ where
     none: NoneStore<K, V>,
 }
 
-impl<K, V, S> Clone for LazyStore<K, V, S>
+impl<K, V, S> Clone for LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -145,7 +146,7 @@ where
     }
 }
 
-impl<K, V, S> LazyStore<K, V, S>
+impl<K, V, S> LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -178,7 +179,7 @@ where
     }
 }
 
-impl<K, V, S> Storage for LazyStore<K, V, S>
+impl<K, V, S> Storage for LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
@@ -187,7 +188,7 @@ where
     type Key = K;
     type Value = V;
     type Config = S::Config;
-    type Writer = LazyStoreWriter<K, V, S>;
+    type Writer = LazyStorageWriter<K, V, S>;
 
     async fn open(config: S::Config) -> Result<Self> {
         let (store, task) = Self::with_task(config);
@@ -208,10 +209,10 @@ where
 
     fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         match self.once.get() {
-            Some(store) => LazyStoreWriter::Store {
+            Some(store) => LazyStorageWriter::Store {
                 writer: store.writer(key, weight),
             },
-            None => LazyStoreWriter::None {
+            None => LazyStorageWriter::None {
                 writer: NoneStoreWriter(PhantomData),
             },
         }
@@ -245,6 +246,9 @@ where
         }
     }
 }
+
+pub type LazyStore<K, V> = LazyStorage<K, V, Store<K, V>>;
+pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
@@ -290,7 +294,7 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStore::<_, _, Store<_, _>>::with_task(config.into());
+        let (store, task) = LazyStorage::<_, _, Store<_, _>>::with_task(config.into());
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -325,7 +329,7 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStore::<_, _, Store<_, _>>::with_task(config.into());
+        let (store, task) = LazyStorage::<_, _, Store<_, _>>::with_task(config.into());
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 
