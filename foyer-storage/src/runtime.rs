@@ -24,7 +24,7 @@ use crate::{
     storage::{Storage, StorageWriter},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub worker_threads: Option<usize>,
     pub thread_name: Option<String>,
@@ -39,6 +39,20 @@ where
 {
     pub store: S::Config,
     pub runtime: RuntimeConfig,
+}
+
+impl<K, V, S> Clone for RuntimeStoreConfig<K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Storage<Key = K, Value = V>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            runtime: self.runtime.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]

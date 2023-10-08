@@ -88,7 +88,11 @@ impl Device for FsDevice {
         offset: u64,
         len: usize,
     ) -> DeviceResult<usize> {
-        assert!(offset as usize + len <= self.inner.config.file_capacity);
+        let file_capacity = self.inner.config.file_capacity;
+        assert!(
+            offset as usize + len <= file_capacity,
+            "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
+        );
 
         let fd = self.fd(region);
 
@@ -109,7 +113,11 @@ impl Device for FsDevice {
         offset: u64,
         len: usize,
     ) -> DeviceResult<usize> {
-        assert!(offset as usize + len <= self.inner.config.file_capacity);
+        let file_capacity = self.inner.config.file_capacity;
+        assert!(
+            offset as usize + len <= file_capacity,
+            "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
+        );
 
         let fd = self.fd(region);
 

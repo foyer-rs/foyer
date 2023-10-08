@@ -195,6 +195,10 @@ where
         Ok(store)
     }
 
+    fn is_ready(&self) -> bool {
+        self.once.get().is_some()
+    }
+
     async fn close(&self) -> Result<()> {
         match self.once.get() {
             Some(store) => store.close().await,

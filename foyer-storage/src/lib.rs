@@ -41,3 +41,5 @@ pub mod runtime;
 pub mod slice;
 pub mod storage;
 pub mod store;
+
+pub mod test_utils;
