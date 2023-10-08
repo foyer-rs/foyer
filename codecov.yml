@@ -3,4 +3,4 @@
 # Tips. You may run following command to validate before committing any changes
 #   curl --data-binary @codecov.yml https://codecov.io/validate
 ignore:
-  - "foyer-storage-bench"
+  - "^foyer\\-storage\\-bench$"
