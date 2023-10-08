@@ -33,11 +33,15 @@ pub trait StorageWriter: Send + Sync + Debug {
 pub trait Storage: Send + Sync + Debug + Clone + 'static {
     type Key: Key;
     type Value: Value;
-    type Config: Send + Debug;
+    type Config: Send + Clone + Debug;
     type Writer: StorageWriter<Key = Self::Key, Value = Self::Value>;
 
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
+
+    fn is_ready(&self) -> bool {
+        true
+    }
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;

@@ -132,6 +132,33 @@ where
     }
 }
 
+impl<K, V, D, EP> Clone for GenericStoreConfig<K, V, D, EP>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy,
+{
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            eviction_config: self.eviction_config.clone(),
+            device_config: self.device_config.clone(),
+            allocator_bits: self.allocator_bits,
+            admissions: self.admissions.clone(),
+            reinsertions: self.reinsertions.clone(),
+            buffer_pool_size: self.buffer_pool_size,
+            flushers: self.flushers,
+            flush_rate_limit: self.flush_rate_limit,
+            reclaimers: self.reclaimers,
+            reclaim_rate_limit: self.reclaim_rate_limit,
+            allocation_timeout: self.allocation_timeout,
+            clean_region_threshold: self.clean_region_threshold,
+            recover_concurrency: self.recover_concurrency,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GenericStore<K, V, D, EP, EL>
 where
@@ -1030,14 +1057,15 @@ where
 }
 
 #[cfg(test)]
-pub mod tests {
-    use std::{collections::HashSet, path::PathBuf};
+mod tests {
+    use std::path::PathBuf;
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
         storage::StorageExt,
+        test_utils::JudgeRecorder,
     };
 
     use super::*;
@@ -1047,113 +1075,6 @@ pub mod tests {
 
     type TestStoreConfig =
         GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
-
-    #[derive(Debug, Clone)]
-    enum Record<K: Key> {
-        Admit(K),
-        Evict(K),
-    }
-
-    #[derive(Debug)]
-    struct JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        records: Mutex<Vec<Record<K>>>,
-        _marker: PhantomData<V>,
-    }
-
-    impl<K, V> JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        fn dump(&self) -> Vec<Record<K>> {
-            self.records.lock().clone()
-        }
-
-        fn remains(&self) -> HashSet<K> {
-            let records = self.dump();
-            let mut res = HashSet::default();
-            for record in records {
-                match record {
-                    Record::Admit(key) => {
-                        res.insert(key);
-                    }
-                    Record::Evict(key) => {
-                        res.remove(&key);
-                    }
-                }
-            }
-            res
-        }
-    }
-
-    impl<K, V> Default for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        fn default() -> Self {
-            Self {
-                records: Mutex::new(Vec::default()),
-                _marker: PhantomData,
-            }
-        }
-    }
-
-    impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        type Key = K;
-
-        type Value = V;
-
-        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
-            self.records.lock().push(Record::Admit(key.clone()));
-            true
-        }
-
-        fn on_insert(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
-
-        fn on_drop(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
-    }
-
-    impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        type Key = K;
-
-        type Value = V;
-
-        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
-            self.records.lock().push(Record::Evict(key.clone()));
-            false
-        }
-
-        fn on_insert(
-            &self,
-            _key: &Self::Key,
-            _weight: usize,
-            _metrics: &Arc<crate::metrics::Metrics>,
-            _judge: bool,
-        ) {
-        }
-
-        fn on_drop(
-            &self,
-            _key: &Self::Key,
-            _weight: usize,
-            _metrics: &Arc<crate::metrics::Metrics>,
-            _judge: bool,
-        ) {
-        }
-    }
 
     #[tokio::test]
     #[expect(clippy::identity_op)]
@@ -1176,8 +1097,8 @@ pub mod tests {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
                 file_capacity: 4 * MB,
-                align: 4096,
-                io_size: 4096 * KB,
+                align: 4 * KB,
+                io_size: 4 * KB,
             },
             allocator_bits: 1,
             admissions,

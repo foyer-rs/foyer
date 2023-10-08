@@ -65,6 +65,26 @@ where
     FifoFsStoreConfig { config: FifoFsStoreConfig<K, V> },
 }
 
+impl<K, V> Clone for StoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::LruFsStoreConfig { config } => Self::LruFsStoreConfig {
+                config: config.clone(),
+            },
+            Self::LfuFsStoreConfig { config } => Self::LfuFsStoreConfig {
+                config: config.clone(),
+            },
+            Self::FifoFsStoreConfig { config } => Self::FifoFsStoreConfig {
+                config: config.clone(),
+            },
+        }
+    }
+}
+
 impl<K, V> From<LruFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
     K: Key,

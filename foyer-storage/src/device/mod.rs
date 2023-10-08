@@ -28,7 +28,7 @@ pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
-    type Config: Send + Debug;
+    type Config: Send + Debug + Clone;
 
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = DeviceResult<Self>> + Send;
