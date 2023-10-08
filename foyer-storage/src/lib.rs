@@ -37,6 +37,7 @@ pub mod reclaimer;
 pub mod region;
 pub mod region_manager;
 pub mod reinsertion;
+pub mod runtime;
 pub mod slice;
 pub mod storage;
 pub mod store;

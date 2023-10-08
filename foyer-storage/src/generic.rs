@@ -141,6 +141,33 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
+    inner: Arc<GenericStoreInner<K, V, D, EP, EL>>,
+}
+
+impl<K, V, D, EP, EL> Clone for GenericStore<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GenericStoreInner<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
     indices: Arc<Indices<K>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
@@ -169,7 +196,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
+    async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Self> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let metrics = Arc::new(METRICS.foyer(&config.name));
@@ -207,7 +234,7 @@ where
             .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
 
-        let store = Arc::new(Self {
+        let inner = GenericStoreInner {
             indices: indices.clone(),
             region_manager: region_manager.clone(),
             device: device.clone(),
@@ -219,13 +246,16 @@ where
             reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
-        });
+        };
+        let store = Self {
+            inner: Arc::new(inner),
+        };
 
-        for admission in store.admissions.iter() {
-            admission.init(&store.indices);
+        for admission in store.inner.admissions.iter() {
+            admission.init(&store.inner.indices);
         }
-        for reinsertion in store.reinsertions.iter() {
-            reinsertion.init(&store.indices);
+        for reinsertion in store.inner.reinsertions.iter() {
+            reinsertion.init(&store.inner.indices);
         }
 
         let flush_rate_limiter = match config.flush_rate_limit {
@@ -274,8 +304,8 @@ where
             .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
             .collect_vec();
 
-        *store.flusher_handles.lock() = flusher_handles;
-        *store.reclaimer_handles.lock() = reclaimer_handles;
+        *store.inner.flusher_handles.lock() = flusher_handles;
+        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
@@ -285,18 +315,18 @@ where
         self.seal().await;
 
         // stop and wait for reclaimers
-        let handles = self.reclaimer_handles.lock().drain(..).collect_vec();
+        let handles = self.inner.reclaimer_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
-            self.reclaimers_stop_tx.send(()).unwrap();
+            self.inner.reclaimers_stop_tx.send(()).unwrap();
         }
         for handle in handles {
             handle.await.unwrap();
         }
 
         // stop and wait for flushers
-        let handles = self.flusher_handles.lock().drain(..).collect_vec();
+        let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
-            self.flushers_stop_tx.send(()).unwrap();
+            self.inner.flushers_stop_tx.send(()).unwrap();
         }
         for handle in handles {
             handle.await.unwrap();
@@ -307,31 +337,32 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<'_, K, V, D, EP, EL> {
-        GenericStoreWriter::new(self, key, weight)
+    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<K, V, D, EP, EL> {
+        GenericStoreWriter::new(self.clone(), key, weight)
     }
 
     #[tracing::instrument(skip(self))]
     fn exists(&self, key: &K) -> Result<bool> {
-        Ok(self.indices.lookup(key).is_some())
+        Ok(self.inner.indices.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip(self))]
     async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
-        let index = match self.indices.lookup(key) {
+        let index = match self.inner.indices.lookup(key) {
             Some(index) => index,
             None => {
-                self.metrics
+                self.inner
+                    .metrics
                     .op_duration_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
         };
 
-        self.region_manager.record_access(&index.region);
-        let region = self.region_manager.region(&index.region);
+        self.inner.region_manager.record_access(&index.region);
+        let region = self.inner.region_manager.region(&index.region);
         let start = index.offset as usize;
         let end = start + index.len as usize;
 
@@ -340,26 +371,31 @@ where
             Some(slice) => slice,
             None => {
                 // Remove index if the storage layer fails to lookup it (because of region version mismatch).
-                self.indices.remove(key);
-                self.metrics
+                self.inner.indices.remove(key);
+                self.inner
+                    .metrics
                     .op_duration_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
         };
-        self.metrics.op_bytes_lookup.inc_by(slice.len() as u64);
+        self.inner
+            .metrics
+            .op_bytes_lookup
+            .inc_by(slice.len() as u64);
 
         let res = match read_entry::<K, V>(slice.as_ref()) {
             Some((_key, value)) => Ok(Some(value)),
             None => {
                 // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
-                self.indices.remove(key);
+                self.inner.indices.remove(key);
                 Ok(None)
             }
         };
         drop(slice);
 
-        self.metrics
+        self.inner
+            .metrics
             .op_duration_lookup_hit
             .observe(now.elapsed().as_secs_f64());
 
@@ -368,16 +404,16 @@ where
 
     #[tracing::instrument(skip(self))]
     fn remove(&self, key: &K) -> Result<bool> {
-        let _timer = self.metrics.op_duration_remove.start_timer();
+        let _timer = self.inner.metrics.op_duration_remove.start_timer();
 
-        let res = self.indices.remove(key).is_some();
+        let res = self.inner.indices.remove(key).is_some();
 
         Ok(res)
     }
 
     #[tracing::instrument(skip(self))]
     fn clear(&self) -> Result<()> {
-        self.indices.clear();
+        self.inner.indices.clear();
 
         // TODO(MrCroxx): set all regions as clean?
 
@@ -385,21 +421,21 @@ where
     }
 
     pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
-        &self.indices
+        &self.inner.indices
     }
 
     pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
-        &self.reinsertions
+        &self.inner.reinsertions
     }
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
-        bits::align_up(self.device.align(), unaligned)
+        bits::align_up(self.inner.device.align(), unaligned)
     }
 
     async fn seal(&self) {
-        self.region_manager.seal().await;
+        self.inner.region_manager.seal().await;
     }
 
     #[tracing::instrument(skip(self))]
@@ -409,11 +445,11 @@ where
         let (tx, rx) = async_channel::bounded(concurrency);
 
         let mut handles = vec![];
-        for region_id in 0..self.device.regions() as RegionId {
+        for region_id in 0..self.inner.device.regions() as RegionId {
             let itx = tx.clone();
             let irx = rx.clone();
-            let region_manager = self.region_manager.clone();
-            let indices = self.indices.clone();
+            let region_manager = self.inner.region_manager.clone();
+            let indices = self.inner.indices.clone();
             let handle = tokio::spawn(async move {
                 itx.send(()).await.unwrap();
                 let res = Self::recover_region(region_id, region_manager, indices).await;
@@ -435,13 +471,14 @@ where
         }
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
-        self.metrics
+        self.inner
+            .metrics
             .total_bytes
-            .set((recovered * self.device.region_size()) as u64);
+            .set((recovered * self.inner.device.region_size()) as u64);
 
         // Force trigger reclamation.
-        if recovered == self.device.regions() {
-            self.region_manager.clean_regions().flash();
+        if recovered == self.inner.device.regions() {
+            self.inner.region_manager.clean_regions().flash();
         }
 
         Ok(())
@@ -467,9 +504,9 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &mut GenericStoreWriter<'_, K, V, D, EP, EL>) {
-        for (index, admission) in self.admissions.iter().enumerate() {
-            let judge = admission.judge(&writer.key, writer.weight, &self.metrics);
+    fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D, EP, EL>) {
+        for (index, admission) in self.inner.admissions.iter().enumerate() {
+            let judge = admission.judge(&writer.key, writer.weight, &self.inner.metrics);
             writer.judges.set(index, judge);
         }
         writer.is_judged = true;
@@ -477,7 +514,7 @@ where
 
     async fn apply_writer(
         &self,
-        mut writer: GenericStoreWriter<'_, K, V, D, EP, EL>,
+        mut writer: GenericStoreWriter<K, V, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
         debug_assert!(!writer.is_inserted);
@@ -491,9 +528,9 @@ where
         writer.is_inserted = true;
         let key = &writer.key;
 
-        for (i, admission) in self.admissions.iter().enumerate() {
+        for (i, admission) in self.inner.admissions.iter().enumerate() {
             let judge = writer.judges.get(i);
-            admission.on_insert(key, writer.weight, &self.metrics, judge);
+            admission.on_insert(key, writer.weight, &self.inner.metrics, judge);
         }
 
         let serialized_len = self.serialized_len(key, &value);
@@ -505,9 +542,13 @@ where
             );
         }
 
-        self.metrics.op_bytes_insert.inc_by(serialized_len as u64);
+        self.inner
+            .metrics
+            .op_bytes_insert
+            .inc_by(serialized_len as u64);
 
         let mut slice = match self
+            .inner
             .region_manager
             .allocate(serialized_len, !writer.is_skippable)
             .await
@@ -531,10 +572,11 @@ where
         };
         drop(slice);
 
-        self.indices.insert(index);
+        self.inner.indices.insert(index);
 
         let duration = now.elapsed() + writer.duration;
-        self.metrics
+        self.inner
+            .metrics
             .op_duration_insert_inserted
             .observe(duration.as_secs_f64());
 
@@ -542,7 +584,7 @@ where
     }
 }
 
-pub struct GenericStoreWriter<'a, K, V, D, EP, EL>
+pub struct GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -550,7 +592,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    store: &'a GenericStore<K, V, D, EP, EL>,
+    store: GenericStore<K, V, D, EP, EL>,
     key: K,
     weight: usize,
 
@@ -564,7 +606,7 @@ where
     is_skippable: bool,
 }
 
-impl<'a, K, V, D, EP, EL> GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -572,12 +614,13 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    fn new(store: &'a GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
+    fn new(store: GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
+        let judges = Judges::new(store.inner.admissions.len());
         Self {
             store,
             key,
             weight,
-            judges: Judges::new(store.admissions.len()),
+            judges,
             is_judged: false,
             duration: Duration::from_nanos(0),
             is_inserted: false,
@@ -587,16 +630,18 @@ where
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub fn judge(&mut self) -> bool {
+        let store = self.store.clone();
         if !self.is_judged {
             let now = Instant::now();
-            self.store.judge_inner(self);
+            store.judge_inner(self);
             self.duration = now.elapsed();
         }
         self.judges.judge()
     }
 
     pub async fn finish(self, value: V) -> Result<bool> {
-        self.store.apply_writer(self, value).await
+        let store = self.store.clone();
+        store.apply_writer(self, value).await
     }
 
     pub fn set_force(&mut self) {
@@ -612,7 +657,7 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> Debug for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> Debug for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -632,7 +677,7 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> Drop for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -643,24 +688,27 @@ where
     fn drop(&mut self) {
         if !self.is_inserted {
             self.store
+                .inner
                 .metrics
                 .op_duration_insert_dropped
                 .observe(self.duration.as_secs_f64());
             let mut filtered = false;
             if self.is_judged {
-                for (i, admission) in self.store.admissions.iter().enumerate() {
+                for (i, admission) in self.store.inner.admissions.iter().enumerate() {
                     let judge = self.judges.get(i);
-                    admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
+                    admission.on_drop(&self.key, self.weight, &self.store.inner.metrics, judge);
                 }
                 filtered = !self.judge();
             }
             if filtered {
                 self.store
+                    .inner
                     .metrics
                     .op_duration_insert_filtered
                     .observe(self.duration.as_secs_f64());
             } else {
                 self.store
+                    .inner
                     .metrics
                     .op_duration_insert_dropped
                     .observe(self.duration.as_secs_f64());
@@ -906,7 +954,7 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> StorageWriter for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> StorageWriter for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -926,7 +974,7 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> ForceStorageWriter for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> ForceStorageWriter for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -950,10 +998,9 @@ where
     type Key = K;
     type Value = V;
     type Config = GenericStoreConfig<K, V, D, EP>;
-    type Owned = Arc<Self>;
-    type Writer<'a> = GenericStoreWriter<'a, K, V, D, EP, EL>;
+    type Writer = GenericStoreWriter<K, V, D, EP, EL>;
 
-    async fn open(config: Self::Config) -> Result<Self::Owned> {
+    async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
     }
 
@@ -961,7 +1008,7 @@ where
         self.close().await
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         self.writer(key, weight)
     }
 

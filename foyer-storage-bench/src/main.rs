@@ -408,7 +408,7 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(args: Args, store: Arc<TStore>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
+async fn bench(args: Args, store: TStore, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -457,7 +457,7 @@ async fn write(
     entry_size_range: Range<usize>,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: Arc<TStore>,
+    store: TStore,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -502,7 +502,7 @@ async fn write(
 async fn read(
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: Arc<TStore>,
+    store: TStore,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
