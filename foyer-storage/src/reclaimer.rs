@@ -42,7 +42,7 @@ where
 {
     threshold: usize,
 
-    store: Arc<GenericStore<K, V, D, EP, EL>>,
+    store: GenericStore<K, V, D, EP, EL>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
@@ -63,7 +63,7 @@ where
 {
     pub fn new(
         threshold: usize,
-        store: Arc<GenericStore<K, V, D, EP, EL>>,
+        store: GenericStore<K, V, D, EP, EL>,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         rate_limiter: Option<Arc<RateLimiter>>,
         metrics: Arc<Metrics>,

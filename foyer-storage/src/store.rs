@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
-
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::{
     fifo::{Fifo, FifoLink},
@@ -35,8 +33,8 @@ pub type LruFsStore<K, V> =
 pub type LruFsStoreConfig<K, V> =
     GenericStoreConfig<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>>;
 
-pub type LruFsStoreWriter<'w, K, V> =
-    GenericStoreWriter<'w, K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
+pub type LruFsStoreWriter<K, V> =
+    GenericStoreWriter<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
 
 pub type LfuFsStore<K, V> =
     GenericStore<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
@@ -44,8 +42,8 @@ pub type LfuFsStore<K, V> =
 pub type LfuFsStoreConfig<K, V> =
     GenericStoreConfig<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>>;
 
-pub type LfuFsStoreWriter<'w, K, V> =
-    GenericStoreWriter<'w, K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
+pub type LfuFsStoreWriter<K, V> =
+    GenericStoreWriter<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
 
 pub type FifoFsStore<K, V> =
     GenericStore<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
@@ -53,8 +51,8 @@ pub type FifoFsStore<K, V> =
 pub type FifoFsStoreConfig<K, V> =
     GenericStoreConfig<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
-pub type FifoFsStoreWriter<'w, K, V> =
-    GenericStoreWriter<'w, K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+pub type FifoFsStoreWriter<K, V> =
+    GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
 #[derive(Debug)]
 pub enum StoreConfig<K, V>
@@ -65,7 +63,6 @@ where
     LruFsStoreConfig { config: LruFsStoreConfig<K, V> },
     LfuFsStoreConfig { config: LfuFsStoreConfig<K, V> },
     FifoFsStoreConfig { config: FifoFsStoreConfig<K, V> },
-    None,
 }
 
 impl<K, V> From<LruFsStoreConfig<K, V>> for StoreConfig<K, V>
@@ -99,43 +96,42 @@ where
 }
 
 #[derive(Debug)]
-pub enum StoreWriter<'a, K, V>
+pub enum StoreWriter<K, V>
 where
     K: Key,
     V: Value,
 {
-    LruFsStorWriter { writer: LruFsStoreWriter<'a, K, V> },
-    LfuFsStorWriter { writer: LfuFsStoreWriter<'a, K, V> },
-    FifoFsStoreWriter { writer: FifoFsStoreWriter<'a, K, V> },
-    None,
+    LruFsStorWriter { writer: LruFsStoreWriter<K, V> },
+    LfuFsStorWriter { writer: LfuFsStoreWriter<K, V> },
+    FifoFsStoreWriter { writer: FifoFsStoreWriter<K, V> },
 }
 
-impl<'a, K, V> From<LruFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
+impl<K, V> From<LruFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn from(writer: LruFsStoreWriter<'a, K, V>) -> Self {
+    fn from(writer: LruFsStoreWriter<K, V>) -> Self {
         StoreWriter::LruFsStorWriter { writer }
     }
 }
 
-impl<'a, K, V> From<LfuFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
+impl<K, V> From<LfuFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn from(writer: LfuFsStoreWriter<'a, K, V>) -> Self {
+    fn from(writer: LfuFsStoreWriter<K, V>) -> Self {
         StoreWriter::LfuFsStorWriter { writer }
     }
 }
 
-impl<'a, K, V> From<FifoFsStoreWriter<'a, K, V>> for StoreWriter<'a, K, V>
+impl<K, V> From<FifoFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn from(writer: FifoFsStoreWriter<'a, K, V>) -> Self {
+    fn from(writer: FifoFsStoreWriter<K, V>) -> Self {
         StoreWriter::FifoFsStoreWriter { writer }
     }
 }
@@ -146,10 +142,9 @@ where
     K: Key,
     V: Value,
 {
-    LruFsStore { store: Arc<LruFsStore<K, V>> },
-    LfuFsStore { store: Arc<LfuFsStore<K, V>> },
-    FifoFsStore { store: Arc<FifoFsStore<K, V>> },
-    None,
+    LruFsStore { store: LruFsStore<K, V> },
+    LfuFsStore { store: LfuFsStore<K, V> },
+    FifoFsStore { store: FifoFsStore<K, V> },
 }
 
 impl<K, V> Clone for Store<K, V>
@@ -160,20 +155,19 @@ where
     fn clone(&self) -> Self {
         match self {
             Self::LruFsStore { store } => Self::LruFsStore {
-                store: Arc::clone(store),
+                store: store.clone(),
             },
             Self::LfuFsStore { store } => Self::LfuFsStore {
-                store: Arc::clone(store),
+                store: store.clone(),
             },
             Self::FifoFsStore { store } => Self::FifoFsStore {
-                store: Arc::clone(store),
+                store: store.clone(),
             },
-            Self::None => Self::None,
         }
     }
 }
 
-impl<'a, K, V> StorageWriter for StoreWriter<'a, K, V>
+impl<K, V> StorageWriter for StoreWriter<K, V>
 where
     K: Key,
     V: Value,
@@ -186,7 +180,6 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.judge(),
             StoreWriter::LfuFsStorWriter { writer } => writer.judge(),
             StoreWriter::FifoFsStoreWriter { writer } => writer.judge(),
-            StoreWriter::None => false,
         }
     }
 
@@ -195,12 +188,11 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
-            StoreWriter::None => Ok(false),
         }
     }
 }
 
-impl<'a, K, V> ForceStorageWriter for StoreWriter<'a, K, V>
+impl<K, V> ForceStorageWriter for StoreWriter<K, V>
 where
     K: Key,
     V: Value,
@@ -210,7 +202,6 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.set_force(),
             StoreWriter::LfuFsStorWriter { writer } => writer.set_force(),
             StoreWriter::FifoFsStoreWriter { writer } => writer.set_force(),
-            StoreWriter::None => {}
         }
     }
 }
@@ -223,10 +214,9 @@ where
     type Key = K;
     type Value = V;
     type Config = StoreConfig<K, V>;
-    type Owned = Self;
-    type Writer<'a> = StoreWriter<'a, K, V>;
+    type Writer = StoreWriter<K, V>;
 
-    async fn open(config: Self::Config) -> Result<Self::Owned> {
+    async fn open(config: Self::Config) -> Result<Self> {
         match config {
             StoreConfig::LruFsStoreConfig { config } => {
                 let store = LruFsStore::open(config).await?;
@@ -240,7 +230,6 @@ where
                 let store = FifoFsStore::open(config).await?;
                 Ok(Self::FifoFsStore { store })
             }
-            StoreConfig::None => Ok(Self::None),
         }
     }
 
@@ -249,16 +238,14 @@ where
             Store::LruFsStore { store } => store.close().await,
             Store::LfuFsStore { store } => store.close().await,
             Store::FifoFsStore { store } => store.close().await,
-            Store::None => Ok(()),
         }
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         match self {
             Store::LruFsStore { store } => store.writer(key, weight).into(),
             Store::LfuFsStore { store } => store.writer(key, weight).into(),
             Store::FifoFsStore { store } => store.writer(key, weight).into(),
-            Store::None => StoreWriter::None,
         }
     }
 
@@ -267,7 +254,6 @@ where
             Store::LruFsStore { store } => store.exists(key),
             Store::LfuFsStore { store } => store.exists(key),
             Store::FifoFsStore { store } => store.exists(key),
-            Store::None => Ok(false),
         }
     }
 
@@ -276,7 +262,6 @@ where
             Store::LruFsStore { store } => store.lookup(key).await,
             Store::LfuFsStore { store } => store.lookup(key).await,
             Store::FifoFsStore { store } => store.lookup(key).await,
-            Store::None => Ok(None),
         }
     }
 
@@ -285,7 +270,6 @@ where
             Store::LruFsStore { store } => store.remove(key),
             Store::LfuFsStore { store } => store.remove(key),
             Store::FifoFsStore { store } => store.remove(key),
-            Store::None => Ok(false),
         }
     }
 
@@ -294,7 +278,6 @@ where
             Store::LruFsStore { store } => store.clear(),
             Store::LfuFsStore { store } => store.clear(),
             Store::FifoFsStore { store } => store.clear(),
-            Store::None => Ok(()),
         }
     }
 }
