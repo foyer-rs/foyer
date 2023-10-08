@@ -21,7 +21,7 @@ use foyer_intrusive::eviction::fifo::FifoConfig;
 use foyer_storage::{
     device::fs::FsDeviceConfig,
     lazy::LazyStore,
-    runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig},
+    runtime::{RuntimeConfig, RuntimeStorageConfig, RuntimeStore},
     storage::{Storage, StorageExt},
     store::{FifoFsStoreConfig, Store},
     test_utils::JudgeRecorder,
@@ -172,14 +172,14 @@ async fn test_lazy_store() {
         recover_concurrency: 2,
     };
 
-    test_storage::<LazyStore<_, _, Store<_, _>>>(config.into(), recorder).await;
+    test_storage::<LazyStore<_, _>>(config.into(), recorder).await;
 }
 
 #[tokio::test]
 async fn test_runtime_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = RuntimeStoreConfig {
+    let config = RuntimeStorageConfig {
         store: FifoFsStoreConfig {
             name: "".to_string(),
             eviction_config: FifoConfig,
@@ -209,5 +209,5 @@ async fn test_runtime_store() {
         },
     };
 
-    test_storage::<RuntimeStore<_, _, Store<_, _>>>(config, recorder).await;
+    test_storage::<RuntimeStore<_, _>>(config, recorder).await;
 }
