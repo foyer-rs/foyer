@@ -30,20 +30,19 @@ pub trait StorageWriter: Send + Sync + Debug {
     fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;
 }
 
-pub trait Storage: Send + Sync + Debug + 'static {
+pub trait Storage: Send + Sync + Debug + Clone + 'static {
     type Key: Key;
     type Value: Value;
     type Config: Send + Debug;
-    type Owned: Send + Sync + Debug + 'static;
-    type Writer<'a>: StorageWriter<Key = Self::Key, Value = Self::Value>;
+    type Writer: StorageWriter<Key = Self::Key, Value = Self::Value>;
 
     #[must_use]
-    fn open(config: Self::Config) -> impl Future<Output = Result<Self::Owned>> + Send;
+    fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_>;
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer;
 
     fn exists(&self, key: &Self::Key) -> Result<bool>;
 
@@ -194,7 +193,7 @@ pub trait ForceStorageWriter: StorageWriter {
 
 pub trait ForceStorageExt: Storage
 where
-    for<'w> Self::Writer<'w>: ForceStorageWriter,
+    Self::Writer: ForceStorageWriter,
 {
     #[tracing::instrument(skip(self, value))]
     fn insert_force(
@@ -281,6 +280,6 @@ where
 impl<S> ForceStorageExt for S
 where
     S: Storage,
-    for<'w> S::Writer<'w>: ForceStorageWriter,
+    S::Writer: ForceStorageWriter,
 {
 }
