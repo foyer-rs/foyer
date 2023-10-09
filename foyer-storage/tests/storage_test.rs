@@ -21,7 +21,7 @@ use foyer_intrusive::eviction::fifo::FifoConfig;
 use foyer_storage::{
     device::fs::FsDeviceConfig,
     lazy::LazyStore,
-    runtime::{RuntimeConfig, RuntimeStorageConfig, RuntimeStore},
+    runtime::{RuntimeConfig, RuntimeLazyStore, RuntimeStorageConfig, RuntimeStore},
     storage::{Storage, StorageExt},
     store::{FifoFsStoreConfig, Store},
     test_utils::JudgeRecorder,
@@ -210,4 +210,41 @@ async fn test_runtime_store() {
     };
 
     test_storage::<RuntimeStore<_, _>>(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_runtime_lazy_store() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = RuntimeStorageConfig {
+        store: FifoFsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig,
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 4 * MB,
+                file_capacity: 1 * MB,
+                align: 4 * KB,
+                io_size: 4 * KB,
+            },
+            allocator_bits: 0,
+            admissions: vec![recorder.clone()],
+            reinsertions: vec![recorder.clone()],
+            buffer_pool_size: 2 * MB,
+            flushers: 1,
+            flush_rate_limit: 0,
+            reclaimers: 1,
+            reclaim_rate_limit: 0,
+            allocation_timeout: Duration::from_millis(10),
+            clean_region_threshold: 1,
+            recover_concurrency: 2,
+        }
+        .into(),
+        runtime: RuntimeConfig {
+            worker_threads: None,
+            thread_name: None,
+        },
+    };
+
+    test_storage::<RuntimeLazyStore<_, _>>(config, recorder).await;
 }
