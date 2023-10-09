@@ -12,83 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    marker::PhantomData,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 use crate::{
     error::Result,
     storage::{Storage, StorageWriter},
-    store::Store,
+    store::{NoneStore, NoneStoreWriter, Store},
 };
 use foyer_common::code::{Key, Value};
 use tokio::task::JoinHandle;
-
-#[derive(Debug)]
-pub struct NoneStoreWriter<K: Key, V: Value>(PhantomData<(K, V)>);
-
-impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
-    type Key = K;
-    type Value = V;
-
-    fn judge(&mut self) -> bool {
-        false
-    }
-
-    async fn finish(self, _: Self::Value) -> Result<bool> {
-        Ok(false)
-    }
-}
-
-#[derive(Debug)]
-pub struct NoneStore<K: Key, V: Value>(PhantomData<(K, V)>);
-
-impl<K: Key, V: Value> Clone for NoneStore<K, V> {
-    fn clone(&self) -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: Key, V: Value> Storage for NoneStore<K, V> {
-    type Key = K;
-    type Value = V;
-    type Config = ();
-    type Writer = NoneStoreWriter<K, V>;
-
-    #[expect(clippy::let_unit_value)]
-    async fn open(_: Self::Config) -> Result<Self> {
-        Ok(NoneStore(PhantomData))
-    }
-
-    fn is_ready(&self) -> bool {
-        true
-    }
-
-    async fn close(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn writer(&self, _: Self::Key, _: usize) -> Self::Writer {
-        NoneStoreWriter(PhantomData)
-    }
-
-    fn exists(&self, _: &Self::Key) -> Result<bool> {
-        Ok(false)
-    }
-
-    async fn lookup(&self, _: &Self::Key) -> Result<Option<Self::Value>> {
-        Ok(None)
-    }
-
-    fn remove(&self, _: &Self::Key) -> Result<bool> {
-        Ok(false)
-    }
-
-    fn clear(&self) -> Result<()> {
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 pub enum LazyStorageWriter<K, V, S>
@@ -145,7 +77,7 @@ where
     fn clone(&self) -> Self {
         Self {
             once: Arc::clone(&self.once),
-            none: NoneStore(PhantomData),
+            none: NoneStore::default(),
         }
     }
 }
@@ -176,7 +108,7 @@ where
 
         let res = Self {
             once,
-            none: NoneStore(PhantomData),
+            none: NoneStore::default(),
         };
 
         (res, handle)
@@ -217,7 +149,7 @@ where
                 writer: store.writer(key, weight),
             },
             None => LazyStorageWriter::None {
-                writer: NoneStoreWriter(PhantomData),
+                writer: NoneStoreWriter::default(),
             },
         }
     }
