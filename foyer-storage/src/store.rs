@@ -253,6 +253,14 @@ where
         }
     }
 
+    fn is_ready(&self) -> bool {
+        match self {
+            Store::LruFsStore { store } => store.is_ready(),
+            Store::LfuFsStore { store } => store.is_ready(),
+            Store::FifoFsStore { store } => store.is_ready(),
+        }
+    }
+
     async fn close(&self) -> Result<()> {
         match self {
             Store::LruFsStore { store } => store.close().await,

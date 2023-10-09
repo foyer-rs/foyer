@@ -23,7 +23,7 @@ use crate::{
     store::Store,
 };
 use foyer_common::code::{Key, Value};
-use futures::Future;
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub struct NoneStoreWriter<K: Key, V: Value>(PhantomData<(K, V)>);
@@ -59,6 +59,10 @@ impl<K: Key, V: Value> Storage for NoneStore<K, V> {
     #[expect(clippy::let_unit_value)]
     async fn open(_: Self::Config) -> Result<Self> {
         Ok(NoneStore(PhantomData))
+    }
+
+    fn is_ready(&self) -> bool {
+        true
     }
 
     async fn close(&self) -> Result<()> {
@@ -152,10 +156,10 @@ where
     V: Value,
     S: Storage<Key = K, Value = V>,
 {
-    fn with_task(config: S::Config) -> (Self, impl Future<Output = Result<S>> + Send) {
+    fn with_handle(config: S::Config) -> (Self, JoinHandle<Result<S>>) {
         let once = Arc::new(OnceLock::new());
 
-        let task = {
+        let handle = tokio::spawn({
             let once = once.clone();
             async move {
                 let store = match S::open(config).await {
@@ -168,14 +172,14 @@ where
                 once.set(store.clone()).unwrap();
                 Ok(store)
             }
-        };
+        });
 
         let res = Self {
             once,
             none: NoneStore(PhantomData),
         };
 
-        (res, task)
+        (res, handle)
     }
 }
 
@@ -191,7 +195,7 @@ where
     type Writer = LazyStorageWriter<K, V, S>;
 
     async fn open(config: S::Config) -> Result<Self> {
-        let (store, task) = Self::with_task(config);
+        let (store, task) = Self::with_handle(config);
         tokio::spawn(task);
         Ok(store)
     }
@@ -294,11 +298,11 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStorage::<_, _, Store<_, _>>::with_task(config.into());
+        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
 
         assert!(!store.insert(100, 100).await.unwrap());
 
-        tokio::spawn(task).await.unwrap().unwrap();
+        handle.await.unwrap().unwrap();
 
         assert!(store.insert(100, 100).await.unwrap());
         assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
@@ -329,11 +333,11 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStorage::<_, _, Store<_, _>>::with_task(config.into());
+        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 
-        tokio::spawn(task).await.unwrap().unwrap();
+        handle.await.unwrap().unwrap();
 
         assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
     }

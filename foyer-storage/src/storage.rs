@@ -39,9 +39,7 @@ pub trait Storage: Send + Sync + Debug + Clone + 'static {
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
 
-    fn is_ready(&self) -> bool {
-        true
-    }
+    fn is_ready(&self) -> bool;
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
