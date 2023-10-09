@@ -992,6 +992,14 @@ where
     type Key = K;
     type Value = V;
 
+    fn key(&self) -> &Self::Key {
+        &self.key
+    }
+
+    fn weight(&self) -> usize {
+        self.weight
+    }
+
     fn judge(&mut self) -> bool {
         self.judge()
     }
