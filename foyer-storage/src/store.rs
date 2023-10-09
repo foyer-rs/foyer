@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::marker::PhantomData;
+
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::{
     fifo::{Fifo, FifoLink},
@@ -55,6 +57,87 @@ pub type FifoFsStoreWriter<K, V> =
     GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
 #[derive(Debug)]
+pub struct NoneStoreWriter<K: Key, V: Value>(PhantomData<(K, V)>);
+
+impl<K: Key, V: Value> Default for NoneStoreWriter<K, V> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
+    type Key = K;
+    type Value = V;
+
+    fn judge(&mut self) -> bool {
+        false
+    }
+
+    async fn finish(self, _: Self::Value) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+impl<K: Key, V: Value> ForceStorageWriter for NoneStoreWriter<K, V> {
+    fn set_force(&mut self) {}
+}
+
+#[derive(Debug)]
+pub struct NoneStore<K: Key, V: Value>(PhantomData<(K, V)>);
+
+impl<K: Key, V: Value> Default for NoneStore<K, V> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K: Key, V: Value> Clone for NoneStore<K, V> {
+    fn clone(&self) -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K: Key, V: Value> Storage for NoneStore<K, V> {
+    type Key = K;
+    type Value = V;
+    type Config = ();
+    type Writer = NoneStoreWriter<K, V>;
+
+    #[expect(clippy::let_unit_value)]
+    async fn open(_: Self::Config) -> Result<Self> {
+        Ok(NoneStore(PhantomData))
+    }
+
+    fn is_ready(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn writer(&self, _: Self::Key, _: usize) -> Self::Writer {
+        NoneStoreWriter(PhantomData)
+    }
+
+    fn exists(&self, _: &Self::Key) -> Result<bool> {
+        Ok(false)
+    }
+
+    async fn lookup(&self, _: &Self::Key) -> Result<Option<Self::Value>> {
+        Ok(None)
+    }
+
+    fn remove(&self, _: &Self::Key) -> Result<bool> {
+        Ok(false)
+    }
+
+    fn clear(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub enum StoreConfig<K, V>
 where
     K: Key,
@@ -63,6 +146,7 @@ where
     LruFsStoreConfig { config: LruFsStoreConfig<K, V> },
     LfuFsStoreConfig { config: LfuFsStoreConfig<K, V> },
     FifoFsStoreConfig { config: FifoFsStoreConfig<K, V> },
+    NoneStoreConfig,
 }
 
 impl<K, V> Clone for StoreConfig<K, V>
@@ -81,6 +165,7 @@ where
             Self::FifoFsStoreConfig { config } => Self::FifoFsStoreConfig {
                 config: config.clone(),
             },
+            Self::NoneStoreConfig => Self::NoneStoreConfig,
         }
     }
 }
@@ -124,6 +209,7 @@ where
     LruFsStorWriter { writer: LruFsStoreWriter<K, V> },
     LfuFsStorWriter { writer: LfuFsStoreWriter<K, V> },
     FifoFsStoreWriter { writer: FifoFsStoreWriter<K, V> },
+    NoneStoreWriter { writer: NoneStoreWriter<K, V> },
 }
 
 impl<K, V> From<LruFsStoreWriter<K, V>> for StoreWriter<K, V>
@@ -156,6 +242,16 @@ where
     }
 }
 
+impl<K, V> From<NoneStoreWriter<K, V>> for StoreWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: NoneStoreWriter<K, V>) -> Self {
+        StoreWriter::NoneStoreWriter { writer }
+    }
+}
+
 #[derive(Debug)]
 pub enum Store<K, V>
 where
@@ -165,6 +261,7 @@ where
     LruFsStore { store: LruFsStore<K, V> },
     LfuFsStore { store: LfuFsStore<K, V> },
     FifoFsStore { store: FifoFsStore<K, V> },
+    NoneStore { store: NoneStore<K, V> },
 }
 
 impl<K, V> Clone for Store<K, V>
@@ -181,6 +278,9 @@ where
                 store: store.clone(),
             },
             Self::FifoFsStore { store } => Self::FifoFsStore {
+                store: store.clone(),
+            },
+            Self::NoneStore { store } => Self::NoneStore {
                 store: store.clone(),
             },
         }
@@ -200,6 +300,7 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.judge(),
             StoreWriter::LfuFsStorWriter { writer } => writer.judge(),
             StoreWriter::FifoFsStoreWriter { writer } => writer.judge(),
+            StoreWriter::NoneStoreWriter { writer } => writer.judge(),
         }
     }
 
@@ -208,6 +309,7 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
+            StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
         }
     }
 }
@@ -222,6 +324,7 @@ where
             StoreWriter::LruFsStorWriter { writer } => writer.set_force(),
             StoreWriter::LfuFsStorWriter { writer } => writer.set_force(),
             StoreWriter::FifoFsStoreWriter { writer } => writer.set_force(),
+            StoreWriter::NoneStoreWriter { writer } => writer.set_force(),
         }
     }
 }
@@ -250,6 +353,10 @@ where
                 let store = FifoFsStore::open(config).await?;
                 Ok(Self::FifoFsStore { store })
             }
+            StoreConfig::NoneStoreConfig => {
+                let store = NoneStore::open(()).await?;
+                Ok(Self::NoneStore { store })
+            }
         }
     }
 
@@ -258,6 +365,7 @@ where
             Store::LruFsStore { store } => store.is_ready(),
             Store::LfuFsStore { store } => store.is_ready(),
             Store::FifoFsStore { store } => store.is_ready(),
+            Store::NoneStore { store } => store.is_ready(),
         }
     }
 
@@ -266,6 +374,7 @@ where
             Store::LruFsStore { store } => store.close().await,
             Store::LfuFsStore { store } => store.close().await,
             Store::FifoFsStore { store } => store.close().await,
+            Store::NoneStore { store } => store.close().await,
         }
     }
 
@@ -274,6 +383,7 @@ where
             Store::LruFsStore { store } => store.writer(key, weight).into(),
             Store::LfuFsStore { store } => store.writer(key, weight).into(),
             Store::FifoFsStore { store } => store.writer(key, weight).into(),
+            Store::NoneStore { store } => store.writer(key, weight).into(),
         }
     }
 
@@ -282,6 +392,7 @@ where
             Store::LruFsStore { store } => store.exists(key),
             Store::LfuFsStore { store } => store.exists(key),
             Store::FifoFsStore { store } => store.exists(key),
+            Store::NoneStore { store } => store.exists(key),
         }
     }
 
@@ -290,6 +401,7 @@ where
             Store::LruFsStore { store } => store.lookup(key).await,
             Store::LfuFsStore { store } => store.lookup(key).await,
             Store::FifoFsStore { store } => store.lookup(key).await,
+            Store::NoneStore { store } => store.lookup(key).await,
         }
     }
 
@@ -298,6 +410,7 @@ where
             Store::LruFsStore { store } => store.remove(key),
             Store::LfuFsStore { store } => store.remove(key),
             Store::FifoFsStore { store } => store.remove(key),
+            Store::NoneStore { store } => store.remove(key),
         }
     }
 
@@ -306,6 +419,7 @@ where
             Store::LruFsStore { store } => store.clear(),
             Store::LfuFsStore { store } => store.clear(),
             Store::FifoFsStore { store } => store.clear(),
+            Store::NoneStore { store } => store.clear(),
         }
     }
 }
