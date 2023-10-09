@@ -1031,6 +1031,10 @@ where
         Self::open(config).await
     }
 
+    fn is_ready(&self) -> bool {
+        true
+    }
+
     async fn close(&self) -> Result<()> {
         self.close().await
     }

@@ -21,6 +21,7 @@ use foyer_common::{
 
 use crate::{
     error::Result,
+    lazy::LazyStore,
     storage::{Storage, StorageWriter},
     store::Store,
 };
@@ -142,6 +143,10 @@ where
         Ok(Self { runtime, store })
     }
 
+    fn is_ready(&self) -> bool {
+        self.store.is_ready()
+    }
+
     async fn close(&self) -> Result<()> {
         let store = self.store.clone();
         self.runtime
@@ -183,3 +188,7 @@ where
 pub type RuntimeStore<K, V> = RuntimeStorage<K, V, Store<K, V>>;
 pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<K, V, Store<K, V>>;
 pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<K, V, Store<K, V>>;
+
+pub type RuntimeLazyStore<K, V> = RuntimeStorage<K, V, LazyStore<K, V>>;
+pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<K, V, LazyStore<K, V>>;
+pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<K, V, LazyStore<K, V>>;
