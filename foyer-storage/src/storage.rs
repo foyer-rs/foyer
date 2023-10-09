@@ -25,6 +25,10 @@ pub trait StorageWriter: Send + Sync + Debug {
     type Key: Key;
     type Value: Value;
 
+    fn key(&self) -> &Self::Key;
+
+    fn weight(&self) -> usize;
+
     fn judge(&mut self) -> bool;
 
     fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;

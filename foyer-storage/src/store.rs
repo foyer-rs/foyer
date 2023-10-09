@@ -57,17 +57,33 @@ pub type FifoFsStoreWriter<K, V> =
     GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
 #[derive(Debug)]
-pub struct NoneStoreWriter<K: Key, V: Value>(PhantomData<(K, V)>);
+pub struct NoneStoreWriter<K: Key, V: Value> {
+    key: K,
+    weight: usize,
+    _marker: PhantomData<V>,
+}
 
-impl<K: Key, V: Value> Default for NoneStoreWriter<K, V> {
-    fn default() -> Self {
-        Self(PhantomData)
+impl<K: Key, V: Value> NoneStoreWriter<K, V> {
+    pub fn new(key: K, weight: usize) -> Self {
+        Self {
+            key,
+            weight,
+            _marker: PhantomData,
+        }
     }
 }
 
 impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
     type Key = K;
     type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        &self.key
+    }
+
+    fn weight(&self) -> usize {
+        self.weight
+    }
 
     fn judge(&mut self) -> bool {
         false
@@ -116,8 +132,8 @@ impl<K: Key, V: Value> Storage for NoneStore<K, V> {
         Ok(())
     }
 
-    fn writer(&self, _: Self::Key, _: usize) -> Self::Writer {
-        NoneStoreWriter(PhantomData)
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+        NoneStoreWriter::new(key, weight)
     }
 
     fn exists(&self, _: &Self::Key) -> Result<bool> {
@@ -294,6 +310,24 @@ where
 {
     type Key = K;
     type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.key(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.key(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.key(),
+            StoreWriter::NoneStoreWriter { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.weight(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.weight(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.weight(),
+            StoreWriter::NoneStoreWriter { writer } => writer.weight(),
+        }
+    }
 
     fn judge(&mut self) -> bool {
         match self {

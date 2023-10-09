@@ -77,6 +77,14 @@ where
     type Key = K;
     type Value = V;
 
+    fn key(&self) -> &Self::Key {
+        self.writer.key()
+    }
+
+    fn weight(&self) -> usize {
+        self.writer.weight()
+    }
+
     fn judge(&mut self) -> bool {
         self.writer.judge()
     }

@@ -42,6 +42,20 @@ where
     type Key = K;
     type Value = V;
 
+    fn key(&self) -> &Self::Key {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.key(),
+            LazyStorageWriter::None { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.weight(),
+            LazyStorageWriter::None { writer } => writer.weight(),
+        }
+    }
+
     fn judge(&mut self) -> bool {
         match self {
             LazyStorageWriter::Store { writer } => writer.judge(),
@@ -149,7 +163,7 @@ where
                 writer: store.writer(key, weight),
             },
             None => LazyStorageWriter::None {
-                writer: NoneStoreWriter::default(),
+                writer: NoneStoreWriter::new(key, weight),
             },
         }
     }
