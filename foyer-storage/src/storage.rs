@@ -189,6 +189,21 @@ pub trait StorageExt: Storage {
 
 impl<S: Storage> StorageExt for S {}
 
+pub trait AsyncStorageExt: Storage {
+    #[tracing::instrument(skip(self, value))]
+    fn insert(&self, key: Self::Key, value: Self::Value) {
+        let weight = key.serialized_len() + value.serialized_len();
+        let store = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = store.writer(key, weight).finish(value).await {
+                tracing::warn!("async storage insert error: {}", e);
+            }
+        });
+    }
+}
+
+impl<S: Storage> AsyncStorageExt for S {}
+
 pub trait ForceStorageWriter: StorageWriter {
     fn set_force(&mut self);
 }
