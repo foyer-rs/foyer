@@ -191,7 +191,7 @@ impl<S: Storage> StorageExt for S {}
 
 pub trait AsyncStorageExt: Storage {
     #[tracing::instrument(skip(self, value))]
-    fn insert(&self, key: Self::Key, value: Self::Value) {
+    fn insert_async(&self, key: Self::Key, value: Self::Value) {
         let weight = key.serialized_len() + value.serialized_len();
         let store = self.clone();
         tokio::spawn(async move {
