@@ -130,25 +130,25 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// enable rated random admission policy if `rated_random` > 0
+    /// enable rated random admission policy if `random_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    rated_random_admission: usize,
+    random_insert_rate_limit: usize,
 
-    /// enable rated random reinsertion policy if `rated_random` > 0
+    /// enable rated random reinsertion policy if `random_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    rated_random_reinsertion: usize,
+    random_reinsert_rate_limit: usize,
 
-    /// enable rated ticket admission policy if `rated_random` > 0
+    /// enable rated ticket admission policy if `ticket_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    rated_ticket_admission: usize,
+    ticket_insert_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `rated_random` > 0
+    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    rated_ticket_reinsertion: usize,
+    ticket_reinsert_rate_limit: usize,
 
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
@@ -311,26 +311,26 @@ async fn main() {
 
     let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
     let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    if args.rated_random_admission > 0 {
+    if args.random_insert_rate_limit > 0 {
         let rr = RatedRandomAdmissionPolicy::new(
-            args.rated_random_admission * 1024 * 1024,
+            args.random_insert_rate_limit * 1024 * 1024,
             Duration::from_millis(100),
         );
         admissions.push(Arc::new(rr));
     }
-    if args.rated_random_reinsertion > 0 {
+    if args.random_reinsert_rate_limit > 0 {
         let rr = RatedRandomReinsertionPolicy::new(
-            args.rated_random_reinsertion * 1024 * 1024,
+            args.random_reinsert_rate_limit * 1024 * 1024,
             Duration::from_millis(100),
         );
         reinsertions.push(Arc::new(rr));
     }
-    if args.rated_ticket_admission > 0 {
-        let rt = RatedTicketAdmissionPolicy::new(args.rated_ticket_admission * 1024 * 1024);
+    if args.ticket_insert_rate_limit > 0 {
+        let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
         admissions.push(Arc::new(rt));
     }
-    if args.rated_ticket_reinsertion > 0 {
-        let rt = RatedTicketReinsertionPolicy::new(args.rated_ticket_reinsertion * 1024 * 1024);
+    if args.ticket_reinsert_rate_limit > 0 {
+        let rt = RatedTicketReinsertionPolicy::new(args.ticket_reinsert_rate_limit * 1024 * 1024);
         reinsertions.push(Arc::new(rt));
     }
 
