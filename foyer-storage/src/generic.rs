@@ -539,6 +539,7 @@ where
         writer.is_judged = true;
     }
 
+    #[tracing::instrument(skip(self, value))]
     async fn apply_writer(
         &self,
         mut writer: GenericStoreWriter<K, V, D, EP, EL>,
