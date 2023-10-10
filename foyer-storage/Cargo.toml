@@ -30,14 +30,6 @@ paste = "1.0"
 prometheus = "0.13"
 rand = "0.8.5"
 thiserror = "1"
-tokio = { version = "1", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
 tracing = "0.1"
 twox-hash = "1"
 
@@ -50,3 +42,4 @@ tempfile = "3"
 
 [features]
 deadlock = ["parking_lot/deadlock_detection"]
+madsim = ["foyer-common/madsim"]

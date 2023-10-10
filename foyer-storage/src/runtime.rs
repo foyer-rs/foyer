@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use foyer_common::{
     code::{Key, Value},
-    runtime::BackgroundShutdownRuntime,
+    runtime::{tokio, BackgroundShutdownRuntime},
 };
 
 use crate::{

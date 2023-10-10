@@ -253,6 +253,8 @@ mod tests {
 
     use super::*;
 
+    use foyer_common::runtime::tokio;
+
     const FILES: usize = 8;
     const FILE_CAPACITY: usize = 8 * 1024; // 8 KiB
     const CAPACITY: usize = FILES * FILE_CAPACITY; // 64 KiB

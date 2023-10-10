@@ -21,7 +21,7 @@ use std::{
 
 use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, rate::RateLimiter};
+use foyer_common::{bits, rate::RateLimiter, runtime::tokio};
 use foyer_intrusive::eviction::EvictionPolicy;
 use futures::future::try_join_all;
 use itertools::Itertools;

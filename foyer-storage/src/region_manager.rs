@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-use foyer_common::queue::AsyncQueue;
+use foyer_common::{queue::AsyncQueue, runtime::tokio};
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},

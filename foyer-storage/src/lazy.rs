@@ -19,7 +19,10 @@ use crate::{
     storage::{Storage, StorageWriter},
     store::{NoneStore, NoneStoreWriter, Store},
 };
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    runtime::tokio,
+};
 use tokio::task::JoinHandle;
 
 #[derive(Debug)]

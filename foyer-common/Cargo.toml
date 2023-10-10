@@ -13,6 +13,14 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 bytes = "1"
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
+madsim-tokio = { version = "0.2", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+], optional = true }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 rand = "0.8.5"
@@ -23,8 +31,12 @@ tokio = { version = "1", features = [
     "macros",
     "time",
     "signal",
-] }
+], optional = true }
 tracing = "0.1"
 
 [dev-dependencies]
 itertools = "0.11.0"
+
+[features]
+default = ["tokio"]
+madsim = ["madsim-tokio"]

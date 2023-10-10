@@ -17,6 +17,11 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+#[cfg(feature = "madsim")]
+pub use madsim_tokio as tokio;
+#[cfg(not(feature = "madsim"))]
+pub use tokio;
+
 use tokio::runtime::Runtime;
 
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
