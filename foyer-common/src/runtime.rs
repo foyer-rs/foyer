@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 use std::{
+    fmt::Debug,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
 };
@@ -27,8 +28,13 @@ use tokio::runtime::Runtime;
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
 ///
 /// This is necessary because directly dropping a nested runtime is not allowed in a parent runtime.
-#[derive(Debug)]
 pub struct BackgroundShutdownRuntime(ManuallyDrop<Runtime>);
+
+impl Debug for BackgroundShutdownRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("BackgroundShutdownRuntime").finish()
+    }
+}
 
 impl Drop for BackgroundShutdownRuntime {
     fn drop(&mut self) {
