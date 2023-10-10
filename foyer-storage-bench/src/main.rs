@@ -165,22 +165,22 @@ pub struct Args {
     #[arg(long, default_value_t = 10)]
     allocation_timeout: usize,
 
-    /// `0` means equal to reclaimer count.
+    /// `0` means equal to reclaimer count
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
 
-    /// The count of allocators is `2 ^ allocator bits`.
+    /// the count of allocators is `2 ^ allocator bits`
     ///
     /// Note: The count of allocators should be greater than buffer count.
     ///       (buffer count = buffer pool size / device region size)
     #[arg(long, default_value_t = 0)]
     allocator_bits: usize,
 
-    /// Weigher to enable metrics exporter.
+    /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
     metrics: bool,
 
-    /// Use separate runtime.
+    /// use separate runtime
     #[arg(long, default_value_t = false)]
     runtime: bool,
 }
