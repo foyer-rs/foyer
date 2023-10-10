@@ -130,22 +130,22 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// enable rated random admission policy if `rated_random` > 0
+    /// enable rated random admission policy if `random_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     random_insert_rate_limit: usize,
 
-    /// enable rated random reinsertion policy if `rated_random` > 0
+    /// enable rated random reinsertion policy if `random_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     random_reinsert_rate_limit: usize,
 
-    /// enable rated ticket admission policy if `rated_random` > 0
+    /// enable rated ticket admission policy if `ticket_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_insert_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `rated_random` > 0
+    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_reinsert_rate_limit: usize,
