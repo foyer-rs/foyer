@@ -12,11 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, ops::RangeBounds};
-
 use bytes::{Buf, BufMut};
 use foyer_common::erwlock::{ErwLock, ErwLockInner};
 use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock};
+use std::{fmt::Debug, ops::RangeBounds};
 use tracing::instrument;
 
 use crate::{
@@ -289,7 +288,7 @@ where
             Box::new(f)
         };
         Ok(Some(ReadSlice::Owned {
-            buf: Some(buf),
+            buf,
             cleanup: Some(cleanup),
         }))
     }
@@ -464,7 +463,7 @@ where
         cleanup: Option<Box<dyn CleanupFn>>,
     },
     Owned {
-        buf: Option<Vec<u8, A>>,
+        buf: Vec<u8, A>,
         cleanup: Option<Box<dyn CleanupFn>>,
     },
 }
@@ -497,7 +496,7 @@ where
     pub fn len(&self) -> usize {
         match self {
             Self::Slice { slice, .. } => slice.len(),
-            Self::Owned { buf, .. } => buf.as_ref().unwrap().len(),
+            Self::Owned { buf, .. } => buf.len(),
         }
     }
 
@@ -513,7 +512,7 @@ where
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Slice { slice, .. } => slice.as_ref(),
-            Self::Owned { buf, .. } => buf.as_ref().unwrap(),
+            Self::Owned { buf, .. } => buf.as_ref(),
         }
     }
 }
