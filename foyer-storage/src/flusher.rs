@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::{rate::RateLimiter, runtime::tokio};
+use foyer_common::rate::RateLimiter;
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 
 use tokio::sync::broadcast;

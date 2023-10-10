@@ -14,10 +14,7 @@
 
 use std::fmt::Debug;
 
-use foyer_common::{
-    code::{Key, Value},
-    runtime::tokio,
-};
+use foyer_common::code::{Key, Value};
 
 use crate::error::Result;
 use futures::Future;

@@ -15,6 +15,3 @@ foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-storage = { path = "../foyer-storage" }
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
-
-[features]
-madsim = ["foyer-common/madsim", "foyer-storage/madsim"]

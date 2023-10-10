@@ -27,7 +27,6 @@ use bytes::BufMut;
 use foyer_common::{
     code::{Key, Value},
     rate::RateLimiter,
-    runtime::tokio,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::broadcast;

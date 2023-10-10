@@ -10,7 +10,6 @@ check:
 	cargo hakari manage-deps
 	cargo sort -w
 	cargo fmt --all
-	cargo clippy --all-targets --features madsim
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
@@ -27,7 +26,7 @@ test-ignored:
 test-all: test test-ignored
 
 madsim:
-	cargo clippy --all-targets --features madsim
+	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" cargo clippy --all-targets
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo test --doc
 

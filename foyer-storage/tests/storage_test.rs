@@ -15,7 +15,6 @@
 #![feature(lint_reasons)]
 #![expect(clippy::identity_op)]
 
-use foyer_common::runtime::tokio;
 use foyer_intrusive::eviction::fifo::FifoConfig;
 use foyer_storage::{
     device::fs::FsDeviceConfig,

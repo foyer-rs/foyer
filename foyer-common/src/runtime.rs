@@ -18,11 +18,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-#[cfg(feature = "madsim")]
-pub use madsim_tokio as tokio;
-#[cfg(not(feature = "madsim"))]
-pub use tokio;
-
 use tokio::runtime::Runtime;
 
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
@@ -40,6 +35,10 @@ impl Drop for BackgroundShutdownRuntime {
     fn drop(&mut self) {
         // Safety: The runtime is only dropped once here.
         let runtime = unsafe { ManuallyDrop::take(&mut self.0) };
+
+        #[cfg(madsim)]
+        drop(runtime);
+        #[cfg(not(madsim))]
         runtime.shutdown_background();
     }
 }

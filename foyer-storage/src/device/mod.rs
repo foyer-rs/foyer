@@ -20,7 +20,6 @@ use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
 use error::DeviceResult;
-use foyer_common::runtime::tokio;
 use futures::Future;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
@@ -79,10 +78,13 @@ where
     F: FnOnce() -> DeviceResult<T> + Send + 'static,
     T: Send + 'static,
 {
+    #[cfg(not(madsim))]
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => res,
         Err(e) => Err(format!("background task failed: {:?}", e,).into()),
     }
+    #[cfg(madsim)]
+    f()
 }
 
 #[cfg(test)]
