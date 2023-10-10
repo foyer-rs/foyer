@@ -21,14 +21,6 @@ memoffset = "0.9"
 parking_lot = "0.12"
 paste = "1.0"
 rand = "0.8.5"
-tokio = { version = "1", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
 tracing = "0.1"
 twox-hash = "1"
 

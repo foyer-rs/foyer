@@ -15,8 +15,6 @@
 #![feature(lint_reasons)]
 #![expect(clippy::identity_op)]
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
 use foyer_intrusive::eviction::fifo::FifoConfig;
 use foyer_storage::{
     device::fs::FsDeviceConfig,
@@ -26,6 +24,7 @@ use foyer_storage::{
     store::{FifoFsStoreConfig, Store},
     test_utils::JudgeRecorder,
 };
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * 1024;

@@ -78,10 +78,13 @@ where
     F: FnOnce() -> DeviceResult<T> + Send + 'static,
     T: Send + 'static,
 {
+    #[cfg(not(madsim))]
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => res,
         Err(e) => Err(format!("background task failed: {:?}", e,).into()),
     }
+    #[cfg(madsim)]
+    f()
 }
 
 #[cfg(test)]
