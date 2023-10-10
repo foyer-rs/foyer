@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::HashMap, fmt::Debug, ops::RangeBounds, task::Waker};
+use std::{fmt::Debug, ops::RangeBounds};
 
 use bytes::{Buf, BufMut};
 use foyer_common::erwlock::{ErwLock, ErwLockInner};
@@ -79,8 +79,6 @@ where
     writers: usize,
     buffered_readers: usize,
     physical_readers: usize,
-
-    wakers: HashMap<usize, Waker>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,8 +137,6 @@ where
             writers: 0,
             buffered_readers: 0,
             physical_readers: 0,
-
-            wakers: HashMap::default(),
         };
         Self {
             id,
@@ -156,7 +152,6 @@ where
             let f = move || {
                 let mut guard = inner.write();
                 guard.writers -= 1;
-                guard.wake_all();
             };
             Box::new(f)
         };
@@ -244,7 +239,6 @@ where
                     let f = move || {
                         let mut guard = inner.write();
                         guard.buffered_readers -= 1;
-                        guard.wake_all();
                     };
                     Box::new(f)
                 };
@@ -281,7 +275,6 @@ where
             {
                 let mut inner = self.inner.write();
                 inner.physical_readers -= 1;
-                inner.wake_all();
                 return Ok(None);
             }
             offset += len;
@@ -292,7 +285,6 @@ where
             let f = move || {
                 let mut guard = inner.write();
                 guard.physical_readers -= 1;
-                guard.wake_all();
             };
             Box::new(f)
         };
@@ -394,12 +386,6 @@ where
 
     pub fn physical_readers(&self) -> usize {
         self.physical_readers
-    }
-
-    fn wake_all(&self) {
-        for waker in self.wakers.values() {
-            waker.wake_by_ref();
-        }
     }
 }
 
