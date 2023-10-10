@@ -10,6 +10,16 @@ members = [
     "foyer-workspace-hack",
 ]
 
+[workspace.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
+
 [patch.crates-io]
 # cmsketch = { path = "../cmsketch-rs" }
 
