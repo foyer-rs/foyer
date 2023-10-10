@@ -14,6 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(lint_reasons)]
+#![feature(async_fn_in_trait)]
 
 mod analyze;
 mod export;
@@ -34,6 +35,7 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 
+use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
     admission::{
@@ -41,13 +43,14 @@ use foyer_storage::{
         AdmissionPolicy,
     },
     device::fs::FsDeviceConfig,
-    generic::GenericStoreConfig,
+    error::Result,
     reinsertion::{
         rated_random::RatedRandomReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy,
         ReinsertionPolicy,
     },
-    storage::{Storage, StorageExt},
-    store::LfuFsStore,
+    runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig, RuntimeStoreWriter},
+    storage::{Storage, StorageExt, StorageWriter},
+    store::{LfuFsStoreConfig, Store, StoreConfig, StoreWriter},
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -145,7 +148,7 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     ticket_insert_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
+    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limitgit a` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_reinsert_rate_limit: usize,
@@ -162,23 +165,217 @@ pub struct Args {
     #[arg(long, default_value_t = 10)]
     allocation_timeout: usize,
 
-    /// `0` means equal to reclaimer count.
+    /// `0` means equal to reclaimer count
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
 
-    /// The count of allocators is `2 ^ allocator bits`.
+    /// the count of allocators is `2 ^ allocator bits`
     ///
     /// Note: The count of allocators should be greater than buffer count.
     ///       (buffer count = buffer pool size / device region size)
     #[arg(long, default_value_t = 0)]
     allocator_bits: usize,
 
-    /// Weigher to enable metrics exporter.
+    /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
     metrics: bool,
+
+    /// use separate runtime
+    #[arg(long, default_value_t = false)]
+    runtime: bool,
 }
 
-type TStore = LfuFsStore<u64, Vec<u8>>;
+#[derive(Debug)]
+pub enum BenchStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    StoreConfig { config: StoreConfig<K, V> },
+    RuntimeStoreConfig { config: RuntimeStoreConfig<K, V> },
+}
+
+impl<K, V> Clone for BenchStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::StoreConfig { config } => Self::StoreConfig {
+                config: config.clone(),
+            },
+            Self::RuntimeStoreConfig { config } => Self::RuntimeStoreConfig {
+                config: config.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum BenchStoreWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    StoreWriter { writer: StoreWriter<K, V> },
+    RuntimeStoreWriter { writer: RuntimeStoreWriter<K, V> },
+}
+
+impl<K, V> From<StoreWriter<K, V>> for BenchStoreWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: StoreWriter<K, V>) -> Self {
+        Self::StoreWriter { writer }
+    }
+}
+
+impl<K, V> From<RuntimeStoreWriter<K, V>> for BenchStoreWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: RuntimeStoreWriter<K, V>) -> Self {
+        Self::RuntimeStoreWriter { writer }
+    }
+}
+
+impl<K, V> StorageWriter for BenchStoreWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.key(),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.weight(),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.weight(),
+        }
+    }
+
+    fn judge(&mut self) -> bool {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.judge(),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.judge(),
+        }
+    }
+
+    async fn finish(self, value: Self::Value) -> Result<bool> {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.finish(value).await,
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.finish(value).await,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum BenchStore<K = u64, V = Vec<u8>>
+where
+    K: Key,
+    V: Value,
+{
+    Store { store: Store<K, V> },
+    RuntimeStore { store: RuntimeStore<K, V> },
+}
+
+impl<K, V> Clone for BenchStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Store { store } => Self::Store {
+                store: store.clone(),
+            },
+            Self::RuntimeStore { store } => Self::RuntimeStore {
+                store: store.clone(),
+            },
+        }
+    }
+}
+
+impl<K, V> Storage for BenchStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+    type Config = BenchStoreConfig<K, V>;
+    type Writer = BenchStoreWriter<K, V>;
+
+    async fn open(config: Self::Config) -> Result<Self> {
+        match config {
+            BenchStoreConfig::StoreConfig { config } => {
+                Store::open(config).await.map(|store| Self::Store { store })
+            }
+            BenchStoreConfig::RuntimeStoreConfig { config } => RuntimeStore::open(config)
+                .await
+                .map(|store| Self::RuntimeStore { store }),
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        match self {
+            BenchStore::Store { store } => store.is_ready(),
+            BenchStore::RuntimeStore { store } => store.is_ready(),
+        }
+    }
+
+    async fn close(&self) -> Result<()> {
+        match self {
+            BenchStore::Store { store } => store.close().await,
+            BenchStore::RuntimeStore { store } => store.close().await,
+        }
+    }
+
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+        match self {
+            BenchStore::Store { store } => store.writer(key, weight).into(),
+            BenchStore::RuntimeStore { store } => store.writer(key, weight).into(),
+        }
+    }
+
+    fn exists(&self, key: &Self::Key) -> Result<bool> {
+        match self {
+            BenchStore::Store { store } => store.exists(key),
+            BenchStore::RuntimeStore { store } => store.exists(key),
+        }
+    }
+
+    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+        match self {
+            BenchStore::Store { store } => store.lookup(key).await,
+            BenchStore::RuntimeStore { store } => store.lookup(key).await,
+        }
+    }
+
+    fn remove(&self, key: &Self::Key) -> Result<bool> {
+        match self {
+            BenchStore::Store { store } => store.remove(key),
+            BenchStore::RuntimeStore { store } => store.remove(key),
+        }
+    }
+
+    fn clear(&self) -> Result<()> {
+        match self {
+            BenchStore::Store { store } => store.clear(),
+            BenchStore::RuntimeStore { store } => store.clear(),
+        }
+    }
+}
 
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
@@ -243,7 +440,7 @@ fn init_logger() {
 
 #[tokio::main]
 async fn main() {
-    is_send_sync_static::<TStore>();
+    is_send_sync_static::<BenchStore>();
 
     init_logger();
 
@@ -340,7 +537,7 @@ async fn main() {
         args.clean_region_threshold
     };
 
-    let config = GenericStoreConfig {
+    let config = LfuFsStoreConfig {
         name: "".to_string(),
         eviction_config,
         device_config,
@@ -357,9 +554,25 @@ async fn main() {
         clean_region_threshold,
     };
 
-    println!("{:#?}", config);
+    let config = if args.runtime {
+        BenchStoreConfig::RuntimeStoreConfig {
+            config: RuntimeStoreConfig {
+                store: config.into(),
+                runtime: RuntimeConfig {
+                    worker_threads: None,
+                    thread_name: Some("foyer".to_string()),
+                },
+            },
+        }
+    } else {
+        BenchStoreConfig::StoreConfig {
+            config: config.into(),
+        }
+    };
 
-    let store = TStore::open(config).await.unwrap();
+    println!("{config:#?}");
+
+    let store = BenchStore::open(config).await.unwrap();
 
     let (stop_tx, _) = broadcast::channel(4096);
 
@@ -408,7 +621,12 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(args: Args, store: TStore, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
+async fn bench(
+    args: Args,
+    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    metrics: Metrics,
+    stop_tx: broadcast::Sender<()>,
+) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -457,7 +675,7 @@ async fn write(
     entry_size_range: Range<usize>,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: TStore,
+    store: impl Storage<Key = u64, Value = Vec<u8>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -502,7 +720,7 @@ async fn write(
 async fn read(
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: TStore,
+    store: impl Storage<Key = u64, Value = Vec<u8>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
