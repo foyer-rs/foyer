@@ -192,11 +192,20 @@ where
 
             let region = self.region(&region_id);
             region.advance().await;
-            let buffer = self
-                .buffers
-                .acquire()
-                .instrument(tracing::debug_span!("acquire_clean_buffer"))
-                .await;
+
+            let buffer = {
+                let timer = self
+                    .metrics
+                    .inner_op_duration_acquire_clean_buffer
+                    .start_timer();
+                let buffer = self
+                    .buffers
+                    .acquire()
+                    .instrument(tracing::debug_span!("acquire_clean_buffer"))
+                    .await;
+                drop(timer);
+                buffer
+            };
             region.attach_buffer(buffer).await;
 
             *current = Some(region.clone());
