@@ -31,6 +31,8 @@ pub trait StorageWriter: Send + Sync + Debug {
 
     fn judge(&mut self) -> bool;
 
+    fn force(&mut self);
+
     fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;
 }
 
@@ -208,14 +210,7 @@ pub trait AsyncStorageExt: Storage {
 
 impl<S: Storage> AsyncStorageExt for S {}
 
-pub trait ForceStorageWriter: StorageWriter {
-    fn set_force(&mut self);
-}
-
-pub trait ForceStorageExt: Storage
-where
-    Self::Writer: ForceStorageWriter,
-{
+pub trait ForceStorageExt: Storage {
     #[tracing::instrument(skip(self, value))]
     fn insert_force(
         &self,
@@ -224,7 +219,7 @@ where
     ) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         let mut writer = self.writer(key, weight);
-        writer.set_force();
+        writer.force();
         writer.finish(value)
     }
 
@@ -246,7 +241,7 @@ where
     {
         async move {
             let mut writer = self.writer(key, weight);
-            writer.set_force();
+            writer.force();
             if !writer.judge() {
                 return Ok(false);
             }
@@ -281,7 +276,7 @@ where
     {
         async move {
             let mut writer = self.writer(key, weight);
-            writer.set_force();
+            writer.force();
             if !writer.judge() {
                 return Ok(false);
             }
@@ -298,9 +293,4 @@ where
     }
 }
 
-impl<S> ForceStorageExt for S
-where
-    S: Storage,
-    S::Writer: ForceStorageWriter,
-{
-}
+impl<S> ForceStorageExt for S where S: Storage {}

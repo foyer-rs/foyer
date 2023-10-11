@@ -271,6 +271,13 @@ where
         }
     }
 
+    fn force(&mut self) {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.force(),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.force(),
+        }
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         match self {
             BenchStoreWriter::StoreWriter { writer } => writer.finish(value).await,
