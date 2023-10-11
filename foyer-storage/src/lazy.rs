@@ -63,6 +63,13 @@ where
         }
     }
 
+    fn force(&mut self) {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.force(),
+            LazyStorageWriter::None { writer } => writer.force(),
+        }
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         match self {
             LazyStorageWriter::Store { writer } => writer.finish(value).await,

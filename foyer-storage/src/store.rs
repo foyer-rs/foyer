@@ -26,7 +26,7 @@ use crate::{
     error::Result,
     generic::{GenericStore, GenericStoreConfig, GenericStoreWriter},
     region_manager::RegionEpItemAdapter,
-    storage::{ForceStorageWriter, Storage, StorageWriter},
+    storage::{Storage, StorageWriter},
 };
 
 pub type LruFsStore<K, V> =
@@ -89,13 +89,11 @@ impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
         false
     }
 
+    fn force(&mut self) {}
+
     async fn finish(self, _: Self::Value) -> Result<bool> {
         Ok(false)
     }
-}
-
-impl<K: Key, V: Value> ForceStorageWriter for NoneStoreWriter<K, V> {
-    fn set_force(&mut self) {}
 }
 
 #[derive(Debug)]
@@ -338,27 +336,21 @@ where
         }
     }
 
+    fn force(&mut self) {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.force(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.force(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.force(),
+            StoreWriter::NoneStoreWriter { writer } => writer.force(),
+        }
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         match self {
             StoreWriter::LruFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
             StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
-        }
-    }
-}
-
-impl<K, V> ForceStorageWriter for StoreWriter<K, V>
-where
-    K: Key,
-    V: Value,
-{
-    fn set_force(&mut self) {
-        match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.set_force(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.set_force(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.set_force(),
-            StoreWriter::NoneStoreWriter { writer } => writer.set_force(),
         }
     }
 }
