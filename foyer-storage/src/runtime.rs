@@ -89,6 +89,10 @@ where
         self.writer.judge()
     }
 
+    fn force(&mut self) {
+        self.writer.force()
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         self.runtime
             .spawn(async move { self.writer.finish(value).await })

@@ -41,7 +41,7 @@ use crate::{
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
-    storage::{ForceStorageWriter, Storage, StorageWriter},
+    storage::{Storage, StorageWriter},
 };
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
@@ -672,7 +672,7 @@ where
         store.apply_writer(self, value).await
     }
 
-    pub fn set_force(&mut self) {
+    pub fn force(&mut self) {
         self.judges.set_mask(Bitmap::new());
     }
 
@@ -1005,21 +1005,12 @@ where
         self.judge()
     }
 
+    fn force(&mut self) {
+        self.force()
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         self.finish(value).await
-    }
-}
-
-impl<K, V, D, EP, EL> ForceStorageWriter for GenericStoreWriter<K, V, D, EP, EL>
-where
-    K: Key,
-    V: Value,
-    D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
-{
-    fn set_force(&mut self) {
-        self.set_force()
     }
 }
 
