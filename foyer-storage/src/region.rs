@@ -14,8 +14,14 @@
 
 use bytes::{Buf, BufMut};
 use foyer_common::erwlock::{ErwLock, ErwLockInner};
-use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock};
-use std::{fmt::Debug, ops::RangeBounds};
+use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock, RwLockWriteGuard};
+use std::{
+    collections::btree_map::{BTreeMap, Entry},
+    fmt::Debug,
+    ops::RangeBounds,
+    sync::Arc,
+};
+use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::{
@@ -78,6 +84,9 @@ where
     writers: usize,
     buffered_readers: usize,
     physical_readers: usize,
+
+    #[expect(clippy::type_complexity)]
+    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<ReadSlice<A>>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +145,8 @@ where
             writers: 0,
             buffered_readers: 0,
             physical_readers: 0,
+
+            waits: BTreeMap::new(),
         };
         Self {
             id,
@@ -219,8 +230,10 @@ where
             std::ops::Bound::Unbounded => self.device.region_size(),
         };
 
+        // case 1: read from dirty buffer
+
         // restrict guard lifetime
-        {
+        let rx = {
             let mut inner = self.inner.write();
 
             if version != 0 && version != inner.version {
@@ -248,11 +261,31 @@ where
                 }));
             }
 
-            // if buffer detached, physical read
+            // case 2: join wait map if exists
+            let rx = match inner.waits.entry((start, end)) {
+                Entry::Vacant(v) => {
+                    v.insert(vec![]);
+                    None
+                }
+                Entry::Occupied(mut o) => {
+                    let (tx, rx) = oneshot::channel();
+                    o.get_mut().push(tx);
+                    Some(rx)
+                }
+            };
+
             inner.physical_readers += 1;
             drop(inner);
+
+            rx
+        };
+
+        // case 3: wait for result
+        if let Some(rx) = rx {
+            return rx.await.map_err(anyhow::Error::from)?.map(Some);
         }
 
+        // case 4: read from device
         let region = self.id;
         let mut buf = self.device.io_buffer(end - start, end - start);
 
@@ -266,18 +299,28 @@ where
                 start + offset + len
             );
             let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
-            if self
+            let read = match self
                 .device
                 .read(s, region, (start + offset) as u64, len)
-                .await?
-                != len
+                .await
             {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let mut inner = self.inner.write();
+                    self.cleanup(&mut inner, start, end)?;
+                    inner.physical_readers -= 1;
+                    return Err(e.into());
+                }
+            };
+            if read != len {
                 let mut inner = self.inner.write();
+                self.cleanup(&mut inner, start, end)?;
                 inner.physical_readers -= 1;
                 return Ok(None);
             }
             offset += len;
         }
+        let buf = Arc::new(buf);
 
         let cleanup = {
             let inner = self.inner.clone();
@@ -287,7 +330,19 @@ where
             };
             Box::new(f)
         };
-        Ok(Some(ReadSlice::Owned {
+
+        if let Some(txs) = self.inner.write().waits.remove(&(start, end)) {
+            // TODO: handle error !!!!!!!!!!!
+            for tx in txs {
+                tx.send(Ok(ReadSlice::Shared {
+                    buf: buf.clone(),
+                    cleanup: Some(cleanup.clone()),
+                }))
+                .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
+            }
+        }
+
+        Ok(Some(ReadSlice::Shared {
             buf,
             cleanup: Some(cleanup),
         }))
@@ -352,6 +407,23 @@ where
         let res = inner.version;
         inner.version += 1;
         res
+    }
+
+    /// Cleanup waits.
+    fn cleanup(
+        &self,
+        guard: &mut RwLockWriteGuard<'_, RegionInner<D::IoBufferAllocator>>,
+        start: usize,
+        end: usize,
+    ) -> Result<()> {
+        if let Some(txs) = guard.waits.remove(&(start, end)) {
+            guard.writers -= txs.len();
+            for tx in txs {
+                tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
+                    .map_err(|_| anyhow::anyhow!("fail to cleanup waits"))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -462,8 +534,8 @@ where
         allocator: Option<A>,
         cleanup: Option<Box<dyn CleanupFn>>,
     },
-    Owned {
-        buf: Vec<u8, A>,
+    Shared {
+        buf: Arc<Vec<u8, A>>,
         cleanup: Option<Box<dyn CleanupFn>>,
     },
 }
@@ -481,8 +553,8 @@ where
                 .field("slice", slice)
                 .field("allocator", allocator)
                 .finish(),
-            Self::Owned { buf, .. } => f
-                .debug_struct("ReadSlice::Owned")
+            Self::Shared { buf, .. } => f
+                .debug_struct("ReadSlice::Shared")
                 .field("buf", buf)
                 .finish(),
         }
@@ -496,7 +568,7 @@ where
     pub fn len(&self) -> usize {
         match self {
             Self::Slice { slice, .. } => slice.len(),
-            Self::Owned { buf, .. } => buf.len(),
+            Self::Shared { buf, .. } => buf.len(),
         }
     }
 
@@ -512,7 +584,7 @@ where
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Slice { slice, .. } => slice.as_ref(),
-            Self::Owned { buf, .. } => buf.as_ref(),
+            Self::Shared { buf, .. } => buf.as_ref(),
         }
     }
 }
@@ -524,7 +596,7 @@ where
     fn drop(&mut self) {
         if let Some(f) = match self {
             ReadSlice::Slice { cleanup, .. } => cleanup.take(),
-            ReadSlice::Owned { cleanup, .. } => cleanup.take(),
+            ReadSlice::Shared { cleanup, .. } => cleanup.take(),
         } {
             f();
         }
