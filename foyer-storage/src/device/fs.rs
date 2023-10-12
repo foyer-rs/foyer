@@ -25,8 +25,9 @@ use super::{
     allocator::AlignedAllocator,
     asyncify,
     error::{DeviceError, DeviceResult},
-    Device, IoBuf, IoBufMut,
+    Device, IoBuf, IoBufMut, IoRange,
 };
+use foyer_common::range::RangeBoundsExt;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -84,11 +85,15 @@ impl Device for FsDevice {
     async fn write(
         &self,
         buf: impl IoBuf,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
     ) -> (DeviceResult<usize>, impl IoBuf) {
         let file_capacity = self.inner.config.file_capacity;
+
+        let range = range.bounds(0..buf.as_ref().len());
+        let len = RangeBoundsExt::len(&range).unwrap();
+
         assert!(
             offset as usize + len <= file_capacity,
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
@@ -98,7 +103,7 @@ impl Device for FsDevice {
 
         asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[..len], offset as i64)
+            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[range], offset as i64)
                 .map_err(DeviceError::from);
             (res, buf)
         })
@@ -108,11 +113,15 @@ impl Device for FsDevice {
     async fn read(
         &self,
         mut buf: impl IoBufMut,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
     ) -> (DeviceResult<usize>, impl IoBufMut) {
         let file_capacity = self.inner.config.file_capacity;
+
+        let range = range.bounds(0..buf.as_ref().len());
+        let len = RangeBoundsExt::len(&range).unwrap();
+
         assert!(
             offset as usize + len <= file_capacity,
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
@@ -122,7 +131,7 @@ impl Device for FsDevice {
 
         asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[..len], offset as i64)
+            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[range], offset as i64)
                 .map_err(DeviceError::from);
             (res, buf)
         })
@@ -270,9 +279,9 @@ mod tests {
         let wbuf = unsafe { Slice::new(&wbuffer) };
         let rbuf = unsafe { SliceMut::new(&mut rbuffer) };
 
-        let (res, _wbuf) = dev.write(wbuf, 0, 0, ALIGN).await;
+        let (res, _wbuf) = dev.write(wbuf, .., 0, 0).await;
         res.unwrap();
-        let (res, _rbuf) = dev.read(rbuf, 0, 0, ALIGN).await;
+        let (res, _rbuf) = dev.read(rbuf, .., 0, 0).await;
         res.unwrap();
 
         assert_eq!(&wbuffer, &rbuffer);
