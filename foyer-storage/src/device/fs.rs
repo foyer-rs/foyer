@@ -256,8 +256,6 @@ mod tests {
 
     use bytes::BufMut;
 
-    use crate::slice::{Slice, SliceMut};
-
     use super::*;
 
     const FILES: usize = 8;
@@ -282,12 +280,9 @@ mod tests {
         let mut rbuffer = dev.io_buffer(ALIGN, ALIGN);
         (&mut rbuffer[..]).put_slice(&[0; ALIGN]);
 
-        let wbuf = unsafe { Slice::new(&wbuffer) };
-        let rbuf = unsafe { SliceMut::new(&mut rbuffer) };
-
-        let (res, _wbuf) = dev.write(wbuf, .., 0, 0).await;
+        let (res, wbuffer) = dev.write(wbuffer, .., 0, 0).await;
         res.unwrap();
-        let (res, _rbuf) = dev.read(rbuf, .., 0, 0).await;
+        let (res, rbuffer) = dev.read(rbuffer, .., 0, 0).await;
         res.unwrap();
 
         assert_eq!(&wbuffer, &rbuffer);
