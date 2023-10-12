@@ -25,7 +25,6 @@ use crate::{
     metrics::Metrics,
     region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    slice::Slice,
 };
 
 #[derive(Debug)]
@@ -90,6 +89,7 @@ where
 
         // step 1: write buffer back to device
         let slice = region.load(.., 0).await?.unwrap();
+        let mut slice = Some(slice);
 
         {
             // wait all physical readers (from previous version) and writers done
@@ -104,17 +104,23 @@ where
             let start = offset;
             let end = std::cmp::min(offset + len, region.device().region_size());
 
-            let s = unsafe { Slice::new(&slice.as_ref()[start..end]) };
             if let Some(limiter) = &self.rate_limiter && let Some(duration) = limiter.consume(len as f64) {
                 tokio::time::sleep(duration).await;
             }
-            let (res, _s) = region
+            let (res, s) = region
                 .device()
-                .write(s, .., region.id(), offset as u64)
+                .write(
+                    slice.take().unwrap(),
+                    start..end,
+                    region.id(),
+                    offset as u64,
+                )
                 .await;
             res?;
+            slice = Some(s);
             offset += len;
         }
+
         drop(slice);
 
         tracing::trace!("[flusher] step 2");
@@ -139,6 +145,8 @@ where
         self.metrics
             .total_bytes
             .add(region.device().region_size() as u64);
+
+        println!("!");
 
         Ok(())
     }

@@ -82,13 +82,16 @@ impl Device for FsDevice {
         Self::open(config).await
     }
 
-    async fn write(
+    async fn write<B>(
         &self,
-        buf: impl IoBuf,
+        buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> (DeviceResult<usize>, impl IoBuf) {
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBuf,
+    {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
@@ -110,13 +113,16 @@ impl Device for FsDevice {
         .await
     }
 
-    async fn read(
+    async fn read<B>(
         &self,
-        mut buf: impl IoBufMut,
+        mut buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> (DeviceResult<usize>, impl IoBufMut) {
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBufMut,
+    {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
