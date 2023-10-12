@@ -14,6 +14,7 @@
 
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
+#![feature(bound_map)]
 #![cfg_attr(coverage_nightly, feature(no_coverage))]
 
 pub mod batch;
@@ -21,6 +22,7 @@ pub mod bits;
 pub mod code;
 pub mod erwlock;
 pub mod queue;
+pub mod range;
 pub mod rate;
 pub mod rated_random;
 pub mod rated_ticket;

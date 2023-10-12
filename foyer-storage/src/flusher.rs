@@ -110,7 +110,7 @@ where
             }
             let (res, _s) = region
                 .device()
-                .write(s, region.id(), offset as u64, len)
+                .write(s, .., region.id(), offset as u64)
                 .await;
             res?;
             offset += len;
