@@ -146,8 +146,6 @@ where
             .total_bytes
             .add(region.device().region_size() as u64);
 
-        println!("!");
-
         Ok(())
     }
 }
