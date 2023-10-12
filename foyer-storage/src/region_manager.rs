@@ -163,11 +163,10 @@ where
             if let Some(region) = current.as_ref() {
                 match region.allocate(size) {
                     AllocateResult::Ok(slice) => return Some(slice),
-                    AllocateResult::Full { .. } => {
+                    AllocateResult::NotEnough { .. } => {
                         self.dirty_regions.release(region.id());
                         *current = None;
                     }
-                    AllocateResult::None => {}
                 }
             }
 
