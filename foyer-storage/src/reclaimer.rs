@@ -213,7 +213,8 @@ where
         let align = region.device().align();
         let mut buf = region.device().io_buffer(align, align);
         (&mut buf[..]).put_slice(&vec![0; align]);
-        region.device().write(buf, region_id, 0, align).await?;
+        let (res, _buf) = region.device().write(buf, region_id, 0, align).await;
+        res?;
 
         // step 4: send clean region
         self.region_manager.clean_regions().release(region_id);
