@@ -20,11 +20,13 @@ use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
 use error::DeviceResult;
+use foyer_common::range::RangeBoundsExt;
 use futures::Future;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
 pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
+pub trait IoRange = RangeBoundsExt<usize> + Send + Sync + 'static + Debug;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
@@ -37,18 +39,18 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     fn write(
         &self,
         buf: impl IoBuf,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
     ) -> impl Future<Output = (DeviceResult<usize>, impl IoBuf)> + Send;
 
     #[must_use]
     fn read(
         &self,
         buf: impl IoBufMut,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
     ) -> impl Future<Output = (DeviceResult<usize>, impl IoBufMut)> + Send;
 
     #[must_use]
@@ -92,7 +94,6 @@ where
     f()
 }
 
-#[cfg(madsim)]
 #[cfg(test)]
 pub mod tests {
     use super::{allocator::AlignedAllocator, *};
@@ -117,9 +118,9 @@ pub mod tests {
         async fn write(
             &self,
             buf: impl IoBuf,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
         ) -> (DeviceResult<usize>, impl IoBuf) {
             (Ok(0), buf)
         }
@@ -127,9 +128,9 @@ pub mod tests {
         async fn read(
             &self,
             buf: impl IoBufMut,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
         ) -> (DeviceResult<usize>, impl IoBufMut) {
             (Ok(0), buf)
         }
