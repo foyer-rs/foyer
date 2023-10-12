@@ -297,11 +297,11 @@ where
                 start + offset + len
             );
             let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
-            let read = match self
+            let (res, _s) = self
                 .device
                 .read(s, region, (start + offset) as u64, len)
-                .await
-            {
+                .await;
+            let read = match res {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     let mut inner = self.inner.write();
