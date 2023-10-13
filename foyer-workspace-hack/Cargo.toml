@@ -20,7 +20,7 @@ futures-executor = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await-macro", "channel", "io", "sink"] }
 hyper = { version = "0.14", features = ["full"] }
-itertools = { version = "0.10" }
+itertools = { version = "0.11" }
 libc = { version = "0.2", features = ["extra_traits"] }
 memchr = { version = "2" }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
@@ -35,7 +35,7 @@ tracing-core = { version = "0.1" }
 
 [build-dependencies]
 either = { version = "1", default-features = false, features = ["use_std"] }
-itertools = { version = "0.10" }
+itertools = { version = "0.11" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 syn = { version = "2", features = ["extra-traits", "full", "visit-mut"] }

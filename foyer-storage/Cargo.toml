@@ -21,7 +21,7 @@ foyer-common = { path = "../foyer-common" }
 foyer-intrusive = { path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 futures = "0.3"
-itertools = "0.11.0"
+itertools = "0.11"
 libc = "0.2"
 memoffset = "0.9"
 nix = { version = "0.27", features = ["fs", "mman", "uio"] }
