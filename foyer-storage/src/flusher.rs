@@ -108,10 +108,11 @@ where
             if let Some(limiter) = &self.rate_limiter && let Some(duration) = limiter.consume(len as f64) {
                 tokio::time::sleep(duration).await;
             }
-            region
+            let (res, _s) = region
                 .device()
-                .write(s, region.id(), offset as u64, len)
-                .await?;
+                .write(s, .., region.id(), offset as u64)
+                .await;
+            res?;
             offset += len;
         }
         drop(slice);

@@ -20,11 +20,13 @@ use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
 use error::DeviceResult;
+use foyer_common::range::RangeBoundsExt;
 use futures::Future;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
 pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
+pub trait IoRange = RangeBoundsExt<usize> + Send + Sync + 'static + Debug;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
@@ -37,19 +39,19 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     fn write(
         &self,
         buf: impl IoBuf,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> impl Future<Output = DeviceResult<usize>> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, impl IoBuf)> + Send;
 
     #[must_use]
     fn read(
         &self,
         buf: impl IoBufMut,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> impl Future<Output = DeviceResult<usize>> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, impl IoBufMut)> + Send;
 
     #[must_use]
     fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
@@ -72,18 +74,23 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     }
 }
 
+#[cfg(not(madsim))]
 #[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> DeviceResult<T>
+async fn asyncify<F, T>(f: F) -> T
 where
-    F: FnOnce() -> DeviceResult<T> + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    #[cfg(not(madsim))]
-    match tokio::task::spawn_blocking(f).await {
-        Ok(res) => res,
-        Err(e) => Err(format!("background task failed: {:?}", e,).into()),
-    }
-    #[cfg(madsim)]
+    tokio::task::spawn_blocking(f).await.unwrap()
+}
+
+#[cfg(madsim)]
+#[tracing::instrument(level = "trace", skip(f))]
+async fn asyncify<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
     f()
 }
 
@@ -110,22 +117,22 @@ pub mod tests {
 
         async fn write(
             &self,
-            _buf: impl IoBuf,
+            buf: impl IoBuf,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
-        ) -> DeviceResult<usize> {
-            Ok(0)
+        ) -> (DeviceResult<usize>, impl IoBuf) {
+            (Ok(0), buf)
         }
 
         async fn read(
             &self,
-            _buf: impl IoBufMut,
+            buf: impl IoBufMut,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
-        ) -> DeviceResult<usize> {
-            Ok(0)
+        ) -> (DeviceResult<usize>, impl IoBufMut) {
+            (Ok(0), buf)
         }
 
         async fn flush(&self) -> DeviceResult<()> {

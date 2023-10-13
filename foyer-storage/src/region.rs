@@ -37,16 +37,14 @@ pub type Version = u32;
 #[derive(Debug)]
 pub enum AllocateResult {
     Ok(WriteSlice),
-    Full { slice: WriteSlice, remain: usize },
-    None,
+    NotEnough(WriteSlice),
 }
 
 impl AllocateResult {
     pub fn unwrap(self) -> WriteSlice {
         match self {
             AllocateResult::Ok(slice) => slice,
-            AllocateResult::Full { .. } => unreachable!(),
-            AllocateResult::None => unreachable!(),
+            AllocateResult::NotEnough { .. } => unreachable!(),
         }
     }
 }
@@ -155,6 +153,8 @@ where
         }
     }
 
+    /// If there is enough buffer, return `AllocateResult::Ok(slice)``.
+    /// Else, return `AllocateResult::NotEnough(slice)`. `slice` is the remaining buffer.
     #[tracing::instrument(skip(self))]
     pub fn allocate(&self, size: usize) -> AllocateResult {
         let cleanup = {
@@ -174,12 +174,10 @@ where
         let region_id = self.id;
 
         if inner.len + size > inner.capacity {
-            let remain = self.device.region_size() - inner.len;
             inner.len = self.device.region_size();
-            let range = inner.len - self.device.align()..inner.len;
 
             let buffer = inner.buffer.as_mut().unwrap();
-            let slice = unsafe { SliceMut::new(&mut buffer[range]) };
+            let slice = unsafe { SliceMut::new(&mut buffer[offset..]) };
 
             let slice = WriteSlice {
                 slice,
@@ -188,7 +186,7 @@ where
                 offset,
                 cleanup: Some(cleanup),
             };
-            AllocateResult::Full { slice, remain }
+            AllocateResult::NotEnough(slice)
         } else {
             inner.len += size;
 
@@ -299,11 +297,11 @@ where
                 start + offset + len
             );
             let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
-            let read = match self
+            let (res, _s) = self
                 .device
-                .read(s, region, (start + offset) as u64, len)
-                .await
-            {
+                .read(s, .., region, (start + offset) as u64)
+                .await;
+            let read = match res {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     let mut inner = self.inner.write();
