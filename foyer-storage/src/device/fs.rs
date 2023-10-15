@@ -82,13 +82,16 @@ impl Device for FsDevice {
         Self::open(config).await
     }
 
-    async fn write(
+    async fn write<B>(
         &self,
-        buf: impl IoBuf,
+        buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> (DeviceResult<usize>, impl IoBuf) {
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBuf,
+    {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
@@ -110,13 +113,16 @@ impl Device for FsDevice {
         .await
     }
 
-    async fn read(
+    async fn read<B>(
         &self,
-        mut buf: impl IoBufMut,
+        mut buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> (DeviceResult<usize>, impl IoBufMut) {
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBufMut,
+    {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
@@ -250,8 +256,6 @@ mod tests {
 
     use bytes::BufMut;
 
-    use crate::slice::{Slice, SliceMut};
-
     use super::*;
 
     const FILES: usize = 8;
@@ -276,12 +280,9 @@ mod tests {
         let mut rbuffer = dev.io_buffer(ALIGN, ALIGN);
         (&mut rbuffer[..]).put_slice(&[0; ALIGN]);
 
-        let wbuf = unsafe { Slice::new(&wbuffer) };
-        let rbuf = unsafe { SliceMut::new(&mut rbuffer) };
-
-        let (res, _wbuf) = dev.write(wbuf, .., 0, 0).await;
+        let (res, wbuffer) = dev.write(wbuffer, .., 0, 0).await;
         res.unwrap();
-        let (res, _rbuf) = dev.read(rbuf, .., 0, 0).await;
+        let (res, rbuffer) = dev.read(rbuffer, .., 0, 0).await;
         res.unwrap();
 
         assert_eq!(&wbuffer, &rbuffer);

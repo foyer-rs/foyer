@@ -26,7 +26,7 @@ use futures::Future;
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
 pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
-pub trait IoRange = RangeBoundsExt<usize> + Send + Sync + 'static + Debug;
+pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
@@ -36,22 +36,26 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     fn open(config: Self::Config) -> impl Future<Output = DeviceResult<Self>> + Send;
 
     #[must_use]
-    fn write(
+    fn write<B>(
         &self,
-        buf: impl IoBuf,
+        buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> impl Future<Output = (DeviceResult<usize>, impl IoBuf)> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    where
+        B: IoBuf;
 
     #[must_use]
-    fn read(
+    fn read<B>(
         &self,
-        buf: impl IoBufMut,
+        buf: B,
         range: impl IoRange,
         region: RegionId,
         offset: u64,
-    ) -> impl Future<Output = (DeviceResult<usize>, impl IoBufMut)> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    where
+        B: IoBufMut;
 
     #[must_use]
     fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
@@ -115,23 +119,29 @@ pub mod tests {
             Ok(Self::new(config))
         }
 
-        async fn write(
+        async fn write<B>(
             &self,
-            buf: impl IoBuf,
+            buf: B,
             _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-        ) -> (DeviceResult<usize>, impl IoBuf) {
+        ) -> (DeviceResult<usize>, B)
+        where
+            B: IoBuf,
+        {
             (Ok(0), buf)
         }
 
-        async fn read(
+        async fn read<B>(
             &self,
-            buf: impl IoBufMut,
+            buf: B,
             _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-        ) -> (DeviceResult<usize>, impl IoBufMut) {
+        ) -> (DeviceResult<usize>, B)
+        where
+            B: IoBufMut,
+        {
             (Ok(0), buf)
         }
 
