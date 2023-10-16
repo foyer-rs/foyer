@@ -40,12 +40,12 @@ pub trait Key:
     }
 
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn write(&self, buf: &mut [u8]) {
+    fn write(&self, buf: impl BufMut) {
         panic!("Method `write` must be implemented for `Key` if storage is used.")
     }
 
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: impl Buf) -> Self {
         panic!("Method `read` must be implemented for `Key` if storage is used.")
     }
 }
@@ -63,12 +63,12 @@ pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
     }
 
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn write(&self, buf: &mut [u8]) {
+    fn write(&self, buf: impl BufMut) {
         panic!("Method `write` must be implemented for `Value` if storage is used.")
     }
 
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: impl Buf) -> Self {
         panic!("Method `read` must be implemented for `Value` if storage is used.")
     }
 }
@@ -93,12 +93,12 @@ macro_rules! impl_key {
                     }
 
                     #[cfg_attr(coverage_nightly, no_coverage)]
-                    fn write(&self, mut buf: &mut [u8]) {
+                    fn write(&self, mut buf: impl BufMut) {
                         buf.[< put_ $type>](*self)
                     }
 
                     #[cfg_attr(coverage_nightly, no_coverage)]
-                    fn read(mut buf: &[u8]) -> Self {
+                    fn read(mut buf: impl Buf) -> Self {
                         buf.[< get_ $type>]()
                     }
                 }
@@ -118,12 +118,12 @@ macro_rules! impl_value {
                     }
 
                     #[cfg_attr(coverage_nightly, no_coverage)]
-                    fn write(&self, mut buf: &mut [u8]) {
+                    fn write(&self, mut buf: impl BufMut) {
                         buf.[< put_ $type>](*self)
                     }
 
                     #[cfg_attr(coverage_nightly, no_coverage)]
-                    fn read(mut buf: &[u8]) -> Self {
+                    fn read(mut buf: impl Buf) -> Self {
                         buf.[< get_ $type>]()
                     }
                 }
@@ -147,12 +147,17 @@ impl Value for Vec<u8> {
     }
 
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: impl BufMut) {
         buf.put_slice(self);
     }
 
+    #[expect(clippy::uninit_vec)]
     #[cfg_attr(coverage_nightly, no_coverage)]
-    fn read(buf: &[u8]) -> Self {
-        buf.to_vec()
+    fn read(mut buf: impl Buf) -> Self {
+        let bytes = buf.remaining();
+        let mut v = Vec::with_capacity(bytes);
+        unsafe { v.set_len(bytes) };
+        buf.copy_to_slice(&mut v);
+        v
     }
 }
