@@ -176,6 +176,10 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     allocator_bits: usize,
 
+    /// Catalog indices sharding bits.
+    #[arg(long, default_value_t = 6)]
+    catalog_bits: usize,
+
     /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
     metrics: bool,
@@ -549,6 +553,7 @@ async fn main() {
         eviction_config,
         device_config,
         allocator_bits: args.allocator_bits,
+        catalog_bits: args.catalog_bits,
         admissions,
         reinsertions,
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
