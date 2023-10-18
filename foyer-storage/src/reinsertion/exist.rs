@@ -19,7 +19,7 @@ use std::{
 
 use foyer_common::code::{Key, Value};
 
-use crate::indices::Indices;
+use crate::catalog::Catalog;
 
 use super::ReinsertionPolicy;
 
@@ -29,7 +29,7 @@ where
     K: Key,
     V: Value,
 {
-    indices: OnceLock<Arc<Indices<K>>>,
+    indices: OnceLock<Arc<Catalog<K>>>,
     _marker: PhantomData<V>,
 }
 
@@ -55,7 +55,7 @@ where
 
     type Value = V;
 
-    fn init(&self, indices: &Arc<crate::indices::Indices<Self::Key>>) {
+    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {
         self.indices.get_or_init(|| indices.clone());
     }
 
