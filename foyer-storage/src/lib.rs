@@ -25,11 +25,11 @@
 #![feature(associated_type_defaults)]
 
 pub mod admission;
+pub mod catalog;
 pub mod device;
 pub mod error;
 pub mod flusher;
 pub mod generic;
-pub mod indices;
 pub mod judge;
 pub mod lazy;
 pub mod metrics;

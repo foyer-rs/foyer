@@ -113,7 +113,7 @@ where
         let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
-        let _indices = self.store.indices().take_region(&region_id);
+        let _indices = self.store.catalog().take_region(&region_id);
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         {
