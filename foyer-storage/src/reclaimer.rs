@@ -42,7 +42,7 @@ where
 {
     threshold: usize,
 
-    store: Arc<GenericStore<K, V, D, EP, EL>>,
+    store: GenericStore<K, V, D, EP, EL>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
@@ -63,7 +63,7 @@ where
 {
     pub fn new(
         threshold: usize,
-        store: Arc<GenericStore<K, V, D, EP, EL>>,
+        store: GenericStore<K, V, D, EP, EL>,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         rate_limiter: Option<Arc<RateLimiter>>,
         metrics: Arc<Metrics>,
@@ -113,7 +113,7 @@ where
         let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
-        let _indices = self.store.indices().take_region(&region_id);
+        let _indices = self.store.catalog().take_region(&region_id);
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         {
@@ -213,7 +213,8 @@ where
         let align = region.device().align();
         let mut buf = region.device().io_buffer(align, align);
         (&mut buf[..]).put_slice(&vec![0; align]);
-        region.device().write(buf, region_id, 0, align).await?;
+        let (res, _buf) = region.device().write(buf, .., region_id, 0).await;
+        res?;
 
         // step 4: send clean region
         self.region_manager.clean_regions().release(region_id);

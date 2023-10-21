@@ -25,25 +25,32 @@ pub trait StorageWriter: Send + Sync + Debug {
     type Key: Key;
     type Value: Value;
 
+    fn key(&self) -> &Self::Key;
+
+    fn weight(&self) -> usize;
+
     fn judge(&mut self) -> bool;
+
+    fn force(&mut self);
 
     fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;
 }
 
-pub trait Storage: Send + Sync + Debug + 'static {
+pub trait Storage: Send + Sync + Debug + Clone + 'static {
     type Key: Key;
     type Value: Value;
-    type Config: Send + Debug;
-    type Owned: Send + Sync + Debug + 'static;
-    type Writer<'a>: StorageWriter<Key = Self::Key, Value = Self::Value>;
+    type Config: Send + Clone + Debug;
+    type Writer: StorageWriter<Key = Self::Key, Value = Self::Value>;
 
     #[must_use]
-    fn open(config: Self::Config) -> impl Future<Output = Result<Self::Owned>> + Send;
+    fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
+
+    fn is_ready(&self) -> bool;
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_>;
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer;
 
     fn exists(&self, key: &Self::Key) -> Result<bool>;
 
@@ -188,14 +195,22 @@ pub trait StorageExt: Storage {
 
 impl<S: Storage> StorageExt for S {}
 
-pub trait ForceStorageWriter: StorageWriter {
-    fn set_force(&mut self);
+pub trait AsyncStorageExt: Storage {
+    #[tracing::instrument(skip(self, value))]
+    fn insert_async(&self, key: Self::Key, value: Self::Value) {
+        let weight = key.serialized_len() + value.serialized_len();
+        let store = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = store.writer(key, weight).finish(value).await {
+                tracing::warn!("async storage insert error: {}", e);
+            }
+        });
+    }
 }
 
-pub trait ForceStorageExt: Storage
-where
-    for<'w> Self::Writer<'w>: ForceStorageWriter,
-{
+impl<S: Storage> AsyncStorageExt for S {}
+
+pub trait ForceStorageExt: Storage {
     #[tracing::instrument(skip(self, value))]
     fn insert_force(
         &self,
@@ -204,7 +219,7 @@ where
     ) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         let mut writer = self.writer(key, weight);
-        writer.set_force();
+        writer.force();
         writer.finish(value)
     }
 
@@ -226,7 +241,7 @@ where
     {
         async move {
             let mut writer = self.writer(key, weight);
-            writer.set_force();
+            writer.force();
             if !writer.judge() {
                 return Ok(false);
             }
@@ -261,7 +276,7 @@ where
     {
         async move {
             let mut writer = self.writer(key, weight);
-            writer.set_force();
+            writer.force();
             if !writer.judge() {
                 return Ok(false);
             }
@@ -278,9 +293,4 @@ where
     }
 }
 
-impl<S> ForceStorageExt for S
-where
-    S: Storage,
-    for<'w> S::Writer<'w>: ForceStorageWriter,
-{
-}
+impl<S> ForceStorageExt for S where S: Storage {}

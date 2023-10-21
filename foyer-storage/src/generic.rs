@@ -15,7 +15,10 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -31,17 +34,17 @@ use twox_hash::XxHash64;
 
 use crate::{
     admission::AdmissionPolicy,
+    catalog::{Catalog, Index, IndexInfo, Sequence},
     device::Device,
     error::Result,
     flusher::Flusher,
-    indices::{Index, Indices},
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
-    storage::{ForceStorageWriter, Storage, StorageWriter},
+    storage::{Storage, StorageWriter},
 };
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::core::adapter::Link;
@@ -72,6 +75,9 @@ where
     /// Note: The count of allocators should be greater than buffer count.
     ///       (buffer count = buffer pool size / device region size)
     pub allocator_bits: usize,
+
+    /// Catalog indices sharding bits.
+    pub catalog_bits: usize,
 
     /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
@@ -118,6 +124,7 @@ where
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
             .field("allocator_bits", &self.allocator_bits)
+            .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("buffer_pool_size", &self.buffer_pool_size)
@@ -132,6 +139,34 @@ where
     }
 }
 
+impl<K, V, D, EP> Clone for GenericStoreConfig<K, V, D, EP>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy,
+{
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            eviction_config: self.eviction_config.clone(),
+            device_config: self.device_config.clone(),
+            allocator_bits: self.allocator_bits,
+            catalog_bits: self.catalog_bits,
+            admissions: self.admissions.clone(),
+            reinsertions: self.reinsertions.clone(),
+            buffer_pool_size: self.buffer_pool_size,
+            flushers: self.flushers,
+            flush_rate_limit: self.flush_rate_limit,
+            reclaimers: self.reclaimers,
+            reclaim_rate_limit: self.reclaim_rate_limit,
+            allocation_timeout: self.allocation_timeout,
+            clean_region_threshold: self.clean_region_threshold,
+            recover_concurrency: self.recover_concurrency,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GenericStore<K, V, D, EP, EL>
 where
@@ -141,7 +176,35 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    indices: Arc<Indices<K>>,
+    inner: Arc<GenericStoreInner<K, V, D, EP, EL>>,
+}
+
+impl<K, V, D, EP, EL> Clone for GenericStore<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GenericStoreInner<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    sequence: AtomicU64,
+    indices: Arc<Catalog<K>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
@@ -169,7 +232,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Arc<Self>> {
+    async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Self> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let metrics = Arc::new(METRICS.foyer(&config.name));
@@ -195,7 +258,7 @@ where
             metrics.clone(),
         ));
 
-        let indices = Arc::new(Indices::new(device.regions()));
+        let indices = Arc::new(Catalog::new(device.regions(), config.catalog_bits));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
         let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
@@ -207,7 +270,8 @@ where
             .map(|_| reclaimers_stop_tx.subscribe())
             .collect_vec();
 
-        let store = Arc::new(Self {
+        let inner = GenericStoreInner {
+            sequence: AtomicU64::new(0),
             indices: indices.clone(),
             region_manager: region_manager.clone(),
             device: device.clone(),
@@ -219,13 +283,16 @@ where
             reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
-        });
+        };
+        let store = Self {
+            inner: Arc::new(inner),
+        };
 
-        for admission in store.admissions.iter() {
-            admission.init(&store.indices);
+        for admission in store.inner.admissions.iter() {
+            admission.init(&store.inner.indices);
         }
-        for reinsertion in store.reinsertions.iter() {
-            reinsertion.init(&store.indices);
+        for reinsertion in store.inner.reinsertions.iter() {
+            reinsertion.init(&store.inner.indices);
         }
 
         let flush_rate_limiter = match config.flush_rate_limit {
@@ -262,7 +329,8 @@ where
             })
             .collect_vec();
 
-        store.recover(config.recover_concurrency).await?;
+        let sequence = store.recover(config.recover_concurrency).await?;
+        store.inner.sequence.store(sequence + 1, Ordering::Relaxed);
 
         let flusher_handles = flushers
             .into_iter()
@@ -274,8 +342,8 @@ where
             .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
             .collect_vec();
 
-        *store.flusher_handles.lock() = flusher_handles;
-        *store.reclaimer_handles.lock() = reclaimer_handles;
+        *store.inner.flusher_handles.lock() = flusher_handles;
+        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
@@ -285,18 +353,18 @@ where
         self.seal().await;
 
         // stop and wait for reclaimers
-        let handles = self.reclaimer_handles.lock().drain(..).collect_vec();
+        let handles = self.inner.reclaimer_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
-            self.reclaimers_stop_tx.send(()).unwrap();
+            self.inner.reclaimers_stop_tx.send(()).unwrap();
         }
         for handle in handles {
             handle.await.unwrap();
         }
 
         // stop and wait for flushers
-        let handles = self.flusher_handles.lock().drain(..).collect_vec();
+        let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
-            self.flushers_stop_tx.send(()).unwrap();
+            self.inner.flushers_stop_tx.send(()).unwrap();
         }
         for handle in handles {
             handle.await.unwrap();
@@ -307,113 +375,131 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<'_, K, V, D, EP, EL> {
-        GenericStoreWriter::new(self, key, weight)
+    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<K, V, D, EP, EL> {
+        GenericStoreWriter::new(self.clone(), key, weight)
     }
 
     #[tracing::instrument(skip(self))]
     fn exists(&self, key: &K) -> Result<bool> {
-        Ok(self.indices.lookup(key).is_some())
+        Ok(self.inner.indices.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip(self))]
     async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
-        let index = match self.indices.lookup(key) {
-            Some(index) => index,
+        let info = match self.inner.indices.lookup(key) {
+            Some(info) => info,
             None => {
-                self.metrics
+                self.inner
+                    .metrics
                     .op_duration_lookup_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
         };
 
-        self.region_manager.record_access(&index.region);
-        let region = self.region_manager.region(&index.region);
-        let start = index.offset as usize;
-        let end = start + index.len as usize;
+        match info.index {
+            crate::catalog::Index::RingBuffer {} => todo!(),
+            crate::catalog::Index::Region {
+                region,
+                version,
+                offset,
+                len,
+                key_len: _,
+                value_len: _,
+            } => {
+                self.inner.region_manager.record_access(&region);
+                let region = self.inner.region_manager.region(&region);
+                let start = offset as usize;
+                let end = start + len as usize;
 
-        // TODO(MrCroxx): read value only
-        let slice = match region.load(start..end, index.version).await? {
-            Some(slice) => slice,
-            None => {
-                // Remove index if the storage layer fails to lookup it (because of region version mismatch).
-                self.indices.remove(key);
-                self.metrics
-                    .op_duration_lookup_miss
+                // TODO(MrCroxx): read value only
+                let slice = match region.load(start..end, version).await? {
+                    Some(slice) => slice,
+                    None => {
+                        // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                        self.inner.indices.remove(key);
+                        self.inner
+                            .metrics
+                            .op_duration_lookup_miss
+                            .observe(now.elapsed().as_secs_f64());
+                        return Ok(None);
+                    }
+                };
+                self.inner
+                    .metrics
+                    .op_bytes_lookup
+                    .inc_by(slice.len() as u64);
+
+                let res = match read_entry::<K, V>(slice.as_ref()) {
+                    Some((_key, value)) => Ok(Some(value)),
+                    None => {
+                        // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
+                        self.inner.indices.remove(key);
+                        Ok(None)
+                    }
+                };
+                drop(slice);
+
+                self.inner
+                    .metrics
+                    .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
-                return Ok(None);
+
+                res
             }
-        };
-        self.metrics.op_bytes_lookup.inc_by(slice.len() as u64);
-
-        let res = match read_entry::<K, V>(slice.as_ref()) {
-            Some((_key, value)) => Ok(Some(value)),
-            None => {
-                // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
-                self.indices.remove(key);
-                Ok(None)
-            }
-        };
-        drop(slice);
-
-        self.metrics
-            .op_duration_lookup_hit
-            .observe(now.elapsed().as_secs_f64());
-
-        res
+        }
     }
 
     #[tracing::instrument(skip(self))]
     fn remove(&self, key: &K) -> Result<bool> {
-        let _timer = self.metrics.op_duration_remove.start_timer();
+        let _timer = self.inner.metrics.op_duration_remove.start_timer();
 
-        let res = self.indices.remove(key).is_some();
+        let res = self.inner.indices.remove(key).is_some();
 
         Ok(res)
     }
 
     #[tracing::instrument(skip(self))]
     fn clear(&self) -> Result<()> {
-        self.indices.clear();
+        self.inner.indices.clear();
 
         // TODO(MrCroxx): set all regions as clean?
 
         Ok(())
     }
 
-    pub(crate) fn indices(&self) -> &Arc<Indices<K>> {
-        &self.indices
+    pub(crate) fn catalog(&self) -> &Arc<Catalog<K>> {
+        &self.inner.indices
     }
 
     pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
-        &self.reinsertions
+        &self.inner.reinsertions
     }
 
     fn serialized_len(&self, key: &K, value: &V) -> usize {
         let unaligned =
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
-        bits::align_up(self.device.align(), unaligned)
+        bits::align_up(self.inner.device.align(), unaligned)
     }
 
     async fn seal(&self) {
-        self.region_manager.seal().await;
+        self.inner.region_manager.seal().await;
     }
 
     #[tracing::instrument(skip(self))]
-    async fn recover(&self, concurrency: usize) -> Result<()> {
+    async fn recover(&self, concurrency: usize) -> Result<Sequence> {
         tracing::info!("start store recovery");
 
         let (tx, rx) = async_channel::bounded(concurrency);
 
         let mut handles = vec![];
-        for region_id in 0..self.device.regions() as RegionId {
+        for region_id in 0..self.inner.device.regions() as RegionId {
             let itx = tx.clone();
             let irx = rx.clone();
-            let region_manager = self.region_manager.clone();
-            let indices = self.indices.clone();
+            let region_manager = self.inner.region_manager.clone();
+            let indices = self.inner.indices.clone();
             let handle = tokio::spawn(async move {
                 itx.send(()).await.unwrap();
                 let res = Self::recover_region(region_id, region_manager, indices).await;
@@ -424,60 +510,66 @@ where
         }
 
         let mut recovered = 0;
+        let mut sequence = 0;
 
         let results = try_join_all(handles).await.map_err(anyhow::Error::from)?;
 
         for (region_id, result) in results.into_iter().enumerate() {
-            if result? {
+            if let Some(seq) = result? {
                 tracing::debug!("region {} is recovered", region_id);
-                recovered += 1
+                recovered += 1;
+                sequence = std::cmp::max(sequence, seq);
             }
         }
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
-        self.metrics
+        self.inner
+            .metrics
             .total_bytes
-            .set((recovered * self.device.region_size()) as u64);
+            .set((recovered * self.inner.device.region_size()) as u64);
 
         // Force trigger reclamation.
-        if recovered == self.device.regions() {
-            self.region_manager.clean_regions().flash();
+        if recovered == self.inner.device.regions() {
+            self.inner.region_manager.clean_regions().flash();
         }
 
-        Ok(())
+        Ok(sequence)
     }
 
-    /// Return `true` if region is valid, otherwise `false`
+    /// Return `Some(max sequence)` if region is valid, otherwise `None`
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        indices: Arc<Indices<K>>,
-    ) -> Result<bool> {
+        indices: Arc<Catalog<K>>,
+    ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
+        let mut sequence = 0;
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
-            while let Some(index) = iter.next().await? {
-                indices.insert(index);
+            while let Some((key, info)) = iter.next().await? {
+                sequence = std::cmp::max(sequence, info.sequence);
+                indices.insert(key, info);
             }
             region_manager.eviction_push(region_id);
-            true
+            Some(sequence)
         } else {
             region_manager.clean_regions().release(region_id);
-            false
+            None
         };
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &mut GenericStoreWriter<'_, K, V, D, EP, EL>) {
-        for (index, admission) in self.admissions.iter().enumerate() {
-            let judge = admission.judge(&writer.key, writer.weight, &self.metrics);
+    fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D, EP, EL>) {
+        for (index, admission) in self.inner.admissions.iter().enumerate() {
+            let judge = admission.judge(&writer.key, writer.weight, &self.inner.metrics);
             writer.judges.set(index, judge);
         }
         writer.is_judged = true;
     }
 
+    #[tracing::instrument(skip(self, value))]
     async fn apply_writer(
         &self,
-        mut writer: GenericStoreWriter<'_, K, V, D, EP, EL>,
+        mut writer: GenericStoreWriter<K, V, D, EP, EL>,
         value: V,
     ) -> Result<bool> {
         debug_assert!(!writer.is_inserted);
@@ -488,15 +580,21 @@ where
 
         let now = Instant::now();
 
-        writer.is_inserted = true;
-        let key = &writer.key;
+        let sequence = if let Some(sequence) = writer.sequence {
+            sequence
+        } else {
+            self.inner.sequence.fetch_add(1, Ordering::Relaxed)
+        };
 
-        for (i, admission) in self.admissions.iter().enumerate() {
+        writer.is_inserted = true;
+        let key = writer.key;
+
+        for (i, admission) in self.inner.admissions.iter().enumerate() {
             let judge = writer.judges.get(i);
-            admission.on_insert(key, writer.weight, &self.metrics, judge);
+            admission.on_insert(&key, writer.weight, &self.inner.metrics, judge);
         }
 
-        let serialized_len = self.serialized_len(key, &value);
+        let serialized_len = self.serialized_len(&key, &value);
 
         if key.serialized_len() + value.serialized_len() != writer.weight {
             tracing::error!(
@@ -505,9 +603,13 @@ where
             );
         }
 
-        self.metrics.op_bytes_insert.inc_by(serialized_len as u64);
+        self.inner
+            .metrics
+            .op_bytes_insert
+            .inc_by(serialized_len as u64);
 
         let mut slice = match self
+            .inner
             .region_manager
             .allocate(serialized_len, !writer.is_skippable)
             .await
@@ -517,24 +619,26 @@ where
             None => return Ok(false),
         };
 
-        write_entry(slice.as_mut(), key, &value);
+        write_entry(slice.as_mut(), &key, &value, sequence);
 
-        let index = Index {
-            region: slice.region_id(),
-            version: slice.version(),
-            offset: slice.offset() as u32,
-            len: slice.len() as u32,
-            key_len: key.serialized_len() as u32,
-            value_len: value.serialized_len() as u32,
-
-            key: key.clone(),
+        let info = IndexInfo {
+            sequence,
+            index: Index::Region {
+                region: slice.region_id(),
+                version: slice.version(),
+                offset: slice.offset() as u32,
+                len: slice.len() as u32,
+                key_len: key.serialized_len() as u32,
+                value_len: value.serialized_len() as u32,
+            },
         };
         drop(slice);
 
-        self.indices.insert(index);
+        self.inner.indices.insert(key, info);
 
         let duration = now.elapsed() + writer.duration;
-        self.metrics
+        self.inner
+            .metrics
             .op_duration_insert_inserted
             .observe(duration.as_secs_f64());
 
@@ -542,7 +646,7 @@ where
     }
 }
 
-pub struct GenericStoreWriter<'a, K, V, D, EP, EL>
+pub struct GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -550,9 +654,11 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    store: &'a GenericStore<K, V, D, EP, EL>,
+    store: GenericStore<K, V, D, EP, EL>,
     key: K,
     weight: usize,
+
+    sequence: Option<Sequence>,
 
     judges: Judges,
     is_judged: bool,
@@ -564,7 +670,7 @@ where
     is_skippable: bool,
 }
 
-impl<'a, K, V, D, EP, EL> GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -572,12 +678,14 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    fn new(store: &'a GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
+    fn new(store: GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
+        let judges = Judges::new(store.inner.admissions.len());
         Self {
             store,
             key,
             weight,
-            judges: Judges::new(store.admissions.len()),
+            sequence: None,
+            judges,
             is_judged: false,
             duration: Duration::from_nanos(0),
             is_inserted: false,
@@ -587,19 +695,21 @@ where
 
     /// Judge if the entry can be admitted by configured admission policies.
     pub fn judge(&mut self) -> bool {
+        let store = self.store.clone();
         if !self.is_judged {
             let now = Instant::now();
-            self.store.judge_inner(self);
+            store.judge_inner(self);
             self.duration = now.elapsed();
         }
         self.judges.judge()
     }
 
     pub async fn finish(self, value: V) -> Result<bool> {
-        self.store.apply_writer(self, value).await
+        let store = self.store.clone();
+        store.apply_writer(self, value).await
     }
 
-    pub fn set_force(&mut self) {
+    pub fn force(&mut self) {
         self.judges.set_mask(Bitmap::new());
     }
 
@@ -610,9 +720,13 @@ where
     pub fn set_skippable(&mut self) {
         self.is_skippable = true
     }
+
+    pub fn set_sequence(&mut self, sequence: Sequence) {
+        self.sequence = Some(sequence);
+    }
 }
 
-impl<'a, K, V, D, EP, EL> Debug for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> Debug for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -632,42 +746,45 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> Drop for GenericStoreWriter<'a, K, V, D, EP, EL>
-where
-    K: Key,
-    V: Value,
-    D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
-{
-    fn drop(&mut self) {
-        if !self.is_inserted {
-            self.store
-                .metrics
-                .op_duration_insert_dropped
-                .observe(self.duration.as_secs_f64());
-            let mut filtered = false;
-            if self.is_judged {
-                for (i, admission) in self.store.admissions.iter().enumerate() {
-                    let judge = self.judges.get(i);
-                    admission.on_drop(&self.key, self.weight, &self.store.metrics, judge);
-                }
-                filtered = !self.judge();
-            }
-            if filtered {
-                self.store
-                    .metrics
-                    .op_duration_insert_filtered
-                    .observe(self.duration.as_secs_f64());
-            } else {
-                self.store
-                    .metrics
-                    .op_duration_insert_dropped
-                    .observe(self.duration.as_secs_f64());
-            }
-        }
-    }
-}
+// impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
+// where
+//     K: Key,
+//     V: Value,
+//     D: Device,
+//     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+//     EL: Link,
+// {
+//     fn drop(&mut self) {
+//         if !self.is_inserted {
+//             self.store
+//                 .inner
+//                 .metrics
+//                 .op_duration_insert_dropped
+//                 .observe(self.duration.as_secs_f64());
+//             let mut filtered = false;
+//             if self.is_judged {
+//                 for (i, admission) in self.store.inner.admissions.iter().enumerate() {
+//                     let judge = self.judges.get(i);
+//                     admission.on_drop(&self.key, self.weight, &self.store.inner.metrics, judge);
+//                 }
+//                 filtered = !self.judge();
+//             }
+//             if filtered {
+//                 self.store
+//                     .inner
+//                     .metrics
+//                     .op_duration_insert_filtered
+//                     .observe(self.duration.as_secs_f64());
+//             } else {
+//                 self.store
+//                     .inner
+//                     .metrics
+//                     .op_duration_insert_dropped
+//                     .observe(self.duration.as_secs_f64());
+//             }
+//         }
+//     }
+// }
 
 const ENTRY_MAGIC: u32 = 0x97_00_00_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_00_00_00;
@@ -676,17 +793,19 @@ const ENTRY_MAGIC_MASK: u32 = 0xFF_00_00_00;
 struct EntryHeader {
     key_len: u32,
     value_len: u32,
+    sequence: Sequence,
     checksum: u64,
 }
 
 impl EntryHeader {
     fn serialized_len() -> usize {
-        4 + 4 + 8
+        4 + 4 + 8 + 8
     }
 
     fn write(&self, mut buf: &mut [u8]) {
         buf.put_u32(self.key_len | ENTRY_MAGIC);
         buf.put_u32(self.value_len);
+        buf.put_u64(self.sequence);
         buf.put_u64(self.checksum);
     }
 
@@ -700,11 +819,13 @@ impl EntryHeader {
 
         let key_len = head ^ ENTRY_MAGIC;
         let value_len = buf.get_u32();
+        let sequence = buf.get_u64();
         let checksum = buf.get_u64();
 
         Some(Self {
             key_len,
             value_len,
+            sequence,
             checksum,
         })
     }
@@ -715,7 +836,7 @@ impl EntryHeader {
 /// # Safety
 ///
 /// `buf.len()` must excatly fit entry size
-fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V)
+fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V, sequence: Sequence)
 where
     K: Key,
     V: Value,
@@ -730,6 +851,7 @@ where
     let header = EntryHeader {
         key_len: key.serialized_len() as u32,
         value_len: value.serialized_len() as u32,
+        sequence,
         checksum,
     };
     header.write(&mut buf[..EntryHeader::serialized_len()]);
@@ -813,7 +935,7 @@ where
         }))
     }
 
-    pub async fn next(&mut self) -> Result<Option<Index<K>>> {
+    pub async fn next(&mut self) -> Result<Option<(K, IndexInfo)>> {
         let region_size = self.region.device().region_size();
         let align = self.region.device().align();
 
@@ -871,31 +993,37 @@ where
             key
         };
 
-        let index = Index {
-            key,
-            region: self.region.id(),
-            version: 0,
-            offset: self.cursor as u32,
-            len: entry_len as u32,
-            key_len: header.key_len,
-            value_len: header.value_len,
+        let info = IndexInfo {
+            sequence: header.sequence,
+            index: Index::Region {
+                region: self.region.id(),
+                version: 0,
+                offset: self.cursor as u32,
+                len: entry_len as u32,
+                key_len: header.key_len,
+                value_len: header.value_len,
+            },
         };
 
         self.cursor += entry_len;
 
-        Ok(Some(index))
+        Ok(Some((key, info)))
     }
 
     pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
-        let index = match self.next().await {
-            Ok(Some(index)) => index,
+        let (_, info) = match self.next().await {
+            Ok(Some(res)) => res,
             Ok(None) => return Ok(None),
             Err(e) => return Err(e),
         };
 
+        let Index::Region { offset, len, .. } = info.index else {
+            unreachable!("kv loaded from region must have index of region")
+        };
+
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
-        let start = index.offset as usize;
-        let end = start + index.len as usize;
+        let start = offset as usize;
+        let end = start + len as usize;
         let Some(slice) = self.region.load(start..end, 0).await? else {
             return Ok(None);
         };
@@ -906,7 +1034,7 @@ where
     }
 }
 
-impl<'a, K, V, D, EP, EL> StorageWriter for GenericStoreWriter<'a, K, V, D, EP, EL>
+impl<K, V, D, EP, EL> StorageWriter for GenericStoreWriter<K, V, D, EP, EL>
 where
     K: Key,
     V: Value,
@@ -917,25 +1045,24 @@ where
     type Key = K;
     type Value = V;
 
+    fn key(&self) -> &Self::Key {
+        &self.key
+    }
+
+    fn weight(&self) -> usize {
+        self.weight
+    }
+
     fn judge(&mut self) -> bool {
         self.judge()
     }
 
+    fn force(&mut self) {
+        self.force()
+    }
+
     async fn finish(self, value: Self::Value) -> Result<bool> {
         self.finish(value).await
-    }
-}
-
-impl<'a, K, V, D, EP, EL> ForceStorageWriter for GenericStoreWriter<'a, K, V, D, EP, EL>
-where
-    K: Key,
-    V: Value,
-    D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
-{
-    fn set_force(&mut self) {
-        self.set_force()
     }
 }
 
@@ -950,18 +1077,21 @@ where
     type Key = K;
     type Value = V;
     type Config = GenericStoreConfig<K, V, D, EP>;
-    type Owned = Arc<Self>;
-    type Writer<'a> = GenericStoreWriter<'a, K, V, D, EP, EL>;
+    type Writer = GenericStoreWriter<K, V, D, EP, EL>;
 
-    async fn open(config: Self::Config) -> Result<Self::Owned> {
+    async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
+    }
+
+    fn is_ready(&self) -> bool {
+        true
     }
 
     async fn close(&self) -> Result<()> {
         self.close().await
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         self.writer(key, weight)
     }
 
@@ -983,14 +1113,15 @@ where
 }
 
 #[cfg(test)]
-pub mod tests {
-    use std::{collections::HashSet, path::PathBuf};
+mod tests {
+    use std::path::PathBuf;
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
         storage::StorageExt,
+        test_utils::JudgeRecorder,
     };
 
     use super::*;
@@ -1000,113 +1131,6 @@ pub mod tests {
 
     type TestStoreConfig =
         GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
-
-    #[derive(Debug, Clone)]
-    enum Record<K: Key> {
-        Admit(K),
-        Evict(K),
-    }
-
-    #[derive(Debug)]
-    struct JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        records: Mutex<Vec<Record<K>>>,
-        _marker: PhantomData<V>,
-    }
-
-    impl<K, V> JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        fn dump(&self) -> Vec<Record<K>> {
-            self.records.lock().clone()
-        }
-
-        fn remains(&self) -> HashSet<K> {
-            let records = self.dump();
-            let mut res = HashSet::default();
-            for record in records {
-                match record {
-                    Record::Admit(key) => {
-                        res.insert(key);
-                    }
-                    Record::Evict(key) => {
-                        res.remove(&key);
-                    }
-                }
-            }
-            res
-        }
-    }
-
-    impl<K, V> Default for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        fn default() -> Self {
-            Self {
-                records: Mutex::new(Vec::default()),
-                _marker: PhantomData,
-            }
-        }
-    }
-
-    impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        type Key = K;
-
-        type Value = V;
-
-        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
-            self.records.lock().push(Record::Admit(key.clone()));
-            true
-        }
-
-        fn on_insert(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
-
-        fn on_drop(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
-    }
-
-    impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
-    where
-        K: Key,
-        V: Value,
-    {
-        type Key = K;
-
-        type Value = V;
-
-        fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
-            self.records.lock().push(Record::Evict(key.clone()));
-            false
-        }
-
-        fn on_insert(
-            &self,
-            _key: &Self::Key,
-            _weight: usize,
-            _metrics: &Arc<crate::metrics::Metrics>,
-            _judge: bool,
-        ) {
-        }
-
-        fn on_drop(
-            &self,
-            _key: &Self::Key,
-            _weight: usize,
-            _metrics: &Arc<crate::metrics::Metrics>,
-            _judge: bool,
-        ) {
-        }
-    }
 
     #[tokio::test]
     #[expect(clippy::identity_op)]
@@ -1129,10 +1153,11 @@ pub mod tests {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
                 file_capacity: 4 * MB,
-                align: 4096,
-                io_size: 4096 * KB,
+                align: 4 * KB,
+                io_size: 4 * KB,
             },
             allocator_bits: 1,
+            catalog_bits: 1,
             admissions,
             reinsertions,
             buffer_pool_size: 8 * MB,
@@ -1184,6 +1209,7 @@ pub mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,

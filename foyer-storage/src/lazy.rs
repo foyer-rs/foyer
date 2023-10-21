@@ -16,55 +16,106 @@ use std::sync::{Arc, OnceLock};
 
 use crate::{
     error::Result,
-    storage::Storage,
-    store::{Store, StoreConfig, StoreWriter},
+    storage::{Storage, StorageWriter},
+    store::{NoneStore, NoneStoreWriter, Store},
 };
 use foyer_common::code::{Key, Value};
-use futures::Future;
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
-pub struct LazyStore<K, V>
+pub enum LazyStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
+    S: Storage<Key = K, Value = V>,
 {
-    once: Arc<OnceLock<Store<K, V>>>,
-    none: Store<K, V>,
+    Store { writer: S::Writer },
+    None { writer: NoneStoreWriter<K, V> },
 }
 
-impl<K, V> Clone for LazyStore<K, V>
+impl<K, V, S> StorageWriter for LazyStorageWriter<K, V, S>
 where
     K: Key,
     V: Value,
+    S: Storage<Key = K, Value = V>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            once: Arc::clone(&self.once),
-            none: Store::None,
+    type Key = K;
+    type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.key(),
+            LazyStorageWriter::None { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.weight(),
+            LazyStorageWriter::None { writer } => writer.weight(),
+        }
+    }
+
+    fn judge(&mut self) -> bool {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.judge(),
+            LazyStorageWriter::None { writer } => writer.judge(),
+        }
+    }
+
+    fn force(&mut self) {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.force(),
+            LazyStorageWriter::None { writer } => writer.force(),
+        }
+    }
+
+    async fn finish(self, value: Self::Value) -> Result<bool> {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.finish(value).await,
+            LazyStorageWriter::None { writer } => writer.finish(value).await,
         }
     }
 }
 
-impl<K, V> LazyStore<K, V>
+#[derive(Debug)]
+pub struct LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
+    S: Storage<Key = K, Value = V>,
 {
-    pub fn lazy(config: StoreConfig<K, V>) -> Self {
-        let (res, task) = Self::lazy_with_task(config);
-        tokio::spawn(task);
-        res
-    }
+    once: Arc<OnceLock<S>>,
+    none: NoneStore<K, V>,
+}
 
-    pub fn lazy_with_task(
-        config: StoreConfig<K, V>,
-    ) -> (Self, impl Future<Output = Result<Store<K, V>>> + Send) {
+impl<K, V, S> Clone for LazyStorage<K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Storage<Key = K, Value = V>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            once: Arc::clone(&self.once),
+            none: NoneStore::default(),
+        }
+    }
+}
+
+impl<K, V, S> LazyStorage<K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Storage<Key = K, Value = V>,
+{
+    fn with_handle(config: S::Config) -> (Self, JoinHandle<Result<S>>) {
         let once = Arc::new(OnceLock::new());
 
-        let task = {
+        let handle = tokio::spawn({
             let once = once.clone();
             async move {
-                let store = match Store::open(config).await {
+                let store = match S::open(config).await {
                     Ok(store) => store,
                     Err(e) => {
                         tracing::error!("Lazy open store fail: {}", e);
@@ -74,36 +125,36 @@ where
                 once.set(store.clone()).unwrap();
                 Ok(store)
             }
-        };
+        });
 
         let res = Self {
             once,
-            none: Store::None,
+            none: NoneStore::default(),
         };
 
-        (res, task)
+        (res, handle)
     }
 }
 
-impl<K, V> Storage for LazyStore<K, V>
+impl<K, V, S> Storage for LazyStorage<K, V, S>
 where
     K: Key,
     V: Value,
+    S: Storage<Key = K, Value = V>,
 {
     type Key = K;
     type Value = V;
-    type Config = StoreConfig<K, V>;
-    type Owned = Self;
-    type Writer<'a> = StoreWriter<'a, K, V>;
+    type Config = S::Config;
+    type Writer = LazyStorageWriter<K, V, S>;
 
-    async fn open(config: Self::Config) -> Result<Self::Owned> {
-        let once = Arc::new(OnceLock::new());
-        let store = Store::open(config).await?;
-        once.set(store).unwrap();
-        Ok(Self {
-            once,
-            none: Store::None,
-        })
+    async fn open(config: S::Config) -> Result<Self> {
+        let (store, task) = Self::with_handle(config);
+        tokio::spawn(task);
+        Ok(store)
+    }
+
+    fn is_ready(&self) -> bool {
+        self.once.get().is_some()
     }
 
     async fn close(&self) -> Result<()> {
@@ -113,10 +164,14 @@ where
         }
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer<'_> {
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         match self.once.get() {
-            Some(store) => store.writer(key, weight),
-            None => self.none.writer(key, weight),
+            Some(store) => LazyStorageWriter::Store {
+                writer: store.writer(key, weight),
+            },
+            None => LazyStorageWriter::None {
+                writer: NoneStoreWriter::new(key, weight),
+            },
         }
     }
 
@@ -149,13 +204,20 @@ where
     }
 }
 
+pub type LazyStore<K, V> = LazyStorage<K, V, Store<K, V>>;
+pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
+
 #[cfg(test)]
 mod tests {
     use std::{path::PathBuf, time::Duration};
 
     use foyer_intrusive::eviction::fifo::FifoConfig;
 
-    use crate::{device::fs::FsDeviceConfig, storage::StorageExt, store::FifoFsStoreConfig};
+    use crate::{
+        device::fs::FsDeviceConfig,
+        storage::StorageExt,
+        store::{FifoFsStoreConfig, Store},
+    };
 
     use super::*;
 
@@ -177,6 +239,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
@@ -189,11 +252,11 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStore::lazy_with_task(config.into());
+        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
 
         assert!(!store.insert(100, 100).await.unwrap());
 
-        tokio::spawn(task).await.unwrap().unwrap();
+        handle.await.unwrap().unwrap();
 
         assert!(store.insert(100, 100).await.unwrap());
         assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
@@ -212,6 +275,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
@@ -224,11 +288,11 @@ mod tests {
             clean_region_threshold: 1,
         };
 
-        let (store, task) = LazyStore::lazy_with_task(config.into());
+        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 
-        tokio::spawn(task).await.unwrap().unwrap();
+        handle.await.unwrap().unwrap();
 
         assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
     }

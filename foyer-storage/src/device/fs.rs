@@ -25,8 +25,9 @@ use super::{
     allocator::AlignedAllocator,
     asyncify,
     error::{DeviceError, DeviceResult},
-    Device, IoBuf, IoBufMut,
+    Device, IoBuf, IoBufMut, IoRange,
 };
+use foyer_common::range::RangeBoundsExt;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -81,46 +82,66 @@ impl Device for FsDevice {
         Self::open(config).await
     }
 
-    async fn write(
+    async fn write<B>(
         &self,
-        buf: impl IoBuf,
+        buf: B,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> DeviceResult<usize> {
-        assert!(offset as usize + len <= self.inner.config.file_capacity);
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBuf,
+    {
+        let file_capacity = self.inner.config.file_capacity;
+
+        let range = range.bounds(0..buf.as_ref().len());
+        let len = RangeBoundsExt::len(&range).unwrap();
+
+        assert!(
+            offset as usize + len <= file_capacity,
+            "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
+        );
 
         let fd = self.fd(region);
 
-        let res = asyncify(move || {
+        asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[..len], offset as i64)?;
-            Ok(res)
+            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[range], offset as i64)
+                .map_err(DeviceError::from);
+            (res, buf)
         })
-        .await?;
-
-        Ok(res)
+        .await
     }
 
-    async fn read(
+    async fn read<B>(
         &self,
-        mut buf: impl IoBufMut,
+        mut buf: B,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> DeviceResult<usize> {
-        assert!(offset as usize + len <= self.inner.config.file_capacity);
+    ) -> (DeviceResult<usize>, B)
+    where
+        B: IoBufMut,
+    {
+        let file_capacity = self.inner.config.file_capacity;
+
+        let range = range.bounds(0..buf.as_ref().len());
+        let len = RangeBoundsExt::len(&range).unwrap();
+
+        assert!(
+            offset as usize + len <= file_capacity,
+            "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
+        );
 
         let fd = self.fd(region);
 
-        let res = asyncify(move || {
+        asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[..len], offset as i64)?;
-            Ok(res)
+            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[range], offset as i64)
+                .map_err(DeviceError::from);
+            (res, buf)
         })
-        .await?;
-
-        Ok(res)
+        .await
     }
 
     #[cfg(target_os = "linux")]
@@ -129,14 +150,9 @@ impl Device for FsDevice {
         // Commit fs cache to disk. Linux waits for I/O completions.
         //
         // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
-        asyncify(move || {
-            nix::unistd::syncfs(fd)?;
-            Ok(())
-        })
-        .await?;
+        asyncify(move || nix::unistd::syncfs(fd).map_err(DeviceError::from)).await?;
 
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
-
         Ok(())
     }
 
@@ -186,8 +202,7 @@ impl FsDevice {
         let path = config.dir.clone();
         let dir = asyncify(move || {
             create_dir_all(&path)?;
-            let dir = File::open(&path)?;
-            Ok(dir)
+            File::open(&path).map_err(DeviceError::from)
         })
         .await?;
 
@@ -241,8 +256,6 @@ mod tests {
 
     use bytes::BufMut;
 
-    use crate::slice::{Slice, SliceMut};
-
     use super::*;
 
     const FILES: usize = 8;
@@ -267,11 +280,10 @@ mod tests {
         let mut rbuffer = dev.io_buffer(ALIGN, ALIGN);
         (&mut rbuffer[..]).put_slice(&[0; ALIGN]);
 
-        let wbuf = unsafe { Slice::new(&wbuffer) };
-        let rbuf = unsafe { SliceMut::new(&mut rbuffer) };
-
-        dev.write(wbuf, 0, 0, ALIGN).await.unwrap();
-        dev.read(rbuf, 0, 0, ALIGN).await.unwrap();
+        let (res, wbuffer) = dev.write(wbuffer, .., 0, 0).await;
+        res.unwrap();
+        let (res, rbuffer) = dev.read(rbuffer, .., 0, 0).await;
+        res.unwrap();
 
         assert_eq!(&wbuffer, &rbuffer);
 

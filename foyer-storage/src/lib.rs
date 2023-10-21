@@ -25,11 +25,11 @@
 #![feature(associated_type_defaults)]
 
 pub mod admission;
+pub mod catalog;
 pub mod device;
 pub mod error;
 pub mod flusher;
 pub mod generic;
-pub mod indices;
 pub mod judge;
 pub mod lazy;
 pub mod metrics;
@@ -37,6 +37,9 @@ pub mod reclaimer;
 pub mod region;
 pub mod region_manager;
 pub mod reinsertion;
+pub mod runtime;
 pub mod slice;
 pub mod storage;
 pub mod store;
+
+pub mod test_utils;

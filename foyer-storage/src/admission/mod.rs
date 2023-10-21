@@ -16,14 +16,14 @@ use foyer_common::code::{Key, Value};
 
 use std::{fmt::Debug, sync::Arc};
 
-use crate::{indices::Indices, metrics::Metrics};
+use crate::{catalog::Catalog, metrics::Metrics};
 
 #[expect(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, indices: &Arc<Indices<Self::Key>>) {}
+    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
 

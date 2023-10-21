@@ -14,7 +14,7 @@
 
 use foyer_common::code::{Key, Value};
 
-use crate::{indices::Indices, metrics::Metrics};
+use crate::{catalog::Catalog, metrics::Metrics};
 use std::{fmt::Debug, sync::Arc};
 
 #[expect(unused_variables)]
@@ -22,7 +22,7 @@ pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, indices: &Arc<Indices<Self::Key>>) {}
+    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
 

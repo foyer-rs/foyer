@@ -12,7 +12,7 @@ on:
 env:
   RUST_TOOLCHAIN: nightly-2023-09-09
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20230910
+  CACHE_KEY_SUFFIX: 20231010v3
 jobs:
   misc-check:
     name: misc check
@@ -52,7 +52,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-rust-test
       - name: Install cargo-binstall
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -64,6 +64,10 @@ jobs:
       - name: Run rust cargo-sort check
         run: |
           cargo sort -w -c
+      - name: Run hakari check
+        run: |
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run
       - name: Run rust format check
         run: |
           cargo fmt --all -- --check
@@ -72,10 +76,6 @@ jobs:
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets -- -D warnings
-      - name: Run hakari check
-        run: |
-          cargo hakari generate --diff
-          cargo hakari manage-deps --dry-run
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
@@ -109,7 +109,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}
+          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
       - name: Run foyer-storage-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
@@ -139,7 +139,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}
+          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-asan
       - name: Run foyer-storage-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
@@ -149,6 +149,45 @@ jobs:
           cargo build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --buffer-pool-size 256 --lookup-range 1000 --allocator-bits 1 --time 60
+  deterministic-test:
+    name: run deterministic test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install rust toolchain@v1
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deterministic-test
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
+      - name: Run rust clippy check (madsim)
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+          RUST_LOG: info
+          TOKIO_WORKER_THREADS: 1
+        run: |-
+          cargo clippy --all-targets
+      - name: Run nexmark test (madsim)
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+          RUST_LOG: info
+          TOKIO_WORKER_THREADS: 1
+        run: |-
+          cargo nextest run --all
 concurrency:
   group: environment-${{ github.ref }}
   cancel-in-progress: true

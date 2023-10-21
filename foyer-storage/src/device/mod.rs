@@ -20,36 +20,42 @@ use std::{alloc::Allocator, fmt::Debug};
 
 use crate::region::RegionId;
 use error::DeviceResult;
+use foyer_common::range::RangeBoundsExt;
 use futures::Future;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
 pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
+pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;
-    type Config: Send + Debug;
+    type Config: Send + Debug + Clone;
 
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = DeviceResult<Self>> + Send;
 
     #[must_use]
-    fn write(
+    fn write<B>(
         &self,
-        buf: impl IoBuf,
+        buf: B,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> impl Future<Output = DeviceResult<usize>> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    where
+        B: IoBuf;
 
     #[must_use]
-    fn read(
+    fn read<B>(
         &self,
-        buf: impl IoBufMut,
+        buf: B,
+        range: impl IoRange,
         region: RegionId,
         offset: u64,
-        len: usize,
-    ) -> impl Future<Output = DeviceResult<usize>> + Send;
+    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    where
+        B: IoBufMut;
 
     #[must_use]
     fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
@@ -72,16 +78,24 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     }
 }
 
+#[cfg(not(madsim))]
 #[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> DeviceResult<T>
+async fn asyncify<F, T>(f: F) -> T
 where
-    F: FnOnce() -> DeviceResult<T> + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    match tokio::task::spawn_blocking(f).await {
-        Ok(res) => res,
-        Err(e) => Err(format!("background task failed: {:?}", e,).into()),
-    }
+    tokio::task::spawn_blocking(f).await.unwrap()
+}
+
+#[cfg(madsim)]
+#[tracing::instrument(level = "trace", skip(f))]
+async fn asyncify<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    f()
 }
 
 #[cfg(test)]
@@ -105,24 +119,30 @@ pub mod tests {
             Ok(Self::new(config))
         }
 
-        async fn write(
+        async fn write<B>(
             &self,
-            _buf: impl IoBuf,
+            buf: B,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
-        ) -> DeviceResult<usize> {
-            Ok(0)
+        ) -> (DeviceResult<usize>, B)
+        where
+            B: IoBuf,
+        {
+            (Ok(0), buf)
         }
 
-        async fn read(
+        async fn read<B>(
             &self,
-            _buf: impl IoBufMut,
+            buf: B,
+            _range: impl IoRange,
             _region: RegionId,
             _offset: u64,
-            _len: usize,
-        ) -> DeviceResult<usize> {
-            Ok(0)
+        ) -> (DeviceResult<usize>, B)
+        where
+            B: IoBufMut,
+        {
+            (Ok(0), buf)
         }
 
         async fn flush(&self) -> DeviceResult<()> {
