@@ -20,6 +20,7 @@
 pub mod batch;
 pub mod bits;
 pub mod code;
+pub mod continuum;
 pub mod erwlock;
 pub mod queue;
 pub mod range;
