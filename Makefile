@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all monitor clear madsim
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim
 
 deps:
 	./scripts/install-deps.sh
@@ -21,7 +21,7 @@ test:
 	RUST_BACKTRACE=1 cargo test --doc
 
 test-ignored:
-	RUST_BACKTRACE=1 cargo test --package foyer-common -- --nocapture --ignored
+	RUST_BACKTRACE=1 cargo nextest run --run-ignored ignored-only --no-capture --workspace
 
 test-all: test test-ignored
 
@@ -31,6 +31,8 @@ madsim:
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo test --doc
 
 all: check test-all
+
+fast: check test
 
 monitor:
 	./scripts/monitor.sh

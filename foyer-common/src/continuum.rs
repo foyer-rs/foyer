@@ -41,7 +41,33 @@ macro_rules! def_continuum {
                     }
                 }
 
+                pub fn is_occupied(&self, start: $uint) -> bool {
+                    !self.is_vacant(start)
+                }
+
+                pub fn is_vacant(&self, start: $uint) -> bool {
+                    let continuum = self.continuum.load(Ordering::Acquire);
+                    if continuum + self.capacity > start {
+                        return true;
+                    }
+
+                    self.advance_until(|_, _| false, 0);
+
+                    let continuum = self.continuum.load(Ordering::Acquire);
+                    continuum + self.capacity > start
+                }
+
+                /// Submit a range.
                 pub fn submit(&self, range: Range<$uint>) {
+                    debug_assert!(range.start < range.end);
+
+                    self.slots[self.slot(range.start)].store(range.end, Ordering::SeqCst);
+                }
+
+                /// Submit a range, may advance continuum till the given range.
+                ///
+                /// Return `true` if advanced, else `false`.
+                pub fn submit_advance(&self, range: Range<$uint>) -> bool{
                     debug_assert!(range.start < range.end);
 
                     let continuum = self.continuum.load(Ordering::Acquire);
@@ -51,13 +77,14 @@ macro_rules! def_continuum {
                     if continuum == range.start {
                         // continuum can be advanced directly and exclusively
                         self.continuum.store(range.end, Ordering::Release);
+                        true
                     } else {
                         let slot = &self.slots[self.slot(range.start)];
                         slot.store(range.end, Ordering::Release);
                         let stop = move |current: $uint, _next: $uint| {
                             current > range.start
                         };
-                        self.advance_until(stop, 1);
+                        self.advance_until(stop, 1)
                     }
                 }
 
@@ -206,6 +233,7 @@ mod tests {
                         let sleep = OsRng.gen_range(0..10);
                         tokio::time::sleep(Duration::from_millis(sleep)).await;
                         c.submit(start..end);
+                        c.advance();
 
                         drop(permit);
                     }
