@@ -87,7 +87,9 @@ jobs:
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov --no-report nextest
-      - name: Generate codecov report cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Generate codecov report
+        run: |
+          cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v3
         with:
           verbose: true

@@ -81,6 +81,7 @@ jobs:
         run: |
           cargo llvm-cov --no-report nextest
       - name: Generate codecov report
+        run: |
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v3
         with:
