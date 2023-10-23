@@ -83,10 +83,12 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
         run: |
-          cargo llvm-cov --no-report test --package foyer-common -- --nocapture --ignored
+          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov --no-report nextest
+      - name: Generate codecov report
+        run: |
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v3
         with:
