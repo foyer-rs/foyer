@@ -15,7 +15,7 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(bound_map)]
-#![cfg_attr(coverage_nightly, feature(no_coverage))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod batch;
 pub mod bits;

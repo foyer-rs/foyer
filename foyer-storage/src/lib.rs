@@ -20,8 +20,6 @@
 #![feature(error_generic_member_access)]
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(associated_type_defaults)]
 
 pub mod admission;

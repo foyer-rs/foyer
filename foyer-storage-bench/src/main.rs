@@ -14,7 +14,6 @@
 
 #![feature(let_chains)]
 #![feature(lint_reasons)]
-#![feature(async_fn_in_trait)]
 
 mod analyze;
 mod export;
