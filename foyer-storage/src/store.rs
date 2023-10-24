@@ -117,7 +117,6 @@ impl<K: Key, V: Value> Storage for NoneStore<K, V> {
     type Config = ();
     type Writer = NoneStoreWriter<K, V>;
 
-    #[expect(clippy::let_unit_value)]
     async fn open(_: Self::Config) -> Result<Self> {
         Ok(NoneStore(PhantomData))
     }

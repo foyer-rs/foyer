@@ -15,7 +15,6 @@
 #![feature(associated_type_bounds)]
 #![feature(ptr_metadata)]
 #![feature(trait_alias)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(lint_reasons)]
 #![expect(clippy::new_without_default)]
 #![cfg_attr(test, expect(clippy::vtable_address_comparisons))]
