@@ -17,7 +17,8 @@ use foyer_common::{bits::align_up, continuum::ContinuumUsize};
 use itertools::Itertools;
 use std::{
     alloc::Global,
-    ops::{Deref, DerefMut},
+    fmt::Debug,
+    ops::{Deref, DerefMut, Range},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -25,7 +26,6 @@ use std::{
     time::Duration,
 };
 
-#[derive(Debug)]
 pub struct RingBuffer<A = Global>
 where
     A: BufferAllocator,
@@ -40,6 +40,20 @@ where
     refs: Vec<Arc<AtomicUsize>>,
 
     continuum: Arc<ContinuumUsize>,
+}
+
+impl<A> Debug for RingBuffer<A>
+where
+    A: BufferAllocator,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RingBuffer")
+            .field("align", &self.align)
+            .field("capacity", &self.capacity)
+            .field("blocks", &self.blocks)
+            .field("allocated", &self.allocated)
+            .finish()
+    }
 }
 
 impl RingBuffer<Global> {
@@ -93,7 +107,7 @@ where
     /// Returns `None` when the allocated buffer cross the boundary.
     ///
     /// When all views from an allocation are dropped, the buffer will be released.
-    pub async fn allocate(self: &Arc<Self>, len: usize, sequence: Sequence) -> ViewMut<A> {
+    pub async fn allocate(self: &Arc<Self>, len: usize, sequence: Sequence) -> ViewMut {
         loop {
             if let Some(view) = self.allocate_inner(len, sequence).await {
                 return view;
@@ -101,11 +115,7 @@ where
         }
     }
 
-    async fn allocate_inner(
-        self: &Arc<Self>,
-        len: usize,
-        sequence: Sequence,
-    ) -> Option<ViewMut<A>> {
+    async fn allocate_inner(self: &Arc<Self>, len: usize, sequence: Sequence) -> Option<ViewMut> {
         let len = align_up(self.align, len);
         let offset = self.allocated.fetch_add(len, Ordering::SeqCst);
 
@@ -128,11 +138,50 @@ where
         }
 
         let refs = self.refs(sequence);
-        Some(ViewMut::new(self, offset, len, refs))
+
+        let ring = Arc::clone(self);
+        let ring: Arc<dyn Ring> = ring;
+        Some(ViewMut::new(ring, offset, len, refs))
     }
 
     fn refs(&self, sequence: Sequence) -> &Arc<AtomicUsize> {
         &self.refs[sequence as usize & (self.blocks - 1)]
+    }
+
+    pub fn continuum(&self) -> usize {
+        self.continuum.continuum() * self.align
+    }
+
+    pub fn advance(&self) {
+        self.continuum.advance();
+    }
+}
+
+pub trait Ring: Send + Sync + 'static + Debug {
+    fn align(&self) -> usize;
+
+    fn ptr(&self, offset: usize) -> *mut u8;
+
+    fn release(&self, range: Range<usize>);
+}
+
+impl<A> Ring for RingBuffer<A>
+where
+    A: BufferAllocator,
+{
+    fn align(&self) -> usize {
+        self.align
+    }
+
+    fn ptr(&self, offset: usize) -> *mut u8 {
+        (self.data.as_ptr() as usize + (offset & (self.capacity - 1))) as *mut u8
+    }
+
+    fn release(&self, range: Range<usize>) {
+        let start = range.start / self.align;
+        let end = range.end / self.align;
+        debug_assert!(self.continuum.is_vacant(start));
+        self.continuum.submit(start..end);
     }
 }
 
@@ -140,41 +189,47 @@ where
 ///
 /// The underlying buffer of [`ViewMut`] must be valid during its lifetime.
 #[derive(Debug)]
-pub struct ViewMut<A = Global>
-where
-    A: BufferAllocator,
-{
-    ring: Arc<RingBuffer<A>>,
+pub struct ViewMut {
+    ring: Arc<dyn Ring>,
     ptr: *mut u8,
     offset: usize,
     len: usize,
+    capacity: usize,
     refs: Arc<AtomicUsize>,
 }
 
-impl<A> ViewMut<A>
-where
-    A: BufferAllocator,
-{
-    fn new(ring: &Arc<RingBuffer<A>>, offset: usize, len: usize, refs: &Arc<AtomicUsize>) -> Self {
+impl ViewMut {
+    fn new(ring: Arc<dyn Ring>, offset: usize, len: usize, refs: &Arc<AtomicUsize>) -> Self {
         refs.fetch_add(1, Ordering::AcqRel);
+        let ptr = ring.ptr(offset);
         Self {
-            ring: Arc::clone(ring),
-            ptr: (ring.data.as_ptr() as usize + (offset & (ring.capacity - 1))) as *mut u8,
+            ring,
+            ptr,
             offset,
             len,
+            capacity: len,
             refs: Arc::clone(refs),
         }
     }
 
-    pub fn freeze(self) -> View<A> {
+    /// Shrink the accessable area of [`ViewMut`].
+    ///
+    /// `shrink` will not release the underlying buffer size.
+    pub fn shrink_to(&mut self, len: usize) {
+        debug_assert!(len <= self.capacity);
+        self.len = len;
+    }
+
+    pub fn aligned(&self) -> usize {
+        align_up(self.ring.align(), self.len)
+    }
+
+    pub fn freeze(self) -> View {
         View::from(self)
     }
 }
 
-impl<A> Deref for ViewMut<A>
-where
-    A: BufferAllocator,
-{
+impl Deref for ViewMut {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -182,56 +237,38 @@ where
     }
 }
 
-impl<A> DerefMut for ViewMut<A>
-where
-    A: BufferAllocator,
-{
+impl DerefMut for ViewMut {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
 
-impl<A> Drop for ViewMut<A>
-where
-    A: BufferAllocator,
-{
+impl Drop for ViewMut {
     fn drop(&mut self) {
         if self.refs.fetch_sub(1, Ordering::AcqRel) == 1 {
-            let block_start = self.offset / self.ring.align;
-            let block_end = (self.offset + self.len) / self.ring.align;
-            self.ring.continuum.is_vacant(block_start);
-            self.ring.continuum.submit(block_start..block_end);
+            self.ring.release(self.offset..self.offset + self.capacity);
         }
     }
 }
 
-unsafe impl<A> Send for ViewMut<A> where A: BufferAllocator {}
-unsafe impl<A> Sync for ViewMut<A> where A: BufferAllocator {}
+unsafe impl Send for ViewMut {}
+unsafe impl Sync for ViewMut {}
 
 /// # Safety
 ///
 /// The underlying buffer of [`View`] must be valid during its lifetime.
 #[derive(Debug)]
-pub struct View<A = Global>
-where
-    A: BufferAllocator,
-{
-    view: ViewMut<A>,
+pub struct View {
+    view: ViewMut,
 }
 
-impl<A> From<ViewMut<A>> for View<A>
-where
-    A: BufferAllocator,
-{
-    fn from(view: ViewMut<A>) -> Self {
+impl From<ViewMut> for View {
+    fn from(view: ViewMut) -> Self {
         Self { view }
     }
 }
 
-impl<A> Deref for View<A>
-where
-    A: BufferAllocator,
-{
+impl Deref for View {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -239,10 +276,7 @@ where
     }
 }
 
-impl<A> Clone for View<A>
-where
-    A: BufferAllocator,
-{
+impl Clone for View {
     fn clone(&self) -> Self {
         self.view.refs.fetch_add(1, Ordering::AcqRel);
         let view = ViewMut {
@@ -250,14 +284,21 @@ where
             ptr: self.view.ptr,
             offset: self.view.offset,
             len: self.view.len,
+            capacity: self.view.capacity,
             refs: self.view.refs.clone(),
         };
         Self { view }
     }
 }
 
-unsafe impl<A> Send for View<A> where A: BufferAllocator {}
-unsafe impl<A> Sync for View<A> where A: BufferAllocator {}
+impl View {
+    pub fn aligned(&self) -> usize {
+        self.view.aligned()
+    }
+}
+
+unsafe impl Send for View {}
+unsafe impl Sync for View {}
 
 #[cfg(test)]
 mod tests {
@@ -294,7 +335,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(view.offset, i * 1024 * 1024);
-            assert_eq!(view.len, 1024 * 1024);
+            assert_eq!(view.capacity, 1024 * 1024);
             views.insert(seq, view);
         }
         let seq = sequence.fetch_add(1, Ordering::Relaxed);
@@ -311,7 +352,7 @@ mod tests {
         views.remove(&1).unwrap();
         let view = future.await.unwrap();
         assert_eq!(view.offset, 17 * 1024 * 1024);
-        assert_eq!(view.len, 2 * 1024 * 1024);
+        assert_eq!(view.capacity, 2 * 1024 * 1024);
         views.insert(seq, view);
 
         drop(views);

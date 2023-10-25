@@ -67,7 +67,7 @@ macro_rules! def_continuum {
                 /// Submit a range, may advance continuum till the given range.
                 ///
                 /// Return `true` if advanced, else `false`.
-                pub fn submit_advance(&self, range: Range<$uint>) -> bool{
+                pub fn submit_advance(&self, range: Range<$uint>) -> bool {
                     debug_assert!(range.start < range.end);
 
                     let continuum = self.continuum.load(Ordering::Acquire);
@@ -166,8 +166,7 @@ macro_rules! def_continuum {
                         continuum = next;
                     }
 
-                    #[cfg(test)]
-                    assert_eq!(start, self.continuum.load(Ordering::Acquire));
+                    debug_assert_eq!(start, self.continuum.load(Ordering::Acquire));
 
                     // modify continuum exclusively and unlock
                     self.continuum.store(continuum, Ordering::Release);

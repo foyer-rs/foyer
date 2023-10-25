@@ -29,7 +29,7 @@ where
     K: Key,
     V: Value,
 {
-    indices: OnceLock<Arc<Catalog<K>>>,
+    catalog: OnceLock<Arc<Catalog<K>>>,
     _marker: PhantomData<V>,
 }
 
@@ -40,7 +40,7 @@ where
 {
     fn default() -> Self {
         Self {
-            indices: OnceLock::new(),
+            catalog: OnceLock::new(),
             _marker: PhantomData,
         }
     }
@@ -56,7 +56,7 @@ where
     type Value = V;
 
     fn init(&self, indices: &Arc<Catalog<Self::Key>>) {
-        self.indices.get_or_init(|| indices.clone());
+        self.catalog.get_or_init(|| indices.clone());
     }
 
     fn judge(
@@ -65,7 +65,7 @@ where
         _weight: usize,
         _metrics: &std::sync::Arc<crate::metrics::Metrics>,
     ) -> bool {
-        let indices = self.indices.get().unwrap();
+        let indices = self.catalog.get().unwrap();
         indices.lookup(key).is_some()
     }
 

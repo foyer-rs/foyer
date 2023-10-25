@@ -29,21 +29,24 @@ use foyer_intrusive::eviction::EvictionPolicy;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
 use twox_hash::XxHash64;
 
 use crate::{
     admission::AdmissionPolicy,
-    catalog::{Catalog, Index, IndexInfo, Sequence},
+    catalog::{Catalog, Index, Item, Sequence},
     device::Device,
     error::Result,
-    flusher::Flusher,
+    flusher_v2::{Entry, Flusher},
     judge::Judges,
     metrics::{Metrics, METRICS},
-    reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
+    ring::RingBuffer,
     storage::{Storage, StorageWriter},
 };
 use foyer_common::code::{Key, Value};
@@ -75,6 +78,11 @@ where
     /// Note: The count of allocators should be greater than buffer count.
     ///       (buffer count = buffer pool size / device region size)
     pub allocator_bits: usize,
+
+    /// `ring_buffer_blocks` must be power of 2.
+    ///
+    /// `ring buffer capacity = ring buffer blocks * device align size`.
+    pub ring_buffer_blocks: usize,
 
     /// Catalog indices sharding bits.
     pub catalog_bits: usize,
@@ -124,6 +132,7 @@ where
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
             .field("allocator_bits", &self.allocator_bits)
+            .field("ring_buffer_blocks", &self.ring_buffer_blocks)
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
@@ -152,6 +161,7 @@ where
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
             allocator_bits: self.allocator_bits,
+            ring_buffer_blocks: self.ring_buffer_blocks,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
@@ -204,20 +214,19 @@ where
     EL: Link,
 {
     sequence: AtomicU64,
-    indices: Arc<Catalog<K>>,
+    catalog: Arc<Catalog<K>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
+    ring: Arc<RingBuffer<D::IoBufferAllocator>>,
 
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
+    flusher_entry_txs: Vec<mpsc::UnboundedSender<Entry>>,
     flusher_handles: Mutex<Vec<JoinHandle<()>>>,
     flushers_stop_tx: broadcast::Sender<()>,
-
-    reclaimer_handles: Mutex<Vec<JoinHandle<()>>>,
-    reclaimers_stop_tx: broadcast::Sender<()>,
 
     metrics: Arc<Metrics>,
 
@@ -235,9 +244,15 @@ where
     async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Self> {
         tracing::info!("open store with config:\n{:#?}", config);
 
+        assert!(
+            config.ring_buffer_blocks.is_power_of_two(),
+            "`ring_buffer_blocks` must be power of 2",
+        );
+
         let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let device = D::open(config.device_config).await?;
+        assert!(device.regions() >= config.flushers * 2);
 
         let buffer_count = config.buffer_pool_size / device.region_size();
 
@@ -247,6 +262,12 @@ where
             )
             .into());
         }
+
+        let ring = Arc::new(RingBuffer::new_in(
+            device.align(),
+            config.ring_buffer_blocks,
+            device.io_buffer_allocator().clone(),
+        ));
 
         let region_manager = Arc::new(RegionManager::new(
             config.allocator_bits,
@@ -258,29 +279,31 @@ where
             metrics.clone(),
         ));
 
-        let indices = Arc::new(Catalog::new(device.regions(), config.catalog_bits));
+        let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_bits));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
-        let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         let flusher_stop_rxs = (0..config.flushers)
             .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
-        let reclaimer_stop_rxs = (0..config.reclaimers)
-            .map(|_| reclaimers_stop_tx.subscribe())
-            .collect_vec();
+        let (flusher_entry_txs, flusher_entry_rxs): (
+            Vec<mpsc::UnboundedSender<Entry>>,
+            Vec<mpsc::UnboundedReceiver<Entry>>,
+        ) = (0..config.flushers)
+            .map(|_| mpsc::unbounded_channel())
+            .unzip();
 
         let inner = GenericStoreInner {
             sequence: AtomicU64::new(0),
-            indices: indices.clone(),
+            catalog: catalog.clone(),
             region_manager: region_manager.clone(),
+            ring,
             device: device.clone(),
             admissions: config.admissions,
             reinsertions: config.reinsertions,
+            flusher_entry_txs,
             flusher_handles: Mutex::new(vec![]),
-            reclaimer_handles: Mutex::new(vec![]),
             flushers_stop_tx,
-            reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
         };
@@ -289,40 +312,28 @@ where
         };
 
         for admission in store.inner.admissions.iter() {
-            admission.init(&store.inner.indices);
+            admission.init(&store.inner.catalog);
         }
         for reinsertion in store.inner.reinsertions.iter() {
-            reinsertion.init(&store.inner.indices);
+            reinsertion.init(&store.inner.catalog);
         }
 
         let flush_rate_limiter = match config.flush_rate_limit {
             0 => None,
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
         };
-        let reclaim_rate_limiter = match config.reclaim_rate_limit {
-            0 => None,
-            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
-        };
 
         let flushers = flusher_stop_rxs
             .into_iter()
-            .map(|stop_rx| {
+            .zip_eq(flusher_entry_rxs.into_iter())
+            .map(|(stop_rx, entry_rx)| {
                 Flusher::new(
                     region_manager.clone(),
+                    catalog.clone(),
+                    device.clone(),
+                    entry_rx,
                     flush_rate_limiter.clone(),
-                    metrics.clone(),
-                    stop_rx,
-                )
-            })
-            .collect_vec();
-        let reclaimers = reclaimer_stop_rxs
-            .into_iter()
-            .map(|stop_rx| {
-                Reclaimer::new(
-                    config.clean_region_threshold,
-                    store.clone(),
-                    region_manager.clone(),
-                    reclaim_rate_limiter.clone(),
+                    store.inner.reinsertions.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
@@ -337,13 +348,7 @@ where
             .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
             .collect_vec();
 
-        let reclaimer_handles = reclaimers
-            .into_iter()
-            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
-            .collect_vec();
-
         *store.inner.flusher_handles.lock() = flusher_handles;
-        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
@@ -351,15 +356,6 @@ where
     async fn close(&self) -> Result<()> {
         // seal current dirty buffer and trigger flushing
         self.seal().await;
-
-        // stop and wait for reclaimers
-        let handles = self.inner.reclaimer_handles.lock().drain(..).collect_vec();
-        if !handles.is_empty() {
-            self.inner.reclaimers_stop_tx.send(()).unwrap();
-        }
-        for handle in handles {
-            handle.await.unwrap();
-        }
 
         // stop and wait for flushers
         let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
@@ -381,15 +377,15 @@ where
 
     #[tracing::instrument(skip(self))]
     fn exists(&self, key: &K) -> Result<bool> {
-        Ok(self.inner.indices.lookup(key).is_some())
+        Ok(self.inner.catalog.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip(self))]
     async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
-        let info = match self.inner.indices.lookup(key) {
-            Some(info) => info,
+        let item = match self.inner.catalog.lookup(key) {
+            Some(item) => item,
             None => {
                 self.inner
                     .metrics
@@ -399,8 +395,26 @@ where
             }
         };
 
-        match info.index {
-            crate::catalog::Index::RingBuffer {} => todo!(),
+        match item.index {
+            crate::catalog::Index::RingBuffer { view } => {
+                println!("ring");
+                let res = match read_entry::<K, V>(view.as_ref()) {
+                    Some((_key, value)) => Ok(Some(value)),
+                    None => {
+                        // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
+                        self.inner.catalog.remove(key);
+                        Ok(None)
+                    }
+                };
+
+                self.inner
+                    .metrics
+                    .op_duration_lookup_hit
+                    .observe(now.elapsed().as_secs_f64());
+
+                res
+            }
+            // read from region
             crate::catalog::Index::Region {
                 region,
                 version,
@@ -419,7 +433,7 @@ where
                     Some(slice) => slice,
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of region version mismatch).
-                        self.inner.indices.remove(key);
+                        self.inner.catalog.remove(key);
                         self.inner
                             .metrics
                             .op_duration_lookup_miss
@@ -427,6 +441,7 @@ where
                         return Ok(None);
                     }
                 };
+
                 self.inner
                     .metrics
                     .op_bytes_lookup
@@ -436,7 +451,7 @@ where
                     Some((_key, value)) => Ok(Some(value)),
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
-                        self.inner.indices.remove(key);
+                        self.inner.catalog.remove(key);
                         Ok(None)
                     }
                 };
@@ -456,14 +471,14 @@ where
     fn remove(&self, key: &K) -> Result<bool> {
         let _timer = self.inner.metrics.op_duration_remove.start_timer();
 
-        let res = self.inner.indices.remove(key).is_some();
+        let res = self.inner.catalog.remove(key).is_some();
 
         Ok(res)
     }
 
     #[tracing::instrument(skip(self))]
     fn clear(&self) -> Result<()> {
-        self.inner.indices.clear();
+        self.inner.catalog.clear();
 
         // TODO(MrCroxx): set all regions as clean?
 
@@ -471,7 +486,7 @@ where
     }
 
     pub(crate) fn catalog(&self) -> &Arc<Catalog<K>> {
-        &self.inner.indices
+        &self.inner.catalog
     }
 
     pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
@@ -499,7 +514,7 @@ where
             let itx = tx.clone();
             let irx = rx.clone();
             let region_manager = self.inner.region_manager.clone();
-            let indices = self.inner.indices.clone();
+            let indices = self.inner.catalog.clone();
             let handle = tokio::spawn(async move {
                 itx.send(()).await.unwrap();
                 let res = Self::recover_region(region_id, region_manager, indices).await;
@@ -540,21 +555,24 @@ where
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        indices: Arc<Catalog<K>>,
+        catalog: Arc<Catalog<K>>,
     ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
         let mut sequence = 0;
+        println!("try recover region {region_id}");
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
-            while let Some((key, info)) = iter.next().await? {
-                sequence = std::cmp::max(sequence, info.sequence);
-                indices.insert(key, info);
+            println!("will recover region {region_id}");
+            while let Some((key, item)) = iter.next().await? {
+                println!("recover key: {key:?}");
+                sequence = std::cmp::max(sequence, item.sequence);
+                catalog.insert(Arc::new(key), item);
             }
-            region_manager.eviction_push(region_id);
             Some(sequence)
         } else {
             region_manager.clean_regions().release(region_id);
             None
         };
+        region_manager.eviction_push(region_id);
         Ok(res)
     }
 
@@ -608,33 +626,57 @@ where
             .op_bytes_insert
             .inc_by(serialized_len as u64);
 
-        let mut slice = match self
-            .inner
-            .region_manager
-            .allocate(serialized_len, !writer.is_skippable)
-            .await
-        {
-            Some(slice) => slice,
-            // Only reachable when writer is skippable.
-            None => return Ok(false),
-        };
+        // let mut slice = match self
+        //     .inner
+        //     .region_manager
+        //     .allocate(serialized_len, !writer.is_skippable)
+        //     .await
+        // {
+        //     Some(slice) => slice,
+        //     // Only reachable when writer is skippable.
+        //     None => return Ok(false),
+        // };
 
-        write_entry(slice.as_mut(), &key, &value, sequence);
+        // write_entry(slice.as_mut(), &key, &value, sequence);
 
-        let info = IndexInfo {
-            sequence,
-            index: Index::Region {
-                region: slice.region_id(),
-                version: slice.version(),
-                offset: slice.offset() as u32,
-                len: slice.len() as u32,
-                key_len: key.serialized_len() as u32,
-                value_len: value.serialized_len() as u32,
+        // let info = IndexInfo {
+        //     sequence,
+        //     index: Index::Region {
+        //         region: slice.region_id(),
+        //         version: slice.version(),
+        //         offset: slice.offset() as u32,
+        //         len: slice.len() as u32,
+        //         key_len: key.serialized_len() as u32,
+        //         value_len: value.serialized_len() as u32,
+        //     },
+        // };
+        // drop(slice);
+
+        let mut view = self.inner.ring.allocate(serialized_len, sequence).await;
+        let written = write_entry(&mut view, &key, &value, sequence);
+        view.shrink_to(written);
+        let view = view.freeze();
+
+        let key = Arc::new(key);
+
+        self.inner.catalog.insert(
+            key.clone(),
+            Item {
+                sequence,
+                index: Index::RingBuffer { view: view.clone() },
             },
-        };
-        drop(slice);
+        );
 
-        self.inner.indices.insert(key, info);
+        let flusher = sequence as usize % self.inner.flusher_entry_txs.len();
+        self.inner.flusher_entry_txs[flusher]
+            .send(Entry {
+                key_len: key.serialized_len(),
+                value_len: value.serialized_len(),
+                sequence,
+                key,
+                view,
+            })
+            .unwrap();
 
         let duration = now.elapsed() + writer.duration;
         self.inner
@@ -836,7 +878,7 @@ impl EntryHeader {
 /// # Safety
 ///
 /// `buf.len()` must excatly fit entry size
-fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V, sequence: Sequence)
+fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V, sequence: Sequence) -> usize
 where
     K: Key,
     V: Value,
@@ -855,6 +897,7 @@ where
         checksum,
     };
     header.write(&mut buf[..EntryHeader::serialized_len()]);
+    offset
 }
 
 /// | header | value | key | <padding> |
@@ -935,7 +978,7 @@ where
         }))
     }
 
-    pub async fn next(&mut self) -> Result<Option<(K, IndexInfo)>> {
+    pub async fn next(&mut self) -> Result<Option<(K, Item)>> {
         let region_size = self.region.device().region_size();
         let align = self.region.device().align();
 
@@ -993,7 +1036,7 @@ where
             key
         };
 
-        let info = IndexInfo {
+        let info = Item {
             sequence: header.sequence,
             index: Index::Region {
                 region: self.region.id(),
@@ -1157,6 +1200,7 @@ mod tests {
                 io_size: 4 * KB,
             },
             allocator_bits: 1,
+            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
             catalog_bits: 1,
             admissions,
             reinsertions,
@@ -1172,12 +1216,19 @@ mod tests {
 
         let store = TestStore::open(config).await.unwrap();
 
+        // # Safety
+        //
+        // The last inserted entry must not trigger new eviction.
+        //
+        // TODO(MrCroxx): remove the safety attention!!!
+
         // files:
         // [0, 1, 2]
         // [3, 4, 5]
         // [6, 7, 8]
         // [9, 10, 11]
-        for i in 0..20 {
+        // ... ...
+        for i in 0..21 {
             store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
         }
 
@@ -1185,7 +1236,7 @@ mod tests {
 
         let remains = recorder.remains();
 
-        for i in 0..20 {
+        for i in 0..21 {
             if remains.contains(&i) {
                 assert_eq!(
                     store.lookup(&i).await.unwrap().unwrap(),
@@ -1209,6 +1260,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
@@ -1223,7 +1275,7 @@ mod tests {
         };
         let store = TestStore::open(config).await.unwrap();
 
-        for i in 0..12 {
+        for i in 0..21 {
             if remains.contains(&i) {
                 assert_eq!(
                     store.lookup(&i).await.unwrap().unwrap(),

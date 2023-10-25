@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::device::error::DeviceError;
+use crate::{buffer::BufferError, device::error::DeviceError};
 
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
@@ -30,6 +30,8 @@ struct ErrorInner {
 pub enum ErrorKind {
     #[error("device error: {0}")]
     Device(#[from] DeviceError),
+    #[error("buffer error: {0}")]
+    Buffer(#[from] BufferError),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
@@ -42,6 +44,12 @@ impl From<ErrorKind> for Error {
 
 impl From<DeviceError> for Error {
     fn from(value: DeviceError) -> Self {
+        value.into()
+    }
+}
+
+impl From<BufferError> for Error {
+    fn from(value: BufferError) -> Self {
         value.into()
     }
 }

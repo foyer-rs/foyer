@@ -239,6 +239,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
@@ -275,6 +276,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
+            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
