@@ -397,7 +397,6 @@ where
 
         match item.index {
             crate::catalog::Index::RingBuffer { view } => {
-                println!("ring");
                 let res = match read_entry::<K, V>(view.as_ref()) {
                     Some((_key, value)) => Ok(Some(value)),
                     None => {
@@ -559,11 +558,8 @@ where
     ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
         let mut sequence = 0;
-        println!("try recover region {region_id}");
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
-            println!("will recover region {region_id}");
             while let Some((key, item)) = iter.next().await? {
-                println!("recover key: {key:?}");
                 sequence = std::cmp::max(sequence, item.sequence);
                 catalog.insert(Arc::new(key), item);
             }
