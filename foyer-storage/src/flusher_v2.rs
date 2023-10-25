@@ -158,6 +158,13 @@ where
             self.region_manager.eviction_push(old_region);
         }
 
+        self.metrics.total_bytes.add(
+            self.region_manager
+                .region(&new_region)
+                .device()
+                .region_size() as u64,
+        );
+
         // 3. retry write
         let entries = self.buffer.write(entry).await?;
         self.update_catalog(entries).await?;
