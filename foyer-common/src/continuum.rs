@@ -240,10 +240,7 @@ mod tests {
             })
             .collect_vec();
 
-        let handles = tasks
-            .into_iter()
-            .map(|task| tokio::spawn(task))
-            .collect_vec();
+        let handles = tasks.into_iter().map(tokio::spawn).collect_vec();
         for handle in handles {
             handle.await.unwrap();
         }
