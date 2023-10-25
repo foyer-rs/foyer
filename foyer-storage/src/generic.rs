@@ -43,6 +43,7 @@ use crate::{
     flusher_v2::{Entry, Flusher},
     judge::Judges,
     metrics::{Metrics, METRICS},
+    reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::ReinsertionPolicy,
@@ -228,6 +229,9 @@ where
     flusher_handles: Mutex<Vec<JoinHandle<()>>>,
     flushers_stop_tx: broadcast::Sender<()>,
 
+    reclaimer_handles: Mutex<Vec<JoinHandle<()>>>,
+    reclaimers_stop_tx: broadcast::Sender<()>,
+
     metrics: Arc<Metrics>,
 
     _marker: PhantomData<V>,
@@ -282,7 +286,6 @@ where
         let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_bits));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
-
         let flusher_stop_rxs = (0..config.flushers)
             .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
@@ -292,6 +295,11 @@ where
         ) = (0..config.flushers)
             .map(|_| mpsc::unbounded_channel())
             .unzip();
+
+        let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+        let reclaimer_stop_rxs = (0..config.reclaimers)
+            .map(|_| reclaimers_stop_tx.subscribe())
+            .collect_vec();
 
         let inner = GenericStoreInner {
             sequence: AtomicU64::new(0),
@@ -303,7 +311,9 @@ where
             reinsertions: config.reinsertions,
             flusher_entry_txs,
             flusher_handles: Mutex::new(vec![]),
+            reclaimer_handles: Mutex::new(vec![]),
             flushers_stop_tx,
+            reclaimers_stop_tx,
             metrics: metrics.clone(),
             _marker: PhantomData,
         };
@@ -323,6 +333,11 @@ where
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
         };
 
+        let reclaim_rate_limiter = match config.reclaim_rate_limit {
+            0 => None,
+            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
+        };
+
         let flushers = flusher_stop_rxs
             .into_iter()
             .zip_eq(flusher_entry_rxs.into_iter())
@@ -333,7 +348,20 @@ where
                     device.clone(),
                     entry_rx,
                     flush_rate_limiter.clone(),
-                    store.inner.reinsertions.clone(),
+                    metrics.clone(),
+                    stop_rx,
+                )
+            })
+            .collect_vec();
+
+        let reclaimers = reclaimer_stop_rxs
+            .into_iter()
+            .map(|stop_rx| {
+                Reclaimer::new(
+                    config.clean_region_threshold,
+                    store.clone(),
+                    region_manager.clone(),
+                    reclaim_rate_limiter.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
@@ -347,8 +375,13 @@ where
             .into_iter()
             .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
             .collect_vec();
+        let reclaimer_handles = reclaimers
+            .into_iter()
+            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+            .collect_vec();
 
         *store.inner.flusher_handles.lock() = flusher_handles;
+        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
 
         Ok(store)
     }
@@ -361,6 +394,15 @@ where
         let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
             self.inner.flushers_stop_tx.send(()).unwrap();
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // stop and wait for reclaimers
+        let handles = self.inner.reclaimer_handles.lock().drain(..).collect_vec();
+        if !handles.is_empty() {
+            self.inner.reclaimers_stop_tx.send(()).unwrap();
         }
         for handle in handles {
             handle.await.unwrap();
@@ -563,12 +605,12 @@ where
                 sequence = std::cmp::max(sequence, item.sequence);
                 catalog.insert(Arc::new(key), item);
             }
+            region_manager.eviction_push(region_id);
             Some(sequence)
         } else {
             region_manager.clean_regions().release(region_id);
             None
         };
-        region_manager.eviction_push(region_id);
         Ok(res)
     }
 
@@ -1211,12 +1253,6 @@ mod tests {
         };
 
         let store = TestStore::open(config).await.unwrap();
-
-        // # Safety
-        //
-        // The last inserted entry must not trigger new eviction.
-        //
-        // TODO(MrCroxx): remove the safety attention!!!
 
         // files:
         // [0, 1, 2]

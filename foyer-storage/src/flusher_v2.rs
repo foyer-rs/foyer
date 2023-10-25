@@ -12,23 +12,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::{
-    code::{Key, Value},
-    rate::RateLimiter,
-};
+use foyer_common::{code::Key, rate::RateLimiter};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use std::{any::Any, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
+use tracing::Instrument;
 
 use crate::{
     buffer::{BufferError, FlushBuffer, PositionedEntry},
     catalog::{Catalog, Index, Item, Sequence},
     device::Device,
     error::{Error, Result},
-    judge::Judges,
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    reinsertion::ReinsertionPolicy,
     ring::View,
 };
 
@@ -59,10 +55,9 @@ impl Clone for Entry {
 }
 
 #[derive(Debug)]
-pub struct Flusher<K, V, D, EP, EL>
+pub struct Flusher<K, D, EP, EL>
 where
     K: Key,
-    V: Value,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -77,29 +72,24 @@ where
 
     _rate_limiter: Option<Arc<RateLimiter>>,
 
-    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
-
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
 }
 
-impl<K, V, D, EP, EL> Flusher<K, V, D, EP, EL>
+impl<K, D, EP, EL> Flusher<K, D, EP, EL>
 where
     K: Key,
-    V: Value,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         region_manager: Arc<RegionManager<D, EP, EL>>,
         catalog: Arc<Catalog<K>>,
         device: D,
         entry_rx: mpsc::UnboundedReceiver<Entry>,
         rate_limiter: Option<Arc<RateLimiter>>,
-        reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -110,7 +100,6 @@ where
             buffer,
             entry_rx,
             _rate_limiter: rate_limiter,
-            reinsertions,
             metrics,
             stop_rx,
         }
@@ -149,71 +138,31 @@ where
 
         // current region is full, rotate flush buffer region and retry
 
-        // 1. evict a region (since regions >= flushers * 2, there must be evictable regions)
-        let new_region = self.region_manager.eviction_pop().unwrap();
-        let region = self.region_manager.region(&new_region);
+        // 1. get a clean region
+        let timer = self
+            .metrics
+            .inner_op_duration_acquire_clean_region
+            .start_timer();
+        let new_region = self
+            .region_manager
+            .clean_regions()
+            .acquire()
+            .instrument(tracing::debug_span!("acquire_clean_region"))
+            .await;
+        drop(timer);
 
-        // 2. drop catalog of evicted region
-        let items = self.catalog.take_region(&new_region);
-
-        // 3. make sure there is no readers or writers on this region.
-        {
-            let guard = region.exclusive(false, false, false).await;
-            tracing::trace!(
-                "[reclaimer] region {}, writers: {}, buffered readers: {}, physical readers: {}",
-                region.id(),
-                guard.writers(),
-                guard.buffered_readers(),
-                guard.physical_readers()
-            );
-            drop(guard);
-        }
-
-        // TODO(MrCroxx): do reinsertion backgroud !!!!!!!!!!
-        // TODO(MrCroxx): do reinsertion backgroud !!!!!!!!!!
-        // TODO(MrCroxx): do reinsertion backgroud !!!!!!!!!!
-        if !self.reinsertions.is_empty() {
-            for (key, Item { index, .. }) in items {
-                let Index::Region {
-                    key_len, value_len, ..
-                } = index
-                else {
-                    unreachable!()
-                };
-
-                let weight = key_len as usize + value_len as usize;
-                let mut judges = Judges::new(self.reinsertions.len());
-                for (index, reinsertion) in self.reinsertions.iter().enumerate() {
-                    let judge = reinsertion.judge(&key, weight, &self.metrics);
-                    judges.set(index, judge);
-                }
-                if !judges.judge() {
-                    for (index, reinsertion) in self.reinsertions.iter().enumerate() {
-                        let judge = judges.get(index);
-                        reinsertion.on_drop(&key, weight, &self.metrics, judge);
-                    }
-                    continue;
-                }
-
-                for (index, reinsertion) in self.reinsertions.iter().enumerate() {
-                    let judge = judges.get(index);
-                    reinsertion.on_insert(&key, weight, &self.metrics, judge);
-                }
-            }
-        }
-
-        // 4. rotate flush buffer
-        let mut entries = self.buffer.rotate(new_region).await?;
-
-        // 5. make old region evictable
+        // 2. rotate flush buffer
+        let entries = self.buffer.rotate(new_region).await?;
+        self.update_catalog(entries).await?;
         if let Some(old_region) = old_region {
             self.region_manager.eviction_push(old_region);
         }
 
-        // 6. retry write
-        entries.append(&mut self.buffer.write(entry).await?);
+        // 3. retry write
+        let entries = self.buffer.write(entry).await?;
+        self.update_catalog(entries).await?;
 
-        self.update_catalog(entries).await
+        Ok(())
     }
 
     async fn update_catalog(&self, entries: Vec<PositionedEntry>) -> Result<()> {
