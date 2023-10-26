@@ -5,15 +5,15 @@
 
 set -e
 
-# DIR="etc/grafana/dashboards/"
-# DASHBOARDS="etc/grafana/dashboards/*.json"
-
-DIR="etc/grafana/dashboards/"
+DIR="etc/grafana/dashboards"
 
 
-for dashboard in `ls $DIR | grep -v '.min.json'`; do
-    name=`basename $dashboard .json`
-    cat "${DIR}${dashboard}" | jq -c > "${DIR}${name}.min.json"
+for dashboard in "${DIR}"/*.json; do
+    if [[ "$dashboard" == *.min.json ]]; then
+        continue
+    fi
+    name=$(basename "$dashboard" .json)
+    jq -c < "$dashboard" > "${DIR}/${name}.min.json"
 done
 
 if [ "$1" == "--check" ] ; then
