@@ -30,7 +30,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, Semaphore},
     task::JoinHandle,
 };
 use twox_hash::XxHash64;
@@ -541,18 +541,17 @@ where
     async fn recover(&self, concurrency: usize) -> Result<Sequence> {
         tracing::info!("start store recovery");
 
-        let (tx, rx) = async_channel::bounded(concurrency);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
 
         let mut handles = vec![];
         for region_id in 0..self.inner.device.regions() as RegionId {
-            let itx = tx.clone();
-            let irx = rx.clone();
+            let semaphore = semaphore.clone();
             let region_manager = self.inner.region_manager.clone();
             let indices = self.inner.catalog.clone();
             let handle = tokio::spawn(async move {
-                itx.send(()).await.unwrap();
+                let permit = semaphore.acquire().await;
                 let res = Self::recover_region(region_id, region_manager, indices).await;
-                irx.recv().await.unwrap();
+                drop(permit);
                 res
             });
             handles.push(handle);
