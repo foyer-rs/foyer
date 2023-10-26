@@ -2,5 +2,34 @@
 # Reference: https://docs.codecov.com/docs/codecovyml-reference
 # Tips. You may run following command to validate before committing any changes
 #   curl --data-binary @codecov.yml https://codecov.io/validate
+coverage:
+  precision: 2
+  round: down
+  range: "70..100"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: "0%"
+        base: auto
+        if_not_found: success
+        informational: false
+        only_pulls: false
+    patch:
+      default:
+        target: auto
+        threshold: "0%"
+        base: auto
+        if_not_found: success
+        informational: true
+        only_pulls: false
+    changes:
+      default:
+        target: auto
+        threshold: "0%"
+        base: auto
+        if_not_found: success
+        informational: true
+        only_pulls: false
 ignore:
   - "foyer-storage-bench"
