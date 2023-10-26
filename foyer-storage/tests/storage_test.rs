@@ -129,7 +129,7 @@ async fn test_store() {
             io_size: 4 * KB,
         },
         allocator_bits: 0,
-        ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+        ring_buffer_capacity: 16 * MB,
         catalog_bits: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
@@ -161,7 +161,7 @@ async fn test_lazy_store() {
             io_size: 4 * KB,
         },
         allocator_bits: 0,
-        ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+        ring_buffer_capacity: 16 * MB,
         catalog_bits: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
@@ -194,7 +194,7 @@ async fn test_runtime_store() {
                 io_size: 4 * KB,
             },
             allocator_bits: 0,
-            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![recorder.clone()],
             reinsertions: vec![recorder.clone()],
@@ -233,7 +233,7 @@ async fn test_runtime_lazy_store() {
                 io_size: 4 * KB,
             },
             allocator_bits: 0,
-            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![recorder.clone()],
             reinsertions: vec![recorder.clone()],

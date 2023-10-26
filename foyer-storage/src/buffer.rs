@@ -237,7 +237,7 @@ mod tests {
     async fn test_flush_buffer() {
         let tempdir = tempdir().unwrap();
 
-        let ring = Arc::new(RingBuffer::new(4 * 1024, 4 * 1024)); // 16 MiB
+        let ring = Arc::new(RingBuffer::new(4096, 16 * 1024 * 1024));
         let device = FsDevice::open(FsDeviceConfig {
             dir: tempdir.path().into(),
             capacity: 256 * 1024,     // 256 KiB

@@ -58,10 +58,8 @@ where
 
 impl RingBuffer<Global> {
     /// `align` must be power of 2.
-    ///
-    /// `capacity` must be a multiplier of `align`.
-    pub fn new(align: usize, blocks: usize) -> Self {
-        Self::new_in(align, blocks, Global)
+    pub fn new(align: usize, capacity: usize) -> Self {
+        Self::new_in(align, capacity, Global)
     }
 }
 
@@ -70,22 +68,16 @@ where
     A: BufferAllocator,
 {
     /// `align` must be power of 2.
-    ///
-    /// `blocks` must be power of 2.
-    ///
-    /// `capacity = align * blocks`.
-    pub fn new_in(align: usize, blocks: usize, alloc: A) -> Self {
+    pub fn new_in(align: usize, capacity: usize, alloc: A) -> Self {
         assert!(align.is_power_of_two());
-        assert!(blocks.is_power_of_two());
-
-        let capacity = align * blocks;
+        let capacity = align_up(align, capacity);
+        let blocks = capacity / align;
 
         let mut data = Vec::with_capacity_in(capacity, alloc);
         unsafe { data.set_len(capacity) };
 
         let allocated = AtomicUsize::new(0);
 
-        let blocks = capacity / align;
         let continuum = Arc::new(ContinuumUsize::new(blocks));
         let refs = (0..blocks)
             .map(|_| Arc::new(AtomicUsize::default()))
@@ -145,7 +137,7 @@ where
     }
 
     fn refs(&self, sequence: Sequence) -> &Arc<AtomicUsize> {
-        &self.refs[sequence as usize & (self.blocks - 1)]
+        &self.refs[sequence as usize % self.blocks]
     }
 
     pub fn continuum(&self) -> usize {
@@ -174,7 +166,7 @@ where
     }
 
     fn ptr(&self, offset: usize) -> *mut u8 {
-        (self.data.as_ptr() as usize + (offset & (self.capacity - 1))) as *mut u8
+        (self.data.as_ptr() as usize + (offset % self.capacity)) as *mut u8
     }
 
     fn release(&self, range: Range<usize>) {
@@ -322,9 +314,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ring() {
         const ALIGN: usize = 4096; // 4 KiB
-        const BLOCKS: usize = 4096; // capacity = 4 KiB * 4K = 16 MiB
+        const CAPACITY: usize = 16 * 1024 * 1024; // 16 MiB
 
-        let ring = Arc::new(RingBuffer::new(ALIGN, BLOCKS));
+        let ring = Arc::new(RingBuffer::new(ALIGN, CAPACITY));
         let sequence = Arc::new(AtomicU64::default());
 
         let mut views = BTreeMap::new();
@@ -358,11 +350,11 @@ mod tests {
         drop(views);
     }
 
-    async fn test_ring_concurrent_case(blocks: usize, concurrency: usize, loops: usize) {
+    async fn test_ring_concurrent_case(capacity: usize, concurrency: usize, loops: usize) {
         const ALIGN: usize = 4096; // 4 KiB
         const SIZE: Range<usize> = 16 * 1024..256 * 1024; // 16 KiB ~ 128 KiB
 
-        let ring = Arc::new(RingBuffer::new(ALIGN, blocks));
+        let ring = Arc::new(RingBuffer::new(ALIGN, capacity));
         let sequence = Arc::new(AtomicU64::default());
 
         let tasks = (0..concurrency)
@@ -392,8 +384,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ring_concurrent_small() {
-        // 4096 * 4096 = 16 MiB
-        test_ring_concurrent_case(4096, 16, 100).await;
+        test_ring_concurrent_case(16 * 1024 * 1024, 16, 100).await;
     }
 
     #[ignore]
@@ -402,7 +393,12 @@ mod tests {
         let concurrency = available_parallelism().unwrap().get() * 64;
 
         let now = Instant::now();
-        test_ring_concurrent_case(65536, available_parallelism().unwrap().get() * 64, 1000).await;
+        test_ring_concurrent_case(
+            128 * 1024 * 1024,
+            available_parallelism().unwrap().get() * 64,
+            1000,
+        )
+        .await;
         let elapsed = now.elapsed();
 
         println!("========== ring current fuzzy begin ==========");

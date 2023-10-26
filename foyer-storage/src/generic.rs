@@ -80,10 +80,8 @@ where
     ///       (buffer count = buffer pool size / device region size)
     pub allocator_bits: usize,
 
-    /// `ring_buffer_blocks` must be power of 2.
-    ///
-    /// `ring buffer capacity = ring buffer blocks * device align size`.
-    pub ring_buffer_blocks: usize,
+    /// `ring_buffer_capacity` will be aligned up to device align.
+    pub ring_buffer_capacity: usize,
 
     /// Catalog indices sharding bits.
     pub catalog_bits: usize,
@@ -133,7 +131,7 @@ where
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
             .field("allocator_bits", &self.allocator_bits)
-            .field("ring_buffer_blocks", &self.ring_buffer_blocks)
+            .field("ring_buffer_capacity", &self.ring_buffer_capacity)
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
@@ -162,7 +160,7 @@ where
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
             allocator_bits: self.allocator_bits,
-            ring_buffer_blocks: self.ring_buffer_blocks,
+            ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
@@ -248,11 +246,6 @@ where
     async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Self> {
         tracing::info!("open store with config:\n{:#?}", config);
 
-        assert!(
-            config.ring_buffer_blocks.is_power_of_two(),
-            "`ring_buffer_blocks` must be power of 2",
-        );
-
         let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let device = D::open(config.device_config).await?;
@@ -269,7 +262,7 @@ where
 
         let ring = Arc::new(RingBuffer::new_in(
             device.align(),
-            config.ring_buffer_blocks,
+            config.ring_buffer_capacity,
             device.io_buffer_allocator().clone(),
         ));
 
@@ -1238,7 +1231,7 @@ mod tests {
                 io_size: 4 * KB,
             },
             allocator_bits: 1,
-            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions,
             reinsertions,
@@ -1292,7 +1285,7 @@ mod tests {
                 io_size: 4096 * KB,
             },
             allocator_bits: 1,
-            ring_buffer_blocks: 4096, // 4096 * 4 KiB = 16 MiB
+            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],

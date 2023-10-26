@@ -318,7 +318,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.5, sum(rate(foyer_storage_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.5, sum(rate(foyer_storage_op_duration_bucket{op=~\"insert|remove\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "instant": false,
           "legendFormat": "p50 - {{foyer}} foyer storage - {{op}} {{extra}}",
           "range": true,
@@ -330,7 +330,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.9, sum(rate(foyer_storage_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.9, sum(rate(foyer_storage_op_duration_bucket{op=~\"insert|remove\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "p90 - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -343,7 +343,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(foyer_storage_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.99, sum(rate(foyer_storage_op_duration_bucket{op=~\"insert|remove\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "p99 - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -356,7 +356,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1.0, sum(rate(foyer_storage_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(1.0, sum(rate(foyer_storage_op_duration_bucket{op=~\"insert|remove\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "pmax - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -364,7 +364,7 @@
           "refId": "D"
         }
       ],
-      "title": "Op Duration",
+      "title": "Op Write Duration",
       "type": "timeseries"
     },
     {
@@ -433,7 +433,7 @@
         "x": 12,
         "y": 9
       },
-      "id": 4,
+      "id": 10,
       "options": {
         "legend": {
           "calcs": [
@@ -455,7 +455,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.5, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.5, sum(rate(foyer_storage_op_duration_bucket{op=~\"lookup\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "instant": false,
           "legendFormat": "p50 - {{foyer}} foyer storage - {{op}} {{extra}}",
           "range": true,
@@ -467,7 +467,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.9, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.9, sum(rate(foyer_storage_op_duration_bucket{op=~\"lookup\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "p90 - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -480,7 +480,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(0.99, sum(rate(foyer_storage_op_duration_bucket{op=~\"lookup\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "p99 - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -493,7 +493,7 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1.0, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "expr": "histogram_quantile(1.0, sum(rate(foyer_storage_op_duration_bucket{op=~\"lookup\"}[$__rate_interval])) by (le, foyer, op, extra)) ",
           "hide": false,
           "instant": false,
           "legendFormat": "pmax - {{foyer}} foyer storage - {{op}} {{extra}}",
@@ -501,7 +501,7 @@
           "refId": "D"
         }
       ],
-      "title": "Slow Op Duration",
+      "title": "Op Read Duration",
       "type": "timeseries"
     },
     {
@@ -658,7 +658,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "percentunit"
         },
         "overrides": []
       },
@@ -667,6 +667,104 @@
         "w": 12,
         "x": 12,
         "y": 17
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"hit\"}[$__rate_interval])) by (foyer) / (sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"hit\"}[$__rate_interval])) by (foyer) + sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"miss\"}[$__rate_interval])) by (foyer)) ",
+          "instant": false,
+          "legendFormat": "{{foyer}} foyer storage",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Hit Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P92AEBB27A9B79E22"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
       },
       "id": 9,
       "options": {
@@ -795,17 +893,17 @@
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 25
       },
-      "id": 7,
+      "id": 4,
       "options": {
         "legend": {
           "calcs": [
@@ -827,14 +925,53 @@
             "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
           },
           "editorMode": "code",
-          "expr": "sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"hit\"}[$__rate_interval])) by (foyer) / (sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"hit\"}[$__rate_interval])) by (foyer) + sum(rate(foyer_storage_op_duration_count{op=\"lookup\", extra=\"miss\"}[$__rate_interval])) by (foyer)) ",
+          "expr": "histogram_quantile(0.5, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
           "instant": false,
-          "legendFormat": "{{foyer}} foyer storage",
+          "legendFormat": "p50 - {{foyer}} foyer storage - {{op}} {{extra}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.9, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "p90 - {{foyer}} foyer storage - {{op}} {{extra}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "p99 - {{foyer}} foyer storage - {{op}} {{extra}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "a2641a73-8591-446b-9d69-7869ebf43899"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(1.0, sum(rate(foyer_storage_slow_op_duration_bucket[$__rate_interval])) by (le, foyer, op, extra)) ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "pmax - {{foyer}} foyer storage - {{op}} {{extra}}",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "Hit Ratio",
+      "title": "Slow Op Duration",
       "type": "timeseries"
     },
     {
@@ -900,8 +1037,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 25
+        "x": 0,
+        "y": 33
       },
       "id": 6,
       "options": {
