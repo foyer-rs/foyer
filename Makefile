@@ -6,6 +6,8 @@ deps:
 
 check:
 	shellcheck ./scripts/*
+	./.github/template/generate.sh
+	./scripts/minimize-dashboards.sh
 	cargo hakari generate
 	cargo hakari manage-deps
 	cargo sort -w

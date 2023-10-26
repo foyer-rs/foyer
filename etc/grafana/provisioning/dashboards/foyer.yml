@@ -6,4 +6,10 @@ providers:
     allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards/foyer.json
-      foldersFromFilesStructure: true
+      foldersFromFilesStructure: false
+  - name: "node exporter full provider"
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards/node-exporter-full.json
+      foldersFromFilesStructure: false
