@@ -159,6 +159,7 @@ pub struct Metrics {
     pub inner_op_duration_wait_ring_buffer: Histogram,
     pub inner_op_duration_update_catalog: Histogram,
     pub inner_op_duration_entry_flush: Histogram,
+    pub inner_op_duration_flusher_handle: Histogram,
 }
 
 impl Metrics {
@@ -214,6 +215,10 @@ impl Metrics {
             global
                 .inner_op_duration
                 .with_label_values(&[foyer, "entry_flush", ""]);
+        let inner_op_duration_flusher_handle =
+            global
+                .inner_op_duration
+                .with_label_values(&[foyer, "flusher_handle", ""]);
 
         Self {
             op_duration_insert_inserted,
@@ -238,6 +243,7 @@ impl Metrics {
             inner_op_duration_wait_ring_buffer,
             inner_op_duration_update_catalog,
             inner_op_duration_entry_flush,
+            inner_op_duration_flusher_handle,
         }
     }
 }

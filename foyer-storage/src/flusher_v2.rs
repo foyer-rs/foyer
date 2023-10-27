@@ -21,7 +21,7 @@ use crate::{
     region_manager::{RegionEpItemAdapter, RegionManager},
     ring::View,
 };
-use foyer_common::{code::Key, rate::RateLimiter};
+use foyer_common::code::Key;
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use std::{any::Any, fmt::Debug, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
@@ -81,8 +81,6 @@ where
 
     entry_rx: mpsc::UnboundedReceiver<Entry>,
 
-    _rate_limiter: Option<Arc<RateLimiter>>,
-
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
@@ -100,7 +98,6 @@ where
         catalog: Arc<Catalog<K>>,
         device: D,
         entry_rx: mpsc::UnboundedReceiver<Entry>,
-        rate_limiter: Option<Arc<RateLimiter>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -110,7 +107,6 @@ where
             catalog,
             buffer,
             entry_rx,
-            _rate_limiter: rate_limiter,
             metrics,
             stop_rx,
         }
@@ -138,6 +134,8 @@ where
     }
 
     async fn handle(&mut self, entry: Entry) -> Result<()> {
+        let timer = self.metrics.inner_op_duration_flusher_handle.start_timer();
+
         let old_region = self.buffer.region();
 
         let entry = match self.buffer.write(entry).await {
@@ -150,7 +148,7 @@ where
         // current region is full, rotate flush buffer region and retry
 
         // 1. get a clean region
-        let timer = self
+        let acquire_clean_region_timer = self
             .metrics
             .inner_op_duration_acquire_clean_region
             .start_timer();
@@ -160,7 +158,7 @@ where
             .acquire()
             .instrument(tracing::debug_span!("acquire_clean_region"))
             .await;
-        drop(timer);
+        drop(acquire_clean_region_timer);
 
         // 2. rotate flush buffer
         let entries = self.buffer.rotate(new_region).await?;
@@ -180,6 +178,7 @@ where
         let entries = self.buffer.write(entry).await?;
         self.update_catalog(entries).await?;
 
+        drop(timer);
         Ok(())
     }
 
