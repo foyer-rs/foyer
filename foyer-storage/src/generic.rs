@@ -326,11 +326,6 @@ where
             reinsertion.init(&store.inner.catalog);
         }
 
-        let flush_rate_limiter = match config.flush_rate_limit {
-            0 => None,
-            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
-        };
-
         let reclaim_rate_limiter = match config.reclaim_rate_limit {
             0 => None,
             rate => Some(Arc::new(RateLimiter::new(rate as f64))),
@@ -345,7 +340,6 @@ where
                     catalog.clone(),
                     device.clone(),
                     entry_rx,
-                    flush_rate_limiter.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
