@@ -150,7 +150,7 @@ where
             debug_assert!(self.continuum.is_vacant(offset / self.align));
 
             self.continuum
-                .submit((offset / self.align)..((offset + len) / self.align));
+                .submit_advance((offset / self.align)..((offset + len) / self.align));
             return None;
         }
 
@@ -198,7 +198,7 @@ where
         let start = range.start / self.align;
         let end = range.end / self.align;
         debug_assert!(self.continuum.is_vacant(start));
-        self.continuum.submit(start..end);
+        self.continuum.submit_advance(start..end);
     }
 }
 
