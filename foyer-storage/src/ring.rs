@@ -12,7 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{catalog::Sequence, device::BufferAllocator};
+use crate::{
+    catalog::Sequence,
+    device::BufferAllocator,
+    metrics::{Metrics, METRICS},
+};
 use foyer_common::{bits::align_up, continuum::ContinuumUsize};
 use itertools::Itertools;
 use std::{
@@ -23,7 +27,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub struct RingBuffer<A = Global>
@@ -40,6 +44,8 @@ where
     refs: Vec<Arc<AtomicUsize>>,
 
     continuum: Arc<ContinuumUsize>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<A> Debug for RingBuffer<A>
@@ -61,6 +67,11 @@ impl RingBuffer<Global> {
     pub fn new(align: usize, capacity: usize) -> Self {
         Self::new_in(align, capacity, Global)
     }
+
+    /// `align` must be power of 2.
+    pub fn with_metrics(align: usize, capacity: usize, metrics: Arc<Metrics>) -> Self {
+        Self::with_metrics_in(align, capacity, metrics, Global)
+    }
 }
 
 impl<A> RingBuffer<A>
@@ -69,6 +80,12 @@ where
 {
     /// `align` must be power of 2.
     pub fn new_in(align: usize, capacity: usize, alloc: A) -> Self {
+        let metrics = Arc::new(METRICS.foyer(""));
+        Self::with_metrics_in(align, capacity, metrics, alloc)
+    }
+
+    /// `align` must be power of 2.
+    pub fn with_metrics_in(align: usize, capacity: usize, metrics: Arc<Metrics>, alloc: A) -> Self {
         assert!(align.is_power_of_two());
         let capacity = align_up(align, capacity);
         let blocks = capacity / align;
@@ -91,6 +108,7 @@ where
             allocated,
             refs,
             continuum,
+            metrics,
         }
     }
 
@@ -99,6 +117,7 @@ where
     /// Returns `None` when the allocated buffer cross the boundary.
     ///
     /// When all views from an allocation are dropped, the buffer will be released.
+    #[tracing::instrument(skip(self))]
     pub async fn allocate(self: &Arc<Self>, len: usize, sequence: Sequence) -> ViewMut {
         loop {
             if let Some(view) = self.allocate_inner(len, sequence).await {
@@ -107,12 +126,14 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn allocate_inner(self: &Arc<Self>, len: usize, sequence: Sequence) -> Option<ViewMut> {
         let len = align_up(self.align, len);
         let offset = self.allocated.fetch_add(len, Ordering::SeqCst);
 
         debug_assert_eq!(offset & (self.align - 1), 0);
 
+        let now = Instant::now();
         loop {
             self.continuum.advance();
             if self.continuum.continuum() * self.align + self.capacity >= offset + len {
@@ -120,6 +141,10 @@ where
             }
             tokio::time::sleep(Duration::from_micros(100)).await;
         }
+        let elapsed = now.elapsed();
+        self.metrics
+            .inner_op_duration_wait_ring_buffer
+            .observe(elapsed.as_secs_f64());
 
         if offset / self.capacity != (offset + len) / self.capacity {
             debug_assert!(self.continuum.is_vacant(offset / self.align));
