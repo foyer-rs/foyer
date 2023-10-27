@@ -23,13 +23,19 @@ use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use twox_hash::XxHash64;
 
-use crate::region::{RegionId, Version};
+use crate::{
+    device::BufferAllocator,
+    region::{RegionId, Version},
+    ring::View,
+};
 
 pub type Sequence = u64;
 
 #[derive(Debug, Clone)]
 pub enum Index {
-    RingBuffer {},
+    RingBuffer {
+        view: View,
+    },
     Region {
         region: RegionId,
         version: Version,
@@ -41,7 +47,7 @@ pub enum Index {
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexInfo {
+pub struct Item {
     pub sequence: Sequence,
     pub index: Index,
 }
@@ -55,7 +61,7 @@ where
     bits: usize,
 
     /// Sharded by key hash.
-    infos: Vec<RwLock<BTreeMap<Arc<K>, IndexInfo>>>,
+    items: Vec<RwLock<BTreeMap<Arc<K>, Item>>>,
 
     /// Sharded by region id.
     regions: Vec<Mutex<BTreeMap<Arc<K>, u64>>>,
@@ -74,62 +80,61 @@ where
             .collect_vec();
         Self {
             bits,
-            infos,
+            items: infos,
             regions,
         }
     }
 
-    pub fn insert(&self, key: K, info: IndexInfo) {
+    pub fn insert(&self, key: Arc<K>, item: Item) {
         // TODO(MrCroxx): compare sequence.
-        let key = Arc::new(key);
 
-        if let Index::Region { region, .. } = info.index {
+        if let Index::Region { region, .. } = item.index {
             self.regions[region as usize]
                 .lock()
-                .insert(key.clone(), info.sequence);
+                .insert(key.clone(), item.sequence);
         };
 
         let shard = self.shard(&key);
         // TODO(MrCroxx): handle old key?
-        let _ = self.infos[shard].write().insert(key.clone(), info);
+        let _ = self.items[shard].write().insert(key.clone(), item);
     }
 
-    pub fn lookup(&self, key: &K) -> Option<IndexInfo> {
+    pub fn lookup(&self, key: &K) -> Option<Item> {
         let shard = self.shard(key);
-        self.infos[shard].read().get(key).cloned()
+        self.items[shard].read().get(key).cloned()
     }
 
-    pub fn remove(&self, key: &K) -> Option<IndexInfo> {
+    pub fn remove(&self, key: &K) -> Option<Item> {
         let shard = self.shard(key);
-        let info: Option<IndexInfo> = self.infos[shard].write().remove(key);
+        let info: Option<Item> = self.items[shard].write().remove(key);
         if let Some(info) = &info && let Index::Region { region,..} = info.index {
             self.regions[region as usize].lock().remove(key);
         }
         info
     }
 
-    pub fn take_region(&self, region: &RegionId) -> Vec<IndexInfo> {
+    pub fn take_region(&self, region: &RegionId) -> Vec<(Arc<K>, Item)> {
         let mut keys = BTreeMap::new();
         std::mem::swap(&mut *self.regions[*region as usize].lock(), &mut keys);
 
-        let mut infos = Vec::with_capacity(keys.len());
+        let mut items = Vec::with_capacity(keys.len());
         for (key, sequence) in keys {
             let shard = self.shard(&key);
-            match self.infos[shard].write().entry(key.clone()) {
+            match self.items[shard].write().entry(key.clone()) {
                 Entry::Vacant(_) => continue,
                 Entry::Occupied(o) => {
                     if o.get().sequence == sequence {
-                        let info = o.remove();
-                        infos.push(info);
+                        let item = o.remove();
+                        items.push((key.clone(), item));
                     }
                 }
             };
         }
-        infos
+        items
     }
 
     pub fn clear(&self) {
-        for shard in self.infos.iter() {
+        for shard in self.items.iter() {
             shard.write().clear();
         }
         for region in self.regions.iter() {

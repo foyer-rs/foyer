@@ -23,10 +23,12 @@
 #![feature(associated_type_defaults)]
 
 pub mod admission;
+pub mod buffer;
 pub mod catalog;
 pub mod device;
 pub mod error;
 pub mod flusher;
+pub mod flusher_v2;
 pub mod generic;
 pub mod judge;
 pub mod lazy;
