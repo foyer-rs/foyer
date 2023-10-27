@@ -29,9 +29,7 @@ macro_rules! def_continuum {
             }
 
             impl $name {
-                /// `capacity` must be power of 2.
                 pub fn new(capacity: $uint) -> Self {
-                    assert!(capacity.is_power_of_two());
                     let slots = (0..capacity).map(|_| <$atomic>::default()).collect_vec();
                     let continuum = <$atomic>::default();
                     Self {
@@ -97,7 +95,7 @@ macro_rules! def_continuum {
                 }
 
                 fn slot(&self, position: $uint) -> usize {
-                    (position & (self.capacity - 1)) as usize
+                    (position % self.capacity) as usize
                 }
 
                 /// `stop: Fn(continuum, next) -> bool`.

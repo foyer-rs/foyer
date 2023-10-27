@@ -169,8 +169,18 @@ where
         self.continuum.continuum() * self.align
     }
 
+    pub fn allocated(&self) -> usize {
+        self.allocated.load(Ordering::Relaxed)
+    }
+
     pub fn advance(&self) {
         self.continuum.advance();
+    }
+
+    /// Reutrns positive number means how many bytes remains,
+    /// returns negative number means how many bytes are waiting for allocation.
+    pub fn remains(&self) -> isize {
+        self.continuum() as isize - self.allocated() as isize
     }
 }
 
