@@ -277,7 +277,11 @@ where
             metrics.clone(),
         ));
 
-        let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_bits));
+        let catalog = Arc::new(Catalog::new(
+            device.regions(),
+            config.catalog_bits,
+            metrics.clone(),
+        ));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
         let flusher_stop_rxs = (0..config.flushers)
@@ -431,7 +435,7 @@ where
             }
         };
 
-        match item.index {
+        match item.index() {
             crate::catalog::Index::RingBuffer { view } => {
                 let res = match read_entry::<K, V>(view.as_ref()) {
                     Some((_key, value)) => Ok(Some(value)),
@@ -458,13 +462,13 @@ where
                 key_len: _,
                 value_len: _,
             } => {
-                self.inner.region_manager.record_access(&region);
-                let region = self.inner.region_manager.region(&region);
-                let start = offset as usize;
-                let end = start + len as usize;
+                self.inner.region_manager.record_access(region);
+                let region = self.inner.region_manager.region(region);
+                let start = *offset as usize;
+                let end = start + *len as usize;
 
                 // TODO(MrCroxx): read value only
-                let slice = match region.load(start..end, version).await? {
+                let slice = match region.load(start..end, *version).await? {
                     Some(slice) => slice,
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of region version mismatch).
@@ -595,7 +599,7 @@ where
         let mut sequence = 0;
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some((key, item)) = iter.next().await? {
-                sequence = std::cmp::max(sequence, item.sequence);
+                sequence = std::cmp::max(sequence, *item.sequence());
                 catalog.insert(Arc::new(key), item);
             }
             region_manager.eviction_push(region_id);
@@ -657,32 +661,6 @@ where
             .op_bytes_insert
             .inc_by(serialized_len as u64);
 
-        // let mut slice = match self
-        //     .inner
-        //     .region_manager
-        //     .allocate(serialized_len, !writer.is_skippable)
-        //     .await
-        // {
-        //     Some(slice) => slice,
-        //     // Only reachable when writer is skippable.
-        //     None => return Ok(false),
-        // };
-
-        // write_entry(slice.as_mut(), &key, &value, sequence);
-
-        // let info = IndexInfo {
-        //     sequence,
-        //     index: Index::Region {
-        //         region: slice.region_id(),
-        //         version: slice.version(),
-        //         offset: slice.offset() as u32,
-        //         len: slice.len() as u32,
-        //         key_len: key.serialized_len() as u32,
-        //         value_len: value.serialized_len() as u32,
-        //     },
-        // };
-        // drop(slice);
-
         let mut view = self.inner.ring.allocate(serialized_len, sequence).await;
         let written = write_entry(&mut view, &key, &value, sequence);
         view.shrink_to(written);
@@ -692,10 +670,7 @@ where
 
         self.inner.catalog.insert(
             key.clone(),
-            Item {
-                sequence,
-                index: Index::RingBuffer { view: view.clone() },
-            },
+            Item::new(sequence, Index::RingBuffer { view: view.clone() }),
         );
 
         let flusher = sequence as usize % self.inner.flusher_entry_txs.len();
@@ -1067,9 +1042,9 @@ where
             key
         };
 
-        let info = Item {
-            sequence: header.sequence,
-            index: Index::Region {
+        let info = Item::new(
+            header.sequence,
+            Index::Region {
                 region: self.region.id(),
                 version: 0,
                 offset: self.cursor as u32,
@@ -1077,7 +1052,7 @@ where
                 key_len: header.key_len,
                 value_len: header.value_len,
             },
-        };
+        );
 
         self.cursor += entry_len;
 
@@ -1085,19 +1060,19 @@ where
     }
 
     pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
-        let (_, info) = match self.next().await {
+        let (_, item) = match self.next().await {
             Ok(Some(res)) => res,
             Ok(None) => return Ok(None),
             Err(e) => return Err(e),
         };
 
-        let Index::Region { offset, len, .. } = info.index else {
+        let Index::Region { offset, len, .. } = item.index() else {
             unreachable!("kv loaded from region must have index of region")
         };
 
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
-        let start = offset as usize;
-        let end = start + len as usize;
+        let start = *offset as usize;
+        let end = start + *len as usize;
         let Some(slice) = self.region.load(start..end, 0).await? else {
             return Ok(None);
         };

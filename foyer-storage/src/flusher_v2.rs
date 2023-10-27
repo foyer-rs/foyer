@@ -208,7 +208,7 @@ where
                 key_len: key_len as u32,
                 value_len: value_len as u32,
             };
-            let item = Item { sequence, index };
+            let item = Item::new(sequence, index);
             self.catalog.insert(key, item);
         }
         drop(timer);

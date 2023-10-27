@@ -16,6 +16,7 @@ use std::{
     collections::btree_map::{BTreeMap, Entry},
     hash::Hasher,
     sync::Arc,
+    time::Instant,
 };
 
 use foyer_common::code::Key;
@@ -25,6 +26,7 @@ use twox_hash::XxHash64;
 
 use crate::{
     device::BufferAllocator,
+    metrics::Metrics,
     region::{RegionId, Version},
     ring::View,
 };
@@ -48,8 +50,28 @@ pub enum Index {
 
 #[derive(Debug, Clone)]
 pub struct Item {
-    pub sequence: Sequence,
-    pub index: Index,
+    sequence: Sequence,
+    index: Index,
+
+    inserted: Option<Instant>,
+}
+
+impl Item {
+    pub fn new(sequence: Sequence, index: Index) -> Self {
+        Self {
+            sequence,
+            index,
+            inserted: None,
+        }
+    }
+
+    pub fn sequence(&self) -> &Sequence {
+        &self.sequence
+    }
+
+    pub fn index(&self) -> &Index {
+        &self.index
+    }
 }
 
 #[derive(Debug)]
@@ -65,13 +87,15 @@ where
 
     /// Sharded by region id.
     regions: Vec<Mutex<BTreeMap<Arc<K>, u64>>>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K> Catalog<K>
 where
     K: Key,
 {
-    pub fn new(regions: usize, bits: usize) -> Self {
+    pub fn new(regions: usize, bits: usize, metrics: Arc<Metrics>) -> Self {
         let infos = (0..1 << bits)
             .map(|_| RwLock::new(BTreeMap::new()))
             .collect_vec();
@@ -82,10 +106,12 @@ where
             bits,
             items: infos,
             regions,
+
+            metrics,
         }
     }
 
-    pub fn insert(&self, key: Arc<K>, item: Item) {
+    pub fn insert(&self, key: Arc<K>, mut item: Item) {
         // TODO(MrCroxx): compare sequence.
 
         if let Index::Region { region, .. } = item.index {
@@ -96,7 +122,14 @@ where
 
         let shard = self.shard(&key);
         // TODO(MrCroxx): handle old key?
-        let _ = self.items[shard].write().insert(key.clone(), item);
+        let old = {
+            let mut guard = self.items[shard].write();
+            item.inserted = Some(Instant::now());
+            guard.insert(key.clone(), item)
+        };
+        if let Some(old) = old && let Index::RingBuffer { .. } = old.index() {
+            self.metrics.inner_op_duration_entry_flush.observe(old.inserted.unwrap().elapsed().as_secs_f64());
+        }
     }
 
     pub fn lookup(&self, key: &K) -> Option<Item> {
