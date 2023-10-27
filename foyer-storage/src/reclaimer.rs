@@ -209,7 +209,7 @@ where
             }
         }
 
-        // step 3: set region last block zero
+        // step 3: wipe region header
         let align = region.device().align();
         let mut buf = region.device().io_buffer(align, align);
         (&mut buf[..]).put_slice(&vec![0; align]);

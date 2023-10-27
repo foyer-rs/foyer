@@ -23,7 +23,7 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {}
+    fn init(&self, catalog: &Arc<Catalog<Self::Key>>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
 

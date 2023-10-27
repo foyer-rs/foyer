@@ -111,6 +111,10 @@ pub struct Args {
     #[arg(long, default_value_t = 1024)]
     buffer_pool_size: usize,
 
+    /// (MiB)
+    #[arg(long, default_value_t = 1024)]
+    ring_buffer_capacity: usize,
+
     #[arg(long, default_value_t = 4)]
     flushers: usize,
 
@@ -552,6 +556,7 @@ async fn main() {
         eviction_config,
         device_config,
         allocator_bits: args.allocator_bits,
+        ring_buffer_capacity: args.ring_buffer_capacity * 1024 * 1024,
         catalog_bits: args.catalog_bits,
         admissions,
         reinsertions,
