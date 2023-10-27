@@ -16,8 +16,9 @@ use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
     core::{AtomicU64, GenericGauge, GenericGaugeVec},
-    opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, Registry,
+    opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec, Registry,
 };
 type UintGaugeVec = GenericGaugeVec<AtomicU64>;
 type UintGauge = GenericGauge<AtomicU64>;
@@ -67,6 +68,7 @@ pub struct GlobalMetrics {
     total_bytes: UintGaugeVec,
 
     inner_op_duration: HistogramVec,
+    inner_bytes: IntGaugeVec,
 }
 
 impl Default for GlobalMetrics {
@@ -115,7 +117,15 @@ impl GlobalMetrics {
             "foyer_storage_inner_op_duration",
             "foyer storage inner op duration",
             &["foyer", "op", "extra"],
-            vec![0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+            vec![0.0001, 0.01, 0.02, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0],
+            registry,
+        )
+        .unwrap();
+
+        let inner_bytes = register_int_gauge_vec_with_registry!(
+            "foyer_storage_inner_bytes",
+            "foyer storage inner bytes",
+            &["foyer", "component", "extra"],
             registry,
         )
         .unwrap();
@@ -127,6 +137,7 @@ impl GlobalMetrics {
             total_bytes,
 
             inner_op_duration,
+            inner_bytes,
         }
     }
 
@@ -160,6 +171,8 @@ pub struct Metrics {
     pub inner_op_duration_update_catalog: Histogram,
     pub inner_op_duration_entry_flush: Histogram,
     pub inner_op_duration_flusher_handle: Histogram,
+
+    pub inner_bytes_ring_buffer_remains: IntGauge,
 }
 
 impl Metrics {
@@ -220,6 +233,10 @@ impl Metrics {
                 .inner_op_duration
                 .with_label_values(&[foyer, "flusher_handle", ""]);
 
+        let inner_bytes_ring_buffer_remains = global
+            .inner_bytes
+            .with_label_values(&[foyer, "ring", "remains"]);
+
         Self {
             op_duration_insert_inserted,
             op_duration_insert_filtered,
@@ -244,6 +261,8 @@ impl Metrics {
             inner_op_duration_update_catalog,
             inner_op_duration_entry_flush,
             inner_op_duration_flusher_handle,
+
+            inner_bytes_ring_buffer_remains,
         }
     }
 }
