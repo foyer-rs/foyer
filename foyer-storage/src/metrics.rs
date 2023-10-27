@@ -156,6 +156,8 @@ pub struct Metrics {
 
     pub inner_op_duration_acquire_clean_region: Histogram,
     pub inner_op_duration_acquire_clean_buffer: Histogram,
+    pub inner_op_duration_wait_ring_buffer: Histogram,
+    pub inner_op_duration_update_catalog: Histogram,
 }
 
 impl Metrics {
@@ -199,6 +201,14 @@ impl Metrics {
             global
                 .inner_op_duration
                 .with_label_values(&[foyer, "acquire_clean_buffer", ""]);
+        let inner_op_duration_wait_ring_buffer =
+            global
+                .inner_op_duration
+                .with_label_values(&[foyer, "wait_ring_buffer", ""]);
+        let inner_op_duration_update_catalog =
+            global
+                .inner_op_duration
+                .with_label_values(&[foyer, "update_catalog", ""]);
 
         Self {
             op_duration_insert_inserted,
@@ -220,6 +230,8 @@ impl Metrics {
 
             inner_op_duration_acquire_clean_region,
             inner_op_duration_acquire_clean_buffer,
+            inner_op_duration_wait_ring_buffer,
+            inner_op_duration_update_catalog,
         }
     }
 }

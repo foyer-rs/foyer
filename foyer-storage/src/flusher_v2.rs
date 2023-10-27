@@ -12,12 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::{code::Key, rate::RateLimiter};
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use std::{any::Any, sync::Arc};
-use tokio::sync::{broadcast, mpsc};
-use tracing::Instrument;
-
 use crate::{
     buffer::{BufferError, FlushBuffer, PositionedEntry},
     catalog::{Catalog, Index, Item, Sequence},
@@ -27,8 +21,12 @@ use crate::{
     region_manager::{RegionEpItemAdapter, RegionManager},
     ring::View,
 };
+use foyer_common::{code::Key, rate::RateLimiter};
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use std::{any::Any, fmt::Debug, sync::Arc};
+use tokio::sync::{broadcast, mpsc};
+use tracing::Instrument;
 
-#[derive(Debug)]
 pub struct Entry {
     /// # Safety
     ///
@@ -39,7 +37,20 @@ pub struct Entry {
     pub key_len: usize,
     pub value_len: usize,
     pub sequence: Sequence,
+
+    /// Hold a view of referenced buffer, for lookup and prevent from releasing.
     pub view: View,
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("key_len", &self.key_len)
+            .field("value_len", &self.value_len)
+            .field("sequence", &self.sequence)
+            .field("view", &self.view)
+            .finish()
+    }
 }
 
 impl Clone for Entry {
@@ -172,7 +183,9 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn update_catalog(&self, entries: Vec<PositionedEntry>) -> Result<()> {
+        let timer = self.metrics.inner_op_duration_update_catalog.start_timer();
         for PositionedEntry {
             entry:
                 Entry {
@@ -198,6 +211,7 @@ where
             let item = Item { sequence, index };
             self.catalog.insert(key, item);
         }
+        drop(timer);
         Ok(())
     }
 }

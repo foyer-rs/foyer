@@ -260,9 +260,10 @@ where
             .into());
         }
 
-        let ring = Arc::new(RingBuffer::new_in(
+        let ring = Arc::new(RingBuffer::with_metrics_in(
             device.align(),
             config.ring_buffer_capacity,
+            metrics.clone(),
             device.io_buffer_allocator().clone(),
         ));
 
