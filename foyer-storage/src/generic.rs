@@ -655,6 +655,10 @@ where
             .op_bytes_insert
             .inc_by(serialized_len as u64);
 
+        self.inner
+            .metrics
+            .inner_bytes_ring_buffer_remains
+            .set(self.inner.ring.remains() as i64);
         let mut view = self.inner.ring.allocate(serialized_len, sequence).await;
         let written = write_entry(&mut view, &key, &value, sequence);
         view.shrink_to(written);
