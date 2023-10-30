@@ -117,13 +117,11 @@ where
 
         // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
         {
-            let guard = region.exclusive(false, false, false).await;
+            let guard = region.exclusive(false, false).await;
             tracing::trace!(
-                "[reclaimer] region {}, writers: {}, buffered readers: {}, physical readers: {}",
+                "[reclaimer] region {}, physical readers: {}",
                 region.id(),
-                guard.writers(),
-                guard.buffered_readers(),
-                guard.physical_readers()
+                guard.readers(),
             );
             drop(guard);
         }
