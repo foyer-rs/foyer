@@ -13,15 +13,17 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use parking_lot::{lock_api::ArcMutexGuard, Mutex, MutexGuard, RawMutex};
+use parking_lot::{Mutex, MutexGuard};
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
     ops::RangeBounds,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::oneshot;
-use tracing::instrument;
 
 use crate::{
     device::{BufferAllocator, Device},
@@ -55,10 +57,8 @@ pub struct RegionInner<A>
 where
     A: BufferAllocator,
 {
-    readers: usize,
-
     #[expect(clippy::type_complexity)]
-    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<ReadSlice<A>>>>>,
+    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<Vec<u8, A>>>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,8 +89,6 @@ where
 {
     pub fn new(id: RegionId, device: D) -> Self {
         let inner = RegionInner {
-            readers: 0,
-
             waits: BTreeMap::new(),
         };
         Self {
@@ -102,6 +100,7 @@ where
     }
 
     pub fn view(&self, offset: u32, len: u32, key_len: u32, value_len: u32) -> RegionView {
+        self.refs.fetch_add(1, Ordering::SeqCst);
         RegionView {
             id: self.id,
             offset,
@@ -110,6 +109,10 @@ where
             value_len,
             refs: Arc::clone(&self.refs),
         }
+    }
+
+    pub fn refs(&self) -> &Arc<AtomicUsize> {
+        &self.refs
     }
 
     /// Load region data into a [`ReadSlice`].
@@ -123,7 +126,7 @@ where
     pub async fn load(
         &self,
         range: impl RangeBounds<usize>,
-    ) -> Result<Option<ReadSlice<D::IoBufferAllocator>>> {
+    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
         let start = match range.start_bound() {
             std::ops::Bound::Included(i) => *i,
             std::ops::Bound::Excluded(i) => *i + 1,
@@ -151,7 +154,6 @@ where
                 }
             };
 
-            inner.readers += 1;
             drop(inner);
 
             rx
@@ -185,57 +187,27 @@ where
                 Err(e) => {
                     let mut inner = self.inner.lock();
                     self.cleanup(&mut inner, start, end)?;
-                    inner.readers -= 1;
                     return Err(e.into());
                 }
             };
             if read != len {
                 let mut inner = self.inner.lock();
                 self.cleanup(&mut inner, start, end)?;
-                inner.readers -= 1;
                 return Ok(None);
             }
             offset += len;
         }
         let buf = Arc::new(buf);
 
-        let cleanup = {
-            let inner = self.inner.clone();
-            let f = move || {
-                let mut guard = inner.lock();
-                guard.readers -= 1;
-            };
-            Box::new(f)
-        };
-
         if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
             // TODO: handle error !!!!!!!!!!!
             for tx in txs {
-                tx.send(Ok(ReadSlice {
-                    buf: buf.clone(),
-                    cleanup: Some(cleanup.clone()),
-                }))
-                .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
+                tx.send(Ok(buf.clone()))
+                    .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
             }
         }
 
-        Ok(Some(ReadSlice {
-            buf,
-            cleanup: Some(cleanup),
-        }))
-    }
-
-    #[instrument(skip(self))]
-    pub async fn exclusive(&self) -> ArcMutexGuard<RawMutex, RegionInner<D::IoBufferAllocator>> {
-        loop {
-            {
-                let guard = self.inner.clone().lock_arc();
-                if guard.readers == 0 {
-                    break guard;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        }
+        Ok(Some(buf))
     }
 
     pub fn id(&self) -> RegionId {
@@ -254,7 +226,6 @@ where
         end: usize,
     ) -> Result<()> {
         if let Some(txs) = guard.waits.remove(&(start, end)) {
-            guard.readers -= txs.len();
             for tx in txs {
                 tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
                     .map_err(|_| anyhow::anyhow!("fail to cleanup waits"))?;
@@ -264,72 +235,11 @@ where
     }
 }
 
-impl<A> RegionInner<A>
-where
-    A: BufferAllocator,
-{
-    pub fn readers(&self) -> usize {
-        self.readers
-    }
-}
-
 // read & write slice
 
 pub trait CleanupFn = FnOnce() + Send + Sync + 'static;
 
-pub struct ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    buf: Arc<Vec<u8, A>>,
-    cleanup: Option<Box<dyn CleanupFn>>,
-}
-
-impl<A> Debug for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReadSlice")
-            .field("len", &self.buf.len())
-            .finish()
-    }
-}
-
-impl<A> ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-impl<A> AsRef<[u8]> for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn as_ref(&self) -> &[u8] {
-        self.buf.as_ref()
-    }
-}
-
-impl<A> Drop for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn drop(&mut self) {
-        if let Some(f) = self.cleanup.take() {
-            f();
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RegionView {
     id: RegionId,
     offset: u32,
@@ -337,6 +247,26 @@ pub struct RegionView {
     key_len: u32,
     value_len: u32,
     refs: Arc<AtomicUsize>,
+}
+
+impl Clone for RegionView {
+    fn clone(&self) -> Self {
+        self.refs.fetch_add(1, Ordering::SeqCst);
+        Self {
+            id: self.id,
+            offset: self.offset,
+            len: self.len,
+            key_len: self.key_len,
+            value_len: self.value_len,
+            refs: Arc::clone(&self.refs),
+        }
+    }
+}
+
+impl Drop for RegionView {
+    fn drop(&mut self) {
+        self.refs.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl RegionView {
