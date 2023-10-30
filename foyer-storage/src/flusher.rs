@@ -12,52 +12,101 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
-
-use foyer_common::rate::RateLimiter;
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-
-use tokio::sync::broadcast;
-
 use crate::{
+    buffer::{BufferError, FlushBuffer, PositionedEntry},
+    catalog::{Catalog, Index, Item, Sequence},
     device::Device,
-    error::Result,
+    error::{Error, Result},
     metrics::Metrics,
-    region::RegionId,
     region_manager::{RegionEpItemAdapter, RegionManager},
+    ring::View,
 };
+use foyer_common::code::Key;
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use std::{any::Any, fmt::Debug, sync::Arc};
+use tokio::sync::{broadcast, mpsc};
+use tracing::Instrument;
+
+pub struct Entry {
+    /// # Safety
+    ///
+    /// `key` must be `Arc<K> where K = Flusher<K>`.
+    ///
+    /// Use `dyn Any` here to avoid contagious generic type.
+    pub key: Arc<dyn Any + Send + Sync>,
+    pub key_len: usize,
+    pub value_len: usize,
+    pub sequence: Sequence,
+
+    /// Hold a view of referenced buffer, for lookup and prevent from releasing.
+    pub view: View,
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("key_len", &self.key_len)
+            .field("value_len", &self.value_len)
+            .field("sequence", &self.sequence)
+            .field("view", &self.view)
+            .finish()
+    }
+}
+
+impl Clone for Entry {
+    fn clone(&self) -> Self {
+        Self {
+            key: Arc::clone(&self.key),
+            view: self.view.clone(),
+            key_len: self.key_len,
+            value_len: self.value_len,
+            sequence: self.sequence,
+        }
+    }
+}
 
 #[derive(Debug)]
-pub struct Flusher<D, EP, EL>
+pub struct Flusher<K, D, EP, EL>
 where
+    K: Key,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
-    rate_limiter: Option<Arc<RateLimiter>>,
+    catalog: Arc<Catalog<K>>,
+
+    buffer: FlushBuffer<D>,
+
+    entry_rx: mpsc::UnboundedReceiver<Entry>,
 
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
 }
 
-impl<D, EP, EL> Flusher<D, EP, EL>
+impl<K, D, EP, EL> Flusher<K, D, EP, EL>
 where
+    K: Key,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     pub fn new(
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        rate_limiter: Option<Arc<RateLimiter>>,
+        catalog: Arc<Catalog<K>>,
+        device: D,
+        entry_rx: mpsc::UnboundedReceiver<Entry>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
+        let buffer = FlushBuffer::new(device.clone());
         Self {
             region_manager,
-            rate_limiter,
+            catalog,
+            buffer,
+            entry_rx,
             metrics,
             stop_rx,
         }
@@ -67,10 +116,16 @@ where
         loop {
             tokio::select! {
                 biased;
-                region_id = self.region_manager.dirty_regions().acquire() => {
-                    self.handle(region_id).await?;
+                entry = self.entry_rx.recv() => {
+                    let Some(entry) = entry else {
+                        self.buffer.flush().await?;
+                        tracing::info!("[flusher] exit");
+                        return Ok(());
+                    };
+                    self.handle(entry).await?;
                 }
                 _ = self.stop_rx.recv() => {
+                    self.buffer.flush().await?;
                     tracing::info!("[flusher] exit");
                     return Ok(())
                 }
@@ -78,74 +133,83 @@ where
         }
     }
 
-    async fn handle(&self, region_id: RegionId) -> Result<()> {
-        let _timer = self.metrics.slow_op_duration_flush.start_timer();
+    async fn handle(&mut self, entry: Entry) -> Result<()> {
+        let timer = self.metrics.inner_op_duration_flusher_handle.start_timer();
 
-        tracing::info!("[flusher] receive flush task, region: {}", region_id);
+        let old_region = self.buffer.region();
 
-        let region = self.region_manager.region(&region_id);
+        let entry = match self.buffer.write(entry).await {
+            Err(BufferError::NotEnough { entry }) => entry,
 
-        tracing::trace!("[flusher] step 1");
-
-        // step 1: write buffer back to device
-        let slice = region.load(.., 0).await?.unwrap();
-        let mut slice = Some(slice);
-
-        {
-            // wait all physical readers (from previous version) and writers done
-            let _ = region.exclusive(false, true, false).await;
-        }
-
-        tracing::trace!("[flusher] write region {} back to device", region_id);
-
-        let mut offset = 0;
-        let len = region.device().io_size();
-        while offset < region.device().region_size() {
-            let start = offset;
-            let end = std::cmp::min(offset + len, region.device().region_size());
-
-            if let Some(limiter) = &self.rate_limiter && let Some(duration) = limiter.consume(len as f64) {
-                tokio::time::sleep(duration).await;
-            }
-            let (res, s) = region
-                .device()
-                .write(
-                    slice.take().unwrap(),
-                    start..end,
-                    region.id(),
-                    offset as u64,
-                )
-                .await;
-            res?;
-            slice = Some(s);
-            offset += len;
-        }
-
-        drop(slice);
-
-        tracing::trace!("[flusher] step 2");
-
-        let buffer = {
-            // step 2: detach buffer
-            let mut guard = region.exclusive(false, false, true).await;
-            guard.detach_buffer()
+            Ok(entries) => return self.update_catalog(entries).await,
+            Err(e) => return Err(Error::from(e)),
         };
 
-        tracing::trace!("[flusher] step 3");
+        // current region is full, rotate flush buffer region and retry
 
-        // step 3: release buffer
-        self.region_manager.buffers().release(buffer);
-        self.region_manager.eviction_push(region.id());
+        // 1. get a clean region
+        let acquire_clean_region_timer = self
+            .metrics
+            .inner_op_duration_acquire_clean_region
+            .start_timer();
+        let new_region = self
+            .region_manager
+            .clean_regions()
+            .acquire()
+            .instrument(tracing::debug_span!("acquire_clean_region"))
+            .await;
+        drop(acquire_clean_region_timer);
 
-        tracing::info!("[flusher] finish flush task, region: {}", region_id);
+        // 2. rotate flush buffer
+        let entries = self.buffer.rotate(new_region).await?;
+        self.update_catalog(entries).await?;
+        if let Some(old_region) = old_region {
+            self.region_manager.eviction_push(old_region);
+        }
 
-        self.metrics
-            .op_bytes_flush
-            .inc_by(region.device().region_size() as u64);
-        self.metrics
-            .total_bytes
-            .add(region.device().region_size() as u64);
+        self.metrics.total_bytes.add(
+            self.region_manager
+                .region(&new_region)
+                .device()
+                .region_size() as u64,
+        );
 
+        // 3. retry write
+        let entries = self.buffer.write(entry).await?;
+        self.update_catalog(entries).await?;
+
+        drop(timer);
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn update_catalog(&self, entries: Vec<PositionedEntry>) -> Result<()> {
+        let timer = self.metrics.inner_op_duration_update_catalog.start_timer();
+        for PositionedEntry {
+            entry:
+                Entry {
+                    key,
+                    view,
+                    key_len,
+                    value_len,
+                    sequence,
+                },
+            region,
+            offset,
+        } in entries
+        {
+            let key = key.downcast::<K>().unwrap();
+            let index = Index::Region {
+                region,
+                offset: offset as u32,
+                len: view.aligned() as u32,
+                key_len: key_len as u32,
+                value_len: value_len as u32,
+            };
+            let item = Item::new(sequence, index);
+            self.catalog.insert(key, item);
+        }
+        drop(timer);
         Ok(())
     }
 }

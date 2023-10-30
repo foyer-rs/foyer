@@ -16,7 +16,7 @@ use foyer_common::bits::{align_up, is_aligned};
 
 use crate::{
     device::{error::DeviceError, Device},
-    flusher_v2::Entry,
+    flusher::Entry,
     region::{RegionHeader, RegionId, REGION_MAGIC},
 };
 

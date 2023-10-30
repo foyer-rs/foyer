@@ -40,7 +40,7 @@ use crate::{
     catalog::{Catalog, Index, Item, Sequence},
     device::Device,
     error::Result,
-    flusher_v2::{Entry, Flusher},
+    flusher::{Entry, Flusher},
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
@@ -268,13 +268,10 @@ where
         ));
 
         let region_manager = Arc::new(RegionManager::new(
-            config.allocator_bits,
             buffer_count,
             device.regions(),
             config.eviction_config,
             device.clone(),
-            config.allocation_timeout,
-            metrics.clone(),
         ));
 
         let catalog = Arc::new(Catalog::new(
@@ -379,9 +376,6 @@ where
     }
 
     async fn close(&self) -> Result<()> {
-        // seal current dirty buffer and trigger flushing
-        self.seal().await;
-
         // stop and wait for flushers
         let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
@@ -450,7 +444,6 @@ where
             // read from region
             crate::catalog::Index::Region {
                 region,
-                version,
                 offset,
                 len,
                 key_len: _,
@@ -462,7 +455,7 @@ where
                 let end = start + *len as usize;
 
                 // TODO(MrCroxx): read value only
-                let slice = match region.load(start..end, *version).await? {
+                let slice = match region.load(start..end).await? {
                     Some(slice) => slice,
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of region version mismatch).
@@ -530,10 +523,6 @@ where
         let unaligned =
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
         bits::align_up(self.inner.device.align(), unaligned)
-    }
-
-    async fn seal(&self) {
-        self.inner.region_manager.seal().await;
     }
 
     #[tracing::instrument(skip(self))]
@@ -963,7 +952,7 @@ where
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
         let align = region.device().align();
 
-        let slice = match region.load(..align, 0).await? {
+        let slice = match region.load(..align).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
@@ -990,11 +979,7 @@ where
             return Ok(None);
         }
 
-        let Some(slice) = self
-            .region
-            .load(self.cursor..self.cursor + align, 0)
-            .await?
-        else {
+        let Some(slice) = self.region.load(self.cursor..self.cursor + align).await? else {
             return Ok(None);
         };
 
@@ -1029,7 +1014,7 @@ where
             key
         } else {
             drop(slice);
-            let Some(s) = self.region.load(align_start..align_end, 0).await? else {
+            let Some(s) = self.region.load(align_start..align_end).await? else {
                 return Ok(None);
             };
             let rel_start = abs_start - align_start;
@@ -1044,7 +1029,6 @@ where
             header.sequence,
             Index::Region {
                 region: self.region.id(),
-                version: 0,
                 offset: self.cursor as u32,
                 len: entry_len as u32,
                 key_len: header.key_len,
@@ -1071,7 +1055,7 @@ where
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
         let start = *offset as usize;
         let end = start + *len as usize;
-        let Some(slice) = self.region.load(start..end, 0).await? else {
+        let Some(slice) = self.region.load(start..end).await? else {
             return Ok(None);
         };
         let kv = read_entry::<K, V>(slice.as_ref());

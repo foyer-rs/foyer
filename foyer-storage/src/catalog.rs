@@ -24,12 +24,7 @@ use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use twox_hash::XxHash64;
 
-use crate::{
-    device::BufferAllocator,
-    metrics::Metrics,
-    region::{RegionId, Version},
-    ring::View,
-};
+use crate::{device::BufferAllocator, metrics::Metrics, region::RegionId, ring::View};
 
 pub type Sequence = u64;
 
@@ -40,7 +35,6 @@ pub enum Index {
     },
     Region {
         region: RegionId,
-        version: Version,
         offset: u32,
         len: u32,
         key_len: u32,
