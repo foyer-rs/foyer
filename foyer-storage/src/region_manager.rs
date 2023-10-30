@@ -50,9 +50,6 @@ where
     /// Empty regions.
     clean_regions: AsyncQueue<RegionId>,
 
-    /// Regions with dirty buffer waiting for flushing.
-    dirty_regions: AsyncQueue<RegionId>,
-
     regions: Vec<Region<D>>,
     items: Vec<Arc<RegionEpItem<EL>>>,
 
@@ -81,7 +78,6 @@ where
 
         let eviction = EP::new(eviction_config);
         let clean_regions = AsyncQueue::new();
-        let dirty_regions = AsyncQueue::new();
 
         let mut regions = Vec::with_capacity(region_count);
         let mut items = Vec::with_capacity(region_count);
@@ -99,7 +95,6 @@ where
 
         Self {
             clean_regions,
-            dirty_regions,
             regions,
             items,
             eviction: RwLock::new(eviction),
@@ -121,10 +116,6 @@ where
 
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
         &self.clean_regions
-    }
-
-    pub fn dirty_regions(&self) -> &AsyncQueue<RegionId> {
-        &self.dirty_regions
     }
 
     pub fn eviction_push(&self, region_id: RegionId) {
