@@ -115,7 +115,10 @@ where
         // step 1: drop indices
         let _indices = self.store.catalog().take_region(&region_id);
 
-        // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
+        // Must guarantee there is no following reads on the region to be reclaim.
+        // Which means there is no unfinished reader or reader who holds index and prepare to read.
+
+        // wait unfinished readers
         {
             let guard = region.exclusive().await;
             drop(guard);

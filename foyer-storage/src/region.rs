@@ -18,7 +18,7 @@ use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
     ops::RangeBounds,
-    sync::Arc,
+    sync::{atomic::AtomicUsize, Arc},
 };
 use tokio::sync::oneshot;
 use tracing::instrument;
@@ -71,6 +71,8 @@ where
     inner: Arc<Mutex<RegionInner<D::IoBufferAllocator>>>,
 
     device: D,
+
+    refs: Arc<AtomicUsize>,
 }
 
 /// [`Region`] represents a contiguous aligned range on device and its optional dirty buffer.
@@ -95,6 +97,18 @@ where
             id,
             inner: Arc::new(Mutex::new(inner)),
             device,
+            refs: Arc::new(AtomicUsize::default()),
+        }
+    }
+
+    pub fn view(&self, offset: u32, len: u32, key_len: u32, value_len: u32) -> RegionView {
+        RegionView {
+            id: self.id,
+            offset,
+            len,
+            key_len,
+            value_len,
+            refs: Arc::clone(&self.refs),
         }
     }
 
@@ -312,5 +326,41 @@ where
         if let Some(f) = self.cleanup.take() {
             f();
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RegionView {
+    id: RegionId,
+    offset: u32,
+    len: u32,
+    key_len: u32,
+    value_len: u32,
+    refs: Arc<AtomicUsize>,
+}
+
+impl RegionView {
+    pub fn id(&self) -> &RegionId {
+        &self.id
+    }
+
+    pub fn offset(&self) -> &u32 {
+        &self.offset
+    }
+
+    pub fn len(&self) -> &u32 {
+        &self.len
+    }
+
+    pub fn key_len(&self) -> &u32 {
+        &self.key_len
+    }
+
+    pub fn value_len(&self) -> &u32 {
+        &self.value_len
+    }
+
+    pub fn refs(&self) -> &Arc<AtomicUsize> {
+        &self.refs
     }
 }

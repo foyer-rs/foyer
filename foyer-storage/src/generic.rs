@@ -442,17 +442,13 @@ where
                 res
             }
             // read from region
-            crate::catalog::Index::Region {
-                region,
-                offset,
-                len,
-                key_len: _,
-                value_len: _,
-            } => {
+            crate::catalog::Index::Region { view } => {
+                let region = view.id();
+
                 self.inner.region_manager.record_access(region);
                 let region = self.inner.region_manager.region(region);
-                let start = *offset as usize;
-                let end = start + *len as usize;
+                let start = *view.offset() as usize;
+                let end = start + *view.len() as usize;
 
                 // TODO(MrCroxx): read value only
                 let slice = match region.load(start..end).await? {
@@ -1028,11 +1024,12 @@ where
         let info = Item::new(
             header.sequence,
             Index::Region {
-                region: self.region.id(),
-                offset: self.cursor as u32,
-                len: entry_len as u32,
-                key_len: header.key_len,
-                value_len: header.value_len,
+                view: self.region.view(
+                    self.cursor as u32,
+                    entry_len as u32,
+                    header.key_len,
+                    header.value_len,
+                ),
             },
         );
 
@@ -1048,13 +1045,13 @@ where
             Err(e) => return Err(e),
         };
 
-        let Index::Region { offset, len, .. } = item.index() else {
+        let Index::Region { view } = item.index() else {
             unreachable!("kv loaded from region must have index of region")
         };
 
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
-        let start = *offset as usize;
-        let end = start + *len as usize;
+        let start = *view.offset() as usize;
+        let end = start + *view.len() as usize;
         let Some(slice) = self.region.load(start..end).await? else {
             return Ok(None);
         };

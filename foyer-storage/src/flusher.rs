@@ -19,7 +19,7 @@ use crate::{
     error::{Error, Result},
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    ring::View,
+    ring::RingBufferView,
 };
 use foyer_common::code::Key;
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
@@ -39,7 +39,7 @@ pub struct Entry {
     pub sequence: Sequence,
 
     /// Hold a view of referenced buffer, for lookup and prevent from releasing.
-    pub view: View,
+    pub view: RingBufferView,
 }
 
 impl Debug for Entry {
@@ -200,11 +200,12 @@ where
         {
             let key = key.downcast::<K>().unwrap();
             let index = Index::Region {
-                region,
-                offset: offset as u32,
-                len: view.aligned() as u32,
-                key_len: key_len as u32,
-                value_len: value_len as u32,
+                view: self.region_manager.region(&region).view(
+                    offset as u32,
+                    view.aligned() as u32,
+                    key_len as u32,
+                    value_len as u32,
+                ),
             };
             let item = Item::new(sequence, index);
             self.catalog.insert(key, item);
