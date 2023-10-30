@@ -31,8 +31,6 @@ use crate::{
 };
 
 pub type RegionId = u32;
-/// 0 matches any version
-pub type Version = u32;
 
 pub const REGION_MAGIC: u64 = 0x19970327;
 
@@ -58,9 +56,6 @@ pub struct RegionInner<A>
 where
     A: BufferAllocator,
 {
-    version: Version,
-
-    writers: usize,
     readers: usize,
 
     #[expect(clippy::type_complexity)]
@@ -69,7 +64,6 @@ where
 
 #[derive(Debug, Clone)]
 pub struct RegionInnerExclusiveRequire {
-    can_write: bool,
     can_read: bool,
 }
 
@@ -77,7 +71,7 @@ impl<A: BufferAllocator> ErwLockInner for RegionInner<A> {
     type R = RegionInnerExclusiveRequire;
 
     fn is_exclusive(&self, require: &Self::R) -> bool {
-        (require.can_write || self.writers == 0) && (require.can_read || self.readers == 0)
+        require.can_read || self.readers == 0
     }
 }
 
@@ -107,9 +101,6 @@ where
 {
     pub fn new(id: RegionId, device: D) -> Self {
         let inner = RegionInner {
-            version: 0,
-
-            writers: 0,
             readers: 0,
 
             waits: BTreeMap::new(),
@@ -132,7 +123,6 @@ where
     pub async fn load(
         &self,
         range: impl RangeBounds<usize>,
-        version: Version,
     ) -> Result<Option<ReadSlice<D::IoBufferAllocator>>> {
         let start = match range.start_bound() {
             std::ops::Bound::Included(i) => *i,
@@ -147,10 +137,6 @@ where
 
         let rx = {
             let mut inner = self.inner.write();
-
-            if version != 0 && version != inner.version {
-                return Ok(None);
-            }
 
             // join wait map if exists
             let rx = match inner.waits.entry((start, end)) {
@@ -246,10 +232,7 @@ where
         can_read: bool,
     ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<D::IoBufferAllocator>> {
         self.inner
-            .exclusive(&RegionInnerExclusiveRequire {
-                can_write,
-                can_read,
-            })
+            .exclusive(&RegionInnerExclusiveRequire { can_read })
             .await
     }
 
@@ -261,17 +244,6 @@ where
         &self.device
     }
 
-    pub async fn version(&self) -> Version {
-        self.inner.read().version
-    }
-
-    pub async fn advance(&self) -> Version {
-        let mut inner = self.inner.write();
-        let res = inner.version;
-        inner.version += 1;
-        res
-    }
-
     /// Cleanup waits.
     fn cleanup(
         &self,
@@ -280,7 +252,7 @@ where
         end: usize,
     ) -> Result<()> {
         if let Some(txs) = guard.waits.remove(&(start, end)) {
-            guard.writers -= txs.len();
+            guard.readers -= txs.len();
             for tx in txs {
                 tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
                     .map_err(|_| anyhow::anyhow!("fail to cleanup waits"))?;
@@ -294,10 +266,6 @@ impl<A> RegionInner<A>
 where
     A: BufferAllocator,
 {
-    pub fn writers(&self) -> usize {
-        self.writers
-    }
-
     pub fn readers(&self) -> usize {
         self.readers
     }

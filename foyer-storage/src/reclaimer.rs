@@ -119,10 +119,9 @@ where
         {
             let guard = region.exclusive(false, false).await;
             tracing::trace!(
-                "[reclaimer] region {}, writers: {}, physical readers: {}",
+                "[reclaimer] region {}, physical readers: {}",
                 region.id(),
-                guard.writers(),
-                guard.readers()
+                guard.readers(),
             );
             drop(guard);
         }

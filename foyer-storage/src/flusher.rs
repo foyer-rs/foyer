@@ -201,7 +201,6 @@ where
             let key = key.downcast::<K>().unwrap();
             let index = Index::Region {
                 region,
-                version: 0,
                 offset: offset as u32,
                 len: view.aligned() as u32,
                 key_len: key_len as u32,
