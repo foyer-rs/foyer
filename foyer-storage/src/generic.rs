@@ -40,7 +40,7 @@ use crate::{
     catalog::{Catalog, Index, Item, Sequence},
     device::Device,
     error::Result,
-    flusher_v2::{Entry, Flusher},
+    flusher::{Entry, Flusher},
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
@@ -268,13 +268,10 @@ where
         ));
 
         let region_manager = Arc::new(RegionManager::new(
-            config.allocator_bits,
             buffer_count,
             device.regions(),
             config.eviction_config,
             device.clone(),
-            config.allocation_timeout,
-            metrics.clone(),
         ));
 
         let catalog = Arc::new(Catalog::new(
@@ -379,9 +376,6 @@ where
     }
 
     async fn close(&self) -> Result<()> {
-        // seal current dirty buffer and trigger flushing
-        self.seal().await;
-
         // stop and wait for flushers
         let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
@@ -530,10 +524,6 @@ where
         let unaligned =
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
         bits::align_up(self.inner.device.align(), unaligned)
-    }
-
-    async fn seal(&self) {
-        self.inner.region_manager.seal().await;
     }
 
     #[tracing::instrument(skip(self))]

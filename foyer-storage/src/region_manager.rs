@@ -12,13 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::sync::Arc;
 
 use foyer_common::queue::AsyncQueue;
 use foyer_intrusive::{
@@ -26,15 +20,12 @@ use foyer_intrusive::{
     eviction::{EvictionPolicy, EvictionPolicyExt},
     intrusive_adapter, key_adapter,
 };
-use itertools::Itertools;
+
 use parking_lot::RwLock;
-use tokio::sync::Mutex as AsyncMutex;
-use tracing::Instrument;
 
 use crate::{
     device::Device,
-    metrics::Metrics,
-    region::{AllocateResult, Region, RegionId, WriteSlice},
+    region::{Region, RegionId},
 };
 
 #[derive(Debug)]
@@ -49,11 +40,6 @@ where
 intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
 key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
 
-/// Manager of regions and buffer pools.
-///
-/// # Region Lifetime
-///
-/// `clean` ==(allocate)=> `dirty` ==(flush)=> `evictable` ==(reclaim)=> `clean`
 #[derive(Debug)]
 pub struct RegionManager<D, EP, EL>
 where
@@ -61,13 +47,6 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    allocators: Vec<AsyncMutex<Option<Region<D>>>>,
-    allocator_bits: usize,
-    allocated: AtomicUsize,
-
-    /// Buffer pool for dirty buffers.
-    buffers: AsyncQueue<Vec<u8, D::IoBufferAllocator>>,
-
     /// Empty regions.
     clean_regions: AsyncQueue<RegionId>,
 
@@ -79,10 +58,6 @@ where
 
     /// Eviction policy.
     eviction: RwLock<EP>,
-
-    allocation_timeout: Duration,
-
-    metrics: Arc<Metrics>,
 }
 
 impl<D, EP, EL> RegionManager<D, EP, EL>
@@ -92,13 +67,10 @@ where
     EL: Link,
 {
     pub fn new(
-        allocator_bits: usize,
         buffer_count: usize,
         region_count: usize,
         eviction_config: EP::Config,
         device: D,
-        allocation_timeout: Duration,
-        metrics: Arc<Metrics>,
     ) -> Self {
         let buffers = AsyncQueue::new();
         for _ in 0..buffer_count {
@@ -125,99 +97,12 @@ where
             items.push(item);
         }
 
-        let allocators = (0..(1 << allocator_bits))
-            .map(|_| AsyncMutex::new(None))
-            .collect_vec();
-
         Self {
-            allocators,
-            allocated: AtomicUsize::new(0),
-            allocator_bits,
-            buffers,
             clean_regions,
             dirty_regions,
             regions,
             items,
             eviction: RwLock::new(eviction),
-            allocation_timeout,
-            metrics,
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn allocate(&self, size: usize, must_allocate: bool) -> Option<WriteSlice> {
-        let allocated = self.allocated.fetch_add(1, Ordering::Relaxed);
-        let index = allocated & ((1 << self.allocator_bits) - 1);
-        let allocator = &self.allocators[index];
-
-        let mut current = if must_allocate {
-            allocator.lock().await
-        } else {
-            match tokio::time::timeout(self.allocation_timeout, allocator.lock()).await {
-                Ok(current) => current,
-                Err(_) => return None,
-            }
-        };
-
-        loop {
-            if let Some(region) = current.as_ref() {
-                match region.allocate(size) {
-                    AllocateResult::Ok(slice) => return Some(slice),
-                    AllocateResult::NotEnough { .. } => {
-                        self.dirty_regions.release(region.id());
-                        *current = None;
-                    }
-                }
-            }
-
-            assert!(current.is_none());
-
-            // Wait a clean region to be released.
-            let region_id = {
-                let timer = self
-                    .metrics
-                    .inner_op_duration_acquire_clean_region
-                    .start_timer();
-                let region_id = self
-                    .clean_regions
-                    .acquire()
-                    .instrument(tracing::debug_span!("acquire_clean_region"))
-                    .await;
-                drop(timer);
-                region_id
-            };
-
-            tracing::info!("allocator {} switch to clean region: {}", index, region_id);
-
-            let region = self.region(&region_id);
-            region.advance().await;
-
-            let buffer = {
-                let timer = self
-                    .metrics
-                    .inner_op_duration_acquire_clean_buffer
-                    .start_timer();
-                let buffer = self
-                    .buffers
-                    .acquire()
-                    .instrument(tracing::debug_span!("acquire_clean_buffer"))
-                    .await;
-                drop(timer);
-                buffer
-            };
-            region.attach_buffer(buffer).await;
-
-            *current = Some(region.clone());
-        }
-    }
-
-    pub async fn seal(&self) {
-        for allocator in self.allocators.iter() {
-            let mut guard = allocator.lock().await;
-            if let Some(region) = guard.as_ref() {
-                self.dirty_regions.release(region.id());
-            }
-            *guard = None;
         }
     }
 
@@ -232,10 +117,6 @@ where
         if item.link.is_linked() {
             eviction.access(&self.items[*id as usize]);
         }
-    }
-
-    pub fn buffers(&self) -> &AsyncQueue<Vec<u8, D::IoBufferAllocator>> {
-        &self.buffers
     }
 
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {

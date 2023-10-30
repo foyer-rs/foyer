@@ -297,5 +297,6 @@ mod tests {
         handle.await.unwrap().unwrap();
 
         assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
+        store.close().await.unwrap();
     }
 }
