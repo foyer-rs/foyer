@@ -13,8 +13,7 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use foyer_common::erwlock::{ErwLock, ErwLockInner};
-use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock, RwLockWriteGuard};
+use parking_lot::{lock_api::ArcMutexGuard, Mutex, MutexGuard, RawMutex};
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
@@ -63,26 +62,13 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct RegionInnerExclusiveRequire {
-    can_read: bool,
-}
-
-impl<A: BufferAllocator> ErwLockInner for RegionInner<A> {
-    type R = RegionInnerExclusiveRequire;
-
-    fn is_exclusive(&self, require: &Self::R) -> bool {
-        require.can_read || self.readers == 0
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Region<D>
 where
     D: Device,
 {
     id: RegionId,
 
-    inner: ErwLock<RegionInner<D::IoBufferAllocator>>,
+    inner: Arc<Mutex<RegionInner<D::IoBufferAllocator>>>,
 
     device: D,
 }
@@ -107,7 +93,7 @@ where
         };
         Self {
             id,
-            inner: ErwLock::new(inner),
+            inner: Arc::new(Mutex::new(inner)),
             device,
         }
     }
@@ -136,7 +122,7 @@ where
         };
 
         let rx = {
-            let mut inner = self.inner.write();
+            let mut inner = self.inner.lock();
 
             // join wait map if exists
             let rx = match inner.waits.entry((start, end)) {
@@ -183,14 +169,14 @@ where
             let read = match res {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    let mut inner = self.inner.write();
+                    let mut inner = self.inner.lock();
                     self.cleanup(&mut inner, start, end)?;
                     inner.readers -= 1;
                     return Err(e.into());
                 }
             };
             if read != len {
-                let mut inner = self.inner.write();
+                let mut inner = self.inner.lock();
                 self.cleanup(&mut inner, start, end)?;
                 inner.readers -= 1;
                 return Ok(None);
@@ -202,13 +188,13 @@ where
         let cleanup = {
             let inner = self.inner.clone();
             let f = move || {
-                let mut guard = inner.write();
+                let mut guard = inner.lock();
                 guard.readers -= 1;
             };
             Box::new(f)
         };
 
-        if let Some(txs) = self.inner.write().waits.remove(&(start, end)) {
+        if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
             // TODO: handle error !!!!!!!!!!!
             for tx in txs {
                 tx.send(Ok(ReadSlice {
@@ -226,14 +212,16 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn exclusive(
-        &self,
-        can_write: bool,
-        can_read: bool,
-    ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<D::IoBufferAllocator>> {
-        self.inner
-            .exclusive(&RegionInnerExclusiveRequire { can_read })
-            .await
+    pub async fn exclusive(&self) -> ArcMutexGuard<RawMutex, RegionInner<D::IoBufferAllocator>> {
+        loop {
+            {
+                let guard = self.inner.clone().lock_arc();
+                if guard.readers == 0 {
+                    break guard;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
     }
 
     pub fn id(&self) -> RegionId {
@@ -247,7 +235,7 @@ where
     /// Cleanup waits.
     fn cleanup(
         &self,
-        guard: &mut RwLockWriteGuard<'_, RegionInner<D::IoBufferAllocator>>,
+        guard: &mut MutexGuard<'_, RegionInner<D::IoBufferAllocator>>,
         start: usize,
         end: usize,
     ) -> Result<()> {
