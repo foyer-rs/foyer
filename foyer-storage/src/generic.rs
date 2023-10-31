@@ -95,6 +95,9 @@ where
     /// Buffer pool size, should be a multiplier of device region size.
     pub buffer_pool_size: usize,
 
+    /// Flusher default buffer capacity, must be equals or larger than device io size.
+    pub flusher_buffer_size: usize,
+
     /// Count of flushers.
     pub flushers: usize,
 
@@ -136,6 +139,7 @@ where
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("flusher_buffer_size", &self.flusher_buffer_size)
             .field("flushers", &self.flushers)
             .field("flush_rate_limit", &self.flush_rate_limit)
             .field("reclaimers", &self.reclaimers)
@@ -165,6 +169,7 @@ where
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
             buffer_pool_size: self.buffer_pool_size,
+            flusher_buffer_size: self.flusher_buffer_size,
             flushers: self.flushers,
             flush_rate_limit: self.flush_rate_limit,
             reclaimers: self.reclaimers,
@@ -333,6 +338,7 @@ where
             .zip_eq(flusher_entry_rxs.into_iter())
             .map(|(stop_rx, entry_rx)| {
                 Flusher::new(
+                    config.flusher_buffer_size,
                     region_manager.clone(),
                     catalog.clone(),
                     device.clone(),
@@ -1191,6 +1197,7 @@ mod tests {
             admissions,
             reinsertions,
             buffer_pool_size: 8 * MB,
+            flusher_buffer_size: 0,
             flushers: 1,
             flush_rate_limit: 0,
             reclaimers: 1,
@@ -1245,6 +1252,7 @@ mod tests {
             admissions: vec![],
             reinsertions: vec![],
             buffer_pool_size: 8 * MB,
+            flusher_buffer_size: 0,
             flushers: 1,
             flush_rate_limit: 0,
             reclaimers: 0,

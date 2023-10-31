@@ -202,10 +202,6 @@ where
     }
 }
 
-// read & write slice
-
-pub trait CleanupFn = FnOnce() + Send + Sync + 'static;
-
 #[derive(Debug)]
 pub struct RegionView {
     id: RegionId,
