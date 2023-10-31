@@ -89,14 +89,14 @@ pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
         start..end
     }
 
-    fn len(&self) -> Option<T> {
+    fn size(&self) -> Option<T> {
         let start = self.start()?;
         let end = self.end()?;
         Some(end - start)
     }
 
     fn is_empty(&self) -> bool {
-        match self.len() {
+        match self.size() {
             Some(len) => len == ZeroOne::zero(),
             None => false,
         }

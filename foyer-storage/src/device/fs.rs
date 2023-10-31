@@ -87,7 +87,7 @@ impl Device for FsDevice {
         buf: B,
         range: impl IoRange,
         region: RegionId,
-        offset: u64,
+        offset: usize,
     ) -> (DeviceResult<usize>, B)
     where
         B: IoBuf,
@@ -95,10 +95,10 @@ impl Device for FsDevice {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
-        let len = RangeBoundsExt::len(&range).unwrap();
+        let len = RangeBoundsExt::size(&range).unwrap();
 
         assert!(
-            offset as usize + len <= file_capacity,
+            offset + len <= file_capacity,
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
         );
 
@@ -118,7 +118,7 @@ impl Device for FsDevice {
         mut buf: B,
         range: impl IoRange,
         region: RegionId,
-        offset: u64,
+        offset: usize,
     ) -> (DeviceResult<usize>, B)
     where
         B: IoBufMut,
@@ -126,10 +126,10 @@ impl Device for FsDevice {
         let file_capacity = self.inner.config.file_capacity;
 
         let range = range.bounds(0..buf.as_ref().len());
-        let len = RangeBoundsExt::len(&range).unwrap();
+        let len = RangeBoundsExt::size(&range).unwrap();
 
         assert!(
-            offset as usize + len <= file_capacity,
+            offset + len <= file_capacity,
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
         );
 
@@ -151,15 +151,12 @@ impl Device for FsDevice {
         //
         // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
         asyncify(move || nix::unistd::syncfs(fd).map_err(DeviceError::from)).await?;
-
-        // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
         Ok(())
     }
 
     #[cfg(not(target_os = "linux"))]
     async fn flush(&self) -> DeviceResult<()> {
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
-
         Ok(())
     }
 
