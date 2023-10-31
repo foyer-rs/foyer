@@ -41,7 +41,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         buf: B,
         range: impl IoRange,
         region: RegionId,
-        offset: u64,
+        offset: usize,
     ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
     where
         B: IoBuf;
@@ -52,7 +52,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         buf: B,
         range: impl IoRange,
         region: RegionId,
-        offset: u64,
+        offset: usize,
     ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
     where
         B: IoBufMut;
@@ -64,8 +64,10 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
 
     fn regions(&self) -> usize;
 
+    /// must be power of 2
     fn align(&self) -> usize;
 
+    /// optimized io size
     fn io_size(&self) -> usize;
 
     fn io_buffer_allocator(&self) -> &Self::IoBufferAllocator;
@@ -77,6 +79,43 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
         self.capacity() / self.regions()
     }
 }
+
+pub trait DeviceExt: Device {
+    #[must_use]
+    fn load(
+        &self,
+        region: RegionId,
+        range: impl IoRange,
+    ) -> impl Future<Output = DeviceResult<Vec<u8, Self::IoBufferAllocator>>> + Send {
+        async move {
+            let range = range.bounds(0..self.region_size());
+            let size = range.size().unwrap();
+            debug_assert_eq!(size & (self.align() - 1), 0);
+
+            let mut buf = self.io_buffer(size, size);
+            let mut offset = 0;
+
+            while range.start + offset < range.end {
+                let len = std::cmp::min(self.io_size(), size - offset);
+                let (res, b) = self
+                    .read(buf, offset..offset + len, region, range.start + offset)
+                    .await;
+                let bytes = res?;
+                offset += bytes;
+                buf = b;
+                if bytes != len {
+                    break;
+                }
+            }
+
+            unsafe { buf.set_len(offset) };
+
+            Ok(buf)
+        }
+    }
+}
+
+impl<D: Device> DeviceExt for D {}
 
 #[cfg(not(madsim))]
 #[tracing::instrument(level = "trace", skip(f))]
@@ -124,7 +163,7 @@ pub mod tests {
             buf: B,
             _range: impl IoRange,
             _region: RegionId,
-            _offset: u64,
+            _offset: usize,
         ) -> (DeviceResult<usize>, B)
         where
             B: IoBuf,
@@ -137,7 +176,7 @@ pub mod tests {
             buf: B,
             _range: impl IoRange,
             _region: RegionId,
-            _offset: u64,
+            _offset: usize,
         ) -> (DeviceResult<usize>, B)
         where
             B: IoBufMut,

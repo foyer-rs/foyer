@@ -13,7 +13,8 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use parking_lot::{Mutex, MutexGuard};
+use foyer_common::range::RangeBoundsExt;
+use parking_lot::Mutex;
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
@@ -26,9 +27,8 @@ use std::{
 use tokio::sync::oneshot;
 
 use crate::{
-    device::{BufferAllocator, Device},
+    device::{BufferAllocator, Device, DeviceExt},
     error::Result,
-    slice::SliceMut,
 };
 
 pub type RegionId = u32;
@@ -75,14 +75,6 @@ where
     refs: Arc<AtomicUsize>,
 }
 
-/// [`Region`] represents a contiguous aligned range on device and its optional dirty buffer.
-///
-/// [`Region`] may be in one of the following states:
-///
-/// - physical write : written by flushers with append pattern
-/// - physical read  : read if entry is not in ring buffer
-/// - reclaim        : happens after the region is evicted, must guarantee there is no writers or readers,
-///                    *or in-flight writers or readers*
 impl<D> Region<D>
 where
     D: Device,
@@ -137,22 +129,13 @@ where
         &self,
         range: impl RangeBounds<usize>,
     ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(i) => *i,
-            std::ops::Bound::Excluded(i) => *i + 1,
-            std::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Included(i) => *i + 1,
-            std::ops::Bound::Excluded(i) => *i,
-            std::ops::Bound::Unbounded => self.device.region_size(),
-        };
+        let range = range.bounds(0..self.device.region_size());
 
         let rx = {
             let mut inner = self.inner.lock();
 
             // join wait map if exists
-            let rx = match inner.waits.entry((start, end)) {
+            let rx = match inner.waits.entry((range.start, range.end)) {
                 Entry::Vacant(v) => {
                     v.insert(vec![]);
                     None
@@ -176,45 +159,23 @@ where
 
         // otherwise, read from device
         let region = self.id;
-        let mut buf = self.device.io_buffer(end - start, end - start);
 
-        let mut offset = 0;
-        while start + offset < end {
-            let len = std::cmp::min(self.device.io_size(), end - start - offset);
-            tracing::trace!(
-                "read region {} [{}..{}]",
-                region,
-                start + offset,
-                start + offset + len
-            );
-            let s = unsafe { SliceMut::new(&mut buf[offset..offset + len]) };
-            let (res, _s) = self
-                .device
-                .read(s, .., region, (start + offset) as u64)
-                .await;
-            let read = match res {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    let mut inner = self.inner.lock();
-                    self.cleanup(&mut inner, start, end)?;
-                    return Err(e.into());
-                }
-            };
-            if read != len {
-                let mut inner = self.inner.lock();
-                self.cleanup(&mut inner, start, end)?;
-                // TODO(MrCroxx): return err?
+        let buf = match self.device.load(region, range.start..range.end).await {
+            Err(e) => {
+                self.cleanup(range.start, range.end)?;
+                return Err(e.into());
+            }
+            Ok(buf) if buf.len() != range.size().unwrap() => {
+                self.cleanup(range.start, range.end)?;
                 return Ok(None);
             }
-            offset += len;
-        }
+            Ok(buf) => buf,
+        };
         let buf = Arc::new(buf);
 
-        if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
-            // TODO: handle error !!!!!!!!!!!
+        if let Some(txs) = self.inner.lock().waits.remove(&(range.start, range.end)) {
             for tx in txs {
-                tx.send(Ok(buf.clone()))
-                    .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
+                tx.send(Ok(buf.clone())).unwrap()
             }
         }
 
@@ -230,16 +191,11 @@ where
     }
 
     /// Cleanup waits.
-    fn cleanup(
-        &self,
-        guard: &mut MutexGuard<'_, RegionInner<D::IoBufferAllocator>>,
-        start: usize,
-        end: usize,
-    ) -> Result<()> {
-        if let Some(txs) = guard.waits.remove(&(start, end)) {
+    fn cleanup(&self, start: usize, end: usize) -> Result<()> {
+        if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
             for tx in txs {
                 tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
-                    .map_err(|_| anyhow::anyhow!("fail to cleanup waits"))?;
+                    .unwrap()
             }
         }
         Ok(())
