@@ -42,12 +42,9 @@ pub struct FlushBuffer<D>
 where
     D: Device,
 {
+    // TODO(MrCroxx): optimize buffer allocation
     /// io buffer
-    ///
-    /// # Safety
-    ///
-    /// `buffer` should always be `Some`. The usage of `Option` is for temporarily taking ownership.
-    buffer: Option<Vec<u8, D::IoBufferAllocator>>,
+    buffer: Vec<u8, D::IoBufferAllocator>,
 
     /// current writing region
     region: Option<RegionId>,
@@ -60,20 +57,24 @@ where
 
     // underlying device
     device: D,
+
+    default_buffer_capacity: usize,
 }
 
 impl<D> FlushBuffer<D>
 where
     D: Device,
 {
-    pub fn new(device: D) -> Self {
-        let buffer = Some(device.io_buffer(0, device.io_size()));
+    pub fn new(device: D, default_buffer_capacity: usize) -> Self {
+        let default_buffer_capacity = std::cmp::max(default_buffer_capacity, device.io_size());
+        let buffer = device.io_buffer(0, default_buffer_capacity);
         Self {
             buffer,
             region: None,
             offset: 0,
             entries: vec![],
             device,
+            default_buffer_capacity,
         }
     }
 
@@ -83,9 +84,12 @@ where
 
     pub fn remaining(&self) -> usize {
         if self.region.is_none() {
-            return 0;
+            0
+        } else {
+            self.device
+                .region_size()
+                .saturating_sub(self.offset + self.buffer.len())
         }
-        self.device.region_size() - self.offset - self.buffer.as_ref().unwrap().len()
     }
 
     /// Flush io buffer if necessary, and reset io buffer to a new region.
@@ -93,17 +97,17 @@ where
     /// Returns fully flushed entries.
     pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry>> {
         let entries = self.flush().await?;
-        debug_assert!(self.buffer.as_ref().unwrap().is_empty());
+        debug_assert!(self.buffer.is_empty());
         self.region = Some(region);
         self.offset = 0;
 
         // write region header
-        let buffer = self.buffer.as_mut().unwrap();
-        unsafe { buffer.set_len(self.device.align()) };
+        unsafe { self.buffer.set_len(self.device.align()) };
         let header = RegionHeader {
             magic: REGION_MAGIC,
         };
-        header.write(buffer);
+        header.write(&mut self.buffer[..]);
+        debug_assert_eq!(self.buffer.len(), self.device.align());
 
         Ok(entries)
     }
@@ -120,20 +124,20 @@ where
         };
 
         // align io buffer
-        let mut buffer = self.buffer.take().unwrap();
-        let len = align_up(self.device.align(), buffer.len());
-        debug_assert!(len <= buffer.capacity());
-        unsafe { buffer.set_len(len) };
-        debug_assert!(self.offset + buffer.len() <= self.device.region_size());
+        let len = align_up(self.device.align(), self.buffer.len());
+        debug_assert!(len <= self.buffer.capacity());
+        unsafe { self.buffer.set_len(len) };
+        debug_assert!(self.offset + self.buffer.len() <= self.device.region_size());
 
         // flush and clear buffer
-        let (res, mut buffer) = self.device.write(buffer, .., region, self.offset).await;
-        buffer.clear();
-        self.buffer = Some(buffer);
+        let mut buf = self.device.io_buffer(0, self.default_buffer_capacity);
+        std::mem::swap(&mut self.buffer, &mut buf);
+
+        let (res, _buf) = self.device.write(buf, .., region, self.offset).await;
         res?;
 
         // advance io buffer
-        self.offset += self.device.io_size();
+        self.offset += len;
         if self.offset == self.device.region_size() {
             self.region = None;
         }
@@ -145,62 +149,38 @@ where
 
     /// Write entry to io buffer.
     ///
-    /// The io buffer may be flushed if needed.
+    /// The io buffer may be flushed if buffer size equals or exceeds device io size.
     ///
     /// Returns fully flushed entries if there is enough space in the current region.
     /// Otherwise, returns `NotEnough` error with the given `entry`.
     pub async fn write(&mut self, entry: Entry) -> BufferResult<Vec<PositionedEntry>> {
         // check region remaining size
-        let padding = align_up(self.device.align(), entry.view.len()) - entry.view.len();
-        if self.remaining() < entry.view.len() + padding {
+        let len = align_up(self.device.align(), entry.view.len());
+        if self.remaining() < len {
             return Err(BufferError::NotEnough { entry });
         }
 
+        // write view and padding
         let region = self.region.unwrap();
-        let offset = self.offset + self.buffer.as_ref().unwrap().len();
+        let offset = self.offset + self.buffer.len();
+        let target_len = self.buffer.len() + len;
+        debug_assert!(is_aligned(self.device.align(), offset));
 
-        let mut entries = vec![];
-        let mut written = 0;
-
-        // write view
-        let mut flushed = true;
-        while written < entry.view.len() {
-            flushed = false;
-            let buffer = self.buffer.as_mut().unwrap();
-            let bytes = std::cmp::min(
-                entry.view.len() - written,
-                self.device.io_size() - buffer.len(),
-            );
-            std::io::copy(&mut &entry.view[written..written + bytes], buffer)
-                .map_err(DeviceError::from)?;
-            written += bytes;
-
-            if buffer.len() == self.device.io_size() {
-                entries.append(&mut self.flush().await?);
-                flushed = true;
-            }
-        }
-
-        // write padding
-        let buffer = self.buffer.as_mut().unwrap();
-        debug_assert!(self.device.io_size() - buffer.len() >= padding);
-        unsafe { buffer.set_len(buffer.len() + padding) };
-        debug_assert!(is_aligned(self.device.align(), buffer.len()));
-        if buffer.len() == self.device.io_size() {
-            entries.append(&mut self.flush().await?);
-            flushed = true;
-        }
-
-        let entry = PositionedEntry {
+        self.buffer.reserve_exact(len);
+        std::io::copy(&mut &entry.view[..], &mut self.buffer).map_err(DeviceError::from)?;
+        unsafe { self.buffer.set_len(target_len) };
+        self.entries.push(PositionedEntry {
             entry,
             region,
             offset,
-        };
-        if flushed {
-            entries.push(entry);
+        });
+
+        // flush if buffer equals or exceeds device io size
+        let entries = if self.buffer.len() >= self.device.io_size() || self.remaining() == 0 {
+            self.flush().await?
         } else {
-            self.entries.push(entry);
-        }
+            vec![]
+        };
 
         Ok(entries)
     }
@@ -244,8 +224,9 @@ mod tests {
         })
         .await
         .unwrap();
+        const DEFAULT_BUFFER_CAPACITY: usize = 32 * 1024;
 
-        let mut buffer = FlushBuffer::new(device.clone());
+        let mut buffer = FlushBuffer::new(device.clone(), DEFAULT_BUFFER_CAPACITY);
         assert_eq!(buffer.region(), None);
 
         {
@@ -267,21 +248,28 @@ mod tests {
             let entries = buffer.rotate(0).await.unwrap();
             assert!(entries.is_empty());
 
+            // 4 ~ 12 KiB
             let entries = buffer.write(entry.clone()).await.unwrap();
             assert!(entries.is_empty());
+            // 12 ~ 20 KiB
             let entries = buffer.write(entry.clone()).await.unwrap();
-            assert_eq!(entries.len(), 1);
+            assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
+            assert_eq!(entries[1].offset, 12 * 1024);
 
+            // 20 ~ 28 KiB
+            let entries = buffer.write(entry.clone()).await.unwrap();
+            assert!(entries.is_empty());
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0].offset, 12 * 1024);
+            assert_eq!(entries[0].offset, 20 * 1024);
 
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 0, 0).await;
             res.unwrap();
             assert_eq!(&buf[4 * 1024..9 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
             assert_eq!(&buf[12 * 1024..17 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
+            assert_eq!(&buf[20 * 1024..25 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
 
             assert!(buffer.entries.is_empty());
         }
@@ -307,8 +295,10 @@ mod tests {
             let entries = buffer.rotate(1).await.unwrap();
             assert!(entries.is_empty());
 
+            // 4 ~ 60 KiB
             let entries = buffer.write(entry).await.unwrap();
-            assert!(entries.is_empty());
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].offset, 4 * 1024);
 
             let view = {
                 let mut view = ring.allocate(3 * 1024 - 128, 2).await; // ~ 3 KiB
@@ -317,10 +307,10 @@ mod tests {
             };
             let entry = ent(view);
 
+            // 60 ~ 64 KiB
             let entries = buffer.write(entry).await.unwrap();
-            assert_eq!(entries.len(), 2);
-            assert_eq!(entries[0].offset, 4 * 1024);
-            assert_eq!(entries[1].offset, 60 * 1024);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].offset, 60 * 1024);
 
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 1, 0).await;

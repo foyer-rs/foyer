@@ -111,6 +111,9 @@ pub struct Args {
     #[arg(long, default_value_t = 1024)]
     buffer_pool_size: usize,
 
+    #[arg(long, default_value_t = 0)]
+    flusher_buffer_size: usize,
+
     /// (MiB)
     #[arg(long, default_value_t = 1024)]
     ring_buffer_capacity: usize,
@@ -561,6 +564,7 @@ async fn main() {
         admissions,
         reinsertions,
         buffer_pool_size: args.buffer_pool_size * 1024 * 1024,
+        flusher_buffer_size: args.flusher_buffer_size,
         flushers: args.flushers,
         flush_rate_limit: args.flush_rate_limit * 1024 * 1024,
         reclaimers: args.reclaimers,
