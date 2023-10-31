@@ -412,8 +412,8 @@ where
     async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let now = Instant::now();
 
-        let item = match self.inner.catalog.lookup(key) {
-            Some(item) => item,
+        let (_sequence, index) = match self.inner.catalog.lookup(key) {
+            Some(item) => item.consume(),
             None => {
                 self.inner
                     .metrics
@@ -423,7 +423,7 @@ where
             }
         };
 
-        match item.index() {
+        match index {
             crate::catalog::Index::RingBuffer { view } => {
                 let res = match read_entry::<K, V>(view.as_ref()) {
                     Some((_key, value)) => Ok(Some(value)),
@@ -447,11 +447,9 @@ where
 
                 self.inner.region_manager.record_access(region);
                 let region = self.inner.region_manager.region(region);
-                let start = *view.offset() as usize;
-                let end = start + *view.len() as usize;
 
                 // TODO(MrCroxx): read value only
-                let slice = match region.load(start..end).await? {
+                let slice = match region.load(view).await? {
                     Some(slice) => slice,
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of region version mismatch).
@@ -477,7 +475,6 @@ where
                         Ok(None)
                     }
                 };
-                drop(slice);
 
                 self.inner
                     .metrics
@@ -948,7 +945,7 @@ where
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
         let align = region.device().align();
 
-        let slice = match region.load(..align).await? {
+        let slice = match region.load_range(..align).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
@@ -975,7 +972,11 @@ where
             return Ok(None);
         }
 
-        let Some(slice) = self.region.load(self.cursor..self.cursor + align).await? else {
+        let Some(slice) = self
+            .region
+            .load_range(self.cursor..self.cursor + align)
+            .await?
+        else {
             return Ok(None);
         };
 
@@ -1010,7 +1011,7 @@ where
             key
         } else {
             drop(slice);
-            let Some(s) = self.region.load(align_start..align_end).await? else {
+            let Some(s) = self.region.load_range(align_start..align_end).await? else {
                 return Ok(None);
             };
             let rel_start = abs_start - align_start;
@@ -1052,7 +1053,7 @@ where
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
         let start = *view.offset() as usize;
         let end = start + *view.len() as usize;
-        let Some(slice) = self.region.load(start..end).await? else {
+        let Some(slice) = self.region.load_range(start..end).await? else {
             return Ok(None);
         };
         let kv = read_entry::<K, V>(slice.as_ref());

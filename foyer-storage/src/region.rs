@@ -115,15 +115,25 @@ where
         &self.refs
     }
 
-    /// Load region data into a [`ReadSlice`].
-    ///
-    /// Data may be loaded ether from physical device or from dirty buffer.
-    ///
-    /// Use version `0` to skip version check.
-    ///
-    /// Returns `None` if verion mismatch or given range cannot be fully filled.
-    #[tracing::instrument(skip(self, range), fields(start, end))]
+    /// Load region data by view from device.
+    #[expect(clippy::type_complexity)]
+    #[tracing::instrument(skip(self, view))]
     pub async fn load(
+        &self,
+        view: RegionView,
+    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
+        let res = self
+            .load_range(view.offset as usize..view.offset as usize + view.len as usize)
+            .await;
+        // drop view after load finish
+        drop(view);
+        res
+    }
+
+    /// Load region data with given `range` from device.
+    #[expect(clippy::type_complexity)]
+    #[tracing::instrument(skip(self, range), fields(start, end))]
+    pub async fn load_range(
         &self,
         range: impl RangeBounds<usize>,
     ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
@@ -193,6 +203,7 @@ where
             if read != len {
                 let mut inner = self.inner.lock();
                 self.cleanup(&mut inner, start, end)?;
+                // TODO(MrCroxx): return err?
                 return Ok(None);
             }
             offset += len;

@@ -63,6 +63,10 @@ impl Item {
     pub fn index(&self) -> &Index {
         &self.index
     }
+
+    pub fn consume(self) -> (Sequence, Index) {
+        (self.sequence, self.index)
+    }
 }
 
 #[derive(Debug)]
