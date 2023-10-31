@@ -13,16 +13,17 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use foyer_common::erwlock::{ErwLock, ErwLockInner};
-use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock, RwLockWriteGuard};
+use parking_lot::{Mutex, MutexGuard};
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
     ops::RangeBounds,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::oneshot;
-use tracing::instrument;
 
 use crate::{
     device::{BufferAllocator, Device},
@@ -56,23 +57,8 @@ pub struct RegionInner<A>
 where
     A: BufferAllocator,
 {
-    readers: usize,
-
     #[expect(clippy::type_complexity)]
-    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<ReadSlice<A>>>>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RegionInnerExclusiveRequire {
-    can_read: bool,
-}
-
-impl<A: BufferAllocator> ErwLockInner for RegionInner<A> {
-    type R = RegionInnerExclusiveRequire;
-
-    fn is_exclusive(&self, require: &Self::R) -> bool {
-        require.can_read || self.readers == 0
-    }
+    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<Vec<u8, A>>>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,9 +68,11 @@ where
 {
     id: RegionId,
 
-    inner: ErwLock<RegionInner<D::IoBufferAllocator>>,
+    inner: Arc<Mutex<RegionInner<D::IoBufferAllocator>>>,
 
     device: D,
+
+    refs: Arc<AtomicUsize>,
 }
 
 /// [`Region`] represents a contiguous aligned range on device and its optional dirty buffer.
@@ -101,29 +89,54 @@ where
 {
     pub fn new(id: RegionId, device: D) -> Self {
         let inner = RegionInner {
-            readers: 0,
-
             waits: BTreeMap::new(),
         };
         Self {
             id,
-            inner: ErwLock::new(inner),
+            inner: Arc::new(Mutex::new(inner)),
             device,
+            refs: Arc::new(AtomicUsize::default()),
         }
     }
 
-    /// Load region data into a [`ReadSlice`].
-    ///
-    /// Data may be loaded ether from physical device or from dirty buffer.
-    ///
-    /// Use version `0` to skip version check.
-    ///
-    /// Returns `None` if verion mismatch or given range cannot be fully filled.
-    #[tracing::instrument(skip(self, range), fields(start, end))]
+    pub fn view(&self, offset: u32, len: u32, key_len: u32, value_len: u32) -> RegionView {
+        self.refs.fetch_add(1, Ordering::SeqCst);
+        RegionView {
+            id: self.id,
+            offset,
+            len,
+            key_len,
+            value_len,
+            refs: Arc::clone(&self.refs),
+        }
+    }
+
+    pub fn refs(&self) -> &Arc<AtomicUsize> {
+        &self.refs
+    }
+
+    /// Load region data by view from device.
+    #[expect(clippy::type_complexity)]
+    #[tracing::instrument(skip(self, view))]
     pub async fn load(
         &self,
+        view: RegionView,
+    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
+        let res = self
+            .load_range(view.offset as usize..view.offset as usize + view.len as usize)
+            .await;
+        // drop view after load finish
+        drop(view);
+        res
+    }
+
+    /// Load region data with given `range` from device.
+    #[expect(clippy::type_complexity)]
+    #[tracing::instrument(skip(self, range), fields(start, end))]
+    pub async fn load_range(
+        &self,
         range: impl RangeBounds<usize>,
-    ) -> Result<Option<ReadSlice<D::IoBufferAllocator>>> {
+    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
         let start = match range.start_bound() {
             std::ops::Bound::Included(i) => *i,
             std::ops::Bound::Excluded(i) => *i + 1,
@@ -136,7 +149,7 @@ where
         };
 
         let rx = {
-            let mut inner = self.inner.write();
+            let mut inner = self.inner.lock();
 
             // join wait map if exists
             let rx = match inner.waits.entry((start, end)) {
@@ -151,7 +164,6 @@ where
                 }
             };
 
-            inner.readers += 1;
             drop(inner);
 
             rx
@@ -183,57 +195,30 @@ where
             let read = match res {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    let mut inner = self.inner.write();
+                    let mut inner = self.inner.lock();
                     self.cleanup(&mut inner, start, end)?;
-                    inner.readers -= 1;
                     return Err(e.into());
                 }
             };
             if read != len {
-                let mut inner = self.inner.write();
+                let mut inner = self.inner.lock();
                 self.cleanup(&mut inner, start, end)?;
-                inner.readers -= 1;
+                // TODO(MrCroxx): return err?
                 return Ok(None);
             }
             offset += len;
         }
         let buf = Arc::new(buf);
 
-        let cleanup = {
-            let inner = self.inner.clone();
-            let f = move || {
-                let mut guard = inner.write();
-                guard.readers -= 1;
-            };
-            Box::new(f)
-        };
-
-        if let Some(txs) = self.inner.write().waits.remove(&(start, end)) {
+        if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
             // TODO: handle error !!!!!!!!!!!
             for tx in txs {
-                tx.send(Ok(ReadSlice {
-                    buf: buf.clone(),
-                    cleanup: Some(cleanup.clone()),
-                }))
-                .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
+                tx.send(Ok(buf.clone()))
+                    .map_err(|_| anyhow::anyhow!("fail to send load result"))?;
             }
         }
 
-        Ok(Some(ReadSlice {
-            buf,
-            cleanup: Some(cleanup),
-        }))
-    }
-
-    #[instrument(skip(self))]
-    pub async fn exclusive(
-        &self,
-        can_write: bool,
-        can_read: bool,
-    ) -> ArcRwLockWriteGuard<RawRwLock, RegionInner<D::IoBufferAllocator>> {
-        self.inner
-            .exclusive(&RegionInnerExclusiveRequire { can_read })
-            .await
+        Ok(Some(buf))
     }
 
     pub fn id(&self) -> RegionId {
@@ -247,12 +232,11 @@ where
     /// Cleanup waits.
     fn cleanup(
         &self,
-        guard: &mut RwLockWriteGuard<'_, RegionInner<D::IoBufferAllocator>>,
+        guard: &mut MutexGuard<'_, RegionInner<D::IoBufferAllocator>>,
         start: usize,
         end: usize,
     ) -> Result<()> {
         if let Some(txs) = guard.waits.remove(&(start, end)) {
-            guard.readers -= txs.len();
             for tx in txs {
                 tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
                     .map_err(|_| anyhow::anyhow!("fail to cleanup waits"))?;
@@ -262,67 +246,62 @@ where
     }
 }
 
-impl<A> RegionInner<A>
-where
-    A: BufferAllocator,
-{
-    pub fn readers(&self) -> usize {
-        self.readers
-    }
-}
-
 // read & write slice
 
 pub trait CleanupFn = FnOnce() + Send + Sync + 'static;
 
-pub struct ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    buf: Arc<Vec<u8, A>>,
-    cleanup: Option<Box<dyn CleanupFn>>,
+#[derive(Debug)]
+pub struct RegionView {
+    id: RegionId,
+    offset: u32,
+    len: u32,
+    key_len: u32,
+    value_len: u32,
+    refs: Arc<AtomicUsize>,
 }
 
-impl<A> Debug for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReadSlice")
-            .field("len", &self.buf.len())
-            .finish()
-    }
-}
-
-impl<A> ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-impl<A> AsRef<[u8]> for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn as_ref(&self) -> &[u8] {
-        self.buf.as_ref()
-    }
-}
-
-impl<A> Drop for ReadSlice<A>
-where
-    A: BufferAllocator,
-{
-    fn drop(&mut self) {
-        if let Some(f) = self.cleanup.take() {
-            f();
+impl Clone for RegionView {
+    fn clone(&self) -> Self {
+        self.refs.fetch_add(1, Ordering::SeqCst);
+        Self {
+            id: self.id,
+            offset: self.offset,
+            len: self.len,
+            key_len: self.key_len,
+            value_len: self.value_len,
+            refs: Arc::clone(&self.refs),
         }
+    }
+}
+
+impl Drop for RegionView {
+    fn drop(&mut self) {
+        self.refs.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl RegionView {
+    pub fn id(&self) -> &RegionId {
+        &self.id
+    }
+
+    pub fn offset(&self) -> &u32 {
+        &self.offset
+    }
+
+    pub fn len(&self) -> &u32 {
+        &self.len
+    }
+
+    pub fn key_len(&self) -> &u32 {
+        &self.key_len
+    }
+
+    pub fn value_len(&self) -> &u32 {
+        &self.value_len
+    }
+
+    pub fn refs(&self) -> &Arc<AtomicUsize> {
+        &self.refs
     }
 }

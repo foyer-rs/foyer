@@ -24,22 +24,19 @@ use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use twox_hash::XxHash64;
 
-use crate::{device::BufferAllocator, metrics::Metrics, region::RegionId, ring::View};
+use crate::{
+    device::BufferAllocator,
+    metrics::Metrics,
+    region::{RegionId, RegionView},
+    ring::RingBufferView,
+};
 
 pub type Sequence = u64;
 
 #[derive(Debug, Clone)]
 pub enum Index {
-    RingBuffer {
-        view: View,
-    },
-    Region {
-        region: RegionId,
-        offset: u32,
-        len: u32,
-        key_len: u32,
-        value_len: u32,
-    },
+    RingBuffer { view: RingBufferView },
+    Region { view: RegionView },
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +62,10 @@ impl Item {
 
     pub fn index(&self) -> &Index {
         &self.index
+    }
+
+    pub fn consume(self) -> (Sequence, Index) {
+        (self.sequence, self.index)
     }
 }
 
@@ -108,8 +109,8 @@ where
     pub fn insert(&self, key: Arc<K>, mut item: Item) {
         // TODO(MrCroxx): compare sequence.
 
-        if let Index::Region { region, .. } = item.index {
-            self.regions[region as usize]
+        if let Index::Region { view } = &item.index {
+            self.regions[*view.id() as usize]
                 .lock()
                 .insert(key.clone(), item.sequence);
         };
@@ -134,8 +135,8 @@ where
     pub fn remove(&self, key: &K) -> Option<Item> {
         let shard = self.shard(key);
         let info: Option<Item> = self.items[shard].write().remove(key);
-        if let Some(info) = &info && let Index::Region { region,..} = info.index {
-            self.regions[region as usize].lock().remove(key);
+        if let Some(info) = &info && let Index::Region { view} = &info.index {
+            self.regions[*view.id() as usize].lock().remove(key);
         }
         info
     }

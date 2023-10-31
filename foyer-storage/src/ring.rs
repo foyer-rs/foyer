@@ -118,7 +118,7 @@ where
     ///
     /// When all views from an allocation are dropped, the buffer will be released.
     #[tracing::instrument(skip(self))]
-    pub async fn allocate(self: &Arc<Self>, len: usize, sequence: Sequence) -> ViewMut {
+    pub async fn allocate(self: &Arc<Self>, len: usize, sequence: Sequence) -> RingBufferViewMut {
         loop {
             if let Some(view) = self.allocate_inner(len, sequence).await {
                 return view;
@@ -127,7 +127,11 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    async fn allocate_inner(self: &Arc<Self>, len: usize, sequence: Sequence) -> Option<ViewMut> {
+    async fn allocate_inner(
+        self: &Arc<Self>,
+        len: usize,
+        sequence: Sequence,
+    ) -> Option<RingBufferViewMut> {
         let len = align_up(self.align, len);
         let offset = self.allocated.fetch_add(len, Ordering::SeqCst);
 
@@ -158,7 +162,7 @@ where
 
         let ring = Arc::clone(self);
         let ring: Arc<dyn Ring> = ring;
-        Some(ViewMut::new(ring, offset, len, refs))
+        Some(RingBufferViewMut::new(ring, offset, len, refs))
     }
 
     fn refs(&self, sequence: Sequence) -> &Arc<AtomicUsize> {
@@ -216,7 +220,7 @@ where
 ///
 /// The underlying buffer of [`ViewMut`] must be valid during its lifetime.
 #[derive(Debug)]
-pub struct ViewMut {
+pub struct RingBufferViewMut {
     ring: Arc<dyn Ring>,
     ptr: *mut u8,
     offset: usize,
@@ -225,7 +229,7 @@ pub struct ViewMut {
     refs: Arc<AtomicUsize>,
 }
 
-impl ViewMut {
+impl RingBufferViewMut {
     fn new(ring: Arc<dyn Ring>, offset: usize, len: usize, refs: &Arc<AtomicUsize>) -> Self {
         refs.fetch_add(1, Ordering::AcqRel);
         let ptr = ring.ptr(offset);
@@ -251,12 +255,12 @@ impl ViewMut {
         align_up(self.ring.align(), self.len)
     }
 
-    pub fn freeze(self) -> View {
-        View::from(self)
+    pub fn freeze(self) -> RingBufferView {
+        RingBufferView::from(self)
     }
 }
 
-impl Deref for ViewMut {
+impl Deref for RingBufferViewMut {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -264,13 +268,13 @@ impl Deref for ViewMut {
     }
 }
 
-impl DerefMut for ViewMut {
+impl DerefMut for RingBufferViewMut {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
 
-impl Drop for ViewMut {
+impl Drop for RingBufferViewMut {
     fn drop(&mut self) {
         if self.refs.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.ring.release(self.offset..self.offset + self.capacity);
@@ -278,24 +282,24 @@ impl Drop for ViewMut {
     }
 }
 
-unsafe impl Send for ViewMut {}
-unsafe impl Sync for ViewMut {}
+unsafe impl Send for RingBufferViewMut {}
+unsafe impl Sync for RingBufferViewMut {}
 
 /// # Safety
 ///
 /// The underlying buffer of [`View`] must be valid during its lifetime.
 #[derive(Debug)]
-pub struct View {
-    view: ViewMut,
+pub struct RingBufferView {
+    view: RingBufferViewMut,
 }
 
-impl From<ViewMut> for View {
-    fn from(view: ViewMut) -> Self {
+impl From<RingBufferViewMut> for RingBufferView {
+    fn from(view: RingBufferViewMut) -> Self {
         Self { view }
     }
 }
 
-impl Deref for View {
+impl Deref for RingBufferView {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -303,10 +307,10 @@ impl Deref for View {
     }
 }
 
-impl Clone for View {
+impl Clone for RingBufferView {
     fn clone(&self) -> Self {
         self.view.refs.fetch_add(1, Ordering::AcqRel);
-        let view = ViewMut {
+        let view = RingBufferViewMut {
             ring: self.view.ring.clone(),
             ptr: self.view.ptr,
             offset: self.view.offset,
@@ -318,14 +322,14 @@ impl Clone for View {
     }
 }
 
-impl View {
+impl RingBufferView {
     pub fn aligned(&self) -> usize {
         self.view.aligned()
     }
 }
 
-unsafe impl Send for View {}
-unsafe impl Sync for View {}
+unsafe impl Send for RingBufferView {}
+unsafe impl Sync for RingBufferView {}
 
 #[cfg(test)]
 mod tests {

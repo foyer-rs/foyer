@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 
 use crate::{
     device::Device,
@@ -113,17 +116,18 @@ where
         let region = self.region_manager.region(&region_id);
 
         // step 1: drop indices
-        let _indices = self.store.catalog().take_region(&region_id);
+        let indices = self.store.catalog().take_region(&region_id);
 
-        // after drop indices and acquire exclusive lock, no writers or readers are supposed to access the region
+        // Must guarantee there is no following reads on the region to be reclaim.
+        // Which means there is no unfinished reader or reader who holds index and prepare to read.
+
+        // wait unfinished readers
         {
-            let guard = region.exclusive(false, false).await;
-            tracing::trace!(
-                "[reclaimer] region {}, physical readers: {}",
-                region.id(),
-                guard.readers(),
-            );
-            drop(guard);
+            // only each `indices` holds one ref
+            while region.refs().load(Ordering::SeqCst) > indices.len() {
+                println!("refs: {}", region.refs().load(Ordering::SeqCst));
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
         }
 
         // step 2: do reinsertion
