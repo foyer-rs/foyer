@@ -154,7 +154,6 @@ pub struct Metrics {
     pub op_duration_lookup_hit: Histogram,
     pub op_duration_lookup_miss: Histogram,
     pub op_duration_remove: Histogram,
-    pub slow_op_duration_flush: Histogram,
     pub slow_op_duration_reclaim: Histogram,
 
     pub op_bytes_insert: IntCounter,
@@ -193,9 +192,6 @@ impl Metrics {
             .op_duration
             .with_label_values(&[foyer, "lookup", "miss"]);
         let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
-        let slow_op_duration_flush = global
-            .slow_op_duration
-            .with_label_values(&[foyer, "flush", ""]);
         let slow_op_duration_reclaim = global
             .slow_op_duration
             .with_label_values(&[foyer, "reclaim", ""]);
@@ -244,7 +240,6 @@ impl Metrics {
             op_duration_lookup_hit,
             op_duration_lookup_miss,
             op_duration_remove,
-            slow_op_duration_flush,
             slow_op_duration_reclaim,
 
             op_bytes_insert,

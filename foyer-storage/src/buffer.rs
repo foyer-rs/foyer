@@ -218,12 +218,12 @@ mod tests {
 
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
-        ring::{RingBuffer, View},
+        ring::{RingBuffer, RingBufferView},
     };
 
     use super::*;
 
-    fn ent(view: View) -> Entry {
+    fn ent(view: RingBufferView) -> Entry {
         Entry {
             key: Arc::new(()),
             view,
