@@ -127,10 +127,7 @@ where
         debug_assert!(self.offset + buffer.len() <= self.device.region_size());
 
         // flush and clear buffer
-        let (res, mut buffer) = self
-            .device
-            .write(buffer, .., region, self.offset as u64)
-            .await;
+        let (res, mut buffer) = self.device.write(buffer, .., region, self.offset).await;
         buffer.clear();
         self.buffer = Some(buffer);
         res?;
