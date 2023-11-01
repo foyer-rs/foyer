@@ -108,10 +108,6 @@ pub struct Args {
     #[arg(long, default_value_t = 64)]
     region_size: usize,
 
-    /// (MiB)
-    #[arg(long, default_value_t = 1024)]
-    buffer_pool_size: usize,
-
     #[arg(long, default_value_t = 0)]
     flusher_buffer_size: usize,
 
@@ -162,26 +158,11 @@ pub struct Args {
 
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
-    flush_rate_limit: usize,
-
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
     reclaim_rate_limit: usize,
-
-    /// (ms)
-    #[arg(long, default_value_t = 10)]
-    allocation_timeout: usize,
 
     /// `0` means equal to reclaimer count
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
-
-    /// the count of allocators is `2 ^ allocator bits`
-    ///
-    /// Note: The count of allocators should be greater than buffer count.
-    ///       (buffer count = buffer pool size / device region size)
-    #[arg(long, default_value_t = 0)]
-    allocator_bits: usize,
 
     /// Catalog indices sharding bits.
     #[arg(long, default_value_t = 6)]
