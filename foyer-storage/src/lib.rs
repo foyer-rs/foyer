@@ -25,6 +25,7 @@
 pub mod admission;
 pub mod buffer;
 pub mod catalog;
+pub mod compress;
 pub mod device;
 pub mod error;
 pub mod flusher;

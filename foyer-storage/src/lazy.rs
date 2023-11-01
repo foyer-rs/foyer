@@ -252,6 +252,7 @@ mod tests {
             recover_concurrency: 2,
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
+            compression: crate::compress::Compression::None,
         };
 
         let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
@@ -290,6 +291,7 @@ mod tests {
             recover_concurrency: 2,
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
+            compression: crate::compress::Compression::None,
         };
 
         let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());

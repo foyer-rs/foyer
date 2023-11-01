@@ -38,6 +38,7 @@ use twox_hash::XxHash64;
 use crate::{
     admission::AdmissionPolicy,
     catalog::{Catalog, Index, Item, Sequence},
+    compress::Compression,
     device::Device,
     error::Result,
     flusher::{Entry, Flusher},
@@ -120,6 +121,9 @@ where
 
     /// Concurrency of recovery.
     pub recover_concurrency: usize,
+
+    /// Compression algorithm.
+    pub compression: Compression,
 }
 
 impl<K, V, D, EP> Debug for GenericStoreConfig<K, V, D, EP>
@@ -147,6 +151,7 @@ where
             .field("allocation_timeout", &self.allocation_timeout)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
+            .field("compression", &self.compression)
             .finish()
     }
 }
@@ -177,6 +182,7 @@ where
             allocation_timeout: self.allocation_timeout,
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
+            compression: self.compression,
         }
     }
 }
@@ -339,6 +345,7 @@ where
             .map(|(stop_rx, entry_rx)| {
                 Flusher::new(
                     config.flusher_buffer_size,
+                    config.compression,
                     region_manager.clone(),
                     catalog.clone(),
                     device.clone(),
@@ -431,21 +438,14 @@ where
 
         match index {
             crate::catalog::Index::RingBuffer { view } => {
-                let res = match read_entry::<K, V>(view.as_ref()) {
-                    Some((_key, value)) => Ok(Some(value)),
-                    None => {
-                        // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
-                        self.inner.catalog.remove(key);
-                        Ok(None)
-                    }
-                };
+                let v = V::read(&view);
 
                 self.inner
                     .metrics
                     .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
 
-                res
+                Ok(Some(v))
             }
             // read from region
             crate::catalog::Index::Region { view } => {
@@ -516,12 +516,6 @@ where
 
     pub(crate) fn reinsertions(&self) -> &Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>> {
         &self.inner.reinsertions
-    }
-
-    fn serialized_len(&self, key: &K, value: &V) -> usize {
-        let unaligned =
-            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len();
-        bits::align_up(self.inner.device.align(), unaligned)
     }
 
     #[tracing::instrument(skip(self))]
@@ -629,27 +623,22 @@ where
             admission.on_insert(&key, writer.weight, &self.inner.metrics, judge);
         }
 
-        let serialized_len = self.serialized_len(&key, &value);
+        // only write value to ring buffer
+        let len = bits::align_up(self.inner.device.align(), value.serialized_len());
 
-        if key.serialized_len() + value.serialized_len() != writer.weight {
-            tracing::error!(
-                "weight != key.serialized_len() + value.serialized_len(), weight: {}, key size: {}, value size: {}, key: {:?}",
-                writer.weight, key.serialized_len(), value.serialized_len(), key
-            );
-        }
-
-        self.inner
-            .metrics
-            .op_bytes_insert
-            .inc_by(serialized_len as u64);
+        // record aligned header + key + value size for metrics
+        self.inner.metrics.op_bytes_insert.inc_by(bits::align_up(
+            self.inner.device.align(),
+            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
+        ) as u64);
 
         self.inner
             .metrics
             .inner_bytes_ring_buffer_remains
             .set(self.inner.ring.remains() as i64);
-        let mut view = self.inner.ring.allocate(serialized_len, sequence).await;
-        let written = write_entry(&mut view, &key, &value, sequence);
-        view.shrink_to(written);
+        let mut view = self.inner.ring.allocate(len, sequence).await;
+        value.write(&mut view);
+        view.shrink_to(value.serialized_len());
         let view = view.freeze();
 
         let key = Arc::new(key);
@@ -820,79 +809,57 @@ where
 //     }
 // }
 
-const ENTRY_MAGIC: u32 = 0x97_00_00_00;
-const ENTRY_MAGIC_MASK: u32 = 0xFF_00_00_00;
+const ENTRY_MAGIC: u32 = 0x97_03_27_00;
+const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
 
 #[derive(Debug)]
-struct EntryHeader {
-    key_len: u32,
-    value_len: u32,
-    sequence: Sequence,
-    checksum: u64,
+pub struct EntryHeader {
+    pub key_len: u32,
+    pub value_len: u32,
+    pub sequence: Sequence,
+    pub checksum: u64,
+    pub compression: Compression,
 }
 
 impl EntryHeader {
-    fn serialized_len() -> usize {
-        4 + 4 + 8 + 8
+    pub const fn serialized_len() -> usize {
+        4 + 4 + 8 + 8 + 4 /* magic & compression */
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u32(self.key_len | ENTRY_MAGIC);
+    pub fn write(&self, mut buf: &mut [u8]) {
+        buf.put_u32(self.key_len);
         buf.put_u32(self.value_len);
         buf.put_u64(self.sequence);
         buf.put_u64(self.checksum);
+
+        let v = ENTRY_MAGIC | self.compression.to_u8() as u32;
+        buf.put_u32(v);
     }
 
-    fn read(mut buf: &[u8]) -> Option<Self> {
-        let head = buf.get_u32();
-        let magic = head & ENTRY_MAGIC_MASK;
-
-        if magic != ENTRY_MAGIC {
-            return None;
-        }
-
-        let key_len = head ^ ENTRY_MAGIC;
+    pub fn read(mut buf: &[u8]) -> Option<Self> {
+        let key_len = buf.get_u32();
         let value_len = buf.get_u32();
         let sequence = buf.get_u64();
         let checksum = buf.get_u64();
+
+        let v = buf.get_u32();
+        let magic = v & ENTRY_MAGIC_MASK;
+        if magic != ENTRY_MAGIC {
+            return None;
+        }
+        let compression = Compression::try_from_u8(v as u8)?;
 
         Some(Self {
             key_len,
             value_len,
             sequence,
+            compression,
             checksum,
         })
     }
 }
 
-/// | header | value | key | <padding> |
-///
-/// # Safety
-///
-/// `buf.len()` must excatly fit entry size
-fn write_entry<K, V>(buf: &mut [u8], key: &K, value: &V, sequence: Sequence) -> usize
-where
-    K: Key,
-    V: Value,
-{
-    let mut offset = EntryHeader::serialized_len();
-    value.write(&mut buf[offset..offset + value.serialized_len()]);
-    offset += value.serialized_len();
-    key.write(&mut buf[offset..offset + key.serialized_len()]);
-    offset += key.serialized_len();
-    let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
-
-    let header = EntryHeader {
-        key_len: key.serialized_len() as u32,
-        value_len: value.serialized_len() as u32,
-        sequence,
-        checksum,
-    };
-    header.write(&mut buf[..EntryHeader::serialized_len()]);
-    offset
-}
-
-/// | header | value | key | <padding> |
+/// | header | value (compressed) | key | <padding> |
 ///
 /// # Safety
 ///
@@ -902,11 +869,27 @@ where
     K: Key,
     V: Value,
 {
+    // read entry header
     let header = EntryHeader::read(buf)?;
 
+    // read value
     let mut offset = EntryHeader::serialized_len();
-    let value = V::read(&buf[offset..offset + header.value_len as usize]);
+    let compressed = &buf[offset..offset + header.value_len as usize];
     offset += header.value_len as usize;
+    let value = match header.compression {
+        Compression::None => V::read(compressed),
+        Compression::Zstd => {
+            let mut decompressed =
+                Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
+            if let Err(e) = zstd::stream::copy_decode(&mut &compressed[..], &mut decompressed) {
+                tracing::warn!("decompress error: {}", e);
+                return None;
+            }
+            V::read(&decompressed[..])
+        }
+    };
+
+    // read key
     let key = K::read(&buf[offset..offset + header.key_len as usize]);
     offset += header.key_len as usize;
 
@@ -923,7 +906,7 @@ where
     Some((key, value))
 }
 
-fn checksum(buf: &[u8]) -> u64 {
+pub fn checksum(buf: &[u8]) -> u64 {
     let mut hasher = XxHash64::with_seed(0);
     hasher.write(buf);
     hasher.finish()
@@ -1205,6 +1188,7 @@ mod tests {
             recover_concurrency: 2,
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
+            compression: Compression::None,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -1260,6 +1244,7 @@ mod tests {
             recover_concurrency: 2,
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
+            compression: Compression::None,
         };
         let store = TestStore::open(config).await.unwrap();
 

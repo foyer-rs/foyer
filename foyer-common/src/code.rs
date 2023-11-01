@@ -29,22 +29,18 @@ pub trait Key:
     + Clone
     + std::fmt::Debug
 {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn weight(&self) -> usize {
         std::mem::size_of::<Self>()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Key` if storage is used.")
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn write(&self, buf: &mut [u8]) {
         panic!("Method `write` must be implemented for `Key` if storage is used.")
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn read(buf: &[u8]) -> Self {
         panic!("Method `read` must be implemented for `Key` if storage is used.")
     }
@@ -52,22 +48,18 @@ pub trait Key:
 
 #[expect(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn weight(&self) -> usize {
         std::mem::size_of::<Self>()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Value` if storage is used.")
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn write(&self, buf: &mut [u8]) {
         panic!("Method `write` must be implemented for `Value` if storage is used.")
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn read(buf: &[u8]) -> Self {
         panic!("Method `read` must be implemented for `Value` if storage is used.")
     }
@@ -87,17 +79,17 @@ macro_rules! impl_key {
         paste! {
             $(
                 impl Key for $type {
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn serialized_len(&self) -> usize {
                         std::mem::size_of::<$type>()
                     }
 
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn write(&self, mut buf: &mut [u8]) {
                         buf.[< put_ $type>](*self)
                     }
 
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn read(mut buf: &[u8]) -> Self {
                         buf.[< get_ $type>]()
                     }
@@ -112,17 +104,17 @@ macro_rules! impl_value {
         paste! {
             $(
                 impl Value for $type {
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn serialized_len(&self) -> usize {
                         std::mem::size_of::<$type>()
                     }
 
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn write(&self, mut buf: &mut [u8]) {
                         buf.[< put_ $type>](*self)
                     }
 
-                    #[cfg_attr(coverage_nightly, coverage(off))]
+
                     fn read(mut buf: &[u8]) -> Self {
                         buf.[< get_ $type>]()
                     }
@@ -135,24 +127,66 @@ macro_rules! impl_value {
 for_all_primitives! { impl_key }
 for_all_primitives! { impl_value }
 
-impl Value for Vec<u8> {
-    #[cfg_attr(coverage_nightly, coverage(off))]
+impl Key for Vec<u8> {
     fn weight(&self) -> usize {
         self.len()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn serialized_len(&self) -> usize {
         self.len()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn write(&self, mut buf: &mut [u8]) {
         buf.put_slice(self);
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn read(buf: &[u8]) -> Self {
         buf.to_vec()
     }
+}
+
+impl Value for Vec<u8> {
+    fn weight(&self) -> usize {
+        self.len()
+    }
+
+    fn serialized_len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, mut buf: &mut [u8]) {
+        buf.put_slice(self);
+    }
+
+    fn read(buf: &[u8]) -> Self {
+        buf.to_vec()
+    }
+}
+
+impl Key for () {
+    fn weight(&self) -> usize {
+        0
+    }
+
+    fn serialized_len(&self) -> usize {
+        0
+    }
+
+    fn write(&self, _buf: &mut [u8]) {}
+
+    fn read(_buf: &[u8]) -> Self {}
+}
+
+impl Value for () {
+    fn weight(&self) -> usize {
+        0
+    }
+
+    fn serialized_len(&self) -> usize {
+        0
+    }
+
+    fn write(&self, _buf: &mut [u8]) {}
+
+    fn read(_buf: &[u8]) -> Self {}
 }
