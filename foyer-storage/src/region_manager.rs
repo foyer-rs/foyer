@@ -63,19 +63,7 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    pub fn new(
-        buffer_count: usize,
-        region_count: usize,
-        eviction_config: EP::Config,
-        device: D,
-    ) -> Self {
-        let buffers = AsyncQueue::new();
-        for _ in 0..buffer_count {
-            let len = device.region_size();
-            let buffer = device.io_buffer(len, len);
-            buffers.release(buffer);
-        }
-
+    pub fn new(region_count: usize, eviction_config: EP::Config, device: D) -> Self {
         let eviction = EP::new(eviction_config);
         let clean_regions = AsyncQueue::new();
 
