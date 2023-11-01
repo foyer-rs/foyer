@@ -75,12 +75,6 @@ where
     /// Device configurations.
     pub device_config: D::Config,
 
-    /// The count of allocators is `2 ^ allocator bits`.
-    ///
-    /// Note: The count of allocators should be greater than buffer count.
-    ///       (buffer count = buffer pool size / device region size)
-    pub allocator_bits: usize,
-
     /// `ring_buffer_capacity` will be aligned up to device align.
     pub ring_buffer_capacity: usize,
 
@@ -93,26 +87,17 @@ where
     /// Reinsertion policies.
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
-    /// Buffer pool size, should be a multiplier of device region size.
-    pub buffer_pool_size: usize,
-
     /// Flusher default buffer capacity, must be equals or larger than device io size.
     pub flusher_buffer_size: usize,
 
     /// Count of flushers.
     pub flushers: usize,
 
-    /// Flush rate limits.
-    pub flush_rate_limit: usize,
-
     /// Count of reclaimers.
     pub reclaimers: usize,
 
     /// Flush rate limits.
     pub reclaim_rate_limit: usize,
-
-    /// Allocation timout for skippable writers.
-    pub allocation_timeout: Duration,
 
     /// Clean region count threshold to trigger reclamation.
     ///
@@ -137,18 +122,14 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
-            .field("allocator_bits", &self.allocator_bits)
             .field("ring_buffer_capacity", &self.ring_buffer_capacity)
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
-            .field("buffer_pool_size", &self.buffer_pool_size)
             .field("flusher_buffer_size", &self.flusher_buffer_size)
             .field("flushers", &self.flushers)
-            .field("flush_rate_limit", &self.flush_rate_limit)
             .field("reclaimers", &self.reclaimers)
             .field("reclaim_rate_limit", &self.reclaim_rate_limit)
-            .field("allocation_timeout", &self.allocation_timeout)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("compression", &self.compression)
@@ -168,18 +149,14 @@ where
             name: self.name.clone(),
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
-            allocator_bits: self.allocator_bits,
             ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
-            buffer_pool_size: self.buffer_pool_size,
             flusher_buffer_size: self.flusher_buffer_size,
             flushers: self.flushers,
-            flush_rate_limit: self.flush_rate_limit,
             reclaimers: self.reclaimers,
             reclaim_rate_limit: self.reclaim_rate_limit,
-            allocation_timeout: self.allocation_timeout,
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
@@ -262,15 +239,6 @@ where
         let device = D::open(config.device_config).await?;
         assert!(device.regions() >= config.flushers * 2);
 
-        let buffer_count = config.buffer_pool_size / device.region_size();
-
-        if buffer_count < (1 << config.allocator_bits) {
-            return Err(anyhow::anyhow!(
-                "The count of allocators shoule be greater than buffer count."
-            )
-            .into());
-        }
-
         let ring = Arc::new(RingBuffer::with_metrics_in(
             device.align(),
             config.ring_buffer_capacity,
@@ -279,7 +247,6 @@ where
         ));
 
         let region_manager = Arc::new(RegionManager::new(
-            buffer_count,
             device.regions(),
             config.eviction_config,
             device.clone(),
@@ -438,14 +405,19 @@ where
 
         match index {
             crate::catalog::Index::RingBuffer { view } => {
-                let v = V::read(&view);
+                let value = V::read(&view);
 
                 self.inner
                     .metrics
                     .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
 
-                Ok(Some(v))
+                self.inner
+                    .metrics
+                    .op_bytes_lookup
+                    .inc_by(value.serialized_len() as u64);
+
+                Ok(Some(value))
             }
             // read from region
             crate::catalog::Index::Region { view } => {
@@ -455,8 +427,8 @@ where
                 let region = self.inner.region_manager.region(region);
 
                 // TODO(MrCroxx): read value only
-                let slice = match region.load(view).await? {
-                    Some(slice) => slice,
+                let buf = match region.load(view).await? {
+                    Some(buf) => buf,
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of region version mismatch).
                         self.inner.catalog.remove(key);
@@ -468,13 +440,14 @@ where
                     }
                 };
 
-                self.inner
-                    .metrics
-                    .op_bytes_lookup
-                    .inc_by(slice.len() as u64);
-
-                let res = match read_entry::<K, V>(slice.as_ref()) {
-                    Some((_key, value)) => Ok(Some(value)),
+                let res = match read_entry::<K, V>(buf.as_ref()) {
+                    Some((_key, value)) => {
+                        self.inner
+                            .metrics
+                            .op_bytes_lookup
+                            .inc_by(value.serialized_len() as u64);
+                        Ok(Some(value))
+                    }
                     None => {
                         // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
                         self.inner.catalog.remove(key);
@@ -1174,19 +1147,15 @@ mod tests {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            allocator_bits: 1,
             ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions,
             reinsertions,
-            buffer_pool_size: 8 * MB,
             flusher_buffer_size: 0,
             flushers: 1,
-            flush_rate_limit: 0,
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             compression: Compression::None,
         };
@@ -1230,19 +1199,15 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            allocator_bits: 1,
             ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
-            buffer_pool_size: 8 * MB,
             flusher_buffer_size: 0,
             flushers: 1,
-            flush_rate_limit: 0,
             reclaimers: 0,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             compression: Compression::None,
         };
