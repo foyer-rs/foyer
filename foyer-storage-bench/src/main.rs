@@ -41,6 +41,7 @@ use foyer_storage::{
         rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
         AdmissionPolicy,
     },
+    compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
     reinsertion::{
@@ -193,6 +194,10 @@ pub struct Args {
     /// use separate runtime
     #[arg(long, default_value_t = false)]
     runtime: bool,
+
+    /// available values: "none", "zstd"
+    #[arg(long, default_value = "none")]
+    compression: String,
 }
 
 #[derive(Debug)]
@@ -554,6 +559,12 @@ async fn main() {
         args.clean_region_threshold
     };
 
+    let compression = match args.compression.as_str() {
+        "none" => Compression::None,
+        "zstd" => Compression::Zstd,
+        _ => panic!("unsupported compression algorithm"),
+    };
+
     let config = LfuFsStoreConfig {
         name: "".to_string(),
         eviction_config,
@@ -572,6 +583,7 @@ async fn main() {
         recover_concurrency: args.recover_concurrency,
         allocation_timeout: Duration::from_millis(args.allocation_timeout as u64),
         clean_region_threshold,
+        compression,
     };
 
     let config = if args.runtime {

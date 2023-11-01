@@ -35,6 +35,7 @@ tracing = { version = "0.1" }
 tracing-core = { version = "0.1" }
 
 [build-dependencies]
+cc = { version = "1", default-features = false, features = ["parallel"] }
 either = { version = "1", default-features = false, features = ["use_std"] }
 itertools = { version = "0.11" }
 proc-macro2 = { version = "1" }

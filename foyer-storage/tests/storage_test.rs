@@ -17,6 +17,7 @@
 
 use foyer_intrusive::eviction::fifo::FifoConfig;
 use foyer_storage::{
+    compress::Compression,
     device::fs::FsDeviceConfig,
     lazy::LazyStore,
     runtime::{RuntimeConfig, RuntimeLazyStore, RuntimeStorageConfig, RuntimeStore},
@@ -142,6 +143,41 @@ async fn test_store() {
         allocation_timeout: Duration::from_millis(10),
         clean_region_threshold: 1,
         recover_concurrency: 2,
+        compression: Compression::None,
+    };
+
+    test_storage::<Store<_, _>>(config.into(), recorder).await;
+}
+
+#[tokio::test]
+async fn test_store_zstd() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = FifoFsStoreConfig {
+        name: "".to_string(),
+        eviction_config: FifoConfig,
+        device_config: FsDeviceConfig {
+            dir: PathBuf::from(tempdir.path()),
+            capacity: 4 * MB,
+            file_capacity: 1 * MB,
+            align: 4 * KB,
+            io_size: 4 * KB,
+        },
+        allocator_bits: 0,
+        ring_buffer_capacity: 16 * MB,
+        catalog_bits: 1,
+        admissions: vec![recorder.clone()],
+        reinsertions: vec![recorder.clone()],
+        buffer_pool_size: 2 * MB,
+        flusher_buffer_size: 0,
+        flushers: 1,
+        flush_rate_limit: 0,
+        reclaimers: 1,
+        reclaim_rate_limit: 0,
+        allocation_timeout: Duration::from_millis(10),
+        clean_region_threshold: 1,
+        recover_concurrency: 2,
+        compression: Compression::Zstd,
     };
 
     test_storage::<Store<_, _>>(config.into(), recorder).await;
@@ -175,6 +211,7 @@ async fn test_lazy_store() {
         allocation_timeout: Duration::from_millis(10),
         clean_region_threshold: 1,
         recover_concurrency: 2,
+        compression: Compression::None,
     };
 
     test_storage::<LazyStore<_, _>>(config.into(), recorder).await;
@@ -209,6 +246,7 @@ async fn test_runtime_store() {
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             recover_concurrency: 2,
+            compression: Compression::None,
         }
         .into(),
         runtime: RuntimeConfig {
@@ -249,6 +287,7 @@ async fn test_runtime_lazy_store() {
             allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             recover_concurrency: 2,
+            compression: Compression::None,
         }
         .into(),
         runtime: RuntimeConfig {

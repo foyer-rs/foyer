@@ -32,6 +32,7 @@ thiserror = "1"
 tokio = { workspace = true }
 tracing = "0.1"
 twox-hash = "1"
+zstd = "0.13"
 
 [dev-dependencies]
 bytesize = "1"
