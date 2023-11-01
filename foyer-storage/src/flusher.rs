@@ -15,6 +15,7 @@
 use crate::{
     buffer::{BufferError, FlushBuffer, PositionedEntry},
     catalog::{Catalog, Index, Item, Sequence},
+    compress::Compression,
     device::Device,
     error::{Error, Result},
     metrics::Metrics,
@@ -73,6 +74,8 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
+    compression: Compression,
+
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
     catalog: Arc<Catalog<K>>,
@@ -93,8 +96,10 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         default_buffer_capacity: usize,
+        compression: Compression,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         catalog: Arc<Catalog<K>>,
         device: D,
@@ -104,6 +109,7 @@ where
     ) -> Self {
         let buffer = FlushBuffer::new(device.clone(), default_buffer_capacity);
         Self {
+            compression,
             region_manager,
             catalog,
             buffer,
@@ -139,7 +145,7 @@ where
 
         let old_region = self.buffer.region();
 
-        let entry = match self.buffer.write(entry).await {
+        let entry = match self.buffer.write::<K>(entry, self.compression).await {
             Err(BufferError::NotEnough { entry }) => entry,
 
             Ok(entries) => return self.update_catalog(entries).await,
@@ -176,7 +182,7 @@ where
         );
 
         // 3. retry write
-        let entries = self.buffer.write(entry).await?;
+        let entries = self.buffer.write::<K>(entry, self.compression).await?;
         self.update_catalog(entries).await?;
 
         drop(timer);
@@ -185,25 +191,30 @@ where
 
     #[tracing::instrument(skip(self))]
     async fn update_catalog(&self, entries: Vec<PositionedEntry>) -> Result<()> {
+        // record fully flushed bytes by the way
+        let mut bytes = 0;
+
         let timer = self.metrics.inner_op_duration_update_catalog.start_timer();
         for PositionedEntry {
             entry:
                 Entry {
                     key,
-                    view,
+                    view: _,
                     key_len,
                     value_len,
                     sequence,
                 },
             region,
             offset,
+            len,
         } in entries
         {
+            bytes += len;
             let key = key.downcast::<K>().unwrap();
             let index = Index::Region {
                 view: self.region_manager.region(&region).view(
                     offset as u32,
-                    view.aligned() as u32,
+                    len as u32,
                     key_len as u32,
                     value_len as u32,
                 ),
@@ -212,6 +223,9 @@ where
             self.catalog.insert(key, item);
         }
         drop(timer);
+
+        self.metrics.op_bytes_flush.inc_by(bytes as u64);
+
         Ok(())
     }
 }

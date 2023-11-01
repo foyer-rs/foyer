@@ -12,11 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::bits::{align_up, is_aligned};
+use foyer_common::{
+    bits::{align_up, is_aligned},
+    code::Key,
+};
 
 use crate::{
+    compress::Compression,
     device::{error::DeviceError, Device},
     flusher::Entry,
+    generic::{checksum, EntryHeader},
     region::{RegionHeader, RegionId, REGION_MAGIC},
 };
 
@@ -35,6 +40,7 @@ pub struct PositionedEntry {
     pub entry: Entry,
     pub region: RegionId,
     pub offset: usize,
+    pub len: usize,
 }
 
 #[derive(Debug)]
@@ -153,26 +159,160 @@ where
     ///
     /// Returns fully flushed entries if there is enough space in the current region.
     /// Otherwise, returns `NotEnough` error with the given `entry`.
-    pub async fn write(&mut self, entry: Entry) -> BufferResult<Vec<PositionedEntry>> {
-        // check region remaining size
-        let len = align_up(self.device.align(), entry.view.len());
-        if self.remaining() < len {
-            return Err(BufferError::NotEnough { entry });
+    ///
+    /// # Format
+    ///
+    /// | header | value (compressed) | key | <padding> |
+    pub async fn write<K: Key>(
+        &mut self,
+        Entry {
+            key,
+            key_len,
+            value_len,
+            sequence,
+            view,
+        }: Entry,
+        compression: Compression,
+    ) -> BufferResult<Vec<PositionedEntry>> {
+        debug_assert_eq!(view.len(), value_len);
+
+        if self.region.is_none() {
+            return Err(BufferError::NotEnough {
+                entry: Entry {
+                    key,
+                    key_len,
+                    value_len,
+                    sequence,
+                    view,
+                },
+            });
         }
 
-        // write view and padding
-        let region = self.region.unwrap();
-        let offset = self.offset + self.buffer.len();
-        let target_len = self.buffer.len() + len;
-        debug_assert!(is_aligned(self.device.align(), offset));
+        // reserve underlying vec capacity
+        let key = key.downcast::<K>().unwrap();
+        let uncompressed = align_up(
+            self.device.align(),
+            EntryHeader::serialized_len() + key_len + value_len,
+        );
+        self.buffer.reserve_exact(uncompressed);
 
-        self.buffer.reserve_exact(len);
-        std::io::copy(&mut &entry.view[..], &mut self.buffer).map_err(DeviceError::from)?;
-        unsafe { self.buffer.set_len(target_len) };
+        // TODO(MrCroxx): skip if remaining is too small
+
+        // 1. try compress and write first
+        let old = self.buffer.len();
+        debug_assert!(is_aligned(self.device.align(), old));
+
+        match compression {
+            Compression::None => {
+                // early return if remaining size is not enough
+                if self.remaining() < uncompressed {
+                    return Err(BufferError::NotEnough {
+                        entry: Entry {
+                            key,
+                            key_len,
+                            value_len,
+                            sequence,
+                            view,
+                        },
+                    });
+                }
+                let mut cursor = self.buffer.len();
+                unsafe { self.buffer.set_len(cursor + uncompressed) };
+                debug_assert!(is_aligned(self.device.align(), self.buffer.len()));
+
+                // reserve space for header
+                cursor += EntryHeader::serialized_len();
+
+                // write value
+                std::io::copy(
+                    &mut &view[..],
+                    &mut &mut self.buffer[cursor..cursor + value_len],
+                )
+                .map_err(DeviceError::from)?;
+                debug_assert_eq!(&view[..], &self.buffer[cursor..cursor + value_len]);
+
+                // write key
+                cursor += value_len;
+                key.write(&mut self.buffer[cursor..cursor + key_len]);
+
+                // calculate checksum
+                cursor -= value_len;
+                let checksum = checksum(&self.buffer[cursor..cursor + value_len + key_len]);
+
+                // write entry header
+                cursor -= EntryHeader::serialized_len();
+                let header = EntryHeader {
+                    key_len: key_len as u32,
+                    value_len: value_len as u32,
+                    sequence,
+                    compression,
+                    checksum,
+                };
+                header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
+            }
+            Compression::Zstd => {
+                // reserve space for header
+                let mut cursor = self.buffer.len() + EntryHeader::serialized_len();
+                unsafe { self.buffer.set_len(cursor) };
+
+                // write compressed value
+                zstd::stream::copy_encode(&mut &view[..], &mut self.buffer, 0)
+                    .map_err(DeviceError::from)?;
+                let value_len = self.buffer.len() - cursor;
+
+                // write key
+                cursor += value_len;
+                self.buffer.reserve_exact(key_len);
+                unsafe { self.buffer.set_len(cursor + key_len) };
+                key.write(&mut self.buffer[cursor..cursor + key_len]);
+
+                // calculate checksum
+                cursor -= value_len;
+                let checksum = checksum(&self.buffer[cursor..cursor + value_len + key_len]);
+
+                // write entry header
+                cursor -= EntryHeader::serialized_len();
+                let header = EntryHeader {
+                    key_len: key_len as u32,
+                    value_len: value_len as u32,
+                    sequence,
+                    compression,
+                    checksum,
+                };
+                header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
+            }
+        }
+
+        // 2. if size exceeds region limit, rollback write and return
+        if self.offset + self.buffer.len() > self.device.region_size() {
+            unsafe { self.buffer.set_len(old) };
+            return Err(BufferError::NotEnough {
+                entry: Entry {
+                    key,
+                    key_len,
+                    value_len,
+                    sequence,
+                    view,
+                },
+            });
+        }
+
+        // 3. align buffer size
+        let target = align_up(self.device.align(), self.buffer.len());
+        self.buffer.reserve_exact(target - self.buffer.len());
+        unsafe { self.buffer.set_len(target) }
+
         self.entries.push(PositionedEntry {
-            entry,
-            region,
-            offset,
+            entry: Entry {
+                key,
+                key_len,
+                value_len,
+                sequence,
+                view,
+            },
+            region: self.region.unwrap(),
+            offset: self.offset + old,
+            len: self.buffer.len() - old,
         });
 
         // flush if buffer equals or exceeds device io size
@@ -201,11 +341,13 @@ mod tests {
     use super::*;
 
     fn ent(view: RingBufferView) -> Entry {
+        let key = Arc::new(());
+        let value_len = view.len();
         Entry {
-            key: Arc::new(()),
+            key,
             view,
             key_len: 0,
-            value_len: 0,
+            value_len,
             sequence: 0,
         }
     }
@@ -229,6 +371,8 @@ mod tests {
         let mut buffer = FlushBuffer::new(device.clone(), DEFAULT_BUFFER_CAPACITY);
         assert_eq!(buffer.region(), None);
 
+        const HEADER: usize = EntryHeader::serialized_len();
+
         {
             let view = {
                 let mut view = ring.allocate(5 * 1024 - 128, 0).await; // ~ 6 KiB
@@ -239,7 +383,7 @@ mod tests {
             let entry = ent(view);
             assert_eq!(ring.continuum(), 0);
 
-            let res = buffer.write(entry).await;
+            let res = buffer.write::<()>(entry, Compression::None).await;
             let entry = match res {
                 Err(BufferError::NotEnough { entry }) => entry,
                 _ => panic!("should be not enough error"),
@@ -249,16 +393,25 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 12 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer
+                .write::<()>(entry.clone(), Compression::None)
+                .await
+                .unwrap();
             assert!(entries.is_empty());
             // 12 ~ 20 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer
+                .write::<()>(entry.clone(), Compression::None)
+                .await
+                .unwrap();
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
             assert_eq!(entries[1].offset, 12 * 1024);
 
             // 20 ~ 28 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer
+                .write::<()>(entry.clone(), Compression::None)
+                .await
+                .unwrap();
             assert!(entries.is_empty());
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
@@ -267,9 +420,18 @@ mod tests {
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 0, 0).await;
             res.unwrap();
-            assert_eq!(&buf[4 * 1024..9 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
-            assert_eq!(&buf[12 * 1024..17 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
-            assert_eq!(&buf[20 * 1024..25 * 1024 - 128], &[b'x'; 5 * 1024 - 128]);
+            assert_eq!(
+                &buf[HEADER + 4 * 1024..HEADER + 9 * 1024 - 128],
+                &[b'x'; 5 * 1024 - 128]
+            );
+            assert_eq!(
+                &buf[HEADER + 12 * 1024..HEADER + 17 * 1024 - 128],
+                &[b'x'; 5 * 1024 - 128]
+            );
+            assert_eq!(
+                &buf[HEADER + 20 * 1024..HEADER + 25 * 1024 - 128],
+                &[b'x'; 5 * 1024 - 128]
+            );
 
             assert!(buffer.entries.is_empty());
         }
@@ -286,7 +448,7 @@ mod tests {
             };
             let entry = ent(view);
 
-            let res = buffer.write(entry).await;
+            let res = buffer.write::<()>(entry, Compression::None).await;
             let entry = match res {
                 Err(BufferError::NotEnough { entry }) => entry,
                 _ => panic!("should be not enough error"),
@@ -296,27 +458,34 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 60 KiB
-            let entries = buffer.write(entry).await.unwrap();
+            let entries = buffer.write::<()>(entry, Compression::None).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
             let view = {
                 let mut view = ring.allocate(3 * 1024 - 128, 2).await; // ~ 3 KiB
                 (&mut view[..]).put_slice(&[b'x'; 3 * 1024 - 128]);
+                view.shrink_to(3 * 1024 - 128);
                 view.freeze()
             };
             let entry = ent(view);
 
             // 60 ~ 64 KiB
-            let entries = buffer.write(entry).await.unwrap();
+            let entries = buffer.write::<()>(entry, Compression::None).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 60 * 1024);
 
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 1, 0).await;
             res.unwrap();
-            assert_eq!(&buf[4 * 1024..58 * 1024 - 128], &[b'x'; 54 * 1024 - 128]);
-            assert_eq!(&buf[60 * 1024..63 * 1024 - 128], &[b'x'; 3 * 1024 - 128]);
+            assert_eq!(
+                &buf[HEADER + 4 * 1024..HEADER + 58 * 1024 - 128],
+                &[b'x'; 54 * 1024 - 128]
+            );
+            assert_eq!(
+                &buf[HEADER + 60 * 1024..HEADER + 63 * 1024 - 128],
+                &[b'x'; 3 * 1024 - 128]
+            );
 
             assert!(buffer.entries.is_empty());
         }
