@@ -209,7 +209,7 @@ pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::path::PathBuf;
 
     use foyer_intrusive::eviction::fifo::FifoConfig;
 
@@ -238,19 +238,15 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            allocator_bits: 1,
             ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
-            buffer_pool_size: 8 * MB,
             flusher_buffer_size: 0,
             flushers: 1,
-            flush_rate_limit: 0,
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
         };
@@ -277,19 +273,15 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            allocator_bits: 1,
             ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
-            buffer_pool_size: 8 * MB,
             flusher_buffer_size: 0,
             flushers: 1,
-            flush_rate_limit: 0,
             reclaimers: 1,
             reclaim_rate_limit: 0,
             recover_concurrency: 2,
-            allocation_timeout: Duration::from_millis(10),
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
         };
