@@ -167,21 +167,15 @@ where
         &mut self,
         Entry {
             key,
-            key_len,
-            value_len,
             sequence,
             view,
         }: Entry,
         compression: Compression,
     ) -> BufferResult<Vec<PositionedEntry>> {
-        debug_assert_eq!(view.len(), value_len);
-
         if self.region.is_none() {
             return Err(BufferError::NotEnough {
                 entry: Entry {
                     key,
-                    key_len,
-                    value_len,
                     sequence,
                     view,
                 },
@@ -192,7 +186,7 @@ where
         let key = key.downcast::<K>().unwrap();
         let uncompressed = align_up(
             self.device.align(),
-            EntryHeader::serialized_len() + key_len + value_len,
+            EntryHeader::serialized_len() + key.serialized_len() + view.len(),
         );
         self.buffer.reserve_exact(uncompressed);
 
@@ -202,86 +196,55 @@ where
         let old = self.buffer.len();
         debug_assert!(is_aligned(self.device.align(), old));
 
+        if compression == Compression::None && self.remaining() < uncompressed {
+            // early return if remaining size is not enough
+            return Err(BufferError::NotEnough {
+                entry: Entry {
+                    key,
+                    sequence,
+                    view,
+                },
+            });
+        }
+
+        let mut cursor = self.buffer.len();
+
+        // reserve space for header
+        cursor += EntryHeader::serialized_len();
+        unsafe { self.buffer.set_len(cursor) };
+
         match compression {
             Compression::None => {
-                // early return if remaining size is not enough
-                if self.remaining() < uncompressed {
-                    return Err(BufferError::NotEnough {
-                        entry: Entry {
-                            key,
-                            key_len,
-                            value_len,
-                            sequence,
-                            view,
-                        },
-                    });
-                }
-                let mut cursor = self.buffer.len();
-                unsafe { self.buffer.set_len(cursor + uncompressed) };
-                debug_assert!(is_aligned(self.device.align(), self.buffer.len()));
-
-                // reserve space for header
-                cursor += EntryHeader::serialized_len();
-
-                // write value
-                std::io::copy(
-                    &mut &view[..],
-                    &mut &mut self.buffer[cursor..cursor + value_len],
-                )
-                .map_err(DeviceError::from)?;
-                debug_assert_eq!(&view[..], &self.buffer[cursor..cursor + value_len]);
-
-                // write key
-                cursor += value_len;
-                key.write(&mut self.buffer[cursor..cursor + key_len]);
-
-                // calculate checksum
-                cursor -= value_len;
-                let checksum = checksum(&self.buffer[cursor..cursor + value_len + key_len]);
-
-                // write entry header
-                cursor -= EntryHeader::serialized_len();
-                let header = EntryHeader {
-                    key_len: key_len as u32,
-                    value_len: value_len as u32,
-                    sequence,
-                    compression,
-                    checksum,
-                };
-                header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
+                std::io::copy(&mut &view[..], &mut self.buffer).map_err(DeviceError::from)?;
             }
             Compression::Zstd => {
-                // reserve space for header
-                let mut cursor = self.buffer.len() + EntryHeader::serialized_len();
-                unsafe { self.buffer.set_len(cursor) };
-
-                // write compressed value
                 zstd::stream::copy_encode(&mut &view[..], &mut self.buffer, 0)
                     .map_err(DeviceError::from)?;
-                let value_len = self.buffer.len() - cursor;
-
-                // write key
-                cursor += value_len;
-                self.buffer.reserve_exact(key_len);
-                unsafe { self.buffer.set_len(cursor + key_len) };
-                key.write(&mut self.buffer[cursor..cursor + key_len]);
-
-                // calculate checksum
-                cursor -= value_len;
-                let checksum = checksum(&self.buffer[cursor..cursor + value_len + key_len]);
-
-                // write entry header
-                cursor -= EntryHeader::serialized_len();
-                let header = EntryHeader {
-                    key_len: key_len as u32,
-                    value_len: value_len as u32,
-                    sequence,
-                    compression,
-                    checksum,
-                };
-                header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
             }
         }
+        let compressed_value_len = self.buffer.len() - cursor;
+
+        // write key
+        cursor += compressed_value_len;
+        self.buffer.reserve_exact(key.serialized_len());
+        unsafe { self.buffer.set_len(cursor + key.serialized_len()) };
+        key.write(&mut self.buffer[cursor..cursor + key.serialized_len()]);
+
+        // calculate checksum
+        cursor -= compressed_value_len;
+        let checksum =
+            checksum(&self.buffer[cursor..cursor + compressed_value_len + key.serialized_len()]);
+
+        // write entry header
+        cursor -= EntryHeader::serialized_len();
+        let header = EntryHeader {
+            key_len: key.serialized_len() as u32,
+            value_len: compressed_value_len as u32,
+            sequence,
+            compression,
+            checksum,
+        };
+        header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
 
         // 2. if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
@@ -289,8 +252,6 @@ where
             return Err(BufferError::NotEnough {
                 entry: Entry {
                     key,
-                    key_len,
-                    value_len,
                     sequence,
                     view,
                 },
@@ -305,8 +266,6 @@ where
         self.entries.push(PositionedEntry {
             entry: Entry {
                 key,
-                key_len,
-                value_len,
                 sequence,
                 view,
             },
@@ -342,12 +301,9 @@ mod tests {
 
     fn ent(view: RingBufferView) -> Entry {
         let key = Arc::new(());
-        let value_len = view.len();
         Entry {
             key,
             view,
-            key_len: 0,
-            value_len,
             sequence: 0,
         }
     }
