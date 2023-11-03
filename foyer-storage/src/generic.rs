@@ -624,8 +624,6 @@ where
         let flusher = sequence as usize % self.inner.flusher_entry_txs.len();
         self.inner.flusher_entry_txs[flusher]
             .send(Entry {
-                key_len: key.serialized_len(),
-                value_len: value.serialized_len(),
                 sequence,
                 key,
                 view,
@@ -987,12 +985,7 @@ where
         let info = Item::new(
             header.sequence,
             Index::Region {
-                view: self.region.view(
-                    self.cursor as u32,
-                    entry_len as u32,
-                    header.key_len,
-                    header.value_len,
-                ),
+                view: self.region.view(self.cursor as u32, entry_len as u32),
             },
         );
 
