@@ -818,7 +818,7 @@ impl EntryHeader {
         if magic != ENTRY_MAGIC {
             return None;
         }
-        let compression = Compression::try_from_u8(v as u8)?;
+        let compression = Compression::try_from(v as u8).ok()?;
 
         Some(Self {
             key_len,

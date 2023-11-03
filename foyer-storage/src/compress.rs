@@ -14,6 +14,10 @@
 
 // TODO(MrCroxx): unify compress interface?
 
+use anyhow::anyhow;
+
+const NOT_SUPPORT: &str = "compression algorithm not support";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
     None,
@@ -30,15 +34,6 @@ impl Compression {
         }
     }
 
-    pub fn try_from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(Self::None),
-            1 => Some(Self::Zstd),
-            2 => Some(Self::Lz4),
-            _ => None,
-        }
-    }
-
     pub fn to_str(&self) -> &str {
         match self {
             Self::None => "none",
@@ -46,13 +41,58 @@ impl Compression {
             Self::Lz4 => "lz4",
         }
     }
+}
 
-    pub fn try_from_str(s: &str) -> Option<Self> {
-        match s {
-            "none" => Some(Self::None),
-            "zstd" => Some(Self::Zstd),
-            "lz4" => Some(Self::Lz4),
-            _ => None,
+impl From<Compression> for u8 {
+    fn from(value: Compression) -> Self {
+        match value {
+            Compression::None => 0,
+            Compression::Zstd => 1,
+            Compression::Lz4 => 2,
         }
+    }
+}
+
+impl From<Compression> for &str {
+    fn from(value: Compression) -> Self {
+        match value {
+            Compression::None => "none",
+            Compression::Zstd => "zstd",
+            Compression::Lz4 => "lz4",
+        }
+    }
+}
+
+impl TryFrom<u8> for Compression {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Zstd),
+            2 => Ok(Self::Lz4),
+            _ => Err(anyhow!(NOT_SUPPORT)),
+        }
+    }
+}
+
+impl TryFrom<&str> for Compression {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "none" => Ok(Self::None),
+            "zstd" => Ok(Self::Zstd),
+            "lz4" => Ok(Self::Lz4),
+            _ => Err(anyhow!(NOT_SUPPORT)),
+        }
+    }
+}
+
+impl TryFrom<String> for Compression {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
     }
 }

@@ -41,7 +41,6 @@ use foyer_storage::{
         rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
         AdmissionPolicy,
     },
-    compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
     reinsertion::{
@@ -540,7 +539,10 @@ async fn main() {
         args.clean_region_threshold
     };
 
-    let compression = Compression::try_from_str(args.compression.as_str())
+    let compression = args
+        .compression
+        .as_str()
+        .try_into()
         .expect("unsupported compression algorithm");
 
     let config = LfuFsStoreConfig {
