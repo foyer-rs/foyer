@@ -221,6 +221,15 @@ where
                 zstd::stream::copy_encode(&mut &view[..], &mut self.buffer, 0)
                     .map_err(DeviceError::from)?;
             }
+            Compression::Lz4 => {
+                let mut encoder = lz4::EncoderBuilder::new()
+                    .checksum(lz4::ContentChecksum::NoChecksum)
+                    .build(&mut self.buffer)
+                    .map_err(DeviceError::from)?;
+                std::io::copy(&mut &view[..], &mut encoder).map_err(DeviceError::from)?;
+                let (_w, res) = encoder.finish();
+                res.map_err(DeviceError::from)?;
+            }
         }
         let compressed_value_len = self.buffer.len() - cursor;
 
