@@ -18,6 +18,7 @@
 pub enum Compression {
     None,
     Zstd,
+    Lz4,
 }
 
 impl Compression {
@@ -25,6 +26,7 @@ impl Compression {
         match self {
             Self::None => 0,
             Self::Zstd => 1,
+            Self::Lz4 => 2,
         }
     }
 
@@ -32,6 +34,24 @@ impl Compression {
         match v {
             0 => Some(Self::None),
             1 => Some(Self::Zstd),
+            2 => Some(Self::Lz4),
+            _ => None,
+        }
+    }
+
+    pub fn to_str(&self) -> &str {
+        match self {
+            Self::None => "none",
+            Self::Zstd => "zstd",
+            Self::Lz4 => "lz4",
+        }
+    }
+
+    pub fn try_from_str(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(Self::None),
+            "zstd" => Some(Self::Zstd),
+            "lz4" => Some(Self::Lz4),
             _ => None,
         }
     }

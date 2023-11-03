@@ -540,11 +540,8 @@ async fn main() {
         args.clean_region_threshold
     };
 
-    let compression = match args.compression.as_str() {
-        "none" => Compression::None,
-        "zstd" => Compression::Zstd,
-        _ => panic!("unsupported compression algorithm"),
-    };
+    let compression = Compression::try_from_str(args.compression.as_str())
+        .expect("unsupported compression algorithm");
 
     let config = LfuFsStoreConfig {
         name: "".to_string(),
