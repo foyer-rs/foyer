@@ -852,7 +852,28 @@ where
         Compression::Zstd => {
             let mut decompressed =
                 Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
-            if let Err(e) = zstd::stream::copy_decode(&mut &compressed[..], &mut decompressed) {
+            if let Err(e) = zstd::stream::copy_decode(compressed, &mut decompressed) {
+                tracing::warn!("decompress error: {}", e);
+                return None;
+            }
+            V::read(&decompressed[..])
+        }
+        Compression::Lz4 => {
+            let mut decompressed =
+                Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
+            let mut decoder = match lz4::Decoder::new(compressed) {
+                Ok(decoder) => decoder,
+                Err(e) => {
+                    tracing::warn!("decompress error: {}", e);
+                    return None;
+                }
+            };
+            if let Err(e) = std::io::copy(&mut decoder, &mut decompressed) {
+                tracing::warn!("decompress error: {}", e);
+                return None;
+            }
+            let (_r, res) = decoder.finish();
+            if let Err(e) = res {
                 tracing::warn!("decompress error: {}", e);
                 return None;
             }

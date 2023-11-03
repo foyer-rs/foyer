@@ -22,6 +22,7 @@ foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.11"
 libc = "0.2"
+lz4 = "1.24"
 memoffset = "0.9"
 nix = { version = "0.27", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
