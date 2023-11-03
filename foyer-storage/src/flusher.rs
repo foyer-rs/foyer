@@ -35,8 +35,6 @@ pub struct Entry {
     ///
     /// Use `dyn Any` here to avoid contagious generic type.
     pub key: Arc<dyn Any + Send + Sync>,
-    pub key_len: usize,
-    pub value_len: usize,
     pub sequence: Sequence,
 
     /// Hold a view of referenced buffer, for lookup and prevent from releasing.
@@ -46,8 +44,6 @@ pub struct Entry {
 impl Debug for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
-            .field("key_len", &self.key_len)
-            .field("value_len", &self.value_len)
             .field("sequence", &self.sequence)
             .field("view", &self.view)
             .finish()
@@ -59,8 +55,6 @@ impl Clone for Entry {
         Self {
             key: Arc::clone(&self.key),
             view: self.view.clone(),
-            key_len: self.key_len,
-            value_len: self.value_len,
             sequence: self.sequence,
         }
     }
@@ -200,8 +194,6 @@ where
                 Entry {
                     key,
                     view: _,
-                    key_len,
-                    value_len,
                     sequence,
                 },
             region,
@@ -212,12 +204,10 @@ where
             bytes += len;
             let key = key.downcast::<K>().unwrap();
             let index = Index::Region {
-                view: self.region_manager.region(&region).view(
-                    offset as u32,
-                    len as u32,
-                    key_len as u32,
-                    value_len as u32,
-                ),
+                view: self
+                    .region_manager
+                    .region(&region)
+                    .view(offset as u32, len as u32),
             };
             let item = Item::new(sequence, index);
             self.catalog.insert(key, item);

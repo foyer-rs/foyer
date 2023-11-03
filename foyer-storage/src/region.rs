@@ -91,14 +91,12 @@ where
         }
     }
 
-    pub fn view(&self, offset: u32, len: u32, key_len: u32, value_len: u32) -> RegionView {
+    pub fn view(&self, offset: u32, len: u32) -> RegionView {
         self.refs.fetch_add(1, Ordering::SeqCst);
         RegionView {
             id: self.id,
             offset,
             len,
-            key_len,
-            value_len,
             refs: Arc::clone(&self.refs),
         }
     }
@@ -207,8 +205,6 @@ pub struct RegionView {
     id: RegionId,
     offset: u32,
     len: u32,
-    key_len: u32,
-    value_len: u32,
     refs: Arc<AtomicUsize>,
 }
 
@@ -219,8 +215,6 @@ impl Clone for RegionView {
             id: self.id,
             offset: self.offset,
             len: self.len,
-            key_len: self.key_len,
-            value_len: self.value_len,
             refs: Arc::clone(&self.refs),
         }
     }
@@ -243,14 +237,6 @@ impl RegionView {
 
     pub fn len(&self) -> &u32 {
         &self.len
-    }
-
-    pub fn key_len(&self) -> &u32 {
-        &self.key_len
-    }
-
-    pub fn value_len(&self) -> &u32 {
-        &self.value_len
     }
 
     pub fn refs(&self) -> &Arc<AtomicUsize> {

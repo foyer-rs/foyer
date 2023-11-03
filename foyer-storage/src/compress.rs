@@ -14,7 +14,7 @@
 
 // TODO(MrCroxx): unify compress interface?
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
     None,
     Zstd,
