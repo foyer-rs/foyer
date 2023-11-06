@@ -18,6 +18,7 @@
 mod analyze;
 mod export;
 mod rate;
+mod text;
 mod utils;
 
 use std::{
@@ -60,6 +61,7 @@ use rand::{
 
 use export::MetricsExporter;
 use rate::RateLimiter;
+use text::text;
 use tokio::sync::broadcast;
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
 
@@ -591,6 +593,7 @@ async fn main() {
         monitor(
             iostat_path,
             Duration::from_secs(args.report_interval),
+            args.time,
             metrics,
             stop_tx.subscribe(),
         )
@@ -704,7 +707,7 @@ async fn write(
         let idx = index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(entry_size_range.clone());
-        let data = vec![idx as u8; entry_size];
+        let data = text(idx as usize, entry_size);
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
         }
@@ -758,7 +761,7 @@ async fn read(
 
         if let Some(buf) = res {
             let entry_size = buf.len();
-            assert_eq!(vec![idx as u8; entry_size], buf);
+            assert_eq!(text(idx as usize, entry_size), buf);
             if let Err(e) = metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
