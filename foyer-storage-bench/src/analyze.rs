@@ -318,13 +318,17 @@ pub fn analyze(
 pub async fn monitor(
     iostat_path: impl AsRef<Path>,
     interval: Duration,
+    total_secs: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
 ) {
     let mut stat = iostat(&iostat_path);
     let mut metrics_dump = metrics.dump();
+
+    let start = Instant::now();
+
     loop {
-        let start = Instant::now();
+        let now = Instant::now();
         match stop.try_recv() {
             Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
@@ -335,12 +339,13 @@ pub async fn monitor(
         let new_metrics_dump = metrics.dump();
         let analysis = analyze(
             // interval may have ~ +7% error
-            start.elapsed(),
+            now.elapsed(),
             &stat,
             &new_stat,
             &metrics_dump,
             &new_metrics_dump,
         );
+        println!("[{}s/{}s]", start.elapsed().as_secs(), total_secs);
         println!("{}", analysis);
         stat = new_stat;
         metrics_dump = new_metrics_dump;
