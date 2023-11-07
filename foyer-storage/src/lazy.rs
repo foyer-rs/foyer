@@ -15,6 +15,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::{
+    compress::Compression,
     error::Result,
     storage::{Storage, StorageWriter},
     store::{NoneStore, NoneStoreWriter, Store},
@@ -74,6 +75,20 @@ where
         match self {
             LazyStorageWriter::Store { writer } => writer.finish(value).await,
             LazyStorageWriter::None { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.compression(),
+            LazyStorageWriter::None { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            LazyStorageWriter::Store { writer } => writer.set_compression(compression),
+            LazyStorageWriter::None { writer } => writer.set_compression(compression),
         }
     }
 }

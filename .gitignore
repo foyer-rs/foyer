@@ -7,3 +7,5 @@ lcov.info
 
 docker-compose.override.yaml
 .tmp
+
+perf.data*

@@ -22,6 +22,7 @@ use foyer_intrusive::eviction::{
 };
 
 use crate::{
+    compress::Compression,
     device::fs::FsDevice,
     error::Result,
     generic::{GenericStore, GenericStoreConfig, GenericStoreWriter},
@@ -94,6 +95,12 @@ impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
     async fn finish(self, _: Self::Value) -> Result<bool> {
         Ok(false)
     }
+
+    fn compression(&self) -> Compression {
+        Compression::None
+    }
+
+    fn set_compression(&mut self, _: Compression) {}
 }
 
 #[derive(Debug)]
@@ -350,6 +357,24 @@ where
             StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
             StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
             StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.compression(),
+            StoreWriter::LfuFsStorWriter { writer } => writer.compression(),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.compression(),
+            StoreWriter::NoneStoreWriter { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            StoreWriter::LruFsStorWriter { writer } => writer.set_compression(compression),
+            StoreWriter::LfuFsStorWriter { writer } => writer.set_compression(compression),
+            StoreWriter::FifoFsStoreWriter { writer } => writer.set_compression(compression),
+            StoreWriter::NoneStoreWriter { writer } => writer.set_compression(compression),
         }
     }
 }

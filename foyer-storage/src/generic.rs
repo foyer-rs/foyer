@@ -220,6 +220,8 @@ where
 
     metrics: Arc<Metrics>,
 
+    compression: Compression,
+
     _marker: PhantomData<V>,
 }
 
@@ -288,6 +290,7 @@ where
             flushers_stop_tx,
             reclaimers_stop_tx,
             metrics: metrics.clone(),
+            compression: config.compression,
             _marker: PhantomData,
         };
         let store = Self {
@@ -312,7 +315,6 @@ where
             .map(|(stop_rx, entry_rx)| {
                 Flusher::new(
                     config.flusher_buffer_size,
-                    config.compression,
                     region_manager.clone(),
                     catalog.clone(),
                     device.clone(),
@@ -627,6 +629,7 @@ where
                 sequence,
                 key,
                 view,
+                compression: writer.compression,
             })
             .unwrap();
 
@@ -662,6 +665,7 @@ where
 
     is_inserted: bool,
     is_skippable: bool,
+    compression: Compression,
 }
 
 impl<K, V, D, EP, EL> GenericStoreWriter<K, V, D, EP, EL>
@@ -674,6 +678,7 @@ where
 {
     fn new(store: GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
         let judges = Judges::new(store.inner.admissions.len());
+        let compression = store.inner.compression;
         Self {
             store,
             key,
@@ -684,6 +689,7 @@ where
             duration: Duration::from_nanos(0),
             is_inserted: false,
             is_skippable: false,
+            compression,
         }
     }
 
@@ -717,6 +723,14 @@ where
 
     pub fn set_sequence(&mut self, sequence: Sequence) {
         self.sequence = Some(sequence);
+    }
+
+    pub fn compression(&self) -> Compression {
+        self.compression
+    }
+
+    pub fn set_compression(&mut self, compression: Compression) {
+        self.compression = compression
     }
 }
 
@@ -1068,6 +1082,14 @@ where
 
     async fn finish(self, value: Self::Value) -> Result<bool> {
         self.finish(value).await
+    }
+
+    fn compression(&self) -> Compression {
+        self.compression()
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        self.set_compression(compression)
     }
 }
 
