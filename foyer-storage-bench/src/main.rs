@@ -42,6 +42,7 @@ use foyer_storage::{
         rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
         AdmissionPolicy,
     },
+    compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
     reinsertion::{
@@ -279,6 +280,20 @@ where
         match self {
             BenchStoreWriter::StoreWriter { writer } => writer.finish(value).await,
             BenchStoreWriter::RuntimeStoreWriter { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.compression(),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            BenchStoreWriter::StoreWriter { writer } => writer.set_compression(compression),
+            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.set_compression(compression),
         }
     }
 }

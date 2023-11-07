@@ -36,6 +36,7 @@ pub struct Entry {
     /// Use `dyn Any` here to avoid contagious generic type.
     pub key: Arc<dyn Any + Send + Sync>,
     pub sequence: Sequence,
+    pub compression: Compression,
 
     /// Hold a view of referenced buffer, for lookup and prevent from releasing.
     pub view: RingBufferView,
@@ -56,6 +57,7 @@ impl Clone for Entry {
             key: Arc::clone(&self.key),
             view: self.view.clone(),
             sequence: self.sequence,
+            compression: self.compression,
         }
     }
 }
@@ -68,8 +70,6 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    compression: Compression,
-
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
     catalog: Arc<Catalog<K>>,
@@ -90,10 +90,8 @@ where
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         default_buffer_capacity: usize,
-        compression: Compression,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         catalog: Arc<Catalog<K>>,
         device: D,
@@ -103,7 +101,6 @@ where
     ) -> Self {
         let buffer = FlushBuffer::new(device.clone(), default_buffer_capacity);
         Self {
-            compression,
             region_manager,
             catalog,
             buffer,
@@ -139,7 +136,7 @@ where
 
         let old_region = self.buffer.region();
 
-        let entry = match self.buffer.write::<K>(entry, self.compression).await {
+        let entry = match self.buffer.write::<K>(entry).await {
             Err(BufferError::NotEnough { entry }) => entry,
 
             Ok(entries) => return self.update_catalog(entries).await,
@@ -176,7 +173,7 @@ where
         );
 
         // 3. retry write
-        let entries = self.buffer.write::<K>(entry, self.compression).await?;
+        let entries = self.buffer.write::<K>(entry).await?;
         self.update_catalog(entries).await?;
 
         drop(timer);
@@ -190,12 +187,7 @@ where
 
         let timer = self.metrics.inner_op_duration_update_catalog.start_timer();
         for PositionedEntry {
-            entry:
-                Entry {
-                    key,
-                    view: _,
-                    sequence,
-                },
+            entry: Entry { key, sequence, .. },
             region,
             offset,
             len,
