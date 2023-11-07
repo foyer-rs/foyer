@@ -20,6 +20,7 @@ use foyer_common::{
 };
 
 use crate::{
+    compress::Compression,
     error::Result,
     lazy::LazyStore,
     storage::{Storage, StorageWriter},
@@ -98,6 +99,14 @@ where
             .spawn(async move { self.writer.finish(value).await })
             .await
             .unwrap()
+    }
+
+    fn compression(&self) -> Compression {
+        self.writer.compression()
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        self.writer.set_compression(compression)
     }
 }
 

@@ -168,15 +168,16 @@ where
         Entry {
             key,
             sequence,
+            compression,
             view,
         }: Entry,
-        compression: Compression,
     ) -> BufferResult<Vec<PositionedEntry>> {
         if self.region.is_none() {
             return Err(BufferError::NotEnough {
                 entry: Entry {
                     key,
                     sequence,
+                    compression,
                     view,
                 },
             });
@@ -202,6 +203,7 @@ where
                 entry: Entry {
                     key,
                     sequence,
+                    compression,
                     view,
                 },
             });
@@ -262,6 +264,7 @@ where
                 entry: Entry {
                     key,
                     sequence,
+                    compression,
                     view,
                 },
             });
@@ -276,6 +279,7 @@ where
             entry: Entry {
                 key,
                 sequence,
+                compression,
                 view,
             },
             region: self.region.unwrap(),
@@ -313,6 +317,7 @@ mod tests {
         Entry {
             key,
             view,
+            compression: Compression::None,
             sequence: 0,
         }
     }
@@ -348,7 +353,7 @@ mod tests {
             let entry = ent(view);
             assert_eq!(ring.continuum(), 0);
 
-            let res = buffer.write::<()>(entry, Compression::None).await;
+            let res = buffer.write::<()>(entry).await;
             let entry = match res {
                 Err(BufferError::NotEnough { entry }) => entry,
                 _ => panic!("should be not enough error"),
@@ -358,25 +363,16 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 12 KiB
-            let entries = buffer
-                .write::<()>(entry.clone(), Compression::None)
-                .await
-                .unwrap();
+            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
             assert!(entries.is_empty());
             // 12 ~ 20 KiB
-            let entries = buffer
-                .write::<()>(entry.clone(), Compression::None)
-                .await
-                .unwrap();
+            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
             assert_eq!(entries[1].offset, 12 * 1024);
 
             // 20 ~ 28 KiB
-            let entries = buffer
-                .write::<()>(entry.clone(), Compression::None)
-                .await
-                .unwrap();
+            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
             assert!(entries.is_empty());
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
@@ -413,7 +409,7 @@ mod tests {
             };
             let entry = ent(view);
 
-            let res = buffer.write::<()>(entry, Compression::None).await;
+            let res = buffer.write::<()>(entry).await;
             let entry = match res {
                 Err(BufferError::NotEnough { entry }) => entry,
                 _ => panic!("should be not enough error"),
@@ -423,7 +419,7 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 60 KiB
-            let entries = buffer.write::<()>(entry, Compression::None).await.unwrap();
+            let entries = buffer.write::<()>(entry).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
@@ -436,7 +432,7 @@ mod tests {
             let entry = ent(view);
 
             // 60 ~ 64 KiB
-            let entries = buffer.write::<()>(entry, Compression::None).await.unwrap();
+            let entries = buffer.write::<()>(entry).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 60 * 1024);
 

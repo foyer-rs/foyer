@@ -16,7 +16,7 @@ use std::fmt::Debug;
 
 use foyer_common::code::{Key, Value};
 
-use crate::error::Result;
+use crate::{compress::Compression, error::Result};
 use futures::Future;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
@@ -32,6 +32,10 @@ pub trait StorageWriter: Send + Sync + Debug {
     fn judge(&mut self) -> bool;
 
     fn force(&mut self);
+
+    fn compression(&self) -> Compression;
+
+    fn set_compression(&mut self, compression: Compression);
 
     fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;
 }
