@@ -15,6 +15,9 @@
 use bytes::{Buf, BufMut};
 use paste::paste;
 
+pub type CodingError = anyhow::Error;
+pub type CodingResult<T> = Result<T, CodingError>;
+
 #[expect(unused_variables)]
 pub trait Key:
     Sized
@@ -37,11 +40,11 @@ pub trait Key:
         panic!("Method `serialized_len` must be implemented for `Key` if storage is used.")
     }
 
-    fn write(&self, buf: &mut [u8]) {
+    fn write(&self, buf: &mut [u8]) -> CodingResult<()> {
         panic!("Method `write` must be implemented for `Key` if storage is used.")
     }
 
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> CodingResult<Self> {
         panic!("Method `read` must be implemented for `Key` if storage is used.")
     }
 }
@@ -56,11 +59,11 @@ pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
         panic!("Method `serialized_len` must be implemented for `Value` if storage is used.")
     }
 
-    fn write(&self, buf: &mut [u8]) {
+    fn write(&self, buf: &mut [u8]) -> CodingResult<()> {
         panic!("Method `write` must be implemented for `Value` if storage is used.")
     }
 
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> CodingResult<Self> {
         panic!("Method `read` must be implemented for `Value` if storage is used.")
     }
 }
@@ -85,13 +88,14 @@ macro_rules! impl_key {
                     }
 
 
-                    fn write(&self, mut buf: &mut [u8]) {
-                        buf.[< put_ $type>](*self)
+                    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+                        buf.[< put_ $type>](*self);
+                        Ok(())
                     }
 
 
-                    fn read(mut buf: &[u8]) -> Self {
-                        buf.[< get_ $type>]()
+                    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+                        Ok(buf.[< get_ $type>]())
                     }
                 }
             )*
@@ -110,13 +114,14 @@ macro_rules! impl_value {
                     }
 
 
-                    fn write(&self, mut buf: &mut [u8]) {
-                        buf.[< put_ $type>](*self)
+                    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+                        buf.[< put_ $type>](*self);
+                        Ok(())
                     }
 
 
-                    fn read(mut buf: &[u8]) -> Self {
-                        buf.[< get_ $type>]()
+                    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+                        Ok(buf.[< get_ $type>]())
                     }
                 }
             )*
@@ -136,12 +141,13 @@ impl Key for Vec<u8> {
         self.len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_slice(self);
+        Ok(())
     }
 
-    fn read(buf: &[u8]) -> Self {
-        buf.to_vec()
+    fn read(buf: &[u8]) -> CodingResult<Self> {
+        Ok(buf.to_vec())
     }
 }
 
@@ -154,12 +160,13 @@ impl Value for Vec<u8> {
         self.len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_slice(self);
+        Ok(())
     }
 
-    fn read(buf: &[u8]) -> Self {
-        buf.to_vec()
+    fn read(buf: &[u8]) -> CodingResult<Self> {
+        Ok(buf.to_vec())
     }
 }
 
@@ -172,9 +179,13 @@ impl Key for () {
         0
     }
 
-    fn write(&self, _buf: &mut [u8]) {}
+    fn write(&self, _buf: &mut [u8]) -> CodingResult<()> {
+        Ok(())
+    }
 
-    fn read(_buf: &[u8]) -> Self {}
+    fn read(_buf: &[u8]) -> CodingResult<Self> {
+        Ok(())
+    }
 }
 
 impl Value for () {
@@ -186,7 +197,11 @@ impl Value for () {
         0
     }
 
-    fn write(&self, _buf: &mut [u8]) {}
+    fn write(&self, _buf: &mut [u8]) -> CodingResult<()> {
+        Ok(())
+    }
 
-    fn read(_buf: &[u8]) -> Self {}
+    fn read(_buf: &[u8]) -> CodingResult<Self> {
+        Ok(())
+    }
 }

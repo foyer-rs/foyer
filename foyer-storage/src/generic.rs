@@ -22,9 +22,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::anyhow;
 use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, rate::RateLimiter};
+use foyer_common::{bits, code::CodingError, rate::RateLimiter};
 use foyer_intrusive::eviction::EvictionPolicy;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -407,7 +408,7 @@ where
 
         match index {
             crate::catalog::Index::RingBuffer { view } => {
-                let value = V::read(&view);
+                let value = V::read(&view)?;
 
                 self.inner
                     .metrics
@@ -443,17 +444,17 @@ where
                 };
 
                 let res = match read_entry::<K, V>(buf.as_ref()) {
-                    Some((_key, value)) => {
+                    Ok((_key, value)) => {
                         self.inner
                             .metrics
                             .op_bytes_lookup
                             .inc_by(value.serialized_len() as u64);
                         Ok(Some(value))
                     }
-                    None => {
+                    Err(e) => {
                         // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
                         self.inner.catalog.remove(key);
-                        Ok(None)
+                        Err(e)
                     }
                 };
 
@@ -612,7 +613,8 @@ where
             .inner_bytes_ring_buffer_remains
             .set(self.inner.ring.remains() as i64);
         let mut view = self.inner.ring.allocate(len, sequence).await;
-        value.write(&mut view);
+        value.write(&mut view)?;
+
         view.shrink_to(value.serialized_len());
         let view = view.freeze();
 
@@ -821,7 +823,7 @@ impl EntryHeader {
         buf.put_u32(v);
     }
 
-    pub fn read(mut buf: &[u8]) -> Option<Self> {
+    pub fn read(mut buf: &[u8]) -> Result<Self> {
         let key_len = buf.get_u32();
         let value_len = buf.get_u32();
         let sequence = buf.get_u64();
@@ -830,11 +832,13 @@ impl EntryHeader {
         let v = buf.get_u32();
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
-            return None;
+            return Err(
+                anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into(),
+            );
         }
-        let compression = Compression::try_from(v as u8).ok()?;
+        let compression = Compression::try_from(v as u8)?;
 
-        Some(Self {
+        Ok(Self {
             key_len,
             value_len,
             sequence,
@@ -849,7 +853,7 @@ impl EntryHeader {
 /// # Safety
 ///
 /// `buf.len()` must excatly fit entry size
-fn read_entry<K, V>(buf: &[u8]) -> Option<(K, V)>
+fn read_entry<K, V>(buf: &[u8]) -> Result<(K, V)>
 where
     K: Key,
     V: Value,
@@ -862,54 +866,39 @@ where
     let compressed = &buf[offset..offset + header.value_len as usize];
     offset += header.value_len as usize;
     let value = match header.compression {
-        Compression::None => V::read(compressed),
+        Compression::None => V::read(compressed)?,
         Compression::Zstd => {
             let mut decompressed =
                 Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
-            if let Err(e) = zstd::stream::copy_decode(compressed, &mut decompressed) {
-                tracing::warn!("decompress error: {}", e);
-                return None;
-            }
-            V::read(&decompressed[..])
+            zstd::stream::copy_decode(compressed, &mut decompressed).map_err(CodingError::from)?;
+            V::read(&decompressed[..])?
         }
         Compression::Lz4 => {
             let mut decompressed =
                 Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
-            let mut decoder = match lz4::Decoder::new(compressed) {
-                Ok(decoder) => decoder,
-                Err(e) => {
-                    tracing::warn!("decompress error: {}", e);
-                    return None;
-                }
-            };
-            if let Err(e) = std::io::copy(&mut decoder, &mut decompressed) {
-                tracing::warn!("decompress error: {}", e);
-                return None;
-            }
+            let mut decoder = lz4::Decoder::new(compressed).map_err(CodingError::from)?;
+            std::io::copy(&mut decoder, &mut decompressed).map_err(CodingError::from)?;
             let (_r, res) = decoder.finish();
-            if let Err(e) = res {
-                tracing::warn!("decompress error: {}", e);
-                return None;
-            }
-            V::read(&decompressed[..])
+            res.map_err(CodingError::from)?;
+            V::read(&decompressed[..])?
         }
     };
 
     // read key
-    let key = K::read(&buf[offset..offset + header.key_len as usize]);
+    let key = K::read(&buf[offset..offset + header.key_len as usize])?;
     offset += header.key_len as usize;
 
     let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
     if checksum != header.checksum {
-        tracing::warn!(
-            "checksum mismatch, checksum: {}, expected: {}",
-            checksum,
+        return Err(anyhow!(
+            "magic mismatch, expected: {}, got: {}",
             header.checksum,
-        );
-        return None;
+            checksum
+        )
+        .into());
     }
 
-    Some((key, value))
+    Ok((key, value))
 }
 
 pub fn checksum(buf: &[u8]) -> u64 {
@@ -975,7 +964,7 @@ where
             return Ok(None);
         };
 
-        let Some(header) = EntryHeader::read(slice.as_ref()) else {
+        let Ok(header) = EntryHeader::read(slice.as_ref()) else {
             return Ok(None);
         };
 
@@ -1001,7 +990,10 @@ where
             // header and key are in the same block, read directly from slice
             let rel_start = EntryHeader::serialized_len() + header.value_len as usize;
             let rel_end = rel_start + header.key_len as usize;
-            let key = K::read(&slice.as_ref()[rel_start..rel_end]);
+
+            let Ok(key) = K::read(&slice.as_ref()[rel_start..rel_end]) else {
+                return Ok(None);
+            };
             drop(slice);
             key
         } else {
@@ -1012,7 +1004,9 @@ where
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
-            let key = K::read(&s.as_ref()[rel_start..rel_end]);
+            let Ok(key) = K::read(&s.as_ref()[rel_start..rel_end]) else {
+                return Ok(None);
+            };
             drop(s);
             key
         };
@@ -1046,7 +1040,7 @@ where
         let Some(slice) = self.region.load_range(start..end).await? else {
             return Ok(None);
         };
-        let kv = read_entry::<K, V>(slice.as_ref());
+        let kv = read_entry::<K, V>(slice.as_ref()).ok();
         drop(slice);
 
         Ok(kv)
