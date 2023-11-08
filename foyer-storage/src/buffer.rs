@@ -31,6 +31,8 @@ pub enum BufferError {
     Device(#[from] DeviceError),
     #[error("")]
     NotEnough { entry: Entry },
+    #[error("other error: {0}")]
+    Other(#[from] anyhow::Error),
 }
 
 pub type BufferResult<T> = std::result::Result<T, BufferError>;
@@ -239,7 +241,7 @@ where
         cursor += compressed_value_len;
         self.buffer.reserve_exact(key.serialized_len());
         unsafe { self.buffer.set_len(cursor + key.serialized_len()) };
-        key.write(&mut self.buffer[cursor..cursor + key.serialized_len()]);
+        key.write(&mut self.buffer[cursor..cursor + key.serialized_len()])?;
 
         // calculate checksum
         cursor -= compressed_value_len;
