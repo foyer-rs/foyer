@@ -27,9 +27,6 @@ memchr = { version = "2" }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }
-regex = { version = "1" }
-regex-automata = { version = "0.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
-regex-syntax = { version = "0.8" }
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 tracing = { version = "0.1" }
 tracing-core = { version = "0.1" }

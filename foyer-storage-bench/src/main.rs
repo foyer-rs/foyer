@@ -405,7 +405,7 @@ fn init_logger() {
 
 #[cfg(feature = "trace")]
 fn init_logger() {
-    use opentelemetry::sdk::{
+    use opentelemetry_sdk::{
         trace::{BatchConfig, Config},
         Resource,
     };
@@ -428,7 +428,7 @@ fn init_logger() {
         .with_exporter(opentelemetry_otlp::new_exporter().tonic())
         .with_trace_config(trace_config)
         .with_batch_config(batch_config)
-        .install_batch(opentelemetry::runtime::Tokio)
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
         .unwrap();
     let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     tracing_subscriber::registry()
