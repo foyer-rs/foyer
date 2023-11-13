@@ -202,10 +202,9 @@ impl<S: Storage> StorageExt for S {}
 pub trait AsyncStorageExt: Storage {
     #[tracing::instrument(skip(self, value))]
     fn insert_async(&self, key: Self::Key, value: Self::Value) {
-        let weight = key.serialized_len() + value.serialized_len();
         let store = self.clone();
         tokio::spawn(async move {
-            if let Err(e) = store.writer(key, weight).finish(value).await {
+            if let Err(e) = store.insert(key, value).await {
                 tracing::warn!("async storage insert error: {}", e);
             }
         });
@@ -213,12 +212,12 @@ pub trait AsyncStorageExt: Storage {
 
     #[tracing::instrument(skip(self, value))]
     fn insert_if_not_exists_async(&self, key: Self::Key, value: Self::Value) {
-        match self.exists(&key) {
-            Ok(false) => {}
-            Ok(true) => return,
-            Err(e) => tracing::warn!("async storage insert error: {}", e),
-        }
-        self.insert_async(key, value);
+        let store = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = store.insert_if_not_exists(key, value).await {
+                tracing::warn!("async storage insert error: {}", e);
+            }
+        });
     }
 }
 
