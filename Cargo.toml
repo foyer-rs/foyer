@@ -24,4 +24,4 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
 # cmsketch = { path = "../cmsketch-rs" }
 
 [profile.release]
-debug = 1
+debug = "full"
