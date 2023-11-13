@@ -210,6 +210,16 @@ pub trait AsyncStorageExt: Storage {
             }
         });
     }
+
+    #[tracing::instrument(skip(self, value))]
+    fn insert_if_not_exists_async(&self, key: Self::Key, value: Self::Value) {
+        match self.exists(&key) {
+            Ok(false) => {}
+            Ok(true) => return,
+            Err(e) => tracing::warn!("async storage insert error: {}", e),
+        }
+        self.insert_async(key, value);
+    }
 }
 
 impl<S: Storage> AsyncStorageExt for S {}
