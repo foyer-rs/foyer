@@ -35,14 +35,7 @@ opentelemetry_sdk = { version = "0.21", features = [
 parking_lot = "0.12"
 prometheus = "0.13"
 rand = "0.8.5"
-tokio = { version = "1", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.22", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
