@@ -20,7 +20,7 @@ futures-core = { version = "0.3" }
 futures-executor = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await-macro", "channel", "io", "sink"] }
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "1.0", features = ["full"] }
 itertools = { version = "0.11" }
 libc = { version = "0.2", features = ["extra_traits"] }
 memchr = { version = "2" }
