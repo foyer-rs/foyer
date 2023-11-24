@@ -12,12 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.s
 
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{collections::HashSet, marker::PhantomData};
 
 use foyer_common::code::{Key, Value};
 use parking_lot::Mutex;
 
-use crate::{admission::AdmissionPolicy, metrics::Metrics, reinsertion::ReinsertionPolicy};
+use crate::{admission::AdmissionPolicy, reinsertion::ReinsertionPolicy};
 
 #[derive(Debug, Clone)]
 pub enum Record<K: Key> {
@@ -83,14 +83,14 @@ where
 
     type Value = V;
 
-    fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+    fn judge(&self, key: &K, _weight: usize) -> bool {
         self.records.lock().push(Record::Admit(key.clone()));
         true
     }
 
-    fn on_insert(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+    fn on_insert(&self, _key: &K, _weight: usize, _judge: bool) {}
 
-    fn on_drop(&self, _key: &K, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+    fn on_drop(&self, _key: &K, _weight: usize, _judge: bool) {}
 }
 
 impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
@@ -102,26 +102,12 @@ where
 
     type Value = V;
 
-    fn judge(&self, key: &K, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+    fn judge(&self, key: &K, _weight: usize) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));
         false
     }
 
-    fn on_insert(
-        &self,
-        _key: &Self::Key,
-        _weight: usize,
-        _metrics: &Arc<crate::metrics::Metrics>,
-        _judge: bool,
-    ) {
-    }
+    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 
-    fn on_drop(
-        &self,
-        _key: &Self::Key,
-        _weight: usize,
-        _metrics: &Arc<crate::metrics::Metrics>,
-        _judge: bool,
-    ) {
-    }
+    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 }
