@@ -15,9 +15,9 @@
 use std::fmt::Debug;
 
 use foyer_common::code::{Key, Value};
+use futures::Future;
 
 use crate::{compress::Compression, error::Result};
-use futures::Future;
 
 pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
 

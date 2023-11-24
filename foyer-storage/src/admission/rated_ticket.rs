@@ -12,12 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use super::AdmissionPolicy;
+use std::{fmt::Debug, marker::PhantomData};
+
 use foyer_common::{
     code::{Key, Value},
     rated_ticket::RatedTicket,
 };
-use std::{fmt::Debug, marker::PhantomData};
+
+use super::AdmissionPolicy;
 
 #[derive(Debug)]
 pub struct RatedTicketAdmissionPolicy<K, V>

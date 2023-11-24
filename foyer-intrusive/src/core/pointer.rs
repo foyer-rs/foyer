@@ -240,8 +240,9 @@ unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{boxed::Box, fmt::Debug, mem, pin::Pin, rc::Rc, sync::Arc};
+
+    use super::*;
 
     /// Clones a `Pointer` from a `*const Pointer::Value`
     ///

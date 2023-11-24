@@ -28,6 +28,7 @@
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
+use super::EvictionPolicy;
 use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
@@ -36,8 +37,6 @@ use crate::{
     },
     intrusive_adapter,
 };
-
-use super::EvictionPolicy;
 
 #[derive(Clone, Debug)]
 pub struct LruConfig {
@@ -415,9 +414,8 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::key_adapter;
-
     use super::*;
+    use crate::key_adapter;
 
     #[derive(Debug)]
     struct LruItem {

@@ -30,6 +30,7 @@ use std::{mem::ManuallyDrop, ptr::NonNull};
 
 use itertools::Itertools;
 
+use super::EvictionPolicy;
 use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
@@ -38,8 +39,6 @@ use crate::{
     },
     intrusive_adapter,
 };
-
-use super::EvictionPolicy;
 
 #[derive(Debug, Clone)]
 pub struct SegmentedFifoConfig {
@@ -381,12 +380,10 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use crate::eviction::EvictionPolicyExt;
     use itertools::Itertools;
 
-    use crate::priority_adapter;
-
     use super::*;
+    use crate::{eviction::EvictionPolicyExt, priority_adapter};
 
     #[derive(Debug)]
     struct SegmentedFifoItem {

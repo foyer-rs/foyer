@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
+use std::{hash::Hasher, sync::Arc};
 
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::{
@@ -22,7 +22,6 @@ use foyer_intrusive::{
     intrusive_adapter, key_adapter, priority_adapter,
 };
 use parking_lot::Mutex;
-use std::hash::Hasher;
 use twox_hash::XxHash64;
 
 pub struct CacheConfig<E>
