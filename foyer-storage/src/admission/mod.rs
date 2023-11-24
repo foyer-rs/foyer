@@ -12,24 +12,31 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use crate::{catalog::Catalog, metrics::Metrics};
 use foyer_common::code::{Key, Value};
-
 use std::{fmt::Debug, sync::Arc};
 
-use crate::{catalog::Catalog, metrics::Metrics};
+#[derive(Debug, Clone)]
+pub struct AdmissionContext<K>
+where
+    K: Key,
+{
+    pub catalog: Arc<Catalog<K>>,
+    pub metrics: Arc<Metrics>,
+}
 
 #[expect(unused_variables)]
 pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, catalog: &Arc<Catalog<Self::Key>>) {}
+    fn init(&self, context: AdmissionContext<Self::Key>) {}
 
-    fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
+    fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 
-    fn on_insert(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+    fn on_insert(&self, key: &Self::Key, weight: usize, judge: bool);
 
-    fn on_drop(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+    fn on_drop(&self, key: &Self::Key, weight: usize, judge: bool);
 }
 
 pub mod rated_random;

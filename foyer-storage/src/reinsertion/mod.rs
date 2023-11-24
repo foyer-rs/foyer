@@ -12,23 +12,31 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::code::{Key, Value};
-
 use crate::{catalog::Catalog, metrics::Metrics};
+use foyer_common::code::{Key, Value};
 use std::{fmt::Debug, sync::Arc};
+
+#[derive(Debug, Clone)]
+pub struct ReinsertionContext<K>
+where
+    K: Key,
+{
+    pub catalog: Arc<Catalog<K>>,
+    pub metrics: Arc<Metrics>,
+}
 
 #[expect(unused_variables)]
 pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {}
+    fn init(&self, context: ReinsertionContext<Self::Key>) {}
 
-    fn judge(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>) -> bool;
+    fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 
-    fn on_insert(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+    fn on_insert(&self, key: &Self::Key, weight: usize, judge: bool);
 
-    fn on_drop(&self, key: &Self::Key, weight: usize, metrics: &Arc<Metrics>, judge: bool);
+    fn on_drop(&self, key: &Self::Key, weight: usize, judge: bool);
 }
 
 pub mod exist;

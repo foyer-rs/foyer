@@ -12,11 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-};
-
 use crate::{
     device::Device,
     error::Result,
@@ -32,6 +27,10 @@ use foyer_common::{
     rate::RateLimiter,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 use tokio::sync::broadcast;
 
 #[derive(Debug)]
@@ -151,13 +150,13 @@ where
 
                     let mut judges = Judges::new(reinsertions.len());
                     for (index, reinsertion) in reinsertions.iter().enumerate() {
-                        let judge = reinsertion.judge(&key, weight, &metrics);
+                        let judge = reinsertion.judge(&key, weight);
                         judges.set(index, judge);
                     }
                     if !judges.judge() {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                            reinsertion.on_drop(&key, weight, judge);
                         }
                         continue;
                     }
@@ -177,12 +176,12 @@ where
                     if writer.finish(value).await? {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_insert(&key, weight, &metrics, judge);
+                            reinsertion.on_insert(&key, weight, judge);
                         }
                     } else {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                            reinsertion.on_drop(&key, weight, judge);
                         }
                         // The writer is already been judged and admitted, but not inserted successfully and skipped.
                         // That means allocating timeouts and there is no clean region available.
