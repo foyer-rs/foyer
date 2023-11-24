@@ -22,7 +22,6 @@ use hyper::{
     service::service_fn,
     Request, Response,
 };
-
 use prometheus::{Encoder, TextEncoder};
 use tokio::net::TcpListener;
 
