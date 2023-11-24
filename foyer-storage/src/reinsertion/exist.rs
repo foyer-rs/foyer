@@ -12,16 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use super::{ReinsertionContext, ReinsertionPolicy};
+use crate::catalog::Catalog;
+use foyer_common::code::{Key, Value};
 use std::{
     marker::PhantomData,
     sync::{Arc, OnceLock},
 };
-
-use foyer_common::code::{Key, Value};
-
-use crate::catalog::Catalog;
-
-use super::ReinsertionPolicy;
 
 #[derive(Debug)]
 pub struct ExistReinsertionPolicy<K, V>
@@ -55,35 +52,16 @@ where
 
     type Value = V;
 
-    fn init(&self, indices: &Arc<Catalog<Self::Key>>) {
-        self.catalog.get_or_init(|| indices.clone());
+    fn init(&self, context: ReinsertionContext<Self::Key>) {
+        self.catalog.get_or_init(|| context.catalog.clone());
     }
 
-    fn judge(
-        &self,
-        key: &Self::Key,
-        _weight: usize,
-        _metrics: &std::sync::Arc<crate::metrics::Metrics>,
-    ) -> bool {
+    fn judge(&self, key: &Self::Key, _weight: usize) -> bool {
         let indices = self.catalog.get().unwrap();
         indices.lookup(key).is_some()
     }
 
-    fn on_insert(
-        &self,
-        _key: &Self::Key,
-        _weight: usize,
-        _metrics: &Arc<crate::metrics::Metrics>,
-        _judge: bool,
-    ) {
-    }
+    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 
-    fn on_drop(
-        &self,
-        _key: &Self::Key,
-        _weight: usize,
-        _metrics: &Arc<crate::metrics::Metrics>,
-        _judge: bool,
-    ) {
-    }
+    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 }
