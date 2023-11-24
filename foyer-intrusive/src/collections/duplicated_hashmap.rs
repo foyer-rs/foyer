@@ -12,12 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, ptr::NonNull};
+use std::{fmt::Debug, hash::Hasher, marker::PhantomData, ptr::NonNull};
 
 use foyer_common::code::{Key, Value};
-use std::hash::Hasher;
 use twox_hash::XxHash64;
 
+use super::dlist::{DList, DListIter, DListIterMut, DListLink};
 use crate::{
     core::{
         adapter::{Adapter, KeyAdapter, Link},
@@ -25,8 +25,6 @@ use crate::{
     },
     intrusive_adapter,
 };
-
-use super::dlist::{DList, DListIter, DListIterMut, DListLink};
 
 pub struct DuplicatedHashMapLink {
     slot_link: DListLink,
@@ -336,9 +334,8 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::{intrusive_adapter, key_adapter};
-
     use super::*;
+    use crate::{intrusive_adapter, key_adapter};
 
     #[derive(Debug)]
     struct DuplicatedHashMapItem {

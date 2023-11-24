@@ -14,14 +14,15 @@
 
 use std::sync::{Arc, OnceLock};
 
+use foyer_common::code::{Key, Value};
+use tokio::task::JoinHandle;
+
 use crate::{
     compress::Compression,
     error::Result,
     storage::{Storage, StorageWriter},
     store::{NoneStore, NoneStoreWriter, Store},
 };
-use foyer_common::code::{Key, Value};
-use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub enum LazyStorageWriter<K, V, S>
@@ -228,13 +229,12 @@ mod tests {
 
     use foyer_intrusive::eviction::fifo::FifoConfig;
 
+    use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
         storage::StorageExt,
         store::{FifoFsStoreConfig, Store},
     };
-
-    use super::*;
 
     const KB: usize = 1024;
     const MB: usize = 1024 * 1024;

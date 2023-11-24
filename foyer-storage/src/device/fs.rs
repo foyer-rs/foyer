@@ -19,7 +19,9 @@ use std::{
     sync::Arc,
 };
 
-use crate::region::RegionId;
+use foyer_common::range::RangeBoundsExt;
+use futures::future::try_join_all;
+use itertools::Itertools;
 
 use super::{
     allocator::AlignedAllocator,
@@ -27,9 +29,7 @@ use super::{
     error::{DeviceError, DeviceResult},
     Device, IoBuf, IoBufMut, IoRange,
 };
-use foyer_common::range::RangeBoundsExt;
-use futures::future::try_join_all;
-use itertools::Itertools;
+use crate::region::RegionId;
 
 #[derive(Debug, Clone)]
 pub struct FsDeviceConfig {

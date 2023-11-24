@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use bytes::{Buf, BufMut};
-use foyer_common::range::RangeBoundsExt;
-use parking_lot::Mutex;
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
@@ -24,6 +21,10 @@ use std::{
         Arc,
     },
 };
+
+use bytes::{Buf, BufMut};
+use foyer_common::range::RangeBoundsExt;
+use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
 use crate::{

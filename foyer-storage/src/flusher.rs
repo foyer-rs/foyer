@@ -12,6 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{any::Any, fmt::Debug, sync::Arc};
+
+use foyer_common::code::Key;
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use tokio::sync::{broadcast, mpsc};
+use tracing::Instrument;
+
 use crate::{
     buffer::{BufferError, FlushBuffer, PositionedEntry},
     catalog::{Catalog, Index, Item, Sequence},
@@ -22,11 +29,6 @@ use crate::{
     region_manager::{RegionEpItemAdapter, RegionManager},
     ring::RingBufferView,
 };
-use foyer_common::code::Key;
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use std::{any::Any, fmt::Debug, sync::Arc};
-use tokio::sync::{broadcast, mpsc};
-use tracing::Instrument;
 
 pub struct Entry {
     /// # Safety

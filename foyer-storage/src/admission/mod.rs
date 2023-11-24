@@ -12,9 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{catalog::Catalog, metrics::Metrics};
-use foyer_common::code::{Key, Value};
 use std::{fmt::Debug, sync::Arc};
+
+use foyer_common::code::{Key, Value};
+
+use crate::{catalog::Catalog, metrics::Metrics};
 
 #[derive(Debug, Clone)]
 pub struct AdmissionContext<K>
