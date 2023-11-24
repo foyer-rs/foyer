@@ -307,12 +307,11 @@ mod tests {
     use bytes::BufMut;
     use tempfile::tempdir;
 
+    use super::*;
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
         ring::{RingBuffer, RingBufferView},
     };
-
-    use super::*;
 
     fn ent(view: RingBufferView) -> Entry {
         let key = Arc::new(());

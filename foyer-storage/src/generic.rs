@@ -14,6 +14,7 @@
 
 use std::{
     fmt::Debug,
+    hash::Hasher,
     marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -25,8 +26,12 @@ use std::{
 use anyhow::anyhow;
 use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, code::CodingError, rate::RateLimiter};
-use foyer_intrusive::eviction::EvictionPolicy;
+use foyer_common::{
+    bits,
+    code::{CodingError, Key, Value},
+    rate::RateLimiter,
+};
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -37,7 +42,7 @@ use tokio::{
 use twox_hash::XxHash64;
 
 use crate::{
-    admission::AdmissionPolicy,
+    admission::{AdmissionContext, AdmissionPolicy},
     catalog::{Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
@@ -48,13 +53,10 @@ use crate::{
     reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId, REGION_MAGIC},
     region_manager::{RegionEpItemAdapter, RegionManager},
-    reinsertion::ReinsertionPolicy,
+    reinsertion::{ReinsertionContext, ReinsertionPolicy},
     ring::RingBuffer,
     storage::{Storage, StorageWriter},
 };
-use foyer_common::code::{Key, Value};
-use foyer_intrusive::core::adapter::Link;
-use std::hash::Hasher;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
@@ -298,11 +300,20 @@ where
             inner: Arc::new(inner),
         };
 
+        let admission_context = AdmissionContext {
+            catalog: catalog.clone(),
+            metrics: metrics.clone(),
+        };
+        let reinsertion_context = ReinsertionContext {
+            catalog: catalog.clone(),
+            metrics: metrics.clone(),
+        };
+
         for admission in store.inner.admissions.iter() {
-            admission.init(&store.inner.catalog);
+            admission.init(admission_context.clone());
         }
         for reinsertion in store.inner.reinsertions.iter() {
-            reinsertion.init(&store.inner.catalog);
+            reinsertion.init(reinsertion_context.clone());
         }
 
         let reclaim_rate_limiter = match config.reclaim_rate_limit {
@@ -565,7 +576,7 @@ where
 
     fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D, EP, EL>) {
         for (index, admission) in self.inner.admissions.iter().enumerate() {
-            let judge = admission.judge(&writer.key, writer.weight, &self.inner.metrics);
+            let judge = admission.judge(&writer.key, writer.weight);
             writer.judges.set(index, judge);
         }
         writer.is_judged = true;
@@ -596,7 +607,7 @@ where
 
         for (i, admission) in self.inner.admissions.iter().enumerate() {
             let judge = writer.judges.get(i);
-            admission.on_insert(&key, writer.weight, &self.inner.metrics, judge);
+            admission.on_insert(&key, writer.weight, judge);
         }
 
         // only write value to ring buffer
@@ -1139,13 +1150,12 @@ mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
+    use super::*;
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
         storage::StorageExt,
         test_utils::JudgeRecorder,
     };
-
-    use super::*;
 
     type TestStore =
         GenericStore<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;

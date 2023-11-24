@@ -12,14 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
 use foyer_common::{
     code::{Key, Value},
     rated_random::RatedRandom,
 };
-
-use crate::metrics::Metrics;
 
 use super::ReinsertionPolicy;
 
@@ -56,15 +54,15 @@ where
 
     type Value = V;
 
-    fn judge(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+    fn judge(&self, _key: &Self::Key, _weight: usize) -> bool {
         self.inner.judge()
     }
 
-    fn on_insert(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
+    fn on_insert(&self, _key: &Self::Key, weight: usize, judge: bool) {
         self.inner.on_insert(weight, judge)
     }
 
-    fn on_drop(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, judge: bool) {
+    fn on_drop(&self, _key: &Self::Key, weight: usize, judge: bool) {
         self.inner.on_drop(weight, judge)
     }
 }

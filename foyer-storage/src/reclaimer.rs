@@ -17,6 +17,14 @@ use std::{
     time::Duration,
 };
 
+use bytes::BufMut;
+use foyer_common::{
+    code::{Key, Value},
+    rate::RateLimiter,
+};
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use tokio::sync::broadcast;
+
 use crate::{
     device::Device,
     error::Result,
@@ -26,13 +34,6 @@ use crate::{
     region_manager::{RegionEpItemAdapter, RegionManager},
     storage::Storage,
 };
-use bytes::BufMut;
-use foyer_common::{
-    code::{Key, Value},
-    rate::RateLimiter,
-};
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
-use tokio::sync::broadcast;
 
 #[derive(Debug)]
 pub struct Reclaimer<K, V, D, EP, EL>
@@ -151,13 +152,13 @@ where
 
                     let mut judges = Judges::new(reinsertions.len());
                     for (index, reinsertion) in reinsertions.iter().enumerate() {
-                        let judge = reinsertion.judge(&key, weight, &metrics);
+                        let judge = reinsertion.judge(&key, weight);
                         judges.set(index, judge);
                     }
                     if !judges.judge() {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                            reinsertion.on_drop(&key, weight, judge);
                         }
                         continue;
                     }
@@ -177,12 +178,12 @@ where
                     if writer.finish(value).await? {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_insert(&key, weight, &metrics, judge);
+                            reinsertion.on_insert(&key, weight, judge);
                         }
                     } else {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, &metrics, judge);
+                            reinsertion.on_drop(&key, weight, judge);
                         }
                         // The writer is already been judged and admitted, but not inserted successfully and skipped.
                         // That means allocating timeouts and there is no clean region available.

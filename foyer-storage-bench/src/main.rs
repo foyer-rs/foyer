@@ -34,7 +34,7 @@ use std::{
 
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
-
+use export::MetricsExporter;
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
@@ -59,8 +59,6 @@ use rand::{
     rngs::{OsRng, StdRng},
     Rng, SeedableRng,
 };
-
-use export::MetricsExporter;
 use rate::RateLimiter;
 use text::text;
 use tokio::sync::broadcast;

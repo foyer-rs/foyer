@@ -12,13 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{
-    catalog::Sequence,
-    device::BufferAllocator,
-    metrics::{Metrics, METRICS},
-};
-use foyer_common::{bits::align_up, continuum::ContinuumUsize};
-use itertools::Itertools;
 use std::{
     alloc::Global,
     fmt::Debug,
@@ -28,6 +21,15 @@ use std::{
         Arc,
     },
     time::{Duration, Instant},
+};
+
+use foyer_common::{bits::align_up, continuum::ContinuumUsize};
+use itertools::Itertools;
+
+use crate::{
+    catalog::Sequence,
+    device::BufferAllocator,
+    metrics::{Metrics, METRICS},
 };
 
 pub struct RingBuffer<A = Global>

@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use parking_lot::Mutex;
 use std::{collections::VecDeque, fmt::Debug};
+
+use parking_lot::Mutex;
 use tokio::sync::{watch, Notify};
 
 #[derive(Debug)]
@@ -103,12 +104,13 @@ impl<T: Debug> AsyncQueue<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::queue::AsyncQueue;
     use std::{
         future::{poll_fn, Future},
         pin::pin,
         task::{Poll, Poll::Pending},
     };
+
+    use crate::queue::AsyncQueue;
 
     #[tokio::test]
     async fn test_basic() {

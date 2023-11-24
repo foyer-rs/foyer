@@ -12,14 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData};
 
 use foyer_common::{
     code::{Key, Value},
     rated_ticket::RatedTicket,
 };
-
-use crate::metrics::Metrics;
 
 use super::AdmissionPolicy;
 
@@ -56,13 +54,13 @@ where
 
     type Value = V;
 
-    fn judge(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>) -> bool {
+    fn judge(&self, _key: &Self::Key, _weight: usize) -> bool {
         self.inner.probe()
     }
 
-    fn on_insert(&self, _key: &Self::Key, weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {
+    fn on_insert(&self, _key: &Self::Key, weight: usize, _judge: bool) {
         self.inner.reduce(weight as f64);
     }
 
-    fn on_drop(&self, _key: &Self::Key, _weight: usize, _metrics: &Arc<Metrics>, _judge: bool) {}
+    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 }
