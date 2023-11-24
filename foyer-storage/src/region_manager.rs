@@ -20,7 +20,6 @@ use foyer_intrusive::{
     eviction::{EvictionPolicy, EvictionPolicyExt},
     intrusive_adapter, key_adapter,
 };
-
 use parking_lot::RwLock;
 
 use crate::{

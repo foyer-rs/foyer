@@ -507,9 +507,8 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::intrusive_adapter;
-
     use super::*;
+    use crate::intrusive_adapter;
 
     #[derive(Debug)]
     struct DListItem {

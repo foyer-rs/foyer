@@ -28,6 +28,7 @@
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
+use super::EvictionPolicy;
 use crate::{
     collections::dlist::{DList, DListIter, DListLink},
     core::{
@@ -36,8 +37,6 @@ use crate::{
     },
     intrusive_adapter,
 };
-
-use super::EvictionPolicy;
 
 #[derive(Debug, Clone)]
 pub struct FifoConfig;
@@ -288,10 +287,10 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use crate::eviction::EvictionPolicyExt;
     use itertools::Itertools;
 
     use super::*;
+    use crate::eviction::EvictionPolicyExt;
 
     #[derive(Debug)]
     struct FifoItem {

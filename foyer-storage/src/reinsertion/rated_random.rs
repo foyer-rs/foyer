@@ -12,12 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use super::ReinsertionPolicy;
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
+
 use foyer_common::{
     code::{Key, Value},
     rated_random::RatedRandom,
 };
-use std::{fmt::Debug, marker::PhantomData, time::Duration};
+
+use super::ReinsertionPolicy;
 
 #[derive(Debug)]
 pub struct RatedRandomReinsertionPolicy<K, V>

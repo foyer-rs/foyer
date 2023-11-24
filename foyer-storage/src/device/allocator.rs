@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::bits;
 use std::alloc::{Allocator, Global};
+
+use foyer_common::bits;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AlignedAllocator {

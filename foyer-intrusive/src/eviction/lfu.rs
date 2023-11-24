@@ -26,24 +26,24 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{
+    hash::{Hash, Hasher},
+    mem::ManuallyDrop,
+    ptr::NonNull,
+};
+
+use cmsketch::CMSketchUsize;
+use twox_hash::XxHash64;
+
+use super::EvictionPolicy;
 use crate::{
-    collections::dlist::{DList, DListIter},
+    collections::dlist::{DList, DListIter, DListLink},
     core::{
         adapter::{Adapter, KeyAdapter, Link},
         pointer::Pointer,
     },
     intrusive_adapter,
 };
-
-use std::{mem::ManuallyDrop, ptr::NonNull};
-
-use cmsketch::CMSketchUsize;
-use std::hash::{Hash, Hasher};
-use twox_hash::XxHash64;
-
-use crate::collections::dlist::DListLink;
-
-use super::EvictionPolicy;
 
 const MIN_CAPACITY: usize = 100;
 const ERROR_THRESHOLD: f64 = 5.0;
@@ -560,9 +560,8 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::key_adapter;
-
     use super::*;
+    use crate::key_adapter;
 
     #[derive(Debug)]
     struct LfuItem {

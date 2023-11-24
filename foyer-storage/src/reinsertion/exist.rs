@@ -12,13 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use super::{ReinsertionContext, ReinsertionPolicy};
-use crate::catalog::Catalog;
-use foyer_common::code::{Key, Value};
 use std::{
     marker::PhantomData,
     sync::{Arc, OnceLock},
 };
+
+use foyer_common::code::{Key, Value};
+
+use super::{ReinsertionContext, ReinsertionPolicy};
+use crate::catalog::Catalog;
 
 #[derive(Debug)]
 pub struct ExistReinsertionPolicy<K, V>

@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::core::adapter::Adapter;
 use std::fmt::Debug;
+
+use crate::core::adapter::Adapter;
 
 pub trait Config = Send + Sync + 'static + Debug + Clone;
 

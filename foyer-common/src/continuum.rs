@@ -12,11 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use itertools::Itertools;
 use std::{
     ops::Range,
     sync::atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering},
 };
+
+use itertools::Itertools;
 
 macro_rules! def_continuum {
     ($( { $name:ident, $uint:ty, $atomic:ty }, )*) => {

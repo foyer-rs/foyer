@@ -12,16 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use anyhow::anyhow;
-use bitmaps::Bitmap;
-use bytes::{Buf, BufMut};
-use foyer_common::{bits, code::CodingError, rate::RateLimiter};
-use foyer_intrusive::eviction::EvictionPolicy;
-use futures::future::try_join_all;
-use itertools::Itertools;
-use parking_lot::Mutex;
 use std::{
     fmt::Debug,
+    hash::Hasher,
     marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -29,6 +22,19 @@ use std::{
     },
     time::{Duration, Instant},
 };
+
+use anyhow::anyhow;
+use bitmaps::Bitmap;
+use bytes::{Buf, BufMut};
+use foyer_common::{
+    bits,
+    code::{CodingError, Key, Value},
+    rate::RateLimiter,
+};
+use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+use futures::future::try_join_all;
+use itertools::Itertools;
+use parking_lot::Mutex;
 use tokio::{
     sync::{broadcast, mpsc, Semaphore},
     task::JoinHandle,
@@ -51,9 +57,6 @@ use crate::{
     ring::RingBuffer,
     storage::{Storage, StorageWriter},
 };
-use foyer_common::code::{Key, Value};
-use foyer_intrusive::core::adapter::Link;
-use std::hash::Hasher;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
@@ -1147,13 +1150,12 @@ mod tests {
 
     use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
 
+    use super::*;
     use crate::{
         device::fs::{FsDevice, FsDeviceConfig},
         storage::StorageExt,
         test_utils::JudgeRecorder,
     };
-
-    use super::*;
 
     type TestStore =
         GenericStore<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;

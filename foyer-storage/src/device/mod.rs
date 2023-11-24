@@ -18,10 +18,11 @@ pub mod fs;
 
 use std::{alloc::Allocator, fmt::Debug};
 
-use crate::region::RegionId;
 use error::DeviceResult;
 use foyer_common::range::RangeBoundsExt;
 use futures::Future;
+
+use crate::region::RegionId;
 
 pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
 pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;

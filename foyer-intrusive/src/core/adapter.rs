@@ -327,11 +327,8 @@ macro_rules! priority_adapter {
 mod tests {
     use itertools::Itertools;
 
-    use crate::collections::dlist::*;
-
-    use crate::intrusive_adapter;
-
     use super::*;
+    use crate::{collections::dlist::*, intrusive_adapter};
 
     #[derive(Debug)]
     struct DListItem {
