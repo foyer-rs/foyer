@@ -41,5 +41,4 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     fn on_drop(&self, key: &Self::Key, weight: usize, judge: bool);
 }
 
-pub mod rated_random;
 pub mod rated_ticket;

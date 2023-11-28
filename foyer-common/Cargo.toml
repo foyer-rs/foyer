@@ -17,6 +17,8 @@ foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 itertools = "0.12"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
-rand = "0.8.5"
 tokio = { workspace = true }
 tracing = "0.1"
+
+[dev-dependencies]
+rand = "0.8.5"

@@ -29,7 +29,6 @@ use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
     code::{CodingError, Key, Value},
-    rate::RateLimiter,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use futures::future::try_join_all;
@@ -99,9 +98,6 @@ where
     /// Count of reclaimers.
     pub reclaimers: usize,
 
-    /// Flush rate limits.
-    pub reclaim_rate_limit: usize,
-
     /// Clean region count threshold to trigger reclamation.
     ///
     /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
@@ -132,7 +128,6 @@ where
             .field("flusher_buffer_size", &self.flusher_buffer_size)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
-            .field("reclaim_rate_limit", &self.reclaim_rate_limit)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("compression", &self.compression)
@@ -159,7 +154,6 @@ where
             flusher_buffer_size: self.flusher_buffer_size,
             flushers: self.flushers,
             reclaimers: self.reclaimers,
-            reclaim_rate_limit: self.reclaim_rate_limit,
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
@@ -316,11 +310,6 @@ where
             reinsertion.init(reinsertion_context.clone());
         }
 
-        let reclaim_rate_limiter = match config.reclaim_rate_limit {
-            0 => None,
-            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
-        };
-
         let flushers = flusher_stop_rxs
             .into_iter()
             .zip_eq(flusher_entry_rxs.into_iter())
@@ -344,7 +333,6 @@ where
                     config.clean_region_threshold,
                     store.clone(),
                     region_manager.clone(),
-                    reclaim_rate_limiter.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
@@ -1194,7 +1182,6 @@ mod tests {
             flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 1,
-            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
@@ -1246,7 +1233,6 @@ mod tests {
             flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 0,
-            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
