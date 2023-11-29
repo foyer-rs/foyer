@@ -16,8 +16,8 @@ bitflags = "2.3.1"
 bitmaps = "3.2"
 bytes = "1"
 cmsketch = "0.1"
-foyer-common = { path = "../foyer-common" }
-foyer-intrusive = { path = "../foyer-intrusive" }
+foyer-common = { version = "0.1", path = "../foyer-common" }
+foyer-intrusive = { version = "0.1", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.12"
