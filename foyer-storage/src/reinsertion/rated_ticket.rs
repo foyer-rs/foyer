@@ -12,14 +12,21 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        OnceLock,
+    },
+};
 
 use foyer_common::{
     code::{Key, Value},
     rated_ticket::RatedTicket,
 };
 
-use super::ReinsertionPolicy;
+use super::{ReinsertionContext, ReinsertionPolicy};
 
 #[derive(Debug)]
 pub struct RatedTicketReinsertionPolicy<K, V>
@@ -28,6 +35,10 @@ where
     V: Value,
 {
     inner: RatedTicket,
+
+    last: AtomicUsize,
+
+    context: OnceLock<ReinsertionContext<K>>,
 
     _marker: PhantomData<(K, V)>,
 }
@@ -40,6 +51,8 @@ where
     pub fn new(rate: usize) -> Self {
         Self {
             inner: RatedTicket::new(rate as f64),
+            last: AtomicUsize::default(),
+            context: OnceLock::new(),
             _marker: PhantomData,
         }
     }
@@ -54,13 +67,27 @@ where
 
     type Value = V;
 
-    fn judge(&self, _key: &Self::Key, _weight: usize) -> bool {
-        self.inner.probe()
+    fn init(&self, context: super::ReinsertionContext<Self::Key>) {
+        self.context.set(context).unwrap();
     }
 
-    fn on_insert(&self, _key: &Self::Key, weight: usize, _judge: bool) {
-        self.inner.reduce(weight as f64);
+    fn judge(&self, _key: &Self::Key, _weight: usize) -> bool {
+        let res = self.inner.probe();
+
+        let metrics = self.context.get().unwrap().metrics.as_ref();
+        let current = metrics.op_bytes_reinsert.get() as usize;
+        let last = self.last.load(Ordering::Relaxed);
+        let delta = current.saturating_sub(last);
+
+        if delta > 0 {
+            self.last.store(current, Ordering::Relaxed);
+            self.inner.reduce(delta as f64);
+        }
+
+        res
     }
+
+    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 
     fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
 }

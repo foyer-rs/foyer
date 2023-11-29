@@ -38,17 +38,11 @@ use export::MetricsExporter;
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::{
-        rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
-        AdmissionPolicy,
-    },
+    admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
     compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
-    reinsertion::{
-        rated_random::RatedRandomReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy,
-        ReinsertionPolicy,
-    },
+    reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionPolicy},
     runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{Storage, StorageExt, StorageWriter},
     store::{LfuFsStoreConfig, Store, StoreConfig, StoreWriter},
@@ -136,29 +130,15 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// enable rated random admission policy if `random_insert_rate_limit` > 0
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    random_insert_rate_limit: usize,
-
-    /// enable rated random reinsertion policy if `random_reinsert_rate_limit` > 0
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    random_reinsert_rate_limit: usize,
-
     /// enable rated ticket admission policy if `ticket_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_insert_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limitgit a` > 0
+    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_reinsert_rate_limit: usize,
-
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    reclaim_rate_limit: usize,
 
     /// `0` means equal to reclaimer count
     #[arg(long, default_value_t = 0)]
@@ -525,20 +505,6 @@ async fn main() {
 
     let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
     let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    if args.random_insert_rate_limit > 0 {
-        let rr = RatedRandomAdmissionPolicy::new(
-            args.random_insert_rate_limit * 1024 * 1024,
-            Duration::from_millis(100),
-        );
-        admissions.push(Arc::new(rr));
-    }
-    if args.random_reinsert_rate_limit > 0 {
-        let rr = RatedRandomReinsertionPolicy::new(
-            args.random_reinsert_rate_limit * 1024 * 1024,
-            Duration::from_millis(100),
-        );
-        reinsertions.push(Arc::new(rr));
-    }
     if args.ticket_insert_rate_limit > 0 {
         let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
         admissions.push(Arc::new(rt));
@@ -571,7 +537,6 @@ async fn main() {
         flusher_buffer_size: args.flusher_buffer_size,
         flushers: args.flushers,
         reclaimers: args.reclaimers,
-        reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
         clean_region_threshold,
         compression,
