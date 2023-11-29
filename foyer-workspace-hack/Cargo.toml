@@ -5,7 +5,11 @@
 [package]
 name = "foyer-workspace-hack"
 version = "0.1.0"
+authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "workspace-hack package, managed by hakari"
+license = "Apache-2.0"
+repository = "https://github.com/mrcroxx/foyer"
+homepage = "https://github.com/mrcroxx/foyer"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = true
 # The parts of the file between the BEGIN HAKARI SECTION and END HAKARI SECTION comments
