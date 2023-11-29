@@ -42,5 +42,4 @@ pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
 }
 
 pub mod exist;
-pub mod rated_random;
 pub mod rated_ticket;

@@ -18,10 +18,7 @@ use std::{
 };
 
 use bytes::BufMut;
-use foyer_common::{
-    code::{Key, Value},
-    rate::RateLimiter,
-};
+use foyer_common::code::{Key, Value};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::broadcast;
 
@@ -50,8 +47,6 @@ where
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
-    rate_limiter: Option<Arc<RateLimiter>>,
-
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
@@ -69,7 +64,6 @@ where
         threshold: usize,
         store: GenericStore<K, V, D, EP, EL>,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        rate_limiter: Option<Arc<RateLimiter>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -77,7 +71,6 @@ where
             threshold,
             store,
             region_manager,
-            rate_limiter,
             metrics,
             stop_rx,
         }
@@ -135,7 +128,6 @@ where
         let reinsert = || {
             let region = region.clone();
             let metrics = self.metrics.clone();
-            let rate = self.rate_limiter.clone();
             let reinsertions = self.store.reinsertions().clone();
 
             tracing::info!("[reclaimer] begin reinsertion, region: {}", region_id);
@@ -161,11 +153,6 @@ where
                             reinsertion.on_drop(&key, weight, judge);
                         }
                         continue;
-                    }
-
-                    // TODO(MrCroxx): Should reclaimer use wait if exceed limitation?
-                    if let Some(rate) = rate.as_ref() && let Some(wait) = rate.consume(weight as f64) {
-                        tokio::time::sleep(wait).await;
                     }
 
                     let mut writer = self.store.writer(key.clone(), weight);

@@ -25,6 +25,5 @@ pub mod erwlock;
 pub mod queue;
 pub mod range;
 pub mod rate;
-pub mod rated_random;
 pub mod rated_ticket;
 pub mod runtime;
