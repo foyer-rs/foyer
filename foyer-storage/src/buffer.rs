@@ -22,7 +22,7 @@ use crate::{
     device::{error::DeviceError, Device},
     flusher::Entry,
     generic::{checksum, EntryHeader},
-    region::{RegionHeader, RegionId, REGION_MAGIC},
+    region::{RegionHeader, RegionId, Version, REGION_MAGIC},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -113,6 +113,7 @@ where
         unsafe { self.buffer.set_len(self.device.align()) };
         let header = RegionHeader {
             magic: REGION_MAGIC,
+            version: Version::latest(),
         };
         header.write(&mut self.buffer[..]);
         debug_assert_eq!(self.buffer.len(), self.device.align());
