@@ -50,7 +50,7 @@ use crate::{
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
-    region::{Region, RegionHeader, RegionId, REGION_MAGIC},
+    region::{Region, RegionHeader, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
     ring::RingBuffer,
@@ -933,12 +933,9 @@ where
             None => return Ok(None),
         };
 
-        let header = RegionHeader::read(slice.as_ref());
-        drop(slice);
-
-        if header.magic != REGION_MAGIC {
+        let Ok(_) = RegionHeader::read(slice.as_ref()) else {
             return Ok(None);
-        }
+        };
 
         Ok(Some(Self {
             region,
