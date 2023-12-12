@@ -20,40 +20,6 @@ use paste::paste;
 pub type CodingError = anyhow::Error;
 pub type CodingResult<T> = Result<T, CodingError>;
 
-trait BufMutExt: BufMut {
-    cfg_match! {
-        cfg(target_pointer_width = "16") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u16(v as u16);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i16(v as i16);
-            }
-        }
-        cfg(target_pointer_width = "32") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u32(v as u32);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i32(v as i32);
-            }
-        }
-        cfg(target_pointer_width = "64") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u64(v as u64);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i64(v as i64);
-            }
-        }
-    }
-}
-
-impl<T: Buf> BufExt for T {}
-
 trait BufExt: Buf {
     cfg_match! {
         cfg(target_pointer_width = "16") => {
@@ -81,6 +47,40 @@ trait BufExt: Buf {
 
             fn get_isize(&mut self) -> isize {
                 self.get_i64() as isize
+            }
+        }
+    }
+}
+
+impl<T: Buf> BufExt for T {}
+
+trait BufMutExt: BufMut {
+    cfg_match! {
+        cfg(target_pointer_width = "16") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u16(v as u16);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i16(v as i16);
+            }
+        }
+        cfg(target_pointer_width = "32") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u32(v as u32);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i32(v as i32);
+            }
+        }
+        cfg(target_pointer_width = "64") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u64(v as u64);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i64(v as i64);
             }
         }
     }
