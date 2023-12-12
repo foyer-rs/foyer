@@ -18,13 +18,25 @@ use foyer_common::code::{Key, Value};
 
 use crate::{catalog::Catalog, metrics::Metrics};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReinsertionContext<K>
 where
     K: Key,
 {
     pub catalog: Arc<Catalog<K>>,
     pub metrics: Arc<Metrics>,
+}
+
+impl<K> Clone for ReinsertionContext<K>
+where
+    K: Key,
+{
+    fn clone(&self) -> Self {
+        Self {
+            catalog: self.catalog.clone(),
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 #[expect(unused_variables)]

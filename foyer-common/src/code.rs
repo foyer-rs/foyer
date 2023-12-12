@@ -102,6 +102,9 @@ pub trait Cursor: Send + Sync + 'static + std::io::Read {
     }
 }
 
+/// [`Key`] is required to implement [`Clone`].
+/// 
+/// If cloning a [`Key`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
 pub trait Key:
     Sized
@@ -113,8 +116,8 @@ pub trait Key:
     + PartialEq
     + Ord
     + PartialOrd
-    + Clone
     + std::fmt::Debug
+    + Clone
 {
     type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
 
@@ -140,8 +143,11 @@ pub trait Key:
     }
 }
 
+/// [`Value`] is required to implement [`Clone`].
+/// 
+/// If cloning a [`Value`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
-pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
+pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
     type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
 
     /// memory weight
@@ -352,7 +358,6 @@ impl Cursor for std::io::Cursor<Vec<u8>> {
     fn len(&self) -> usize {
         self.get_ref().len()
     }
-
 }
 
 pub struct PrimitiveCursorVoid;
