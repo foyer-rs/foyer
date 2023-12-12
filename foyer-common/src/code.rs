@@ -20,40 +20,6 @@ use paste::paste;
 pub type CodingError = anyhow::Error;
 pub type CodingResult<T> = Result<T, CodingError>;
 
-trait BufMutExt: BufMut {
-    cfg_match! {
-        cfg(target_pointer_width = "16") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u16(v as u16);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i16(v as i16);
-            }
-        }
-        cfg(target_pointer_width = "32") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u32(v as u32);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i32(v as i32);
-            }
-        }
-        cfg(target_pointer_width = "64") => {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u64(v as u64);
-            }
-
-            fn put_isize(&mut self, v: isize) {
-                self.put_i64(v as i64);
-            }
-        }
-    }
-}
-
-impl<T: Buf> BufExt for T {}
-
 trait BufExt: Buf {
     cfg_match! {
         cfg(target_pointer_width = "16") => {
@@ -86,12 +52,48 @@ trait BufExt: Buf {
     }
 }
 
+impl<T: Buf> BufExt for T {}
+
+trait BufMutExt: BufMut {
+    cfg_match! {
+        cfg(target_pointer_width = "16") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u16(v as u16);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i16(v as i16);
+            }
+        }
+        cfg(target_pointer_width = "32") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u32(v as u32);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i32(v as i32);
+            }
+        }
+        cfg(target_pointer_width = "64") => {
+            fn put_usize(&mut self, v: usize) {
+                self.put_u64(v as u64);
+            }
+
+            fn put_isize(&mut self, v: isize) {
+                self.put_i64(v as i64);
+            }
+        }
+    }
+}
+
 impl<T: BufMut> BufMutExt for T {}
 
 pub trait Cursor: Send + Sync + 'static + std::io::Read {
     type T: Send + Sync + 'static;
 
     fn inner(&self) -> &Self::T;
+
+    fn into_inner(self) -> Self::T;
 
     fn len(&self) -> usize;
 
@@ -100,6 +102,9 @@ pub trait Cursor: Send + Sync + 'static + std::io::Read {
     }
 }
 
+/// [`Key`] is required to implement [`Clone`].
+///
+/// If cloning a [`Key`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
 pub trait Key:
     Sized
@@ -111,8 +116,8 @@ pub trait Key:
     + PartialEq
     + Ord
     + PartialOrd
-    + Clone
     + std::fmt::Debug
+    + Clone
 {
     type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
 
@@ -138,8 +143,11 @@ pub trait Key:
     }
 }
 
+/// [`Value`] is required to implement [`Clone`].
+///
+/// If cloning a [`Value`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
-pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug {
+pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
     type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
 
     /// memory weight
@@ -205,6 +213,10 @@ macro_rules! def_cursor {
 
                     fn inner(&self) -> &Self::T {
                         &self.inner
+                    }
+
+                    fn into_inner(self) -> Self::T {
+                        self.inner
                     }
 
                     fn len(&self) -> usize {
@@ -339,6 +351,10 @@ impl Cursor for std::io::Cursor<Vec<u8>> {
         self.get_ref()
     }
 
+    fn into_inner(self) -> Self::T {
+        self.into_inner()
+    }
+
     fn len(&self) -> usize {
         self.get_ref().len()
     }
@@ -358,6 +374,8 @@ impl Cursor for PrimitiveCursorVoid {
     fn inner(&self) -> &Self::T {
         &()
     }
+
+    fn into_inner(self) -> Self::T {}
 
     fn len(&self) -> usize {
         0
@@ -418,6 +436,10 @@ impl<T: Send + Sync + 'static> Cursor for UnimplementedCursor<T> {
     type T = T;
 
     fn inner(&self) -> &Self::T {
+        unimplemented!()
+    }
+
+    fn into_inner(self) -> Self::T {
         unimplemented!()
     }
 
