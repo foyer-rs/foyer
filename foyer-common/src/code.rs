@@ -103,7 +103,7 @@ pub trait Cursor: Send + Sync + 'static + std::io::Read {
 }
 
 /// [`Key`] is required to implement [`Clone`].
-/// 
+///
 /// If cloning a [`Key`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
 pub trait Key:
@@ -144,7 +144,7 @@ pub trait Key:
 }
 
 /// [`Value`] is required to implement [`Clone`].
-/// 
+///
 /// If cloning a [`Value`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
@@ -375,9 +375,7 @@ impl Cursor for PrimitiveCursorVoid {
         &()
     }
 
-    fn into_inner(self) -> Self::T {
-        ()
-    }
+    fn into_inner(self) -> Self::T {}
 
     fn len(&self) -> usize {
         0
