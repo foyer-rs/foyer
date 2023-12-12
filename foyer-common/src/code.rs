@@ -181,11 +181,47 @@ macro_rules! for_all_primitives {
     };
 }
 
+macro_rules! def_cursor {
+    ($( { $type:ty, $id:ident }, )*) => {
+        paste! {
+            $(
+                pub struct [<PrimitiveCursor $id>] {
+                    inner: $type,
+                    pos: u8,
+                }
+
+                impl std::io::Read for [<PrimitiveCursor $id>] {
+                    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+                        let slice = self.inner.to_be_bytes();
+                        let len = std::cmp::min(slice.len() - self.pos as usize, buf.len());
+                        buf.put_slice(&slice[self.pos as usize..self.pos as usize + len]);
+                        self.pos += len as u8;
+                        Ok(len)
+                    }
+                }
+
+                impl Cursor for [<PrimitiveCursor $id>] {
+                    type T = $type;
+
+                    fn inner(&self) -> &Self::T {
+                        &self.inner
+                    }
+
+                    fn len(&self) -> usize {
+                        std::mem::size_of::<$type>()
+                    }
+                }
+            )*
+        }
+    };
+}
+
 macro_rules! impl_key {
     ($( { $type:ty, $id:ident }, )*) => {
         paste! {
             $(
                 impl Key for $type {
+                    type Cursor = [<PrimitiveCursor $id>];
 
                     fn serialized_len(&self) -> usize {
                         std::mem::size_of::<$type>()
@@ -200,6 +236,13 @@ macro_rules! impl_key {
 
                     fn read(mut buf: &[u8]) -> CodingResult<Self> {
                         Ok(buf.[< get_ $type>]())
+                    }
+
+                    fn into_cursor(self) -> Self::Cursor {
+                        [<PrimitiveCursor $id>] {
+                            inner: self,
+                            pos: 0,
+                        }
                     }
                 }
             )*
@@ -236,38 +279,12 @@ macro_rules! impl_value {
                         }
                     }
                 }
-
-                pub struct [<PrimitiveCursor $id>] {
-                    inner: $type,
-                    pos: u8,
-                }
-
-                impl std::io::Read for [<PrimitiveCursor $id>] {
-                    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
-                        let slice = self.inner.to_be_bytes();
-                        let len = std::cmp::min(slice.len() - self.pos as usize, buf.len());
-                        buf.put_slice(&slice[self.pos as usize..self.pos as usize + len]);
-                        self.pos += len as u8;
-                        Ok(len)
-                    }
-                }
-
-                impl Cursor for [<PrimitiveCursor $id>] {
-                    type T = $type;
-
-                    fn inner(&self) -> &Self::T {
-                        &self.inner
-                    }
-
-                    fn len(&self) -> usize {
-                        std::mem::size_of::<$type>()
-                    }
-                }
             )*
         }
     };
 }
 
+for_all_primitives! { def_cursor }
 for_all_primitives! { impl_key }
 for_all_primitives! { impl_value }
 
