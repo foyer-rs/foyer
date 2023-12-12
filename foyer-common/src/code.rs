@@ -93,6 +93,8 @@ pub trait Cursor: Send + Sync + 'static + std::io::Read {
 
     fn inner(&self) -> &Self::T;
 
+    fn into_inner(self) -> Self::T;
+
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
@@ -205,6 +207,10 @@ macro_rules! def_cursor {
 
                     fn inner(&self) -> &Self::T {
                         &self.inner
+                    }
+
+                    fn into_inner(self) -> Self::T {
+                        self.inner
                     }
 
                     fn len(&self) -> usize {
@@ -339,9 +345,14 @@ impl Cursor for std::io::Cursor<Vec<u8>> {
         self.get_ref()
     }
 
+    fn into_inner(self) -> Self::T {
+        self.into_inner()
+    }
+
     fn len(&self) -> usize {
         self.get_ref().len()
     }
+
 }
 
 pub struct PrimitiveCursorVoid;
@@ -357,6 +368,10 @@ impl Cursor for PrimitiveCursorVoid {
 
     fn inner(&self) -> &Self::T {
         &()
+    }
+
+    fn into_inner(self) -> Self::T {
+        ()
     }
 
     fn len(&self) -> usize {
@@ -418,6 +433,10 @@ impl<T: Send + Sync + 'static> Cursor for UnimplementedCursor<T> {
     type T = T;
 
     fn inner(&self) -> &Self::T {
+        unimplemented!()
+    }
+
+    fn into_inner(self) -> Self::T {
         unimplemented!()
     }
 
