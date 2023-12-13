@@ -130,10 +130,6 @@ pub trait Key:
         panic!("Method `serialized_len` must be implemented for `Key` if storage is used.")
     }
 
-    fn write(&self, buf: &mut [u8]) -> CodingResult<()> {
-        panic!("Method `write` must be implemented for `Key` if storage is used.")
-    }
-
     fn read(buf: &[u8]) -> CodingResult<Self> {
         panic!("Method `read` must be implemented for `Key` if storage is used.")
     }
@@ -157,10 +153,6 @@ pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
 
     fn serialized_len(&self) -> usize {
         panic!("Method `serialized_len` must be implemented for `Value` if storage is used.")
-    }
-
-    fn write(&self, buf: &mut [u8]) -> CodingResult<()> {
-        panic!("Method `write` must be implemented for `Value` if storage is used.")
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -249,11 +241,6 @@ macro_rules! impl_key {
                         std::mem::size_of::<$type>()
                     }
 
-                    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-                        buf.[< put_ $type>](*self);
-                        Ok(())
-                    }
-
                     fn read(mut buf: &[u8]) -> CodingResult<Self> {
                         Ok(buf.[< get_ $type>]())
                     }
@@ -276,11 +263,6 @@ macro_rules! impl_value {
 
                     fn serialized_len(&self) -> usize {
                         std::mem::size_of::<$type>()
-                    }
-
-                    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-                        buf.[< put_ $type>](*self);
-                        Ok(())
                     }
 
                     fn read(mut buf: &[u8]) -> CodingResult<Self> {
@@ -311,11 +293,6 @@ impl Key for Vec<u8> {
         self.len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_slice(self);
-        Ok(())
-    }
-
     fn read(buf: &[u8]) -> CodingResult<Self> {
         Ok(buf.to_vec())
     }
@@ -334,11 +311,6 @@ impl Value for Vec<u8> {
 
     fn serialized_len(&self) -> usize {
         self.len()
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_slice(self);
-        Ok(())
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -377,11 +349,6 @@ impl Key for std::sync::Arc<Vec<u8>> {
         self.len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_slice(self);
-        Ok(())
-    }
-
     fn read(buf: &[u8]) -> CodingResult<Self> {
         Ok(std::sync::Arc::new(buf.to_vec()))
     }
@@ -400,11 +367,6 @@ impl Value for std::sync::Arc<Vec<u8>> {
 
     fn serialized_len(&self) -> usize {
         self.len()
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_slice(self);
-        Ok(())
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -433,7 +395,7 @@ impl std::io::Read for ArcVecU8Cursor {
         let slice = self.inner.as_ref().as_slice();
         let len = std::cmp::min(slice.len() - self.pos, buf.len());
         buf.put_slice(&slice[self.pos..self.pos + len]);
-        self.pos -= len;
+        self.pos += len;
         Ok(len)
     }
 }
@@ -486,10 +448,6 @@ impl Key for () {
         0
     }
 
-    fn write(&self, _buf: &mut [u8]) -> CodingResult<()> {
-        Ok(())
-    }
-
     fn read(_buf: &[u8]) -> CodingResult<Self> {
         Ok(())
     }
@@ -504,10 +462,6 @@ impl Value for () {
 
     fn serialized_len(&self) -> usize {
         0
-    }
-
-    fn write(&self, _buf: &mut [u8]) -> CodingResult<()> {
-        Ok(())
     }
 
     fn read(_buf: &[u8]) -> CodingResult<Self> {

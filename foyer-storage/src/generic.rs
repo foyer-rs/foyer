@@ -53,7 +53,6 @@ use crate::{
     region::{Region, RegionHeader, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
-    ring::RingBuffer,
     storage::{Storage, StorageWriter},
 };
 
@@ -76,9 +75,6 @@ where
 
     /// Device configurations.
     pub device_config: D::Config,
-
-    /// `ring_buffer_capacity` will be aligned up to device align.
-    pub ring_buffer_capacity: usize,
 
     /// Catalog indices sharding bits.
     pub catalog_bits: usize,
@@ -121,7 +117,6 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
-            .field("ring_buffer_capacity", &self.ring_buffer_capacity)
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
@@ -147,7 +142,6 @@ where
             name: self.name.clone(),
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
-            ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
@@ -201,7 +195,6 @@ where
     catalog: Arc<Catalog<K, V>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
-    ring: Arc<RingBuffer<D::IoBufferAllocator>>,
 
     device: D,
 
@@ -238,13 +231,6 @@ where
         let device = D::open(config.device_config).await?;
         assert!(device.regions() >= config.flushers * 2);
 
-        let ring = Arc::new(RingBuffer::with_metrics_in(
-            device.align(),
-            config.ring_buffer_capacity,
-            metrics.clone(),
-            device.io_buffer_allocator().clone(),
-        ));
-
         let region_manager = Arc::new(RegionManager::new(
             device.regions(),
             config.eviction_config,
@@ -278,7 +264,6 @@ where
             sequence: AtomicU64::new(0),
             catalog: catalog.clone(),
             region_manager: region_manager.clone(),
-            ring,
             device: device.clone(),
             admissions: config.admissions,
             reinsertions: config.reinsertions,
@@ -407,23 +392,14 @@ where
         };
 
         match index {
-            crate::catalog::Index::RingBuffer { view } => {
-                let value = V::read(&view)?;
+            crate::catalog::Index::Inflight { key: _, value } => {
+                let value = value.clone();
 
                 self.inner
                     .metrics
                     .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
 
-                self.inner
-                    .metrics
-                    .op_bytes_lookup
-                    .inc_by(value.serialized_len() as u64);
-
-                Ok(Some(value))
-            }
-            crate::catalog::Index::Inflight { key: _, value } => {
-                let value = value.clone();
                 Ok(Some(value))
             }
             // read from region
@@ -603,28 +579,21 @@ where
             admission.on_insert(&key, writer.weight, judge);
         }
 
-        // only write value to ring buffer
-        let len = bits::align_up(self.inner.device.align(), value.serialized_len());
-
         // record aligned header + key + value size for metrics
         self.inner.metrics.op_bytes_insert.inc_by(bits::align_up(
             self.inner.device.align(),
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
         ) as u64);
 
-        self.inner
-            .metrics
-            .inner_bytes_ring_buffer_remains
-            .set(self.inner.ring.remains() as i64);
-        let mut view = self.inner.ring.allocate(len, sequence).await;
-        value.write(&mut view)?;
-
-        view.shrink_to(value.serialized_len());
-        let view = view.freeze();
-
         self.inner.catalog.insert(
             key.clone(),
-            Item::new(sequence, Index::RingBuffer { view: view.clone() }),
+            Item::new(
+                sequence,
+                Index::Inflight {
+                    key: key.clone(),
+                    value: value.clone(),
+                },
+            ),
         );
 
         let flusher = sequence as usize % self.inner.flusher_entry_txs.len();
@@ -632,9 +601,8 @@ where
             .send(Entry {
                 sequence,
                 key,
-                view,
+                value,
                 compression: writer.compression,
-                _marker: PhantomData,
             })
             .unwrap();
 
@@ -1176,7 +1144,6 @@ mod tests {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions,
             reinsertions,
@@ -1227,7 +1194,6 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
