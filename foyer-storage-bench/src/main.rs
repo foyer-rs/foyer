@@ -277,7 +277,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum BenchStore<K = u64, V = Vec<u8>>
+pub enum BenchStore<K = u64, V = Arc<Vec<u8>>>
 where
     K: Key,
     V: Value,
@@ -503,8 +503,8 @@ async fn main() {
         io_size: args.io_size,
     };
 
-    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
+    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
+    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
     if args.ticket_insert_rate_limit > 0 {
         let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
         admissions.push(Arc::new(rt));
@@ -612,7 +612,7 @@ async fn main() {
 
 async fn bench(
     args: Args,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     metrics: Metrics,
     stop_tx: broadcast::Sender<()>,
 ) {
@@ -664,7 +664,7 @@ async fn write(
     entry_size_range: Range<usize>,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -685,7 +685,7 @@ async fn write(
         let idx = index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(entry_size_range.clone());
-        let data = text(idx as usize, entry_size);
+        let data = Arc::new(text(idx as usize, entry_size));
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
         }
@@ -709,7 +709,7 @@ async fn write(
 async fn read(
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -739,7 +739,7 @@ async fn read(
 
         if let Some(buf) = res {
             let entry_size = buf.len();
-            assert_eq!(text(idx as usize, entry_size), buf);
+            assert_eq!(&text(idx as usize, entry_size), buf.as_ref());
             if let Err(e) = metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }

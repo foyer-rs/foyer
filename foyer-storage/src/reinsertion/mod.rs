@@ -19,17 +19,19 @@ use foyer_common::code::{Key, Value};
 use crate::{catalog::Catalog, metrics::Metrics};
 
 #[derive(Debug)]
-pub struct ReinsertionContext<K>
+pub struct ReinsertionContext<K, V>
 where
     K: Key,
+    V: Value,
 {
-    pub catalog: Arc<Catalog<K>>,
+    pub catalog: Arc<Catalog<K, V>>,
     pub metrics: Arc<Metrics>,
 }
 
-impl<K> Clone for ReinsertionContext<K>
+impl<K, V> Clone for ReinsertionContext<K, V>
 where
     K: Key,
+    V: Value,
 {
     fn clone(&self) -> Self {
         Self {
@@ -44,7 +46,7 @@ pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, context: ReinsertionContext<Self::Key>) {}
+    fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 

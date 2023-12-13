@@ -16,8 +16,8 @@
 #![feature(lint_reasons)]
 #![feature(bound_map)]
 #![feature(associated_type_defaults)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![feature(cfg_match)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod batch;
 pub mod bits;

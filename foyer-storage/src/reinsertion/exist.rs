@@ -28,7 +28,7 @@ where
     K: Key,
     V: Value,
 {
-    catalog: OnceLock<Arc<Catalog<K>>>,
+    catalog: OnceLock<Arc<Catalog<K, V>>>,
     _marker: PhantomData<V>,
 }
 
@@ -54,7 +54,7 @@ where
 
     type Value = V;
 
-    fn init(&self, context: ReinsertionContext<Self::Key>) {
+    fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>) {
         self.catalog.get_or_init(|| context.catalog.clone());
     }
 
