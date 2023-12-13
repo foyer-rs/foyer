@@ -440,6 +440,8 @@ impl Cursor for PrimitiveCursorVoid {
 }
 
 impl Key for () {
+    type Cursor = PrimitiveCursorVoid;
+
     fn weight(&self) -> usize {
         0
     }
@@ -450,6 +452,10 @@ impl Key for () {
 
     fn read(_buf: &[u8]) -> CodingResult<Self> {
         Ok(())
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        PrimitiveCursorVoid
     }
 }
 

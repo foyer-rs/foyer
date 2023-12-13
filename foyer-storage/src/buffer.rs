@@ -314,24 +314,17 @@ where
     }
 }
 
-#[cfg(feature = "hahaha")]
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use bytes::BufMut;
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{
-        device::fs::{FsDevice, FsDeviceConfig},
-        ring::RingBuffer,
-    };
+    use crate::device::fs::{FsDevice, FsDeviceConfig};
 
-    fn ent(value: Vec<u8>) -> Entry<(), Vec<u8>> {
+    fn ent(size: usize) -> Entry<(), Vec<u8>> {
         Entry {
             key: (),
-            value,
+            value: vec![b'x'; size],
             compression: Compression::None,
             sequence: 0,
         }
@@ -341,7 +334,6 @@ mod tests {
     async fn test_flush_buffer() {
         let tempdir = tempdir().unwrap();
 
-        let ring = Arc::new(RingBuffer::new(4096, 16 * 1024 * 1024));
         let device = FsDevice::open(FsDeviceConfig {
             dir: tempdir.path().into(),
             capacity: 256 * 1024,     // 256 KiB
@@ -359,14 +351,7 @@ mod tests {
         const HEADER: usize = EntryHeader::serialized_len();
 
         {
-            let view = {
-                let mut view = ring.allocate(5 * 1024 - 128, 0).await; // ~ 6 KiB
-                (&mut view[..]).put_slice(&[b'x'; 5 * 1024 - 128]);
-                view.shrink_to(5 * 1024 - 128); // ~ 5 KiB
-                view.freeze()
-            };
-            let entry = ent(view);
-            assert_eq!(ring.continuum(), 0);
+            let entry = ent(5 * 1024 - 128); // ~ 5 KiB
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -412,17 +397,8 @@ mod tests {
             assert!(buffer.entries.is_empty());
         }
 
-        ring.advance();
-        assert_eq!(ring.continuum(), 8 * 1024);
-
         {
-            let view = {
-                let mut view = ring.allocate(55 * 1024 - 128, 1).await; // ~ 55 KiB
-                (&mut view[..]).put_slice(&[b'x'; 54 * 1024 - 128]);
-                view.shrink_to(54 * 1024 - 128); // ~ 54 KiB
-                view.freeze()
-            };
-            let entry = ent(view);
+            let entry = ent(54 * 1024 - 128); // ~ 54 KiB
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -438,13 +414,7 @@ mod tests {
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
-            let view = {
-                let mut view = ring.allocate(3 * 1024 - 128, 2).await; // ~ 3 KiB
-                (&mut view[..]).put_slice(&[b'x'; 3 * 1024 - 128]);
-                view.shrink_to(3 * 1024 - 128);
-                view.freeze()
-            };
-            let entry = ent(view);
+            let entry = ent(3 * 1024 - 128); // ~ 3 KiB
 
             // 60 ~ 64 KiB
             let entries = buffer.write(entry).await.unwrap();
@@ -465,8 +435,5 @@ mod tests {
 
             assert!(buffer.entries.is_empty());
         }
-
-        ring.advance();
-        assert_eq!(ring.continuum(), 68 * 1024);
     }
 }
