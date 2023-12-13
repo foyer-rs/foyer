@@ -12,9 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-use foyer_common::code::Key;
+use foyer_common::code::{Key, Value};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::{broadcast, mpsc};
 use tracing::Instrument;
@@ -24,27 +24,32 @@ use crate::{
     catalog::{Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
-    error::{Error, Result},
+    error::Result,
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
     ring::RingBufferView,
 };
 
-pub struct Entry {
-    /// # Safety
-    ///
-    /// `key` must be `Arc<K> where K = Flusher<K>`.
-    ///
-    /// Use `dyn Any` here to avoid contagious generic type.
-    pub key: Arc<dyn Any + Send + Sync>,
+pub struct Entry<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub key: K,
     pub sequence: Sequence,
     pub compression: Compression,
 
     /// Hold a view of referenced buffer, for lookup and prevent from releasing.
     pub view: RingBufferView,
+
+    pub _marker: PhantomData<V>,
 }
 
-impl Debug for Entry {
+impl<K, V> Debug for Entry<K, V>
+where
+    K: Key,
+    V: Value,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
             .field("sequence", &self.sequence)
@@ -53,41 +58,48 @@ impl Debug for Entry {
     }
 }
 
-impl Clone for Entry {
+impl<K, V> Clone for Entry<K, V>
+where
+    K: Key,
+    V: Value,
+{
     fn clone(&self) -> Self {
         Self {
-            key: Arc::clone(&self.key),
+            key: self.key.clone(),
             view: self.view.clone(),
             sequence: self.sequence,
             compression: self.compression,
+            _marker: PhantomData,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Flusher<K, D, EP, EL>
+pub struct Flusher<K, V, D, EP, EL>
 where
     K: Key,
+    V: Value,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
 {
     region_manager: Arc<RegionManager<D, EP, EL>>,
 
-    catalog: Arc<Catalog<K>>,
+    catalog: Arc<Catalog<K, V>>,
 
-    buffer: FlushBuffer<D>,
+    buffer: FlushBuffer<K, V, D>,
 
-    entry_rx: mpsc::UnboundedReceiver<Entry>,
+    entry_rx: mpsc::UnboundedReceiver<Entry<K, V>>,
 
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
 }
 
-impl<K, D, EP, EL> Flusher<K, D, EP, EL>
+impl<K, V, D, EP, EL> Flusher<K, V, D, EP, EL>
 where
     K: Key,
+    V: Value,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -95,9 +107,9 @@ where
     pub fn new(
         default_buffer_capacity: usize,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        catalog: Arc<Catalog<K>>,
+        catalog: Arc<Catalog<K, V>>,
         device: D,
-        entry_rx: mpsc::UnboundedReceiver<Entry>,
+        entry_rx: mpsc::UnboundedReceiver<Entry<K, V>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -133,16 +145,15 @@ where
         }
     }
 
-    async fn handle(&mut self, entry: Entry) -> Result<()> {
+    async fn handle(&mut self, entry: Entry<K, V>) -> Result<()> {
         let timer = self.metrics.inner_op_duration_flusher_handle.start_timer();
 
         let old_region = self.buffer.region();
 
-        let entry = match self.buffer.write::<K>(entry).await {
-            Err(BufferError::NotEnough { entry }) => entry,
-
+        let entry = match self.buffer.write(entry).await {
+            Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
             Ok(entries) => return self.update_catalog(entries).await,
-            Err(e) => return Err(Error::from(e)),
+            Err(e) => return Err(e.into()),
         };
 
         // current region is full, rotate flush buffer region and retry
@@ -175,7 +186,11 @@ where
         );
 
         // 3. retry write
-        let entries = self.buffer.write::<K>(entry).await?;
+        let entries = match self.buffer.write(entry).await {
+            Err(BufferError::NeedRotate(_)) => unreachable!(),
+            result => result?,
+        };
+
         self.update_catalog(entries).await?;
 
         drop(timer);
@@ -183,7 +198,7 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    async fn update_catalog(&self, entries: Vec<PositionedEntry>) -> Result<()> {
+    async fn update_catalog(&self, entries: Vec<PositionedEntry<K, V>>) -> Result<()> {
         // record fully flushed bytes by the way
         let mut bytes = 0;
 
@@ -196,7 +211,6 @@ where
         } in entries
         {
             bytes += len;
-            let key = key.downcast::<K>().unwrap();
             let index = Index::Region {
                 view: self
                     .region_manager

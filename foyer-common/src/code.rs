@@ -88,7 +88,7 @@ trait BufMutExt: BufMut {
 
 impl<T: BufMut> BufMutExt for T {}
 
-pub trait Cursor: Send + Sync + 'static + std::io::Read {
+pub trait Cursor: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
     type T: Send + Sync + 'static;
 
     fn inner(&self) -> &Self::T;
@@ -193,9 +193,19 @@ macro_rules! def_cursor {
     ($( { $type:ty, $id:ident }, )*) => {
         paste! {
             $(
+                #[derive(Debug)]
                 pub struct [<PrimitiveCursor $id>] {
                     inner: $type,
                     pos: u8,
+                }
+
+                impl [<PrimitiveCursor $id>] {
+                    pub fn new(inner: $type) -> Self {
+                        Self {
+                            inner,
+                            pos: 0,
+                        }
+                    }
                 }
 
                 impl std::io::Read for [<PrimitiveCursor $id>] {
@@ -239,22 +249,17 @@ macro_rules! impl_key {
                         std::mem::size_of::<$type>()
                     }
 
-
                     fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
                         buf.[< put_ $type>](*self);
                         Ok(())
                     }
-
 
                     fn read(mut buf: &[u8]) -> CodingResult<Self> {
                         Ok(buf.[< get_ $type>]())
                     }
 
                     fn into_cursor(self) -> Self::Cursor {
-                        [<PrimitiveCursor $id>] {
-                            inner: self,
-                            pos: 0,
-                        }
+                        [<PrimitiveCursor $id>]::new(self)
                     }
                 }
             )*
@@ -273,22 +278,17 @@ macro_rules! impl_value {
                         std::mem::size_of::<$type>()
                     }
 
-
                     fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
                         buf.[< put_ $type>](*self);
                         Ok(())
                     }
-
 
                     fn read(mut buf: &[u8]) -> CodingResult<Self> {
                         Ok(buf.[< get_ $type>]())
                     }
 
                     fn into_cursor(self) -> Self::Cursor {
-                        [<PrimitiveCursor $id>] {
-                            inner: self,
-                            pos: 0,
-                        }
+                        [<PrimitiveCursor $id>]::new(self)
                     }
                 }
             )*
@@ -301,6 +301,8 @@ for_all_primitives! { impl_key }
 for_all_primitives! { impl_value }
 
 impl Key for Vec<u8> {
+    type Cursor = std::io::Cursor<Vec<u8>>;
+
     fn weight(&self) -> usize {
         self.len()
     }
@@ -316,6 +318,10 @@ impl Key for Vec<u8> {
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
         Ok(buf.to_vec())
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        std::io::Cursor::new(self)
     }
 }
 
@@ -360,6 +366,95 @@ impl Cursor for std::io::Cursor<Vec<u8>> {
     }
 }
 
+impl Key for std::sync::Arc<Vec<u8>> {
+    type Cursor = ArcVecU8Cursor;
+
+    fn weight(&self) -> usize {
+        self.len()
+    }
+
+    fn serialized_len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_slice(self);
+        Ok(())
+    }
+
+    fn read(buf: &[u8]) -> CodingResult<Self> {
+        Ok(std::sync::Arc::new(buf.to_vec()))
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        ArcVecU8Cursor::new(self)
+    }
+}
+
+impl Value for std::sync::Arc<Vec<u8>> {
+    type Cursor = ArcVecU8Cursor;
+
+    fn weight(&self) -> usize {
+        self.len()
+    }
+
+    fn serialized_len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_slice(self);
+        Ok(())
+    }
+
+    fn read(buf: &[u8]) -> CodingResult<Self> {
+        Ok(std::sync::Arc::new(buf.to_vec()))
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        ArcVecU8Cursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct ArcVecU8Cursor {
+    inner: std::sync::Arc<Vec<u8>>,
+    pos: usize,
+}
+
+impl ArcVecU8Cursor {
+    pub fn new(inner: std::sync::Arc<Vec<u8>>) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for ArcVecU8Cursor {
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        let slice = self.inner.as_ref().as_slice();
+        let len = std::cmp::min(slice.len() - self.pos as usize, buf.len());
+        buf.put_slice(&slice[self.pos..self.pos + len]);
+        self.pos;
+        Ok(len)
+    }
+}
+
+impl Cursor for ArcVecU8Cursor {
+    type T = std::sync::Arc<Vec<u8>>;
+
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+#[derive(Debug)]
 pub struct PrimitiveCursorVoid;
 
 impl std::io::Read for PrimitiveCursorVoid {
@@ -424,15 +519,16 @@ impl Value for () {
     }
 }
 
-pub struct UnimplementedCursor<T: Send + Sync + 'static>(PhantomData<T>);
+#[derive(Debug)]
+pub struct UnimplementedCursor<T: Send + Sync + 'static + std::fmt::Debug>(PhantomData<T>);
 
-impl<T: Send + Sync + 'static> std::io::Read for UnimplementedCursor<T> {
+impl<T: Send + Sync + 'static + std::fmt::Debug> std::io::Read for UnimplementedCursor<T> {
     fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
         unimplemented!()
     }
 }
 
-impl<T: Send + Sync + 'static> Cursor for UnimplementedCursor<T> {
+impl<T: Send + Sync + 'static + std::fmt::Debug> Cursor for UnimplementedCursor<T> {
     type T = T;
 
     fn inner(&self) -> &Self::T {

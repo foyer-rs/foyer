@@ -198,7 +198,7 @@ where
     EL: Link,
 {
     sequence: AtomicU64,
-    catalog: Arc<Catalog<K>>,
+    catalog: Arc<Catalog<K, V>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
     ring: Arc<RingBuffer<D::IoBufferAllocator>>,
@@ -208,7 +208,7 @@ where
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
-    flusher_entry_txs: Vec<mpsc::UnboundedSender<Entry>>,
+    flusher_entry_txs: Vec<mpsc::UnboundedSender<Entry<K, V>>>,
     flusher_handles: Mutex<Vec<JoinHandle<()>>>,
     flushers_stop_tx: broadcast::Sender<()>,
 
@@ -261,9 +261,10 @@ where
         let flusher_stop_rxs = (0..config.flushers)
             .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
+        #[expect(clippy::type_complexity)]
         let (flusher_entry_txs, flusher_entry_rxs): (
-            Vec<mpsc::UnboundedSender<Entry>>,
-            Vec<mpsc::UnboundedReceiver<Entry>>,
+            Vec<mpsc::UnboundedSender<Entry<K, V>>>,
+            Vec<mpsc::UnboundedReceiver<Entry<K, V>>>,
         ) = (0..config.flushers)
             .map(|_| mpsc::unbounded_channel())
             .unzip();
@@ -421,6 +422,10 @@ where
 
                 Ok(Some(value))
             }
+            crate::catalog::Index::Inflight { key: _, value } => {
+                let value = value.clone();
+                Ok(Some(value))
+            }
             // read from region
             crate::catalog::Index::Region { view } => {
                 let region = view.id();
@@ -485,7 +490,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn catalog(&self) -> &Arc<Catalog<K>> {
+    pub(crate) fn catalog(&self) -> &Arc<Catalog<K, V>> {
         &self.inner.catalog
     }
 
@@ -544,14 +549,14 @@ where
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        catalog: Arc<Catalog<K>>,
+        catalog: Arc<Catalog<K, V>>,
     ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
         let mut sequence = 0;
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some((key, item)) = iter.next().await? {
                 sequence = std::cmp::max(sequence, *item.sequence());
-                catalog.insert(Arc::new(key), item);
+                catalog.insert(key, item);
             }
             region_manager.eviction_push(region_id);
             Some(sequence)
@@ -617,8 +622,6 @@ where
         view.shrink_to(value.serialized_len());
         let view = view.freeze();
 
-        let key = Arc::new(key);
-
         self.inner.catalog.insert(
             key.clone(),
             Item::new(sequence, Index::RingBuffer { view: view.clone() }),
@@ -631,6 +634,7 @@ where
                 key,
                 view,
                 compression: writer.compression,
+                _marker: PhantomData,
             })
             .unwrap();
 
@@ -944,7 +948,7 @@ where
         }))
     }
 
-    pub async fn next(&mut self) -> Result<Option<(K, Item)>> {
+    pub async fn next(&mut self) -> Result<Option<(K, Item<K, V>)>> {
         let region_size = self.region.device().region_size();
         let align = self.region.device().align();
 

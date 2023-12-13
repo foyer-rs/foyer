@@ -38,7 +38,7 @@ where
 
     last: AtomicUsize,
 
-    context: OnceLock<AdmissionContext<K>>,
+    context: OnceLock<AdmissionContext<K, V>>,
 
     _marker: PhantomData<(K, V)>,
 }
@@ -67,7 +67,7 @@ where
 
     type Value = V;
 
-    fn init(&self, context: AdmissionContext<Self::Key>) {
+    fn init(&self, context: AdmissionContext<Self::Key, Self::Value>) {
         self.context.set(context).unwrap();
     }
 

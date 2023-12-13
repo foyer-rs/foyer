@@ -31,7 +31,7 @@ pub enum ErrorKind {
     #[error("device error: {0}")]
     Device(#[from] DeviceError),
     #[error("buffer error: {0}")]
-    Buffer(#[from] BufferError),
+    Buffer(anyhow::Error),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
@@ -48,9 +48,16 @@ impl From<DeviceError> for Error {
     }
 }
 
-impl From<BufferError> for Error {
-    fn from(value: BufferError) -> Self {
-        value.into()
+impl<R> From<BufferError<R>> for Error
+where
+    R: Send + Sync + 'static + std::fmt::Debug,
+{
+    fn from(value: BufferError<R>) -> Self {
+        match value {
+            BufferError::NeedRotate(_) => panic!("BufferError::NeedRotate should not be raised!"),
+            BufferError::Device(e) => From::from(e),
+            BufferError::Other(e) => From::from(e),
+        }
     }
 }
 
