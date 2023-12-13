@@ -431,9 +431,9 @@ impl ArcVecU8Cursor {
 impl std::io::Read for ArcVecU8Cursor {
     fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
         let slice = self.inner.as_ref().as_slice();
-        let len = std::cmp::min(slice.len() - self.pos as usize, buf.len());
+        let len = std::cmp::min(slice.len() - self.pos, buf.len());
         buf.put_slice(&slice[self.pos..self.pos + len]);
-        self.pos;
+        self.pos -= len;
         Ok(len)
     }
 }
