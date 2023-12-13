@@ -21,6 +21,8 @@
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
 #![feature(associated_type_defaults)]
+#![feature(box_into_inner)]
+#![feature(try_trait_v2)]
 
 pub mod admission;
 pub mod buffer;

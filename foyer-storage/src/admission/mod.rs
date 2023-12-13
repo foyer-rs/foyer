@@ -19,17 +19,19 @@ use foyer_common::code::{Key, Value};
 use crate::{catalog::Catalog, metrics::Metrics};
 
 #[derive(Debug)]
-pub struct AdmissionContext<K>
+pub struct AdmissionContext<K, V>
 where
     K: Key,
+    V: Value,
 {
-    pub catalog: Arc<Catalog<K>>,
+    pub catalog: Arc<Catalog<K, V>>,
     pub metrics: Arc<Metrics>,
 }
 
-impl<K> Clone for AdmissionContext<K>
+impl<K, V> Clone for AdmissionContext<K, V>
 where
     K: Key,
+    V: Value,
 {
     fn clone(&self) -> Self {
         Self {
@@ -44,7 +46,7 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, context: AdmissionContext<Self::Key>) {}
+    fn init(&self, context: AdmissionContext<Self::Key, Self::Value>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 

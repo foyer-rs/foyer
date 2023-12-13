@@ -12,9 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{fmt::Debug, marker::PhantomData};
+
 use foyer_common::{
     bits::{align_up, is_aligned},
-    code::Key,
+    code::{Key, Value},
 };
 
 use crate::{
@@ -26,28 +28,37 @@ use crate::{
 };
 
 #[derive(thiserror::Error, Debug)]
-pub enum BufferError {
-    #[error(transparent)]
+pub enum BufferError<R>
+where
+    R: Send + Sync + 'static + Debug,
+{
+    #[error("need rotate and retry {0}")]
+    NeedRotate(Box<R>),
+    #[error("device error: {0}")]
     Device(#[from] DeviceError),
-    #[error("")]
-    NotEnough { entry: Entry },
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
 
-pub type BufferResult<T> = std::result::Result<T, BufferError>;
+pub type BufferResult<T, R> = core::result::Result<T, BufferError<R>>;
 
 #[derive(Debug)]
-pub struct PositionedEntry {
-    pub entry: Entry,
+pub struct PositionedEntry<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub entry: Entry<K, V>,
     pub region: RegionId,
     pub offset: usize,
     pub len: usize,
 }
 
 #[derive(Debug)]
-pub struct FlushBuffer<D>
+pub struct FlushBuffer<K, V, D>
 where
+    K: Key,
+    V: Value,
     D: Device,
 {
     // TODO(MrCroxx): optimize buffer allocation
@@ -61,7 +72,7 @@ where
     offset: usize,
 
     /// entries in io buffer waiting for flush
-    entries: Vec<PositionedEntry>,
+    entries: Vec<PositionedEntry<K, V>>,
 
     // underlying device
     device: D,
@@ -69,8 +80,10 @@ where
     default_buffer_capacity: usize,
 }
 
-impl<D> FlushBuffer<D>
+impl<K, V, D> FlushBuffer<K, V, D>
 where
+    K: Key,
+    V: Value,
     D: Device,
 {
     pub fn new(device: D, default_buffer_capacity: usize) -> Self {
@@ -103,7 +116,10 @@ where
     /// Flush io buffer if necessary, and reset io buffer to a new region.
     ///
     /// Returns fully flushed entries.
-    pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry>> {
+    pub async fn rotate(
+        &mut self,
+        region: RegionId,
+    ) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
         let entries = self.flush().await?;
         debug_assert!(self.buffer.is_empty());
         self.region = Some(region);
@@ -126,7 +142,7 @@ where
     /// The io buffer will be cleared after flush.
     ///
     /// Returns fully flushed entries.
-    pub async fn flush(&mut self) -> BufferResult<Vec<PositionedEntry>> {
+    pub async fn flush(&mut self) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
         let Some(region) = self.region else {
             debug_assert!(self.entries.is_empty());
             return Ok(vec![]);
@@ -166,28 +182,27 @@ where
     /// # Format
     ///
     /// | header | value (compressed) | key | <padding> |
-    pub async fn write<K: Key>(
+    pub async fn write(
         &mut self,
         Entry {
             key,
             sequence,
             compression,
             view,
-        }: Entry,
-    ) -> BufferResult<Vec<PositionedEntry>> {
+            _marker,
+        }: Entry<K, V>,
+    ) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
         if self.region.is_none() {
-            return Err(BufferError::NotEnough {
-                entry: Entry {
-                    key,
-                    sequence,
-                    compression,
-                    view,
-                },
-            });
+            return Err(BufferError::NeedRotate(Box::new(Entry {
+                key,
+                sequence,
+                compression,
+                view,
+                _marker: PhantomData,
+            })));
         }
 
         // reserve underlying vec capacity
-        let key = key.downcast::<K>().unwrap();
         let uncompressed = align_up(
             self.device.align(),
             EntryHeader::serialized_len() + key.serialized_len() + view.len(),
@@ -202,14 +217,13 @@ where
 
         if compression == Compression::None && self.remaining() < uncompressed {
             // early return if remaining size is not enough
-            return Err(BufferError::NotEnough {
-                entry: Entry {
-                    key,
-                    sequence,
-                    compression,
-                    view,
-                },
-            });
+            return Err(BufferError::NeedRotate(Box::new(Entry {
+                key,
+                sequence,
+                compression,
+                view,
+                _marker: PhantomData,
+            })));
         }
 
         let mut cursor = self.buffer.len();
@@ -263,14 +277,13 @@ where
         // 2. if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
             unsafe { self.buffer.set_len(old) };
-            return Err(BufferError::NotEnough {
-                entry: Entry {
-                    key,
-                    sequence,
-                    compression,
-                    view,
-                },
-            });
+            return Err(BufferError::NeedRotate(Box::new(Entry {
+                key,
+                sequence,
+                compression,
+                view,
+                _marker: PhantomData,
+            })));
         }
 
         // 3. align buffer size
@@ -284,6 +297,7 @@ where
                 sequence,
                 compression,
                 view,
+                _marker: PhantomData,
             },
             region: self.region.unwrap(),
             offset: self.offset + old,
@@ -314,13 +328,13 @@ mod tests {
         ring::{RingBuffer, RingBufferView},
     };
 
-    fn ent(view: RingBufferView) -> Entry {
-        let key = Arc::new(());
+    fn ent(view: RingBufferView) -> Entry<(), ()> {
         Entry {
-            key,
+            key: (),
             view,
             compression: Compression::None,
             sequence: 0,
+            _marker: PhantomData,
         }
     }
 
@@ -355,9 +369,9 @@ mod tests {
             let entry = ent(view);
             assert_eq!(ring.continuum(), 0);
 
-            let res = buffer.write::<()>(entry).await;
+            let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NotEnough { entry }) => entry,
+                Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
                 _ => panic!("should be not enough error"),
             };
 
@@ -365,16 +379,16 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 12 KiB
-            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap();
             assert!(entries.is_empty());
             // 12 ~ 20 KiB
-            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap();
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
             assert_eq!(entries[1].offset, 12 * 1024);
 
             // 20 ~ 28 KiB
-            let entries = buffer.write::<()>(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap();
             assert!(entries.is_empty());
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
@@ -411,9 +425,9 @@ mod tests {
             };
             let entry = ent(view);
 
-            let res = buffer.write::<()>(entry).await;
+            let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NotEnough { entry }) => entry,
+                Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
                 _ => panic!("should be not enough error"),
             };
 
@@ -421,7 +435,7 @@ mod tests {
             assert!(entries.is_empty());
 
             // 4 ~ 60 KiB
-            let entries = buffer.write::<()>(entry).await.unwrap();
+            let entries = buffer.write(entry).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
@@ -434,7 +448,7 @@ mod tests {
             let entry = ent(view);
 
             // 60 ~ 64 KiB
-            let entries = buffer.write::<()>(entry).await.unwrap();
+            let entries = buffer.write(entry).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 60 * 1024);
 

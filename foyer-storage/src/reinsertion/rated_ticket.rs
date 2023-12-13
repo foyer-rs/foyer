@@ -38,7 +38,7 @@ where
 
     last: AtomicUsize,
 
-    context: OnceLock<ReinsertionContext<K>>,
+    context: OnceLock<ReinsertionContext<K, V>>,
 
     _marker: PhantomData<(K, V)>,
 }
@@ -64,10 +64,9 @@ where
     V: Value,
 {
     type Key = K;
-
     type Value = V;
 
-    fn init(&self, context: super::ReinsertionContext<Self::Key>) {
+    fn init(&self, context: super::ReinsertionContext<Self::Key, Self::Value>) {
         self.context.set(context).unwrap();
     }
 
