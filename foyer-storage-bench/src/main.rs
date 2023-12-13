@@ -105,10 +105,6 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     flusher_buffer_size: usize,
 
-    /// (MiB)
-    #[arg(long, default_value_t = 1024)]
-    ring_buffer_capacity: usize,
-
     #[arg(long, default_value_t = 4)]
     flushers: usize,
 
