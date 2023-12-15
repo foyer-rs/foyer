@@ -27,7 +27,6 @@ use twox_hash::XxHash64;
 use crate::{
     metrics::Metrics,
     region::{RegionId, RegionView},
-    ring::RingBufferView,
 };
 
 pub type Sequence = u64;
@@ -38,7 +37,6 @@ where
     K: Key,
     V: Value,
 {
-    RingBuffer { view: RingBufferView },
     Inflight { key: K, value: V },
     Region { view: RegionView },
 }
@@ -136,7 +134,7 @@ where
             item.inserted = Some(Instant::now());
             guard.insert(key.clone(), item)
         };
-        if let Some(old) = old && let Index::RingBuffer { .. } = old.index() {
+        if let Some(old) = old && let Index::Inflight { .. } = old.index() {
             self.metrics.inner_op_duration_entry_flush.observe(old.inserted.unwrap().elapsed().as_secs_f64());
         }
     }
