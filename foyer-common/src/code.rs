@@ -91,15 +91,7 @@ impl<T: BufMut> BufMutExt for T {}
 pub trait Cursor: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
     type T: Send + Sync + 'static;
 
-    fn inner(&self) -> &Self::T;
-
     fn into_inner(self) -> Self::T;
-
-    fn len(&self) -> usize;
-
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 /// [`Key`] is required to implement [`Clone`].
@@ -213,16 +205,8 @@ macro_rules! def_cursor {
                 impl Cursor for [<PrimitiveCursor $id>] {
                     type T = $type;
 
-                    fn inner(&self) -> &Self::T {
-                        &self.inner
-                    }
-
                     fn into_inner(self) -> Self::T {
                         self.inner
-                    }
-
-                    fn len(&self) -> usize {
-                        std::mem::size_of::<$type>()
                     }
                 }
             )*
@@ -325,16 +309,8 @@ impl Value for Vec<u8> {
 impl Cursor for std::io::Cursor<Vec<u8>> {
     type T = Vec<u8>;
 
-    fn inner(&self) -> &Self::T {
-        self.get_ref()
-    }
-
     fn into_inner(self) -> Self::T {
         self.into_inner()
-    }
-
-    fn len(&self) -> usize {
-        self.get_ref().len()
     }
 }
 
@@ -403,16 +379,8 @@ impl std::io::Read for ArcVecU8Cursor {
 impl Cursor for ArcVecU8Cursor {
     type T = std::sync::Arc<Vec<u8>>;
 
-    fn inner(&self) -> &Self::T {
-        &self.inner
-    }
-
     fn into_inner(self) -> Self::T {
         self.inner
-    }
-
-    fn len(&self) -> usize {
-        self.inner.len()
     }
 }
 
@@ -428,15 +396,7 @@ impl std::io::Read for PrimitiveCursorVoid {
 impl Cursor for PrimitiveCursorVoid {
     type T = ();
 
-    fn inner(&self) -> &Self::T {
-        &()
-    }
-
     fn into_inner(self) -> Self::T {}
-
-    fn len(&self) -> usize {
-        0
-    }
 }
 
 impl Key for () {
@@ -491,15 +451,7 @@ impl<T: Send + Sync + 'static + std::fmt::Debug> std::io::Read for Unimplemented
 impl<T: Send + Sync + 'static + std::fmt::Debug> Cursor for UnimplementedCursor<T> {
     type T = T;
 
-    fn inner(&self) -> &Self::T {
-        unimplemented!()
-    }
-
     fn into_inner(self) -> Self::T {
-        unimplemented!()
-    }
-
-    fn len(&self) -> usize {
         unimplemented!()
     }
 }
