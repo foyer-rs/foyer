@@ -12,11 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
 
 use foyer_common::{
     bits::{align_up, is_aligned},
-    code::{Key, Value},
+    code::{Cursor, Key, Value},
 };
 
 use crate::{
@@ -182,62 +182,57 @@ where
     /// # Format
     ///
     /// | header | value (compressed) | key | <padding> |
+    #[expect(clippy::uninit_vec)]
     pub async fn write(
         &mut self,
         Entry {
             key,
+            value,
             sequence,
             compression,
-            view,
-            _marker,
         }: Entry<K, V>,
     ) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
+        // Notify caller to rotate buffer if there is not enough space for the entry.
+        //
+        // NOTICE:
+        //
+        // Buffer remaining size is not compared here because the compressed entry size can be
+        // either larger (rarely) or smaller than the uncompressed size and it can not be determined
+        // before compression. So we first try to compress it and rollback if it exceeds region size.
+        //
+        // P.S. About rollback, see (*).
         if self.region.is_none() {
             return Err(BufferError::NeedRotate(Box::new(Entry {
                 key,
+                value,
                 sequence,
                 compression,
-                view,
-                _marker: PhantomData,
             })));
         }
 
-        // reserve underlying vec capacity
-        let uncompressed = align_up(
-            self.device.align(),
-            EntryHeader::serialized_len() + key.serialized_len() + view.len(),
-        );
-        self.buffer.reserve_exact(uncompressed);
-
-        // TODO(MrCroxx): skip if remaining is too small
-
-        // 1. try compress and write first
         let old = self.buffer.len();
         debug_assert!(is_aligned(self.device.align(), old));
 
-        if compression == Compression::None && self.remaining() < uncompressed {
-            // early return if remaining size is not enough
-            return Err(BufferError::NeedRotate(Box::new(Entry {
-                key,
-                sequence,
-                compression,
-                view,
-                _marker: PhantomData,
-            })));
-        }
+        // reserve underlying buffer to reduce reallocation
+        let uncompressed = align_up(
+            self.device.align(),
+            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
+        );
+        self.buffer.reserve(old + uncompressed);
 
-        let mut cursor = self.buffer.len();
-
+        let mut cursor = old;
         // reserve space for header
         cursor += EntryHeader::serialized_len();
         unsafe { self.buffer.set_len(cursor) };
 
+        // write value
+        let mut vcursor = value.into_cursor();
         match compression {
             Compression::None => {
-                std::io::copy(&mut &view[..], &mut self.buffer).map_err(DeviceError::from)?;
+                std::io::copy(&mut vcursor, &mut self.buffer).map_err(DeviceError::from)?;
             }
             Compression::Zstd => {
-                zstd::stream::copy_encode(&mut &view[..], &mut self.buffer, 0)
+                zstd::stream::copy_encode(&mut vcursor, &mut self.buffer, 0)
                     .map_err(DeviceError::from)?;
             }
             Compression::Lz4 => {
@@ -245,28 +240,29 @@ where
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .build(&mut self.buffer)
                     .map_err(DeviceError::from)?;
-                std::io::copy(&mut &view[..], &mut encoder).map_err(DeviceError::from)?;
+                std::io::copy(&mut vcursor, &mut encoder).map_err(DeviceError::from)?;
                 let (_w, res) = encoder.finish();
                 res.map_err(DeviceError::from)?;
             }
         }
         let compressed_value_len = self.buffer.len() - cursor;
+        cursor = self.buffer.len();
 
         // write key
-        cursor += compressed_value_len;
-        self.buffer.reserve_exact(key.serialized_len());
-        unsafe { self.buffer.set_len(cursor + key.serialized_len()) };
-        key.write(&mut self.buffer[cursor..cursor + key.serialized_len()])?;
+        let mut kcursor = key.into_cursor();
+        std::io::copy(&mut kcursor, &mut self.buffer).map_err(DeviceError::from)?;
+        let encoded_key_len = self.buffer.len() - cursor;
+        cursor = self.buffer.len();
 
         // calculate checksum
-        cursor -= compressed_value_len;
+        cursor -= compressed_value_len + encoded_key_len;
         let checksum =
-            checksum(&self.buffer[cursor..cursor + compressed_value_len + key.serialized_len()]);
+            checksum(&self.buffer[cursor..cursor + compressed_value_len + encoded_key_len]);
 
         // write entry header
         cursor -= EntryHeader::serialized_len();
         let header = EntryHeader {
-            key_len: key.serialized_len() as u32,
+            key_len: encoded_key_len as u32,
             value_len: compressed_value_len as u32,
             sequence,
             compression,
@@ -274,30 +270,33 @@ where
         };
         header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
 
-        // 2. if size exceeds region limit, rollback write and return
+        // (*) if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
             unsafe { self.buffer.set_len(old) };
+            let key = kcursor.into_inner();
+            let value = vcursor.into_inner();
             return Err(BufferError::NeedRotate(Box::new(Entry {
                 key,
+                value,
                 sequence,
                 compression,
-                view,
-                _marker: PhantomData,
             })));
         }
 
         // 3. align buffer size
         let target = align_up(self.device.align(), self.buffer.len());
-        self.buffer.reserve_exact(target - self.buffer.len());
+        self.buffer.reserve(target - self.buffer.len());
         unsafe { self.buffer.set_len(target) }
+
+        let key = kcursor.into_inner();
+        let value = vcursor.into_inner();
 
         self.entries.push(PositionedEntry {
             entry: Entry {
                 key,
+                value,
                 sequence,
                 compression,
-                view,
-                _marker: PhantomData,
             },
             region: self.region.unwrap(),
             offset: self.offset + old,
@@ -317,24 +316,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use bytes::BufMut;
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{
-        device::fs::{FsDevice, FsDeviceConfig},
-        ring::{RingBuffer, RingBufferView},
-    };
+    use crate::device::fs::{FsDevice, FsDeviceConfig};
 
-    fn ent(view: RingBufferView) -> Entry<(), ()> {
+    fn ent(size: usize) -> Entry<(), Vec<u8>> {
         Entry {
             key: (),
-            view,
+            value: vec![b'x'; size],
             compression: Compression::None,
             sequence: 0,
-            _marker: PhantomData,
         }
     }
 
@@ -342,7 +334,6 @@ mod tests {
     async fn test_flush_buffer() {
         let tempdir = tempdir().unwrap();
 
-        let ring = Arc::new(RingBuffer::new(4096, 16 * 1024 * 1024));
         let device = FsDevice::open(FsDeviceConfig {
             dir: tempdir.path().into(),
             capacity: 256 * 1024,     // 256 KiB
@@ -360,14 +351,7 @@ mod tests {
         const HEADER: usize = EntryHeader::serialized_len();
 
         {
-            let view = {
-                let mut view = ring.allocate(5 * 1024 - 128, 0).await; // ~ 6 KiB
-                (&mut view[..]).put_slice(&[b'x'; 5 * 1024 - 128]);
-                view.shrink_to(5 * 1024 - 128); // ~ 5 KiB
-                view.freeze()
-            };
-            let entry = ent(view);
-            assert_eq!(ring.continuum(), 0);
+            let entry = ent(5 * 1024 - 128); // ~ 5 KiB
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -413,17 +397,8 @@ mod tests {
             assert!(buffer.entries.is_empty());
         }
 
-        ring.advance();
-        assert_eq!(ring.continuum(), 8 * 1024);
-
         {
-            let view = {
-                let mut view = ring.allocate(55 * 1024 - 128, 1).await; // ~ 55 KiB
-                (&mut view[..]).put_slice(&[b'x'; 54 * 1024 - 128]);
-                view.shrink_to(54 * 1024 - 128); // ~ 54 KiB
-                view.freeze()
-            };
-            let entry = ent(view);
+            let entry = ent(54 * 1024 - 128); // ~ 54 KiB
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -439,13 +414,7 @@ mod tests {
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
-            let view = {
-                let mut view = ring.allocate(3 * 1024 - 128, 2).await; // ~ 3 KiB
-                (&mut view[..]).put_slice(&[b'x'; 3 * 1024 - 128]);
-                view.shrink_to(3 * 1024 - 128);
-                view.freeze()
-            };
-            let entry = ent(view);
+            let entry = ent(3 * 1024 - 128); // ~ 3 KiB
 
             // 60 ~ 64 KiB
             let entries = buffer.write(entry).await.unwrap();
@@ -466,8 +435,5 @@ mod tests {
 
             assert!(buffer.entries.is_empty());
         }
-
-        ring.advance();
-        assert_eq!(ring.continuum(), 68 * 1024);
     }
 }

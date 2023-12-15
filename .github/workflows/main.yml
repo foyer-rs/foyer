@@ -127,7 +127,7 @@ jobs:
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
-          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --region-size 16 --lookup-range 1000 --time 60
+          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -156,7 +156,7 @@ jobs:
         run: |-
           cargo build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   deterministic-test:
     name: run deterministic test
     runs-on: ubuntu-latest

@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
@@ -27,7 +27,6 @@ use crate::{
     error::Result,
     metrics::Metrics,
     region_manager::{RegionEpItemAdapter, RegionManager},
-    ring::RingBufferView,
 };
 
 pub struct Entry<K, V>
@@ -36,13 +35,9 @@ where
     V: Value,
 {
     pub key: K,
+    pub value: V,
     pub sequence: Sequence,
     pub compression: Compression,
-
-    /// Hold a view of referenced buffer, for lookup and prevent from releasing.
-    pub view: RingBufferView,
-
-    pub _marker: PhantomData<V>,
 }
 
 impl<K, V> Debug for Entry<K, V>
@@ -53,7 +48,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
             .field("sequence", &self.sequence)
-            .field("view", &self.view)
+            .field("compression", &self.compression)
             .finish()
     }
 }
@@ -66,10 +61,9 @@ where
     fn clone(&self) -> Self {
         Self {
             key: self.key.clone(),
-            view: self.view.clone(),
+            value: self.value.clone(),
             sequence: self.sequence,
             compression: self.compression,
-            _marker: PhantomData,
         }
     }
 }
