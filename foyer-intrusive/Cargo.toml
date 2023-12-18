@@ -15,7 +15,7 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 bytes = "1"
 cmsketch = "0.1"
-foyer-common = { version = "0.1", path = "../foyer-common" }
+foyer-common = { version = "0.2", path = "../foyer-common" }
 foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 itertools = "0.12"
 memoffset = "0.9"
