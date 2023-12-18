@@ -402,7 +402,6 @@ where
 
                 Ok(Some(value))
             }
-            // read from region
             crate::catalog::Index::Region { view } => {
                 let region = view.id();
 
@@ -580,10 +579,12 @@ where
         }
 
         // record aligned header + key + value size for metrics
-        self.inner.metrics.op_bytes_insert.inc_by(bits::align_up(
+        let len = bits::align_up(
             self.inner.device.align(),
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
-        ) as u64);
+        );
+        self.inner.metrics.op_bytes_insert.inc_by(len as u64);
+        self.inner.metrics.insert_entry_bytes.observe(len as f64);
 
         self.inner.catalog.insert(
             key.clone(),

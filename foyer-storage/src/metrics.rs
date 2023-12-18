@@ -16,9 +16,9 @@ use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
     core::{AtomicU64, GenericGauge, GenericGaugeVec},
-    opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Registry,
+    exponential_buckets, opts, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Registry,
 };
 type UintGaugeVec = GenericGaugeVec<AtomicU64>;
 type UintGauge = GenericGauge<AtomicU64>;
@@ -67,8 +67,10 @@ pub struct GlobalMetrics {
     op_bytes: IntCounterVec,
     total_bytes: UintGaugeVec,
 
+    entry_bytes: HistogramVec,
+
     inner_op_duration: HistogramVec,
-    inner_bytes: IntGaugeVec,
+    _inner_bytes: IntGaugeVec,
 }
 
 impl Default for GlobalMetrics {
@@ -113,6 +115,15 @@ impl GlobalMetrics {
         )
         .unwrap();
 
+        let entry_bytes = register_histogram_vec_with_registry!(
+            "foyer_storage_entry_bytes",
+            "foyer storage entry bytes",
+            &["foyer", "op", "extra"],
+            exponential_buckets(1.0, 2.0, 32).unwrap(),
+            registry,
+        )
+        .unwrap();
+
         let inner_op_duration = register_histogram_vec_with_registry!(
             "foyer_storage_inner_op_duration",
             "foyer storage inner op duration",
@@ -136,8 +147,10 @@ impl GlobalMetrics {
             op_bytes,
             total_bytes,
 
+            entry_bytes,
+
             inner_op_duration,
-            inner_bytes,
+            _inner_bytes: inner_bytes,
         }
     }
 
@@ -164,14 +177,14 @@ pub struct Metrics {
 
     pub total_bytes: UintGauge,
 
+    pub insert_entry_bytes: Histogram,
+
     pub inner_op_duration_acquire_clean_region: Histogram,
     pub inner_op_duration_acquire_clean_buffer: Histogram,
     pub inner_op_duration_wait_ring_buffer: Histogram,
     pub inner_op_duration_update_catalog: Histogram,
     pub inner_op_duration_entry_flush: Histogram,
     pub inner_op_duration_flusher_handle: Histogram,
-
-    pub inner_bytes_ring_buffer_remains: IntGauge,
 }
 
 impl Metrics {
@@ -204,6 +217,8 @@ impl Metrics {
 
         let total_bytes = global.total_bytes.with_label_values(&[foyer]);
 
+        let insert_entry_bytes = global.entry_bytes.with_label_values(&[foyer, "insert", ""]);
+
         let inner_op_duration_acquire_clean_region =
             global
                 .inner_op_duration
@@ -229,10 +244,6 @@ impl Metrics {
                 .inner_op_duration
                 .with_label_values(&[foyer, "flusher_handle", ""]);
 
-        let inner_bytes_ring_buffer_remains = global
-            .inner_bytes
-            .with_label_values(&[foyer, "ring", "remains"]);
-
         Self {
             op_duration_insert_inserted,
             op_duration_insert_filtered,
@@ -250,14 +261,14 @@ impl Metrics {
 
             total_bytes,
 
+            insert_entry_bytes,
+
             inner_op_duration_acquire_clean_region,
             inner_op_duration_acquire_clean_buffer,
             inner_op_duration_wait_ring_buffer,
             inner_op_duration_update_catalog,
             inner_op_duration_entry_flush,
             inner_op_duration_flusher_handle,
-
-            inner_bytes_ring_buffer_remains,
         }
     }
 }
