@@ -38,17 +38,11 @@ use export::MetricsExporter;
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
-    admission::{
-        rated_random::RatedRandomAdmissionPolicy, rated_ticket::RatedTicketAdmissionPolicy,
-        AdmissionPolicy,
-    },
+    admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
     compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
-    reinsertion::{
-        rated_random::RatedRandomReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy,
-        ReinsertionPolicy,
-    },
+    reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionPolicy},
     runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{Storage, StorageExt, StorageWriter},
     store::{LfuFsStoreConfig, Store, StoreConfig, StoreWriter},
@@ -111,10 +105,6 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     flusher_buffer_size: usize,
 
-    /// (MiB)
-    #[arg(long, default_value_t = 1024)]
-    ring_buffer_capacity: usize,
-
     #[arg(long, default_value_t = 4)]
     flushers: usize,
 
@@ -136,29 +126,15 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// enable rated random admission policy if `random_insert_rate_limit` > 0
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    random_insert_rate_limit: usize,
-
-    /// enable rated random reinsertion policy if `random_reinsert_rate_limit` > 0
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    random_reinsert_rate_limit: usize,
-
     /// enable rated ticket admission policy if `ticket_insert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_insert_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limitgit a` > 0
+    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
     /// (MiB/s)
     #[arg(long, default_value_t = 0)]
     ticket_reinsert_rate_limit: usize,
-
-    /// (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    reclaim_rate_limit: usize,
 
     /// `0` means equal to reclaimer count
     #[arg(long, default_value_t = 0)]
@@ -297,7 +273,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum BenchStore<K = u64, V = Vec<u8>>
+pub enum BenchStore<K = u64, V = Arc<Vec<u8>>>
 where
     K: Key,
     V: Value,
@@ -523,22 +499,8 @@ async fn main() {
         io_size: args.io_size,
     };
 
-    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![];
-    if args.random_insert_rate_limit > 0 {
-        let rr = RatedRandomAdmissionPolicy::new(
-            args.random_insert_rate_limit * 1024 * 1024,
-            Duration::from_millis(100),
-        );
-        admissions.push(Arc::new(rr));
-    }
-    if args.random_reinsert_rate_limit > 0 {
-        let rr = RatedRandomReinsertionPolicy::new(
-            args.random_reinsert_rate_limit * 1024 * 1024,
-            Duration::from_millis(100),
-        );
-        reinsertions.push(Arc::new(rr));
-    }
+    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
+    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
     if args.ticket_insert_rate_limit > 0 {
         let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
         admissions.push(Arc::new(rt));
@@ -564,14 +526,12 @@ async fn main() {
         name: "".to_string(),
         eviction_config,
         device_config,
-        ring_buffer_capacity: args.ring_buffer_capacity * 1024 * 1024,
         catalog_bits: args.catalog_bits,
         admissions,
         reinsertions,
         flusher_buffer_size: args.flusher_buffer_size,
         flushers: args.flushers,
         reclaimers: args.reclaimers,
-        reclaim_rate_limit: args.reclaim_rate_limit * 1024 * 1024,
         recover_concurrency: args.recover_concurrency,
         clean_region_threshold,
         compression,
@@ -647,7 +607,7 @@ async fn main() {
 
 async fn bench(
     args: Args,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     metrics: Metrics,
     stop_tx: broadcast::Sender<()>,
 ) {
@@ -699,7 +659,7 @@ async fn write(
     entry_size_range: Range<usize>,
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -720,7 +680,7 @@ async fn write(
         let idx = index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(entry_size_range.clone());
-        let data = text(idx as usize, entry_size);
+        let data = Arc::new(text(idx as usize, entry_size));
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
         }
@@ -744,7 +704,7 @@ async fn write(
 async fn read(
     rate: Option<f64>,
     index: Arc<AtomicU64>,
-    store: impl Storage<Key = u64, Value = Vec<u8>>,
+    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     time: u64,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
@@ -774,7 +734,7 @@ async fn read(
 
         if let Some(buf) = res {
             let entry_size = buf.len();
-            assert_eq!(text(idx as usize, entry_size), buf);
+            assert_eq!(&text(idx as usize, entry_size), buf.as_ref());
             if let Err(e) = metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }

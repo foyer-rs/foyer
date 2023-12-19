@@ -37,19 +37,66 @@ pub type RegionId = u32;
 pub const REGION_MAGIC: u64 = 0x19970327;
 
 #[derive(Debug)]
+pub enum Version {
+    V1,
+}
+
+impl Version {
+    pub fn latest() -> Self {
+        Self::V1
+    }
+
+    pub fn to_u64(&self) -> u64 {
+        match self {
+            Version::V1 => 1,
+        }
+    }
+}
+
+impl From<Version> for u64 {
+    fn from(value: Version) -> Self {
+        match value {
+            Version::V1 => 1,
+        }
+    }
+}
+
+impl TryFrom<u64> for Version {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::V1),
+            v => Err(anyhow::anyhow!("invalid region format version: {}", v)),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct RegionHeader {
     /// magic number to decide a valid region
     pub magic: u64,
+    /// format version
+    pub version: Version,
 }
 
 impl RegionHeader {
-    pub fn write(&self, buf: &mut [u8]) {
-        (&mut buf[..]).put_u64(self.magic);
+    pub fn write(&self, mut buf: &mut [u8]) {
+        buf.put_u64(self.magic);
+        buf.put_u64(self.version.to_u64());
     }
 
-    pub fn read(buf: &[u8]) -> Self {
-        let magic = (&buf[..]).get_u64();
-        Self { magic }
+    pub fn read(mut buf: &[u8]) -> std::result::Result<Self, anyhow::Error> {
+        let magic = buf.get_u64();
+        if magic != REGION_MAGIC {
+            return Err(anyhow::anyhow!(
+                "region magic mismatch, magic: {}, expected: {}",
+                magic,
+                REGION_MAGIC
+            ));
+        }
+        let version = buf.get_u64().try_into()?;
+        Ok(Self { magic, version })
     }
 }
 

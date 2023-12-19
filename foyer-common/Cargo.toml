@@ -1,10 +1,12 @@
 [package]
 name = "foyer-common"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "Hybrid cache for Rust"
+description = "common utils for foyer - the hybrid cache for Rust"
 license = "Apache-2.0"
+repository = "https://github.com/mrcroxx/foyer"
+homepage = "https://github.com/mrcroxx/foyer"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-udeps.ignore]
@@ -17,6 +19,8 @@ foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
 itertools = "0.12"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
-rand = "0.8.5"
 tokio = { workspace = true }
 tracing = "0.1"
+
+[dev-dependencies]
+rand = "0.8.5"

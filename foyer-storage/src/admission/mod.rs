@@ -18,13 +18,27 @@ use foyer_common::code::{Key, Value};
 
 use crate::{catalog::Catalog, metrics::Metrics};
 
-#[derive(Debug, Clone)]
-pub struct AdmissionContext<K>
+#[derive(Debug)]
+pub struct AdmissionContext<K, V>
 where
     K: Key,
+    V: Value,
 {
-    pub catalog: Arc<Catalog<K>>,
+    pub catalog: Arc<Catalog<K, V>>,
     pub metrics: Arc<Metrics>,
+}
+
+impl<K, V> Clone for AdmissionContext<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        Self {
+            catalog: self.catalog.clone(),
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 #[expect(unused_variables)]
@@ -32,7 +46,7 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, context: AdmissionContext<Self::Key>) {}
+    fn init(&self, context: AdmissionContext<Self::Key, Self::Value>) {}
 
     fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 
@@ -41,5 +55,4 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     fn on_drop(&self, key: &Self::Key, weight: usize, judge: bool);
 }
 
-pub mod rated_random;
 pub mod rated_ticket;

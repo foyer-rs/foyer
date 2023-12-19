@@ -21,6 +21,8 @@
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
 #![feature(associated_type_defaults)]
+#![feature(box_into_inner)]
+#![feature(try_trait_v2)]
 
 pub mod admission;
 pub mod buffer;
@@ -37,7 +39,6 @@ pub mod reclaimer;
 pub mod region;
 pub mod region_manager;
 pub mod reinsertion;
-pub mod ring;
 pub mod runtime;
 pub mod storage;
 pub mod store;

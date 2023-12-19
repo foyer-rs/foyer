@@ -29,7 +29,6 @@ use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
     code::{CodingError, Key, Value},
-    rate::RateLimiter,
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use futures::future::try_join_all;
@@ -51,10 +50,9 @@ use crate::{
     judge::Judges,
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
-    region::{Region, RegionHeader, RegionId, REGION_MAGIC},
+    region::{Region, RegionHeader, RegionId},
     region_manager::{RegionEpItemAdapter, RegionManager},
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
-    ring::RingBuffer,
     storage::{Storage, StorageWriter},
 };
 
@@ -78,9 +76,6 @@ where
     /// Device configurations.
     pub device_config: D::Config,
 
-    /// `ring_buffer_capacity` will be aligned up to device align.
-    pub ring_buffer_capacity: usize,
-
     /// Catalog indices sharding bits.
     pub catalog_bits: usize,
 
@@ -98,9 +93,6 @@ where
 
     /// Count of reclaimers.
     pub reclaimers: usize,
-
-    /// Flush rate limits.
-    pub reclaim_rate_limit: usize,
 
     /// Clean region count threshold to trigger reclamation.
     ///
@@ -125,14 +117,12 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
-            .field("ring_buffer_capacity", &self.ring_buffer_capacity)
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("flusher_buffer_size", &self.flusher_buffer_size)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
-            .field("reclaim_rate_limit", &self.reclaim_rate_limit)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("compression", &self.compression)
@@ -152,14 +142,12 @@ where
             name: self.name.clone(),
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
-            ring_buffer_capacity: self.ring_buffer_capacity,
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
             flusher_buffer_size: self.flusher_buffer_size,
             flushers: self.flushers,
             reclaimers: self.reclaimers,
-            reclaim_rate_limit: self.reclaim_rate_limit,
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
@@ -204,17 +192,16 @@ where
     EL: Link,
 {
     sequence: AtomicU64,
-    catalog: Arc<Catalog<K>>,
+    catalog: Arc<Catalog<K, V>>,
 
     region_manager: Arc<RegionManager<D, EP, EL>>,
-    ring: Arc<RingBuffer<D::IoBufferAllocator>>,
 
     device: D,
 
     admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
-    flusher_entry_txs: Vec<mpsc::UnboundedSender<Entry>>,
+    flusher_entry_txs: Vec<mpsc::UnboundedSender<Entry<K, V>>>,
     flusher_handles: Mutex<Vec<JoinHandle<()>>>,
     flushers_stop_tx: broadcast::Sender<()>,
 
@@ -244,13 +231,6 @@ where
         let device = D::open(config.device_config).await?;
         assert!(device.regions() >= config.flushers * 2);
 
-        let ring = Arc::new(RingBuffer::with_metrics_in(
-            device.align(),
-            config.ring_buffer_capacity,
-            metrics.clone(),
-            device.io_buffer_allocator().clone(),
-        ));
-
         let region_manager = Arc::new(RegionManager::new(
             device.regions(),
             config.eviction_config,
@@ -267,9 +247,10 @@ where
         let flusher_stop_rxs = (0..config.flushers)
             .map(|_| flushers_stop_tx.subscribe())
             .collect_vec();
+        #[expect(clippy::type_complexity)]
         let (flusher_entry_txs, flusher_entry_rxs): (
-            Vec<mpsc::UnboundedSender<Entry>>,
-            Vec<mpsc::UnboundedReceiver<Entry>>,
+            Vec<mpsc::UnboundedSender<Entry<K, V>>>,
+            Vec<mpsc::UnboundedReceiver<Entry<K, V>>>,
         ) = (0..config.flushers)
             .map(|_| mpsc::unbounded_channel())
             .unzip();
@@ -283,7 +264,6 @@ where
             sequence: AtomicU64::new(0),
             catalog: catalog.clone(),
             region_manager: region_manager.clone(),
-            ring,
             device: device.clone(),
             admissions: config.admissions,
             reinsertions: config.reinsertions,
@@ -316,11 +296,6 @@ where
             reinsertion.init(reinsertion_context.clone());
         }
 
-        let reclaim_rate_limiter = match config.reclaim_rate_limit {
-            0 => None,
-            rate => Some(Arc::new(RateLimiter::new(rate as f64))),
-        };
-
         let flushers = flusher_stop_rxs
             .into_iter()
             .zip_eq(flusher_entry_rxs.into_iter())
@@ -344,7 +319,6 @@ where
                     config.clean_region_threshold,
                     store.clone(),
                     region_manager.clone(),
-                    reclaim_rate_limiter.clone(),
                     metrics.clone(),
                     stop_rx,
                 )
@@ -418,22 +392,16 @@ where
         };
 
         match index {
-            crate::catalog::Index::RingBuffer { view } => {
-                let value = V::read(&view)?;
+            crate::catalog::Index::Inflight { key: _, value } => {
+                let value = value.clone();
 
                 self.inner
                     .metrics
                     .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
 
-                self.inner
-                    .metrics
-                    .op_bytes_lookup
-                    .inc_by(value.serialized_len() as u64);
-
                 Ok(Some(value))
             }
-            // read from region
             crate::catalog::Index::Region { view } => {
                 let region = view.id();
 
@@ -497,7 +465,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn catalog(&self) -> &Arc<Catalog<K>> {
+    pub(crate) fn catalog(&self) -> &Arc<Catalog<K, V>> {
         &self.inner.catalog
     }
 
@@ -556,14 +524,14 @@ where
     async fn recover_region(
         region_id: RegionId,
         region_manager: Arc<RegionManager<D, EP, EL>>,
-        catalog: Arc<Catalog<K>>,
+        catalog: Arc<Catalog<K, V>>,
     ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
         let mut sequence = 0;
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some((key, item)) = iter.next().await? {
                 sequence = std::cmp::max(sequence, *item.sequence());
-                catalog.insert(Arc::new(key), item);
+                catalog.insert(key, item);
             }
             region_manager.eviction_push(region_id);
             Some(sequence)
@@ -610,30 +578,23 @@ where
             admission.on_insert(&key, writer.weight, judge);
         }
 
-        // only write value to ring buffer
-        let len = bits::align_up(self.inner.device.align(), value.serialized_len());
-
         // record aligned header + key + value size for metrics
-        self.inner.metrics.op_bytes_insert.inc_by(bits::align_up(
+        let len = bits::align_up(
             self.inner.device.align(),
             EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
-        ) as u64);
-
-        self.inner
-            .metrics
-            .inner_bytes_ring_buffer_remains
-            .set(self.inner.ring.remains() as i64);
-        let mut view = self.inner.ring.allocate(len, sequence).await;
-        value.write(&mut view)?;
-
-        view.shrink_to(value.serialized_len());
-        let view = view.freeze();
-
-        let key = Arc::new(key);
+        );
+        self.inner.metrics.op_bytes_insert.inc_by(len as u64);
+        self.inner.metrics.insert_entry_bytes.observe(len as f64);
 
         self.inner.catalog.insert(
             key.clone(),
-            Item::new(sequence, Index::RingBuffer { view: view.clone() }),
+            Item::new(
+                sequence,
+                Index::Inflight {
+                    key: key.clone(),
+                    value: value.clone(),
+                },
+            ),
         );
 
         let flusher = sequence as usize % self.inner.flusher_entry_txs.len();
@@ -641,7 +602,7 @@ where
             .send(Entry {
                 sequence,
                 key,
-                view,
+                value,
                 compression: writer.compression,
             })
             .unwrap();
@@ -951,12 +912,9 @@ where
             None => return Ok(None),
         };
 
-        let header = RegionHeader::read(slice.as_ref());
-        drop(slice);
-
-        if header.magic != REGION_MAGIC {
+        let Ok(_) = RegionHeader::read(slice.as_ref()) else {
             return Ok(None);
-        }
+        };
 
         Ok(Some(Self {
             region,
@@ -965,7 +923,7 @@ where
         }))
     }
 
-    pub async fn next(&mut self) -> Result<Option<(K, Item)>> {
+    pub async fn next(&mut self) -> Result<Option<(K, Item<K, V>)>> {
         let region_size = self.region.device().region_size();
         let align = self.region.device().align();
 
@@ -1193,14 +1151,12 @@ mod tests {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions,
             reinsertions,
             flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 1,
-            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
@@ -1245,14 +1201,12 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            ring_buffer_capacity: 16 * MB,
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
             flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 0,
-            reclaim_rate_limit: 0,
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
