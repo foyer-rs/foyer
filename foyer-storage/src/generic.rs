@@ -544,7 +544,7 @@ where
 
     fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D, EP, EL>) {
         for (index, admission) in self.inner.admissions.iter().enumerate() {
-            let judge = admission.judge(&writer.key, writer.weight);
+            let judge = admission.judge(writer.key.as_ref().unwrap(), writer.weight);
             writer.judges.set(index, judge);
         }
         writer.is_judged = true;
@@ -571,7 +571,7 @@ where
         };
 
         writer.is_inserted = true;
-        let key = writer.key;
+        let key = writer.key.take().unwrap();
 
         for (i, admission) in self.inner.admissions.iter().enumerate() {
             let judge = writer.judges.get(i);
@@ -626,7 +626,8 @@ where
     EL: Link,
 {
     store: GenericStore<K, V, D, EP, EL>,
-    key: K,
+    /// `key` is always `Some` before `apply_writer`.
+    key: Option<K>,
     weight: usize,
 
     sequence: Option<Sequence>,
@@ -655,7 +656,7 @@ where
         let compression = store.inner.compression;
         Self {
             store,
-            key,
+            key: Some(key),
             weight,
             sequence: None,
             judges,
@@ -728,45 +729,50 @@ where
     }
 }
 
-// impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
-// where
-//     K: Key,
-//     V: Value,
-//     D: Device,
-//     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-//     EL: Link,
-// {
-//     fn drop(&mut self) {
-//         if !self.is_inserted {
-//             self.store
-//                 .inner
-//                 .metrics
-//                 .op_duration_insert_dropped
-//                 .observe(self.duration.as_secs_f64());
-//             let mut filtered = false;
-//             if self.is_judged {
-//                 for (i, admission) in self.store.inner.admissions.iter().enumerate() {
-//                     let judge = self.judges.get(i);
-//                     admission.on_drop(&self.key, self.weight, &self.store.inner.metrics, judge);
-//                 }
-//                 filtered = !self.judge();
-//             }
-//             if filtered {
-//                 self.store
-//                     .inner
-//                     .metrics
-//                     .op_duration_insert_filtered
-//                     .observe(self.duration.as_secs_f64());
-//             } else {
-//                 self.store
-//                     .inner
-//                     .metrics
-//                     .op_duration_insert_dropped
-//                     .observe(self.duration.as_secs_f64());
-//             }
-//         }
-//     }
-// }
+impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
+where
+    K: Key,
+    V: Value,
+    D: Device,
+    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
+    EL: Link,
+{
+    fn drop(&mut self) {
+        if !self.is_inserted {
+            debug_assert!(self.key.is_some());
+
+            self.store
+                .inner
+                .metrics
+                .op_duration_insert_dropped
+                .observe(self.duration.as_secs_f64());
+
+            // make sure each key after `judge` will call either `on_insert` or `on_drop`.
+            let mut filtered = false;
+            if self.is_judged {
+                filtered = !self.judge();
+                for (i, admission) in self.store.inner.admissions.iter().enumerate() {
+                    let judge = self.judges.get(i);
+                    admission.on_drop(self.key.as_ref().unwrap(), self.weight, judge);
+                }
+            }
+
+            if filtered {
+                self.store
+                    .inner
+                    .metrics
+                    .op_duration_insert_filtered
+                    .observe(self.duration.as_secs_f64());
+            } else {
+                self.store
+                    .inner
+                    .metrics
+                    .op_duration_insert_dropped
+                    .observe(self.duration.as_secs_f64());
+            }
+        }
+    }
+}
 
 const ENTRY_MAGIC: u32 = 0x97_03_27_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
@@ -1028,7 +1034,7 @@ where
     type Value = V;
 
     fn key(&self) -> &Self::Key {
-        &self.key
+        self.key.as_ref().unwrap()
     }
 
     fn weight(&self) -> usize {
