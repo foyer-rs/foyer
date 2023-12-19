@@ -219,6 +219,23 @@ pub trait AsyncStorageExt: Storage {
             }
         });
     }
+
+    fn insert_if_not_exists_async_with_callback<F, FU>(
+        &self,
+        key: Self::Key,
+        value: Self::Value,
+        f: F,
+    ) where
+        F: FnOnce(Result<bool>) -> FU + Send + 'static,
+        FU: Future<Output = ()> + Send + 'static,
+    {
+        let store = self.clone();
+        tokio::spawn(async move {
+            let res = store.insert_if_not_exists(key, value).await;
+            let future = f(res);
+            future.await;
+        });
+    }
 }
 
 impl<S: Storage> AsyncStorageExt for S {}
@@ -307,3 +324,163 @@ pub trait ForceStorageExt: Storage {
 }
 
 impl<S> ForceStorageExt for S where S: Storage {}
+
+#[cfg(test)]
+mod tests {
+    //! storage interface test
+
+    use std::{path::Path, time::Duration};
+
+    use foyer_intrusive::eviction::fifo::FifoConfig;
+
+    use super::*;
+    use crate::{
+        device::fs::FsDeviceConfig,
+        store::{FifoFsStore, FifoFsStoreConfig},
+    };
+
+    const KB: usize = 1024;
+    const MB: usize = 1024 * 1024;
+
+    fn config_for_test(dir: impl AsRef<Path>) -> FifoFsStoreConfig<u64, Vec<u8>> {
+        FifoFsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig,
+            device_config: FsDeviceConfig {
+                dir: dir.as_ref().into(),
+                capacity: 4 * MB,
+                file_capacity: MB,
+                align: 4 * KB,
+                io_size: 4 * KB,
+            },
+            catalog_bits: 1,
+            admissions: vec![],
+            reinsertions: vec![],
+            flusher_buffer_size: 0,
+            flushers: 1,
+            reclaimers: 1,
+            clean_region_threshold: 1,
+            recover_concurrency: 2,
+            compression: Compression::None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_storage() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let config = config_for_test(tempdir.path());
+
+        let storage = FifoFsStore::open(config).await.unwrap();
+        assert!(storage.is_ready());
+
+        assert!(!storage.exists(&1).unwrap());
+
+        let mut writer = storage.writer(1, KB);
+        assert_eq!(writer.key(), &1);
+        assert_eq!(writer.weight(), KB);
+        assert!(writer.judge());
+        assert_eq!(writer.compression(), Compression::None);
+        writer.set_compression(Compression::Lz4);
+        assert_eq!(writer.compression(), Compression::Lz4);
+        writer.force();
+        assert!(writer.finish(vec![b'x'; KB]).await.unwrap());
+
+        assert!(storage.exists(&1).unwrap());
+        assert_eq!(storage.lookup(&1).await.unwrap().unwrap(), vec![b'x'; KB]);
+
+        assert!(storage.remove(&1).unwrap());
+        assert!(!storage.exists(&1).unwrap());
+        assert!(!storage.remove(&1).unwrap());
+
+        storage.clear().unwrap();
+        storage.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_storage_ext() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let config = config_for_test(tempdir.path());
+
+        let storage = FifoFsStore::open(config).await.unwrap();
+
+        assert!(storage.insert(1, vec![b'x'; KB]).await.unwrap());
+        assert!(storage.exists(&1).unwrap());
+
+        assert!(!storage
+            .insert_if_not_exists(1, vec![b'x'; KB])
+            .await
+            .unwrap());
+        assert!(storage
+            .insert_if_not_exists(2, vec![b'x'; KB])
+            .await
+            .unwrap());
+        assert!(storage.exists(&2).unwrap());
+
+        assert!(storage
+            .insert_with(3, || { Ok(vec![b'x'; KB]) }, KB)
+            .await
+            .unwrap());
+        assert!(storage.exists(&3).unwrap());
+
+        assert!(storage
+            .insert_with_future(4, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .await
+            .unwrap());
+        assert!(storage.exists(&4).unwrap());
+
+        assert!(!storage
+            .insert_if_not_exists_with(4, || { Ok(vec![b'x'; KB]) }, KB)
+            .await
+            .unwrap());
+        assert!(storage
+            .insert_if_not_exists_with(5, || { Ok(vec![b'x'; KB]) }, KB)
+            .await
+            .unwrap());
+        assert!(storage.exists(&5).unwrap());
+
+        assert!(!storage
+            .insert_if_not_exists_with_future(5, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .await
+            .unwrap());
+        assert!(storage
+            .insert_if_not_exists_with_future(6, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .await
+            .unwrap());
+        assert!(storage.exists(&6).unwrap());
+    }
+
+    async fn exists_with_retry(
+        storage: &impl Storage<Key = u64, Value = Vec<u8>>,
+        key: &u64,
+    ) -> bool {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        for _ in 0..10 {
+            if storage.exists(key).unwrap() {
+                return true;
+            };
+            tokio::time::sleep(Duration::from_millis(10)).await
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn test_async_storage_ext() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let config = config_for_test(tempdir.path());
+
+        let storage = FifoFsStore::open(config).await.unwrap();
+
+        storage.insert_async(1, vec![b'x'; KB]);
+        assert!(exists_with_retry(&storage, &1).await);
+
+        storage.insert_if_not_exists_async(2, vec![b'x'; KB]);
+        assert!(exists_with_retry(&storage, &2).await);
+
+        storage.insert_if_not_exists_async_with_callback(2, vec![b'x'; KB], |res| async move {
+            assert!(!res.unwrap());
+        });
+        storage.insert_if_not_exists_async_with_callback(3, vec![b'x'; KB], |res| async move {
+            assert!(res.unwrap());
+        });
+    }
+}
