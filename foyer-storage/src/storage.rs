@@ -342,9 +342,10 @@ impl<S> ForceStorageExt for S where S: Storage {}
 mod tests {
     //! storage interface test
 
-    use std::{path::Path, time::Duration};
+    use std::{path::Path, sync::Arc, time::Duration};
 
     use foyer_intrusive::eviction::fifo::FifoConfig;
+    use tokio::sync::Barrier;
 
     use super::*;
     use crate::{
@@ -489,9 +490,13 @@ mod tests {
         storage.insert_if_not_exists_async(2, vec![b'x'; KB]);
         assert!(exists_with_retry(&storage, &2).await);
 
+        let barrier = Arc::new(Barrier::new(2));
+        let b = barrier.clone();
         storage.insert_async_with_callback(3, vec![b'x'; KB], |res| async move {
             assert!(res.unwrap());
+            b.wait().await;
         });
+        barrier.wait().await;
 
         storage.insert_if_not_exists_async_with_callback(3, vec![b'x'; KB], |res| async move {
             assert!(!res.unwrap());
