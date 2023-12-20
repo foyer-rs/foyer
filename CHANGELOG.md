@@ -1,3 +1,16 @@
+## 2023-12-20
+
+| crate | version |
+| - | - |
+| foyer-storage | 0.2.2 |
+
+<details>
+
+- Fix metrics for writer dropping.
+- Add interface `insert_async_with_callback` and `insert_if_not_exists_async_with_callback` for callers to get the insert result.
+
+</details>
+
 ## 2023-12-18
 
 | crate | version |
