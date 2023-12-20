@@ -220,6 +220,19 @@ pub trait AsyncStorageExt: Storage {
         });
     }
 
+    fn insert_async_with_callback<F, FU>(&self, key: Self::Key, value: Self::Value, f: F)
+    where
+        F: FnOnce(Result<bool>) -> FU + Send + 'static,
+        FU: Future<Output = ()> + Send + 'static,
+    {
+        let store = self.clone();
+        tokio::spawn(async move {
+            let res = store.insert(key, value).await;
+            let future = f(res);
+            future.await;
+        });
+    }
+
     fn insert_if_not_exists_async_with_callback<F, FU>(
         &self,
         key: Self::Key,
@@ -476,10 +489,14 @@ mod tests {
         storage.insert_if_not_exists_async(2, vec![b'x'; KB]);
         assert!(exists_with_retry(&storage, &2).await);
 
-        storage.insert_if_not_exists_async_with_callback(2, vec![b'x'; KB], |res| async move {
+        storage.insert_async_with_callback(3, vec![b'x'; KB], |res| async move {
+            assert!(res.unwrap());
+        });
+
+        storage.insert_if_not_exists_async_with_callback(3, vec![b'x'; KB], |res| async move {
             assert!(!res.unwrap());
         });
-        storage.insert_if_not_exists_async_with_callback(3, vec![b'x'; KB], |res| async move {
+        storage.insert_if_not_exists_async_with_callback(4, vec![b'x'; KB], |res| async move {
             assert!(res.unwrap());
         });
     }
