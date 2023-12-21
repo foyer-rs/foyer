@@ -373,8 +373,7 @@ where
 struct Context {
     w_rate: Option<f64>,
     r_rate: Option<f64>,
-    w_index: AtomicU64,
-    r_index: AtomicU64,
+    counts: Vec<AtomicU64>,
     entry_size_range: Range<usize>,
     lookup_range: u64,
     time: u64,
@@ -476,6 +475,11 @@ async fn main() {
     }
 
     println!("{:#?}", args);
+
+    assert!(
+        args.lookup_range > 0,
+        "\"--lookup-range\" value must be greater than 0"
+    );
 
     create_dir_all(&args.dir).unwrap();
 
@@ -633,11 +637,14 @@ async fn bench(
         Some(args.r_rate * 1024.0 * 1024.0)
     };
 
+    let counts = (0..args.writers)
+        .map(|_| AtomicU64::default())
+        .collect_vec();
+
     let context = Arc::new(Context {
         w_rate,
         r_rate,
-        w_index: AtomicU64::new(0),
-        r_index: AtomicU64::new(0),
+        counts,
         entry_size_range: args.entry_size_min..args.entry_size_max + 1,
         time: args.time,
         metrics: metrics.clone(),
@@ -645,7 +652,14 @@ async fn bench(
     });
 
     let w_handles = (0..args.writers)
-        .map(|_| tokio::spawn(write(store.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|id| {
+            tokio::spawn(write(
+                id as u64,
+                store.clone(),
+                context.clone(),
+                stop_tx.subscribe(),
+            ))
+        })
         .collect_vec();
     let r_handles = (0..args.readers)
         .map(|_| tokio::spawn(read(store.clone(), context.clone(), stop_tx.subscribe())))
@@ -656,6 +670,7 @@ async fn bench(
 }
 
 async fn write(
+    id: u64,
     store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
     context: Arc<Context>,
     mut stop: broadcast::Receiver<()>,
@@ -663,6 +678,8 @@ async fn write(
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
+    let step = context.counts.len() as u64;
+    let count = &context.counts[id as usize];
 
     loop {
         match stop.try_recv() {
@@ -673,7 +690,8 @@ async fn write(
             return;
         }
 
-        let idx = context.w_index.fetch_add(1, Ordering::Relaxed);
+        let c = count.load(Ordering::Relaxed);
+        let idx = id + step * c;
         // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(context.entry_size_range.clone());
         let data = Arc::new(text(idx as usize, entry_size));
@@ -684,7 +702,7 @@ async fn write(
         let time = Instant::now();
         let inserted = store.insert(idx, data).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
-        context.r_index.fetch_add(1, Ordering::Relaxed);
+        count.store(c + 1, Ordering::Relaxed);
         if let Err(e) = context.metrics.insert_lats.write().record(lat) {
             tracing::error!("metrics error: {:?}, value: {}", e, lat);
         }
@@ -707,6 +725,7 @@ async fn read(
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
+    let step = context.counts.len() as u64;
 
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -719,10 +738,15 @@ async fn read(
             return;
         }
 
-        let idx_max = context.r_index.load(Ordering::Relaxed);
-        let idx = rng.gen_range(
-            std::cmp::max(idx_max, context.lookup_range) - context.lookup_range..=idx_max,
-        );
+        let w = rng.gen_range(0..step); // pick a writer to read form
+        let c_max = context.counts[w as usize].load(Ordering::Relaxed);
+        if c_max == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            continue;
+        }
+        let c =
+            rng.gen_range(std::cmp::max(c_max, context.lookup_range) - context.lookup_range..c_max);
+        let idx = w + c * step;
 
         let time = Instant::now();
         let res = store.lookup(&idx).await.unwrap();
