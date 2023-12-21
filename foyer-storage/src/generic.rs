@@ -830,7 +830,7 @@ impl EntryHeader {
 ///
 /// # Safety
 ///
-/// `buf.len()` must excatly fit entry size
+/// `buf.len()` must exactly fit entry size
 fn read_entry<K, V>(buf: &[u8]) -> Result<(K, V)>
 where
     K: Key,
