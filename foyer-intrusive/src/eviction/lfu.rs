@@ -139,7 +139,7 @@ where
     /// the window length counter
     window_size: usize,
 
-    /// maxumum value of window length which when hit the counters are halved
+    /// maximum value of window length which when hit the counters are halved
     max_window_size: usize,
 
     /// the capacity for which the counters are sized

@@ -5,6 +5,7 @@ deps:
 	./scripts/install-deps.sh
 
 check:
+	typos
 	shellcheck ./scripts/*
 	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
