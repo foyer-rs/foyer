@@ -370,6 +370,17 @@ where
     }
 }
 
+struct Context {
+    w_rate: Option<f64>,
+    r_rate: Option<f64>,
+    w_index: AtomicU64,
+    r_index: AtomicU64,
+    entry_size_range: Range<usize>,
+    lookup_range: u64,
+    time: u64,
+    metrics: Metrics,
+}
+
 fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
 #[cfg(feature = "tokio-console")]
@@ -622,33 +633,22 @@ async fn bench(
         Some(args.r_rate * 1024.0 * 1024.0)
     };
 
-    let index = Arc::new(AtomicU64::new(0));
+    let context = Arc::new(Context {
+        w_rate,
+        r_rate,
+        w_index: AtomicU64::new(0),
+        r_index: AtomicU64::new(0),
+        entry_size_range: args.entry_size_min..args.entry_size_max + 1,
+        time: args.time,
+        metrics: metrics.clone(),
+        lookup_range: args.lookup_range,
+    });
 
     let w_handles = (0..args.writers)
-        .map(|_| {
-            tokio::spawn(write(
-                args.entry_size_min..args.entry_size_max + 1,
-                w_rate,
-                index.clone(),
-                store.clone(),
-                args.time,
-                metrics.clone(),
-                stop_tx.subscribe(),
-            ))
-        })
+        .map(|_| tokio::spawn(write(store.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
     let r_handles = (0..args.readers)
-        .map(|_| {
-            tokio::spawn(read(
-                r_rate,
-                index.clone(),
-                store.clone(),
-                args.time,
-                metrics.clone(),
-                stop_tx.subscribe(),
-                args.lookup_range,
-            ))
-        })
+        .map(|_| tokio::spawn(read(store.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
 
     join_all(w_handles).await;
@@ -656,30 +656,26 @@ async fn bench(
 }
 
 async fn write(
-    entry_size_range: Range<usize>,
-    rate: Option<f64>,
-    index: Arc<AtomicU64>,
     store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
-    time: u64,
-    metrics: Metrics,
+    context: Arc<Context>,
     mut stop: broadcast::Receiver<()>,
 ) {
     let start = Instant::now();
 
-    let mut limiter = rate.map(RateLimiter::new);
+    let mut limiter = context.w_rate.map(RateLimiter::new);
 
     loop {
         match stop.try_recv() {
             Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
-        if start.elapsed().as_secs() >= time {
+        if start.elapsed().as_secs() >= context.time {
             return;
         }
 
-        let idx = index.fetch_add(1, Ordering::Relaxed);
+        let idx = context.w_index.fetch_add(1, Ordering::Relaxed);
         // TODO(MrCroxx): Use random content?
-        let entry_size = OsRng.gen_range(entry_size_range.clone());
+        let entry_size = OsRng.gen_range(context.entry_size_range.clone());
         let data = Arc::new(text(idx as usize, entry_size));
         if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
             tokio::time::sleep(wait).await;
@@ -688,13 +684,15 @@ async fn write(
         let time = Instant::now();
         let inserted = store.insert(idx, data).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
-        if let Err(e) = metrics.insert_lats.write().record(lat) {
+        context.r_index.fetch_add(1, Ordering::Relaxed);
+        if let Err(e) = context.metrics.insert_lats.write().record(lat) {
             tracing::error!("metrics error: {:?}, value: {}", e, lat);
         }
 
         if inserted {
-            metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-            metrics
+            context.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+            context
+                .metrics
                 .insert_bytes
                 .fetch_add(entry_size, Ordering::Relaxed);
         }
@@ -702,17 +700,13 @@ async fn write(
 }
 
 async fn read(
-    rate: Option<f64>,
-    index: Arc<AtomicU64>,
     store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
-    time: u64,
-    metrics: Metrics,
+    context: Arc<Context>,
     mut stop: broadcast::Receiver<()>,
-    look_up_range: u64,
 ) {
     let start = Instant::now();
 
-    let mut limiter = rate.map(RateLimiter::new);
+    let mut limiter = context.r_rate.map(RateLimiter::new);
 
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -721,12 +715,14 @@ async fn read(
             Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
-        if start.elapsed().as_secs() >= time {
+        if start.elapsed().as_secs() >= context.time {
             return;
         }
 
-        let idx_max = index.load(Ordering::Relaxed);
-        let idx = rng.gen_range(std::cmp::max(idx_max, look_up_range) - look_up_range..=idx_max);
+        let idx_max = context.r_index.load(Ordering::Relaxed);
+        let idx = rng.gen_range(
+            std::cmp::max(idx_max, context.lookup_range) - context.lookup_range..=idx_max,
+        );
 
         let time = Instant::now();
         let res = store.lookup(&idx).await.unwrap();
@@ -735,21 +731,24 @@ async fn read(
         if let Some(buf) = res {
             let entry_size = buf.len();
             assert_eq!(&text(idx as usize, entry_size), buf.as_ref());
-            if let Err(e) = metrics.get_hit_lats.write().record(lat) {
+            if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
-            metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
+            context
+                .metrics
+                .get_bytes
+                .fetch_add(entry_size, Ordering::Relaxed);
 
             if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
                 tokio::time::sleep(wait).await;
             }
         } else {
-            if let Err(e) = metrics.get_miss_lats.write().record(lat) {
+            if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
-            metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
+            context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
-        metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+        context.metrics.get_ios.fetch_add(1, Ordering::Relaxed);
 
         tokio::task::consume_budget().await;
     }
