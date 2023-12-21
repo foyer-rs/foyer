@@ -59,7 +59,7 @@ The write model and the design of storage engine has been switched from CacheLib
 
 Introduces `Store`, `RuntimeStore`, `LazyStore` to simplify usage. In most cases, `RuntimeStore` is preferred to use a dedicated tokio runtime to serve **foyer** to avoid the influence to the user's runtime. If lazy-load is needed, use `RuntimeLazyStore` instead.
 
-The implementation of **foyer** is separated into multiple crates. But importing `foyer` is enought for it re-exports the crates that **foyer**'s user needs.
+The implementation of **foyer** is separated into multiple crates. But importing `foyer` is enough for it re-exports the crates that **foyer**'s user needs.
 
 Brief description about the subcrates:
 
