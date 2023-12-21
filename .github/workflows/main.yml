@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Run typos check
+        uses: crate-ci/typos@master
       - name: Install yq
         run: |
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
@@ -36,8 +38,6 @@ jobs:
       - name: Check if Grafana dashboards are minimized
         run: |
           ./scripts/minimize-dashboards.sh --check
-      - name: Run typos check
-        uses: crate-ci/typos@master
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
   rust-test:
