@@ -29,6 +29,8 @@ jobs:
       - name: Check if Grafana dashboards are minimized
         run: |
           ./scripts/minimize-dashboards.sh --check
+      - name: Run typos check
+        uses: crate-ci/typos@master
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
   rust-test:
