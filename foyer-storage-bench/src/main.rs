@@ -102,9 +102,6 @@ pub struct Args {
     #[arg(long, default_value_t = 64)]
     region_size: usize,
 
-    #[arg(long, default_value_t = 0)]
-    flusher_buffer_size: usize,
-
     #[arg(long, default_value_t = 4)]
     flushers: usize,
 
@@ -544,7 +541,6 @@ async fn main() {
         catalog_bits: args.catalog_bits,
         admissions,
         reinsertions,
-        flusher_buffer_size: args.flusher_buffer_size,
         flushers: args.flushers,
         reclaimers: args.reclaimers,
         recover_concurrency: args.recover_concurrency,

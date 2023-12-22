@@ -12,10 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    marker::PhantomData,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 use foyer_common::code::{Key, Value};
 
@@ -29,7 +26,6 @@ where
     V: Value,
 {
     catalog: OnceLock<Arc<Catalog<K, V>>>,
-    _marker: PhantomData<V>,
 }
 
 impl<K, V> Default for ExistReinsertionPolicy<K, V>
@@ -40,7 +36,6 @@ where
     fn default() -> Self {
         Self {
             catalog: OnceLock::new(),
-            _marker: PhantomData,
         }
     }
 }
