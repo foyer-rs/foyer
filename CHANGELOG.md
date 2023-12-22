@@ -1,3 +1,26 @@
+## 2023-12-22
+
+| crate | version |
+| - | - |
+| foyer | 0.4.0 |
+| foyer-storage | 0.3.0 |
+| foyer-storage-bench | 0.3.0 |
+| foyer-workspace-hack | 0.1.1 |
+
+<details>
+
+### Changes
+
+- Remove config `flusher_buffer_capacity`.
+
+### Fixes
+
+- Fix benchmark tool cache miss ratio.
+
+### 
+
+</details>
+
 ## 2023-12-20
 
 | crate | version |
