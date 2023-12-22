@@ -370,7 +370,6 @@ mod tests {
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
-            flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
