@@ -17,8 +17,6 @@
 
 - Fix benchmark tool cache miss ratio.
 
-### 
-
 </details>
 
 ## 2023-12-20
