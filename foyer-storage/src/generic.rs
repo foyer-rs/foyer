@@ -85,9 +85,6 @@ where
     /// Reinsertion policies.
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 
-    /// Flusher default buffer capacity, must be equals or larger than device io size.
-    pub flusher_buffer_size: usize,
-
     /// Count of flushers.
     pub flushers: usize,
 
@@ -120,7 +117,6 @@ where
             .field("catalog_bits", &self.catalog_bits)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
-            .field("flusher_buffer_size", &self.flusher_buffer_size)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("clean_region_threshold", &self.clean_region_threshold)
@@ -145,7 +141,6 @@ where
             catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
-            flusher_buffer_size: self.flusher_buffer_size,
             flushers: self.flushers,
             reclaimers: self.reclaimers,
             clean_region_threshold: self.clean_region_threshold,
@@ -301,7 +296,6 @@ where
             .zip_eq(flusher_entry_rxs.into_iter())
             .map(|(stop_rx, entry_rx)| {
                 Flusher::new(
-                    config.flusher_buffer_size,
                     region_manager.clone(),
                     catalog.clone(),
                     device.clone(),
@@ -1154,7 +1148,6 @@ mod tests {
             catalog_bits: 1,
             admissions,
             reinsertions,
-            flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 1,
             recover_concurrency: 2,
@@ -1204,7 +1197,6 @@ mod tests {
             catalog_bits: 1,
             admissions: vec![],
             reinsertions: vec![],
-            flusher_buffer_size: 0,
             flushers: 1,
             reclaimers: 0,
             recover_concurrency: 2,

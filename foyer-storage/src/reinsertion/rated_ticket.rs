@@ -14,7 +14,6 @@
 
 use std::{
     fmt::Debug,
-    marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
         OnceLock,
@@ -39,8 +38,6 @@ where
     last: AtomicUsize,
 
     context: OnceLock<ReinsertionContext<K, V>>,
-
-    _marker: PhantomData<(K, V)>,
 }
 
 impl<K, V> RatedTicketReinsertionPolicy<K, V>
@@ -53,7 +50,6 @@ where
             inner: RatedTicket::new(rate as f64),
             last: AtomicUsize::default(),
             context: OnceLock::new(),
-            _marker: PhantomData,
         }
     }
 }

@@ -99,7 +99,6 @@ where
     EL: Link,
 {
     pub fn new(
-        default_buffer_capacity: usize,
         region_manager: Arc<RegionManager<D, EP, EL>>,
         catalog: Arc<Catalog<K, V>>,
         device: D,
@@ -107,7 +106,7 @@ where
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
-        let buffer = FlushBuffer::new(device.clone(), default_buffer_capacity);
+        let buffer = FlushBuffer::new(device.clone());
         Self {
             region_manager,
             catalog,

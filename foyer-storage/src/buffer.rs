@@ -86,8 +86,9 @@ where
     V: Value,
     D: Device,
 {
-    pub fn new(device: D, default_buffer_capacity: usize) -> Self {
-        let default_buffer_capacity = std::cmp::max(default_buffer_capacity, device.io_size());
+    pub fn new(device: D) -> Self {
+        let default_buffer_capacity =
+            align_up(device.align(), device.io_size() + device.io_size() / 2);
         let buffer = device.io_buffer(0, default_buffer_capacity);
         Self {
             buffer,
@@ -343,9 +344,8 @@ mod tests {
         })
         .await
         .unwrap();
-        const DEFAULT_BUFFER_CAPACITY: usize = 32 * 1024;
 
-        let mut buffer = FlushBuffer::new(device.clone(), DEFAULT_BUFFER_CAPACITY);
+        let mut buffer = FlushBuffer::new(device.clone());
         assert_eq!(buffer.region(), None);
 
         const HEADER: usize = EntryHeader::serialized_len();
