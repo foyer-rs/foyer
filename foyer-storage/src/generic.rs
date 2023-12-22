@@ -735,16 +735,9 @@ where
         if !self.is_inserted {
             debug_assert!(self.key.is_some());
 
-            self.store
-                .inner
-                .metrics
-                .op_duration_insert_dropped
-                .observe(self.duration.as_secs_f64());
-
+            let filtered = self.is_judged && !self.judge();
             // make sure each key after `judge` will call either `on_insert` or `on_drop`.
-            let mut filtered = false;
             if self.is_judged {
-                filtered = !self.judge();
                 for (i, admission) in self.store.inner.admissions.iter().enumerate() {
                     let judge = self.judges.get(i);
                     admission.on_drop(self.key.as_ref().unwrap(), self.weight, judge);
