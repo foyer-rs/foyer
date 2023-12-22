@@ -735,12 +735,6 @@ where
         if !self.is_inserted {
             debug_assert!(self.key.is_some());
 
-            self.store
-                .inner
-                .metrics
-                .op_duration_insert_dropped
-                .observe(self.duration.as_secs_f64());
-
             // make sure each key after `judge` will call either `on_insert` or `on_drop`.
             let mut filtered = false;
             if self.is_judged {
