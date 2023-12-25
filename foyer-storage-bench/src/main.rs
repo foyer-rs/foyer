@@ -751,15 +751,24 @@ async fn write(
             let group_cnt = K / G;
             let group_interval = interval.as_secs_f64() * group_cnt as f64;
 
+            if id == 0 {
+                println!("loop interval: {loop_interval:?}, zipf intervals: ");
+            }
+
+            let mut sum = 0;
             let intervals = histogram
                 .values()
                 .copied()
-                .map(|ratio| Duration::from_secs_f64(group_interval / (ratio * K as f64)))
+                .map(|ratio| {
+                    let cnt = ratio * K as f64;
+                    sum += cnt as usize;
+                    let interval = Duration::from_secs_f64(group_interval / cnt);
+                    if id == 0 {
+                        println!("    [{cnt:3.0} ==> {interval:010.3?}]");
+                    }
+                    (sum, interval)
+                })
                 .collect_vec();
-
-            if id == 0 {
-                println!("loop interval: {loop_interval:?}, zipf intervals: {intervals:?}");
-            }
 
             Some(intervals)
         }
@@ -819,8 +828,14 @@ async fn write(
             TimeSeriesDistribution::Zipf { .. } => {
                 store.insert_async_with_callback(idx, data, callback);
                 let intervals = zipf_intervals.as_ref().unwrap();
-                let group = (c as usize % K) / (K / G);
-                tokio::time::sleep(intervals[group].saturating_sub(elapsed)).await;
+
+                let group = match intervals.binary_search_by_key(&(c as usize % K), |(sum, _)| *sum)
+                {
+                    Ok(i) => i,
+                    Err(i) => i.min(G - 1),
+                };
+
+                tokio::time::sleep(intervals[group].1.saturating_sub(elapsed)).await;
             }
         }
 
