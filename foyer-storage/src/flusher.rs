@@ -192,6 +192,10 @@ where
 
     #[tracing::instrument(skip(self))]
     async fn update_catalog(&self, entries: Vec<PositionedEntry<K, V>>) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
         // record fully flushed bytes by the way
         let mut bytes = 0;
 
