@@ -49,6 +49,7 @@ tokio = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.22", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zipf = "7"
 
 [features]
 deadlock = ["parking_lot/deadlock_detection", "foyer-storage/deadlock"]
