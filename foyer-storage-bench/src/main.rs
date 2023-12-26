@@ -953,8 +953,3 @@ fn display_zipf_sample(n: usize, s: f64) {
         );
     }
 }
-
-#[test]
-fn zipf() {
-    display_zipf_sample(1000, 0.5);
-}
