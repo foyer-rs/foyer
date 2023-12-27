@@ -17,7 +17,6 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![expect(clippy::new_without_default)]
-#![cfg_attr(test, expect(clippy::vtable_address_comparisons))]
 
 pub use memoffset::offset_of;
 

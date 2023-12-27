@@ -792,7 +792,9 @@ async fn write(
         // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(context.entry_size_range.clone());
         let data = Arc::new(text(idx as usize, entry_size));
-        if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
+        if let Some(limiter) = &mut limiter
+            && let Some(wait) = limiter.consume(entry_size as f64)
+        {
             tokio::time::sleep(wait).await;
         }
 
@@ -889,7 +891,9 @@ async fn read(
                 .get_bytes
                 .fetch_add(entry_size, Ordering::Relaxed);
 
-            if let Some(limiter) = &mut limiter  && let Some(wait) = limiter.consume(entry_size as f64) {
+            if let Some(limiter) = &mut limiter
+                && let Some(wait) = limiter.consume(entry_size as f64)
+            {
                 tokio::time::sleep(wait).await;
             }
         } else {
