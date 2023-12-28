@@ -1,3 +1,27 @@
+## 2023-12-28
+
+| crate | version |
+| - | - |
+| foyer | 0.5.0 |
+| foyer-common | 0.3.0 |
+| foyer-intrusive | 0.2.0 |
+| foyer-storage | 0.4.0 |
+| foyer-storage-bench | 0.4.0 |
+| foyer-workspace-hack | 0.2.0 |
+
+<details>
+
+### Changes
+
+- Bump rust-toolchain to "nightly-2023-12-26".
+- Introduce time-series distribution args to bench tool. [#253](https://github.com/MrCroxx/foyer/pull/253)
+
+### Fixes
+
+- Fix duplicated insert drop metrics.
+
+</details>
+
 ## 2023-12-22
 
 | crate | version |
