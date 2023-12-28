@@ -4,7 +4,7 @@
 
 [package]
 name = "foyer-workspace-hack"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "workspace-hack package, managed by hakari"
 license = "Apache-2.0"
