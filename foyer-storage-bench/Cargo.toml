@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage-bench"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine bench tool for foyer - the hybrid cache for Rust"
@@ -17,10 +17,10 @@ anyhow = "1"
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
-foyer-common = { version = "0.2", path = "../foyer-common" }
-foyer-intrusive = { version = "0.1", path = "../foyer-intrusive" }
-foyer-storage = { version = "0.3", path = "../foyer-storage" }
-foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
+foyer-common = { version = "0.3", path = "../foyer-common" }
+foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
+foyer-storage = { version = "0.4", path = "../foyer-storage" }
+foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
 futures = "0.3"
 hdrhistogram = "7"
 http-body-util = "0.1"

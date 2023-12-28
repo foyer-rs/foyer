@@ -1,6 +1,6 @@
 [package]
 name = "foyer-common"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "common utils for foyer - the hybrid cache for Rust"
@@ -15,7 +15,7 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 anyhow = "1.0"
 bytes = "1"
-foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
+foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
 itertools = "0.12"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
