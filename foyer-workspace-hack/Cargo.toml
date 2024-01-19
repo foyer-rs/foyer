@@ -17,6 +17,7 @@ publish = true
 
 ### BEGIN HAKARI SECTION
 [dependencies]
+crossbeam-channel = { version = "0.5" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1", default-features = false, features = ["use_std"] }
 futures-channel = { version = "0.3", features = ["sink"] }
@@ -29,7 +30,7 @@ memchr = { version = "2" }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }
-tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 tracing-core = { version = "0.1" }
 
 [build-dependencies]
