@@ -12,47 +12,47 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::backtrace::Backtrace;
+
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
-pub struct DeviceError(Box<DeviceErrorInner>);
+pub struct Error(Box<ErrorInner>);
 
 #[derive(thiserror::Error, Debug)]
-#[error("{source}")]
-struct DeviceErrorInner {
-    source: DeviceErrorKind,
-    // https://github.com/dtolnay/thiserror/issues/204
-    // backtrace: Backtrace,
+#[error("{source:?}")]
+struct ErrorInner {
+    #[from]
+    source: ErrorKind,
+    backtrace: Backtrace,
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum DeviceErrorKind {
+pub enum ErrorKind {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("nix error: {0}")]
-    Nix(#[from] nix::errno::Errno),
     #[error("other error: {0}")]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+    Other(#[from] anyhow::Error),
 }
 
-impl From<std::io::Error> for DeviceError {
+impl From<ErrorKind> for Error {
+    fn from(value: ErrorKind) -> Self {
+        value.into()
+    }
+}
+
+impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         value.into()
     }
 }
 
-impl From<nix::errno::Errno> for DeviceError {
-    fn from(value: nix::errno::Errno) -> Self {
+impl From<anyhow::Error> for Error {
+    fn from(value: anyhow::Error) -> Self {
         value.into()
     }
 }
 
-impl From<String> for DeviceError {
-    fn from(value: String) -> Self {
-        value.into()
-    }
-}
-
-pub type DeviceResult<T> = std::result::Result<T, DeviceError>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
@@ -60,9 +60,6 @@ mod tests {
 
     #[test]
     fn test_error_size() {
-        assert_eq!(
-            std::mem::size_of::<DeviceError>(),
-            std::mem::size_of::<usize>()
-        );
+        assert_eq!(std::mem::size_of::<Error>(), std::mem::size_of::<usize>());
     }
 }
