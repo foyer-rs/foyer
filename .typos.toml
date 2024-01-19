@@ -1,0 +1,8 @@
+[default.extend-words]
+
+[default.extend-identifiers]
+
+[files]
+extend-exclude = [
+    "foyer-workspace-hack/Cargo.toml",
+]
