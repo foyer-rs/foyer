@@ -14,7 +14,7 @@ check:
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets
-	cargo udeps --workspace --exclude foyer-workspace-hack
+	cargo udeps --workspace --exclude foyer-workspace-hack --exclude foyer-experimental
 
 check-all:
 	shellcheck ./scripts/*
@@ -28,7 +28,7 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets
-	cargo udeps --workspace --exclude foyer-workspace-hack
+	cargo udeps --workspace --exclude foyer-workspace-hack --exclude foyer-experimental
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all

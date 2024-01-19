@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "foyer",
     "foyer-common",
+    "foyer-experimental",
     "foyer-intrusive",
     "foyer-memory",
     "foyer-storage",
@@ -18,6 +19,7 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "macros",
     "time",
     "signal",
+    "fs",
 ] }
 
 [patch.crates-io]

@@ -1,0 +1,57 @@
+[package]
+name = "foyer-experimental"
+version = "0.1.0"
+edition = "2021"
+authors = ["MrCroxx <mrcroxx@outlook.com>"]
+description = "experimental components for foyer - the hybrid cache for Rust"
+license = "Apache-2.0"
+repository = "https://github.com/mrcroxx/foyer"
+homepage = "https://github.com/mrcroxx/foyer"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["foyer-workspace-hack"]
+
+[dependencies]
+anyhow = "1.0"
+bitflags = "2.3.1"
+bitmaps = "3.2"
+bitvec = "1"
+bytes = "1"
+casey = "0.4"
+cmsketch = "0.1"
+crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
+foyer-common = { version = "0.2", path = "../foyer-common" }
+foyer-intrusive = { version = "0.1", path = "../foyer-intrusive" }
+foyer-workspace-hack = { version = "0.1", path = "../foyer-workspace-hack" }
+futures = "0.3"
+itertools = "0.12"
+libc = "0.2"
+lz4 = "1.24"
+memoffset = "0.9"
+nix = { version = "0.27", features = ["fs", "mman", "uio"] }
+parking_lot = { version = "0.12", features = ["arc_lock"] }
+paste = "1.0"
+prometheus = "0.13"
+rand = "0.8.5"
+thiserror = "1"
+tokio = { workspace = true }
+tracing = "0.1"
+twox-hash = "1"
+zstd = "0.13"
+
+[dev-dependencies]
+bytesize = "1"
+clap = { version = "4", features = ["derive"] }
+hdrhistogram = "7"
+rand_mt = "4.2.1"
+tempfile = "3"
+
+[features]
+deadlock = ["parking_lot/deadlock_detection"]
+
+[[example]]
+name = "tombstone-log-bench"
+
+[[example]]
+name = "notify"
