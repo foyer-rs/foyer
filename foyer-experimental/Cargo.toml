@@ -39,5 +39,3 @@ deadlock = ["parking_lot/deadlock_detection"]
 [[example]]
 name = "tombstone-log-bench"
 
-[[example]]
-name = "notify"
