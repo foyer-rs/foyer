@@ -28,8 +28,6 @@ struct ErrorInner {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ErrorKind {
-    #[error("nix error: {0}")]
-    Nix(#[from] nix::errno::Errno),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("other error: {0}")]
@@ -38,12 +36,6 @@ pub enum ErrorKind {
 
 impl From<ErrorKind> for Error {
     fn from(value: ErrorKind) -> Self {
-        value.into()
-    }
-}
-
-impl From<nix::errno::Errno> for Error {
-    fn from(value: nix::errno::Errno) -> Self {
         value.into()
     }
 }

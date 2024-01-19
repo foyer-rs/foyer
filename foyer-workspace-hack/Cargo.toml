@@ -4,7 +4,7 @@
 
 [package]
 name = "foyer-workspace-hack"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "workspace-hack package, managed by hakari"
 license = "Apache-2.0"
@@ -38,7 +38,6 @@ cc = { version = "1", default-features = false, features = ["parallel"] }
 either = { version = "1", default-features = false, features = ["use_std"] }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
-syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit-mut"] }
+syn = { version = "2", features = ["extra-traits", "full", "visit-mut"] }
 
 ### END HAKARI SECTION
