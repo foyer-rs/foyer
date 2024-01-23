@@ -4,6 +4,7 @@ members = [
     "foyer",
     "foyer-common",
     "foyer-experimental",
+    "foyer-experimental-bench",
     "foyer-intrusive",
     "foyer-memory",
     "foyer-storage",

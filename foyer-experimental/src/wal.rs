@@ -21,7 +21,7 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::{Buf, BufMut};
@@ -33,6 +33,7 @@ use crate::{
     asyncify,
     buf::{BufExt, BufMutExt},
     error::Result,
+    metrics::Metrics,
 };
 
 pub trait HashValue: Send + Sync + 'static + Eq + std::fmt::Debug {
@@ -105,6 +106,7 @@ impl<H: HashValue> Tombstone<H> {
 pub struct TombstoneLogConfig {
     pub id: usize,
     pub dir: PathBuf,
+    pub metrics: Arc<Metrics>,
 }
 
 #[derive(Debug)]
@@ -122,6 +124,9 @@ struct TombstoneLogInner<H: HashValue> {
 #[derive(Debug)]
 pub struct TombstoneLog<H: HashValue> {
     inner: Arc<TombstoneLogInner<H>>,
+
+    metrics: Arc<Metrics>,
+
     stopped: Arc<AtomicBool>,
     handles: Arc<Mutex<Vec<JoinHandle<Result<()>>>>>,
 }
@@ -130,6 +135,7 @@ impl<H: HashValue> Clone for TombstoneLog<H> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            metrics: self.metrics.clone(),
             stopped: self.stopped.clone(),
             handles: self.handles.clone(),
         }
@@ -155,15 +161,20 @@ impl<H: HashValue> TombstoneLog<H> {
 
         let (task_tx, task_rx) = channel::unbounded();
         let stopped = Arc::new(AtomicBool::new(false));
+        let metrics = config.metrics.clone();
 
         let flusher = TombstoneLogFlusher {
             file,
             inner: inner.clone(),
             task_tx,
+            metrics: metrics.clone(),
             stopped: stopped.clone(),
         };
 
-        let notifier = TombstoneLogFlushNotifier { task_rx };
+        let notifier = TombstoneLogFlushNotifier {
+            task_rx,
+            metrics: metrics.clone(),
+        };
 
         let handles = vec![
             std::thread::spawn(move || flusher.run()),
@@ -173,6 +184,9 @@ impl<H: HashValue> TombstoneLog<H> {
 
         Ok(Self {
             inner,
+
+            metrics,
+
             stopped,
             handles,
         })
@@ -191,22 +205,38 @@ impl<H: HashValue> TombstoneLog<H> {
     }
 
     pub async fn append(&self, tombstone: Tombstone<H>) -> Result<()> {
+        let timer = self.metrics.inner_op_duration_wal_append.start_timer();
+
+        let t = Instant::now();
         let rx = {
             let mut inflights = self.inner.inflights.lock();
             let (tx, rx) = oneshot::channel();
             inflights.push(InflightTombstone { tombstone, tx });
             rx
         };
+        let t = t.elapsed();
+        if t >= Duration::from_micros(1000) {
+            println!("slow lock: {:?}", t);
+        }
         self.inner.condvar.notify_one();
-        rx.await.unwrap()
+        let res = rx.await.unwrap();
+
+        drop(timer);
+
+        res
     }
 }
 
 #[derive(Debug)]
 struct TombstoneLogFlusher<H: HashValue> {
     file: File,
+
     inner: Arc<TombstoneLogInner<H>>,
+
     task_tx: channel::Sender<FlushNotifyTask>,
+
+    metrics: Arc<Metrics>,
+
     stopped: Arc<AtomicBool>,
 }
 
@@ -229,20 +259,17 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
                 std::mem::take(&mut *inflights)
             };
 
-            let now = Instant::now();
+            let timer = self.metrics.inner_op_duration_wal_flush.start_timer();
 
             let mut buffer = Vec::with_capacity(Tombstone::<H>::size() * inflights.len());
             let mut txs = Vec::with_capacity(inflights.len());
-            let ts = inflights.len();
 
-            let write_buffer_start = Instant::now();
             for inflight in inflights {
                 inflight.tombstone.write(&mut buffer);
                 txs.push(inflight.tx);
             }
-            let write_buffer_duration = write_buffer_start.elapsed();
 
-            let write_all_start = Instant::now();
+            let timer_write = self.metrics.inner_op_duration_wal_write.start_timer();
             match self.file.write_all(&buffer) {
                 Ok(()) => {}
                 Err(e) => {
@@ -255,9 +282,10 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
                     continue;
                 }
             }
-            let write_all_duration = write_all_start.elapsed();
+            drop(timer_write);
 
-            let fdatasync_start = Instant::now();
+            let t = Instant::now();
+            let timer_sync = self.metrics.inner_op_duration_wal_sync.start_timer();
             match self.file.sync_data() {
                 Ok(()) => {}
                 Err(e) => {
@@ -270,31 +298,20 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
                     continue;
                 }
             }
-            let fdatasync_duration = fdatasync_start.elapsed();
+            drop(timer_sync);
+            let t = t.elapsed();
+            if t >= Duration::from_micros(1000) {
+                println!("slow sync: {:?}", t);
+            }
 
-            let dispatch_start = Instant::now();
             self.task_tx
                 .send(FlushNotifyTask {
                     txs,
                     io_result: Ok(()),
                 })
                 .unwrap();
-            let dispatch_duration = dispatch_start.elapsed();
 
-            let duration = now.elapsed();
-
-            if duration.as_micros() >= 500 {
-                println!(
-                    "slow: {:?}, write buffer: {:?}, write all: {:?}, fdatasync: {:?}, dispatch: {:?}, ts: {:?}, buffer size: {:.3}KB",
-                    duration,
-                    write_buffer_duration,
-                    write_all_duration,
-                    fdatasync_duration,
-                    dispatch_duration,
-                    ts,
-                    buffer.len() as f64 / 4096.0,
-                );
-            }
+            drop(timer);
         }
     }
 }
@@ -308,11 +325,14 @@ struct FlushNotifyTask {
 #[derive(Debug)]
 struct TombstoneLogFlushNotifier {
     task_rx: channel::Receiver<FlushNotifyTask>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl TombstoneLogFlushNotifier {
     fn run(self) -> Result<()> {
         while let Ok(task) = self.task_rx.recv() {
+            let timer = self.metrics.inner_op_duration_wal_notify.start_timer();
             for tx in task.txs {
                 let res = match &task.io_result {
                     Ok(()) => Ok(()),
@@ -320,6 +340,7 @@ impl TombstoneLogFlushNotifier {
                 };
                 tx.send(res).unwrap();
             }
+            drop(timer);
         }
         Ok(())
     }
