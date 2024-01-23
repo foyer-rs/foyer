@@ -334,6 +334,3 @@ impl TombstoneLogFlushNotifier {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {}

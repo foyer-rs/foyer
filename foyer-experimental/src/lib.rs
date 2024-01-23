@@ -20,6 +20,7 @@
 pub mod buf;
 pub mod error;
 pub mod metrics;
+pub mod notify;
 pub mod wal;
 
 #[cfg(not(madsim))]
