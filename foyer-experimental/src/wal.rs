@@ -21,7 +21,6 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
 };
 
 use bytes::{Buf, BufMut};
@@ -207,17 +206,12 @@ impl<H: HashValue> TombstoneLog<H> {
     pub async fn append(&self, tombstone: Tombstone<H>) -> Result<()> {
         let timer = self.metrics.inner_op_duration_wal_append.start_timer();
 
-        let t = Instant::now();
         let rx = {
             let mut inflights = self.inner.inflights.lock();
             let (tx, rx) = oneshot::channel();
             inflights.push(InflightTombstone { tombstone, tx });
             rx
         };
-        let t = t.elapsed();
-        if t >= Duration::from_micros(1000) {
-            println!("slow lock: {:?}", t);
-        }
         self.inner.condvar.notify_one();
         let res = rx.await.unwrap();
 
@@ -284,7 +278,6 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
             }
             drop(timer_write);
 
-            let t = Instant::now();
             let timer_sync = self.metrics.inner_op_duration_wal_sync.start_timer();
             match self.file.sync_data() {
                 Ok(()) => {}
@@ -299,10 +292,6 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
                 }
             }
             drop(timer_sync);
-            let t = t.elapsed();
-            if t >= Duration::from_micros(1000) {
-                println!("slow sync: {:?}", t);
-            }
 
             self.task_tx
                 .send(FlushNotifyTask {

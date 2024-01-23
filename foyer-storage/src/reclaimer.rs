@@ -119,7 +119,6 @@ where
         {
             // only each `indices` holds one ref
             while region.refs().load(Ordering::SeqCst) > indices.len() {
-                println!("refs: {}", region.refs().load(Ordering::SeqCst));
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
