@@ -12,32 +12,17 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(cfg_match)]
-#![feature(lint_reasons)]
-#![feature(error_generic_member_access)]
-#![feature(lazy_cell)]
+const TEXT: &[u8] = include_bytes!("../etc/sample.txt");
 
-pub mod buf;
-pub mod error;
-pub mod metrics;
-pub mod wal;
-
-#[cfg(not(madsim))]
-#[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(f).await.unwrap()
-}
-
-#[cfg(madsim)]
-#[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    f()
+pub fn text(offset: usize, len: usize) -> Vec<u8> {
+    let mut res = Vec::with_capacity(len);
+    let mut cursor = offset % TEXT.len();
+    let mut remain = len;
+    while remain > 0 {
+        let bytes = std::cmp::min(remain, TEXT.len() - cursor);
+        res.extend(&TEXT[cursor..cursor + bytes]);
+        cursor = (cursor + bytes) % TEXT.len();
+        remain -= bytes;
+    }
+    res
 }

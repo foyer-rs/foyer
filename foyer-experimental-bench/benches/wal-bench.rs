@@ -13,13 +13,18 @@
 //  limitations under the License.
 
 use std::{
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clap::Parser;
 use foyer_common::runtime::BackgroundShutdownRuntime;
-use foyer_experimental::tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig};
+use foyer_experimental::{
+    metrics::METRICS,
+    wal::{Tombstone, TombstoneLog, TombstoneLogConfig},
+};
+use foyer_experimental_bench::{export::MetricsExporter, init_logger, io_monitor, IoMonitorConfig};
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -35,13 +40,34 @@ pub struct Args {
     concurrency: usize,
 
     /// time (s)
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 60)]
     time: usize,
+
+    /// (s)
+    #[arg(long, default_value_t = 2)]
+    report_interval: u64,
+
+    #[arg(long, default_value_t = false)]
+    metrics: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    println!("{:#?}", args);
+
+    init_logger();
+
+    if args.metrics {
+        MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
+    }
+
+    let guard = io_monitor(IoMonitorConfig {
+        dir: PathBuf::from(&args.dir),
+        interval: Duration::from_secs(args.report_interval),
+        total_secs: args.time,
+    });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -53,6 +79,7 @@ async fn main() {
     let config = TombstoneLogConfig {
         id: 0,
         dir: args.dir.clone().into(),
+        metrics: Arc::new(METRICS.metrics("wal-bench")),
     };
     let log = TombstoneLog::open(config).await.unwrap();
 
@@ -71,7 +98,7 @@ async fn main() {
         handle.await.unwrap();
     }
 
-    println!("Bench finishes.");
+    drop(guard);
 
     log.close().await.unwrap();
 }
@@ -91,8 +118,6 @@ async fn write(log: TombstoneLog<u64>, args: Args, rt: Arc<BackgroundShutdownRun
             return;
         }
 
-        // let now = Instant::now();
-
         let tombstone = Tombstone::new(rng.gen(), rng.gen());
         log = rt
             .spawn(async move {
@@ -101,11 +126,5 @@ async fn write(log: TombstoneLog<u64>, args: Args, rt: Arc<BackgroundShutdownRun
             })
             .await
             .unwrap();
-
-        // let duration = now.elapsed();
-
-        // if duration.as_micros() >= 1000 {
-        //     println!("slow: {:?}", duration);
-        // }
     }
 }
