@@ -27,6 +27,7 @@ use std::{
 
 use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
+use handle::BaseHandle;
 use hashbrown::{hash_table::Entry, HashTable};
 use parking_lot::Mutex;
 
@@ -38,49 +39,11 @@ pub trait Handle: Send + Sync + 'static {
     type K: Key;
     type V: Value;
 
-    /// Create a uninited handle.
     fn new() -> Self;
-
-    /// Init handle with args.
     fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize);
-    /// Take key and value from the handle and reset it to the uninited state.
-    fn take(&mut self) -> (Self::K, Self::V);
-    /// Return `true` if the handle is inited.
-    fn is_inited(&self) -> bool;
 
-    /// Get key hash.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the handle is uninited.
-    fn hash(&self) -> u64;
-    /// Get key reference.
-    ///  
-    /// # Panics
-    ///
-    /// Panics if the handle is uninited.
-    fn key(&self) -> &Self::K;
-    /// Get value reference.
-    ///  
-    /// # Panics
-    ///
-    /// Panics if the handle is uninited.
-    fn value(&self) -> &Self::V;
-    /// Get the charge of the handle.
-    fn charge(&self) -> usize;
-
-    /// Increase the external reference count of the handle, returns the new reference count.
-    fn inc_ref(&mut self) -> usize;
-    /// Decrease the external reference count of the handle, returns the new reference count.
-    fn dec_ref(&mut self) -> usize;
-    /// Get the external reference count of the handle.
-    fn refs(&self) -> usize;
-
-    fn set_in_cache(&mut self, in_cache: bool);
-    fn is_in_cache(&self) -> bool;
-
-    fn set_in_eviction(&mut self, in_eviction: bool);
-    fn is_in_eviction(&self) -> bool;
+    fn base(&self) -> &BaseHandle<Self::K, Self::V>;
+    fn base_mut(&self) -> &mut BaseHandle<Self::K, Self::V>;
 }
 
 pub trait HandleAdapter: Send + Sync + 'static {
@@ -130,21 +93,21 @@ where
     type H = H;
 
     unsafe fn insert(&mut self, mut ptr: NonNull<Self::H>) -> Option<NonNull<Self::H>> {
-        let handle = ptr.as_mut();
+        let base = ptr.as_mut().base_mut();
 
-        debug_assert!(!handle.is_in_cache());
-        handle.set_in_cache(true);
+        debug_assert!(!base.is_in_cache());
+        base.set_in_cache(true);
 
         match self.table.entry(
-            handle.hash(),
-            |p| p.as_ref().key() == handle.key(),
-            |p| p.as_ref().hash(),
+            base.hash(),
+            |p| p.as_ref().base().key() == base.key(),
+            |p| p.as_ref().base().hash(),
         ) {
             Entry::Occupied(mut o) => {
                 std::mem::swap(o.get_mut(), &mut ptr);
-                let h = ptr.as_mut();
-                debug_assert!(!h.is_in_cache());
-                h.set_in_cache(false);
+                let b = ptr.as_mut().base_mut();
+                debug_assert!(!b.is_in_cache());
+                b.set_in_cache(false);
                 Some(ptr)
             }
             Entry::Vacant(v) => {
@@ -155,20 +118,23 @@ where
     }
 
     unsafe fn get(&self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>> {
-        self.table.find(hash, |p| p.as_ref().key() == key).copied()
+        self.table
+            .find(hash, |p| p.as_ref().base().key() == key)
+            .copied()
     }
 
     unsafe fn remove(&mut self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>> {
-        match self
-            .table
-            .entry(hash, |p| p.as_ref().key() == key, |p| p.as_ref().hash())
-        {
+        match self.table.entry(
+            hash,
+            |p| p.as_ref().base().key() == key,
+            |p| p.as_ref().base().hash(),
+        ) {
             Entry::Occupied(o) => {
-                let (mut ptr, _) = o.remove();
-                let handle = ptr.as_mut();
-                debug_assert!(handle.is_in_cache());
-                handle.set_in_cache(false);
-                Some(ptr)
+                let (mut p, _) = o.remove();
+                let b = p.as_mut().base_mut();
+                debug_assert!(b.is_in_cache());
+                b.set_in_cache(false);
+                Some(p)
             }
             Entry::Vacant(_) => None,
         }
@@ -235,7 +201,7 @@ where
 
         if let Some(old) = self.indexer.insert(ptr) {
             // There is no external refs of this handle, it MUST be in the eviction collection.
-            if old.as_ref().refs() == 0 {
+            if old.as_ref().base().refs() == 0 {
                 self.eviciton.remove(old);
                 let (key, value) = self.clear_handle(old);
                 last_reference_items.push((key, value));
@@ -243,7 +209,7 @@ where
         }
 
         self.usage.fetch_add(charge, Ordering::Relaxed);
-        ptr.as_mut().inc_ref();
+        ptr.as_mut().base_mut().inc_ref();
 
         ptr
     }
@@ -252,26 +218,26 @@ where
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn release(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
-        let handle = ptr.as_mut();
+        let base = ptr.as_mut().base_mut();
 
-        debug_assert!(!handle.is_in_eviction());
+        debug_assert!(!base.is_in_eviction());
 
-        if handle.dec_ref() > 0 {
+        if base.dec_ref() > 0 {
             // Do nothing if the handle is still referenced externally.
             return None;
         }
 
         // Keep the handle in eviction if it is still in the cache and the cache is not over-sized.
-        if handle.is_in_cache() {
+        if base.is_in_cache() {
             if self.usage.load(Ordering::Relaxed) <= self.capacity {
                 self.eviciton.push(ptr);
                 return None;
             }
             // Emergency remove the handle if there is no space in cache.
-            self.indexer.remove(handle.hash(), handle.key());
+            self.indexer.remove(base.hash(), base.key());
         }
 
-        debug_assert!(!handle.is_in_eviction());
+        debug_assert!(!base.is_in_eviction());
 
         let (key, value) = self.clear_handle(ptr);
         Some((key, value))
@@ -279,13 +245,13 @@ where
 
     unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
         let mut ptr = self.indexer.get(hash, key)?;
-        let handle = ptr.as_mut();
+        let base = ptr.as_mut().base_mut();
 
         // If the handle previously has no reference, it must exist in eviction, remove it.
-        if handle.refs() == 0 {
+        if base.refs() == 0 {
             self.eviciton.remove(ptr);
         }
-        handle.inc_ref();
+        base.inc_ref();
 
         Some(ptr)
     }
@@ -295,9 +261,9 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
         let mut ptr = self.indexer.remove(hash, key)?;
-        let handle = ptr.as_mut();
+        let base = ptr.as_mut().base_mut();
 
-        if handle.refs() == 0 {
+        if base.refs() == 0 {
             self.eviciton.remove(ptr);
             let (key, value) = self.clear_handle(ptr);
             return Some((key, value));
@@ -318,8 +284,8 @@ where
     unsafe fn clear(&mut self) {
         let ptrs = self.eviciton.clear();
         for mut ptr in ptrs {
-            let handle = ptr.as_mut();
-            let p = self.indexer.remove(handle.hash(), handle.key()).unwrap();
+            let base = ptr.as_mut().base_mut();
+            let p = self.indexer.remove(base.hash(), base.key()).unwrap();
             debug_assert_eq!(ptr, p);
             self.clear_handle(ptr);
         }
@@ -330,8 +296,8 @@ where
             && !self.eviciton.is_empty()
         {
             let evicted = self.eviciton.pop();
-            self.indexer
-                .remove(evicted.as_ref().hash(), evicted.as_ref().key());
+            let base = evicted.as_ref().base();
+            self.indexer.remove(base.hash(), base.key());
             let (key, value) = self.clear_handle(evicted);
             last_reference_items.push((key, value));
         }
@@ -339,16 +305,15 @@ where
 
     /// Clear a currently used handle and recycle it if possible.
     unsafe fn clear_handle(&self, mut ptr: NonNull<H>) -> (K, V) {
-        let handle = ptr.as_mut();
+        let base = ptr.as_mut().base_mut();
 
-        debug_assert!(handle.is_inited());
-        debug_assert!(!handle.is_in_cache());
-        debug_assert!(!handle.is_in_eviction());
-        debug_assert_eq!(handle.refs(), 0);
+        debug_assert!(base.is_inited());
+        debug_assert!(!base.is_in_cache());
+        debug_assert!(!base.is_in_eviction());
+        debug_assert_eq!(base.refs(), 0);
 
-        let charge = ptr.as_ref().charge();
-        self.usage.fetch_sub(charge, Ordering::Relaxed);
-        let (key, value) = handle.take();
+        self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
+        let (key, value) = base.take();
 
         let handle = Box::from_raw(ptr.as_ptr());
         let _ = self.object_pool.push(handle);
@@ -447,8 +412,8 @@ where
 
     unsafe fn release(&self, ptr: NonNull<H>) {
         let kv = {
-            let handle = ptr.as_ref();
-            let mut shard = self.shards[handle.hash() as usize % self.shards.len()].lock();
+            let base = ptr.as_ref().base();
+            let mut shard = self.shards[base.hash() as usize % self.shards.len()].lock();
             shard.release(ptr)
         };
 
@@ -497,7 +462,7 @@ where
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.ptr.as_ref().value() }
+        unsafe { self.ptr.as_ref().base().value() }
     }
 }
 

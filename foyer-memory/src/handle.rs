@@ -14,7 +14,7 @@
 
 use bitflags::bitflags;
 
-use crate::{Handle, Key, Value};
+use crate::{Key, Value};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -37,16 +37,14 @@ where
     flags: BaseHandleFlags,
 }
 
-impl<K, V> Handle for BaseHandle<K, V>
+impl<K, V> BaseHandle<K, V>
 where
     K: Key,
     V: Value,
 {
-    type K = K;
-    type V = V;
-
+    /// Create a uninited handle.
     #[inline(always)]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             kv: None,
             hash: 0,
@@ -56,8 +54,9 @@ where
         }
     }
 
+    /// Init handle with args.
     #[inline(always)]
-    fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize) {
+    pub fn init(&mut self, hash: u64, key: K, value: V, charge: usize) {
         debug_assert!(self.kv.is_none());
         self.hash = hash;
         self.kv = Some((key, value));
@@ -66,58 +65,79 @@ where
         self.flags = BaseHandleFlags::empty();
     }
 
+    /// Take key and value from the handle and reset it to the uninited state.
     #[inline(always)]
-    fn take(&mut self) -> (Self::K, Self::V) {
+    pub fn take(&mut self) -> (K, V) {
         debug_assert!(self.kv.is_some());
         unsafe { self.kv.take().unwrap_unchecked() }
     }
 
+    /// Return `true` if the handle is inited.
     #[inline(always)]
-    fn is_inited(&self) -> bool {
+    pub fn is_inited(&self) -> bool {
         self.kv.is_some()
     }
 
+    /// Get key hash.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the handle is uninited.
     #[inline(always)]
-    fn hash(&self) -> u64 {
+    pub fn hash(&self) -> u64 {
         self.hash
     }
 
+    /// Get key reference.
+    ///  
+    /// # Panics
+    ///
+    /// Panics if the handle is uninited.
     #[inline(always)]
-    fn key(&self) -> &Self::K {
+    pub fn key(&self) -> &K {
         debug_assert!(self.kv.is_some());
         unsafe { self.kv.as_ref().map(|kv| &kv.0).unwrap_unchecked() }
     }
 
+    /// Get value reference.
+    ///  
+    /// # Panics
+    ///
+    /// Panics if the handle is uninited.
     #[inline(always)]
-    fn value(&self) -> &Self::V {
+    pub fn value(&self) -> &V {
         debug_assert!(self.kv.is_some());
         unsafe { self.kv.as_ref().map(|kv| &kv.1).unwrap_unchecked() }
     }
 
+    /// Get the charge of the handle.
     #[inline(always)]
-    fn charge(&self) -> usize {
+    pub fn charge(&self) -> usize {
         self.charge
     }
 
+    /// Increase the external reference count of the handle, returns the new reference count.
     #[inline(always)]
-    fn inc_ref(&mut self) -> usize {
+    pub fn inc_ref(&mut self) -> usize {
         self.refs += 1;
         self.refs
     }
 
+    /// Decrease the external reference count of the handle, returns the new reference count.
     #[inline(always)]
-    fn dec_ref(&mut self) -> usize {
+    pub fn dec_ref(&mut self) -> usize {
         self.refs -= 1;
         self.refs
     }
 
+    /// Get the external reference count of the handle.
     #[inline(always)]
-    fn refs(&self) -> usize {
+    pub fn refs(&self) -> usize {
         self.refs
     }
 
     #[inline(always)]
-    fn set_in_cache(&mut self, in_cache: bool) {
+    pub fn set_in_cache(&mut self, in_cache: bool) {
         if in_cache {
             self.flags |= BaseHandleFlags::IN_CACHE;
         } else {
@@ -126,12 +146,12 @@ where
     }
 
     #[inline(always)]
-    fn is_in_cache(&self) -> bool {
+    pub fn is_in_cache(&self) -> bool {
         !(self.flags & BaseHandleFlags::IN_CACHE).is_empty()
     }
 
     #[inline(always)]
-    fn set_in_eviction(&mut self, in_eviction: bool) {
+    pub fn set_in_eviction(&mut self, in_eviction: bool) {
         if in_eviction {
             self.flags |= BaseHandleFlags::IN_EVICTION;
         } else {
@@ -140,7 +160,7 @@ where
     }
 
     #[inline(always)]
-    fn is_in_eviction(&self) -> bool {
+    pub fn is_in_eviction(&self) -> bool {
         !(self.flags & BaseHandleFlags::IN_EVICTION).is_empty()
     }
 }
