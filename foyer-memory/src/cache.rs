@@ -236,6 +236,8 @@ where
         }
         base.inc_ref();
 
+        self.eviciton.access(ptr);
+
         Some(ptr)
     }
 
