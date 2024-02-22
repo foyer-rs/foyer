@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub mod v2;
+
 use std::{hash::Hasher, sync::Arc};
 
 use foyer_common::code::{Key, Value};

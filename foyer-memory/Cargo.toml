@@ -25,6 +25,10 @@ paste = "1.0"
 rand = "0.8.5"
 tracing = "0.1"
 twox-hash = "1"
+bitflags = "2"
+hashbrown = "0.14"
+ahash = "0.8"
+crossbeam = "0.8"
 
 [dev-dependencies]
 bytesize = "1"
