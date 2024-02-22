@@ -17,6 +17,7 @@ publish = true
 
 ### BEGIN HAKARI SECTION
 [dependencies]
+ahash = { version = "0.8" }
 crossbeam-channel = { version = "0.5" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1", default-features = false, features = ["use_std"] }
@@ -25,11 +26,15 @@ futures-core = { version = "0.3" }
 futures-executor = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await-macro", "channel", "io", "sink"] }
+getrandom = { version = "0.2", default-features = false, features = ["std"] }
+hashbrown = { version = "0.14", features = ["raw"] }
 libc = { version = "0.2", features = ["extra_traits"] }
+lock_api = { version = "0.4", features = ["arc_lock"] }
 memchr = { version = "2" }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }
+rand_core = { version = "0.6", default-features = false, features = ["std"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 tracing-core = { version = "0.1" }
 

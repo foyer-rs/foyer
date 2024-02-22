@@ -37,6 +37,16 @@ where
     flags: BaseHandleFlags,
 }
 
+impl<K, V> Default for BaseHandle<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V> BaseHandle<K, V>
 where
     K: Key,

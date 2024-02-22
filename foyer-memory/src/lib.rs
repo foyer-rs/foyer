@@ -12,6 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#![feature(let_chains)]
+#![feature(lint_reasons)]
+
 pub mod eviction;
 pub mod handle;
 
@@ -32,8 +35,10 @@ use hashbrown::{hash_table::Entry, HashTable};
 use parking_lot::Mutex;
 
 pub trait Key: Send + Sync + 'static + Hash + Eq + Ord {}
-
 pub trait Value: Send + Sync + 'static {}
+
+impl<T: Send + Sync + 'static + Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static> Value for T {}
 
 pub trait Handle: Send + Sync + 'static {
     type K: Key;
@@ -43,16 +48,10 @@ pub trait Handle: Send + Sync + 'static {
     fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize);
 
     fn base(&self) -> &BaseHandle<Self::K, Self::V>;
-    fn base_mut(&self) -> &mut BaseHandle<Self::K, Self::V>;
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::K, Self::V>;
 }
 
-pub trait HandleAdapter: Send + Sync + 'static {
-    type H: Handle;
-
-    fn handle(&self) -> &Self::H;
-    fn handle_mut(&mut self) -> &mut Self::H;
-}
-
+#[expect(clippy::missing_safety_doc)]
 pub trait Indexer: Send + Sync + 'static {
     type K: Key;
     type H: Handle<K = Self::K>;
@@ -148,8 +147,8 @@ pub trait Eviction: Send + Sync + 'static {
     type H: Handle;
 
     fn push(&mut self, ptr: NonNull<Self::H>);
-    fn pop(&mut self) -> NonNull<Self::H>;
-    fn peek(&self) -> NonNull<Self::H>;
+    fn pop(&mut self) -> Option<NonNull<Self::H>>;
+    fn peek(&self) -> Option<NonNull<Self::H>>;
     fn access(&mut self, ptr: NonNull<Self::H>);
     fn remove(&mut self, ptr: NonNull<Self::H>);
     fn clear(&mut self) -> Vec<NonNull<Self::H>>;
@@ -276,7 +275,7 @@ where
     ///
     /// # Safety
     ///
-    /// This method is safe only if there is no entry referenced externaly.
+    /// This method is safe only if there is no entry referenced externally.
     ///
     /// # Panics
     ///
@@ -293,9 +292,8 @@ where
 
     unsafe fn evict(&mut self, charge: usize, last_reference_items: &mut Vec<(K, V)>) {
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
-            && !self.eviciton.is_empty()
+            && let Some(evicted) = self.eviciton.pop()
         {
-            let evicted = self.eviciton.pop();
             let base = evicted.as_ref().base();
             self.indexer.remove(base.hash(), base.key());
             let (key, value) = self.clear_handle(evicted);
@@ -337,6 +335,7 @@ where
     }
 }
 
+#[expect(clippy::type_complexity)]
 pub struct Cache<K, V, H, E, I, S = RandomState>
 where
     K: Key,
@@ -489,10 +488,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    use self::eviction::fifo::{Fifo, FifoHandle};
     use super::*;
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
     #[test]
-    fn test_send_sync_static() {}
+    fn test_send_sync_static() {
+        is_send_sync_static::<
+            Cache<
+                u64,
+                u64,
+                FifoHandle<u64, u64>,
+                Fifo<u64, u64>,
+                HashTableIndexer<u64, FifoHandle<u64, u64>>,
+            >,
+        >()
+    }
 }
