@@ -26,6 +26,7 @@ parking_lot = "0.12"
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 hdrhistogram = "7"
+rand = "0.8"
 rand_mt = "4.2.1"
 tempfile = "3"
 

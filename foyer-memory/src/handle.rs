@@ -174,3 +174,25 @@ where
         !(self.flags & BaseHandleFlags::IN_EVICTION).is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base_handle_basic() {
+        let mut h = BaseHandle::<(), ()>::new();
+        assert!(!h.is_in_cache());
+        assert!(!h.is_in_eviction());
+
+        h.set_in_cache(true);
+        h.set_in_eviction(true);
+        assert!(h.is_in_cache());
+        assert!(h.is_in_eviction());
+
+        h.set_in_cache(false);
+        h.set_in_eviction(false);
+        assert!(!h.is_in_cache());
+        assert!(!h.is_in_eviction());
+    }
+}

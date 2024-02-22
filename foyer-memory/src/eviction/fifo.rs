@@ -67,6 +67,13 @@ where
     V: Value,
 {
     type H = FifoHandle<K, V>;
+    type C = ();
+
+    fn new(_: Self::C) -> Self {
+        Self {
+            queue: VecDeque::default(),
+        }
+    }
 
     fn push(&mut self, ptr: NonNull<Self::H>) {
         self.queue.push_back(ptr);

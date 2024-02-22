@@ -32,6 +32,7 @@ use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
 use handle::BaseHandle;
 use hashbrown::{hash_table::Entry, HashTable};
+use itertools::Itertools;
 use parking_lot::Mutex;
 
 pub trait Key: Send + Sync + 'static + Hash + Eq + Ord {}
@@ -56,6 +57,7 @@ pub trait Indexer: Send + Sync + 'static {
     type K: Key;
     type H: Handle<K = Self::K>;
 
+    fn new() -> Self;
     unsafe fn insert(&mut self, handle: NonNull<Self::H>) -> Option<NonNull<Self::H>>;
     unsafe fn get(&self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>>;
     unsafe fn remove(&mut self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>>;
@@ -90,6 +92,12 @@ where
 {
     type K = K;
     type H = H;
+
+    fn new() -> Self {
+        Self {
+            table: HashTable::new(),
+        }
+    }
 
     unsafe fn insert(&mut self, mut ptr: NonNull<Self::H>) -> Option<NonNull<Self::H>> {
         let base = ptr.as_mut().base_mut();
@@ -145,7 +153,9 @@ where
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
     type H: Handle;
+    type C: Clone;
 
+    fn new(config: Self::C) -> Self;
     fn push(&mut self, ptr: NonNull<Self::H>);
     fn pop(&mut self) -> Option<NonNull<Self::H>>;
     fn peek(&self) -> Option<NonNull<Self::H>>;
@@ -166,9 +176,7 @@ where
     indexer: I,
     eviciton: E,
 
-    /// The total cache capacity.
     capacity: usize,
-    /// The total cache usage, shared by all shards.
     usage: Arc<AtomicUsize>,
 
     /// The object pool to avoid frequent handle allocating, shared by all shards.
@@ -183,6 +191,21 @@ where
     E: Eviction<H = H>,
     I: Indexer<K = K, H = H>,
 {
+    fn new(
+        capacity: usize,
+        usage: Arc<AtomicUsize>,
+        eviction_config: E::C,
+        object_pool: Arc<ArrayQueue<Box<H>>>,
+    ) -> Self {
+        Self {
+            indexer: I::new(),
+            eviciton: E::new(eviction_config),
+            capacity,
+            usage,
+            object_pool,
+        }
+    }
+
     /// Insert a new entry into the cache. The handle for the new entry is returned.
     unsafe fn insert(
         &mut self,
@@ -335,6 +358,21 @@ where
     }
 }
 
+pub struct CacheConfig<K, V, H, E, S = RandomState>
+where
+    K: Key,
+    V: Value,
+    H: Handle<K = K, V = V>,
+    E: Eviction<H = H>,
+    S: BuildHasher,
+{
+    pub capacity: usize,
+    pub shards: usize,
+    pub eviction_config: E::C,
+    pub object_pool_capacity: usize,
+    pub hash_builder: S,
+}
+
 #[expect(clippy::type_complexity)]
 pub struct Cache<K, V, H, E, I, S = RandomState>
 where
@@ -347,8 +385,12 @@ where
 {
     shards: Vec<Mutex<CacheShard<K, V, H, E, I>>>,
 
+    capacity: usize,
+    usages: Vec<Arc<AtomicUsize>>,
+
     hash_builder: S,
 }
+
 impl<K, V, H, E, I, S> Cache<K, V, H, E, I, S>
 where
     K: Key,
@@ -358,6 +400,32 @@ where
     I: Indexer<K = K, H = H>,
     S: BuildHasher,
 {
+    pub fn new(config: CacheConfig<K, V, H, E, S>) -> Self {
+        let usages = (0..config.shards)
+            .map(|_| Arc::new(AtomicUsize::new(0)))
+            .collect_vec();
+        let object_pool = Arc::new(ArrayQueue::new(config.object_pool_capacity));
+        let shards = usages
+            .iter()
+            .map(|usage| {
+                CacheShard::new(
+                    config.capacity / config.shards,
+                    usage.clone(),
+                    config.eviction_config.clone(),
+                    object_pool.clone(),
+                )
+            })
+            .map(Mutex::new)
+            .collect_vec();
+
+        Self {
+            shards,
+            capacity: config.capacity,
+            usages,
+            hash_builder: config.hash_builder,
+        }
+    }
+
     pub fn insert(
         self: &Arc<Self>,
         key: K,
@@ -407,6 +475,17 @@ where
                 ptr,
             })
         }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn usage(&self) -> usize {
+        self.usages
+            .iter()
+            .map(|usage| usage.load(Ordering::Relaxed))
+            .sum()
     }
 
     unsafe fn release(&self, ptr: NonNull<H>) {
@@ -488,21 +567,51 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rand::{rngs::SmallRng, RngCore, SeedableRng};
+
     use self::eviction::fifo::{Fifo, FifoHandle};
     use super::*;
+
+    type TestFifoCache = Cache<
+        u64,
+        u64,
+        FifoHandle<u64, u64>,
+        Fifo<u64, u64>,
+        HashTableIndexer<u64, FifoHandle<u64, u64>>,
+    >;
+    type TestFifoCacheConfig = CacheConfig<u64, u64, FifoHandle<u64, u64>, Fifo<u64, u64>>;
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<
-            Cache<
-                u64,
-                u64,
-                FifoHandle<u64, u64>,
-                Fifo<u64, u64>,
-                HashTableIndexer<u64, FifoHandle<u64, u64>>,
-            >,
-        >()
+        is_send_sync_static::<TestFifoCache>();
+        is_send_sync_static::<TestFifoCacheConfig>();
+    }
+
+    #[test]
+    fn test_cache_fuzzy() {
+        const CAPACITY: usize = 256;
+
+        let config = TestFifoCacheConfig {
+            capacity: CAPACITY,
+            shards: 4,
+            eviction_config: (),
+            object_pool_capacity: 16,
+            hash_builder: RandomState::default(),
+        };
+        let cache = Arc::new(TestFifoCache::new(config));
+
+        let mut rng = SmallRng::seed_from_u64(114514);
+        for _ in 0..100000 {
+            let key = rng.next_u64();
+            if let Some(entry) = cache.get(&key) {
+                assert_eq!(key, *entry);
+                drop(entry);
+                continue;
+            }
+            cache.insert(key, key, 1);
+        }
+        assert_eq!(cache.usage(), CAPACITY);
     }
 }
