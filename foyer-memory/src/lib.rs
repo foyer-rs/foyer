@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 pub mod eviction;
+pub mod handle;
 
 use std::{
     hash::{BuildHasher, Hash},
