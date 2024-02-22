@@ -24,6 +24,17 @@ bitflags! {
     }
 }
 
+pub trait Handle: Send + Sync + 'static {
+    type K: Key;
+    type V: Value;
+
+    fn new() -> Self;
+    fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize);
+
+    fn base(&self) -> &BaseHandle<Self::K, Self::V>;
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::K, Self::V>;
+}
+
 #[derive(Debug)]
 pub struct BaseHandle<K, V>
 where

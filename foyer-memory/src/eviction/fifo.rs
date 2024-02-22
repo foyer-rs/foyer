@@ -16,7 +16,11 @@ use std::{collections::VecDeque, ptr::NonNull};
 
 use itertools::Itertools;
 
-use crate::{handle::BaseHandle, Eviction, Handle, Key, Value};
+use crate::{
+    eviction::Eviction,
+    handle::{BaseHandle, Handle},
+    Key, Value,
+};
 
 pub struct FifoHandle<K, V>
 where
