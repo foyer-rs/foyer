@@ -23,13 +23,49 @@ pub trait Eviction: Send + Sync + 'static {
     type H: Handle;
     type C: Clone;
 
+    /// Create a new empty eviction container.
     fn new(config: Self::C) -> Self;
-    fn push(&mut self, ptr: NonNull<Self::H>);
-    fn pop(&mut self) -> Option<NonNull<Self::H>>;
-    fn peek(&self) -> Option<NonNull<Self::H>>;
-    fn access(&mut self, ptr: NonNull<Self::H>);
-    fn remove(&mut self, ptr: NonNull<Self::H>);
-    fn clear(&mut self) -> Vec<NonNull<Self::H>>;
+
+    /// Push a handle `ptr` into the eviction container.
+    ///
+    /// # Safety
+    ///
+    /// The `ptr` must be kept holding until `pop` or `remove`.
+    unsafe fn push(&mut self, ptr: NonNull<Self::H>);
+
+    /// Pop a handle `ptr` from the eviction container.
+    ///
+    /// # Safety
+    ///
+    /// The `ptr` must be taken from the eviction container.
+    /// Or it may become dangling and cause UB.
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::H>>;
+
+    /// Notify the eviciton container that the `ptr` is accessed.
+    /// The eviction container can adjust the order based on it.
+    ///
+    /// # Safety
+    ///
+    /// The lifetimes of all `ptr`s must not be modified.
+    unsafe fn access(&mut self, ptr: NonNull<Self::H>);
+
+    /// Remove the given `ptr` from the eviction container.
+    ///
+    /// # Safety
+    ///
+    /// The `ptr` must be taken from the eviction container.
+    /// Or it may become dangling and cause UB.
+    unsafe fn remove(&mut self, ptr: NonNull<Self::H>);
+
+    /// Remove all `ptr`s from the eviction container and reset.
+    ///
+    /// # Safety
+    ///
+    /// All `ptr` must be taken from the eviction container.
+    /// Or it may become dangling and cause UB.
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::H>>;
+
+    /// Return `true` if the eviction container is empty.
     fn is_empty(&self) -> bool;
 }
 

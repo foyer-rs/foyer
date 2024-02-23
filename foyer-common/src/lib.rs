@@ -19,12 +19,12 @@
 #![feature(cfg_match)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod async_queue;
 pub mod batch;
 pub mod bits;
 pub mod code;
 pub mod continuum;
 pub mod erwlock;
-pub mod queue;
 pub mod range;
 pub mod rate;
 pub mod rated_ticket;

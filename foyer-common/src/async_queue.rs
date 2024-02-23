@@ -110,7 +110,7 @@ mod tests {
         task::{Poll, Poll::Pending},
     };
 
-    use crate::queue::AsyncQueue;
+    use crate::async_queue::AsyncQueue;
 
     #[tokio::test]
     async fn test_basic() {

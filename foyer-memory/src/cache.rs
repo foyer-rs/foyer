@@ -533,7 +533,7 @@ mod tests {
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
-    use crate::eviction::fifo::{Fifo, FifoHandle};
+    use crate::eviction::fifo::{Fifo, FifoConfig, FifoHandle};
 
     type TestFifoCache = Cache<
         u64,
@@ -559,7 +559,9 @@ mod tests {
         let config = TestFifoCacheConfig {
             capacity: CAPACITY,
             shards: 4,
-            eviction_config: (),
+            eviction_config: FifoConfig {
+                default_capacity: 16,
+            },
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
         };

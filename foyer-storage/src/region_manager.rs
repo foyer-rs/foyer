@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::queue::AsyncQueue;
+use foyer_common::async_queue::AsyncQueue;
 use foyer_intrusive::{
     core::adapter::Link,
     eviction::{EvictionPolicy, EvictionPolicyExt},
