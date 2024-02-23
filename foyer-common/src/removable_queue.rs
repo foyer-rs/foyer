@@ -36,6 +36,12 @@ pub struct RemovableQueue<T> {
     token: usize,
 }
 
+impl<T> Default for RemovableQueue<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> RemovableQueue<T> {
     pub const DEFAULT_CAPACITY: usize = 16;
 
@@ -106,10 +112,30 @@ impl<T> RemovableQueue<T> {
 
     /// Randonly remove the element with the given `token` from the queue.
     pub fn remove(&mut self, token: Token) -> Option<T> {
-        debug_assert!(token.0 >= self.token);
+        if token.0 < self.token + self.head || token.0 >= self.token + self.tail {
+            return None;
+        }
         let pos = (token.0 - self.token) % self.capacity;
         self.len -= 1;
         self.queue[pos].take()
+    }
+
+    /// Remove and return all the elements from the queue.
+    pub fn clear(&mut self) -> Vec<T> {
+        let mut res = Vec::with_capacity(self.len);
+        for pos in self.head..self.tail {
+            let pos = pos % self.capacity;
+            if let Some(elem) = self.queue[pos].take() {
+                res.push(elem);
+            }
+        }
+
+        self.token += self.tail;
+        self.head = 0;
+        self.tail = 0;
+        self.len = 0;
+
+        res
     }
 
     /// Returns the actually element count.
