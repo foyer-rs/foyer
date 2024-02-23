@@ -17,6 +17,7 @@
 #![feature(bound_map)]
 #![feature(associated_type_defaults)]
 #![feature(cfg_match)]
+#![feature(let_chains)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod async_queue;
@@ -28,4 +29,5 @@ pub mod erwlock;
 pub mod range;
 pub mod rate;
 pub mod rated_ticket;
+pub mod removable_queue;
 pub mod runtime;
