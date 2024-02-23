@@ -70,7 +70,7 @@ impl<T> RemovableQueue<T> {
     /// Returns a token that can be used for randomly removal.
     pub fn push(&mut self, elem: T) -> Token {
         if self.usage() == self.capacity {
-            self.grow();
+            self.grow_to(self.capacity * 2);
         }
 
         debug_assert!(self.usage() < self.capacity());
@@ -162,10 +162,16 @@ impl<T> RemovableQueue<T> {
         self.capacity
     }
 
-    fn grow(&mut self) {
+    /// Grow the capacity to the given capacity.
+    ///
+    /// If the current capacity is equal or greater than the given capacity, do nothing.
+    fn grow_to(&mut self, capacity: usize) {
         unsafe {
+            if capacity <= self.capacity {
+                return;
+            }
+
             let usage = self.usage();
-            let capacity = self.capacity * 2;
             let mut queue = Self::queue(capacity);
 
             if usage > 0 {
@@ -225,6 +231,8 @@ impl<T> RemovableQueue<T> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
 
     #[test]
@@ -284,5 +292,16 @@ mod tests {
         assert_eq!(queue.capacity(), 16);
         assert_eq!(queue.len(), 9);
         assert_eq!(queue.usage(), 9);
+
+        assert_eq!(queue.remove(Token(6)), None);
+
+        assert_eq!(queue.pop(), Some(0));
+        assert_eq!(queue.capacity(), 16);
+
+        queue.grow_to(24);
+        queue.grow_to(0);
+        assert_eq!(queue.capacity(), 24);
+
+        assert_eq!(queue.clear(), (1..9).collect_vec());
     }
 }
