@@ -203,7 +203,7 @@ impl<T> RemovableQueue<T> {
                 }
             }
 
-            self.token = self.head;
+            self.token += self.head;
 
             std::mem::swap(&mut self.queue, &mut queue);
             self.capacity = capacity;
@@ -266,5 +266,23 @@ mod tests {
         assert_eq!(queue.capacity(), 8);
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.usage(), 1);
+
+        assert_eq!(queue.clear(), vec![6]);
+        assert_eq!(queue.capacity(), 8);
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.usage(), 0);
+        assert!(queue.is_empty());
+
+        for i in 0..8 {
+            assert_eq!(queue.push(i), Token(i + 7));
+        }
+        assert_eq!(queue.capacity(), 8);
+        assert_eq!(queue.len(), 8);
+        assert_eq!(queue.usage(), 8);
+
+        assert_eq!(queue.push(8), Token(8 + 7));
+        assert_eq!(queue.capacity(), 16);
+        assert_eq!(queue.len(), 9);
+        assert_eq!(queue.usage(), 9);
     }
 }
