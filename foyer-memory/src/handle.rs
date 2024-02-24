@@ -25,14 +25,14 @@ bitflags! {
 }
 
 pub trait Handle: Send + Sync + 'static {
-    type K: Key;
-    type V: Value;
+    type Key: Key;
+    type Value: Value;
 
     fn new() -> Self;
-    fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize);
+    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize);
 
-    fn base(&self) -> &BaseHandle<Self::K, Self::V>;
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::K, Self::V>;
+    fn base(&self) -> &BaseHandle<Self::Key, Self::Value>;
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value>;
 }
 
 #[derive(Debug)]

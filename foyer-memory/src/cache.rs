@@ -32,19 +32,19 @@ use crate::{eviction::Eviction, handle::Handle, Key, Value};
 
 #[expect(clippy::missing_safety_doc)]
 pub trait Indexer: Send + Sync + 'static {
-    type K: Key;
-    type H: Handle<K = Self::K>;
+    type Key: Key;
+    type Handle: Handle<Key = Self::Key>;
 
     fn new() -> Self;
-    unsafe fn insert(&mut self, handle: NonNull<Self::H>) -> Option<NonNull<Self::H>>;
-    unsafe fn get(&self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>>;
-    unsafe fn remove(&mut self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>>;
+    unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
+    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
+    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
 }
 
 struct HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<K = K>,
+    H: Handle<Key = K>,
 {
     table: HashTable<NonNull<H>>,
 }
@@ -52,24 +52,24 @@ where
 unsafe impl<K, H> Send for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<K = K>,
+    H: Handle<Key = K>,
 {
 }
 
 unsafe impl<K, H> Sync for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<K = K>,
+    H: Handle<Key = K>,
 {
 }
 
 impl<K, H> Indexer for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<K = K>,
+    H: Handle<Key = K>,
 {
-    type K = K;
-    type H = H;
+    type Key = K;
+    type Handle = H;
 
     fn new() -> Self {
         Self {
@@ -77,7 +77,7 @@ where
         }
     }
 
-    unsafe fn insert(&mut self, mut ptr: NonNull<Self::H>) -> Option<NonNull<Self::H>> {
+    unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
         let base = ptr.as_mut().base_mut();
 
         debug_assert!(!base.is_in_cache());
@@ -102,13 +102,13 @@ where
         }
     }
 
-    unsafe fn get(&self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>> {
+    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
         self.table
             .find(hash, |p| p.as_ref().base().key() == key)
             .copied()
     }
 
-    unsafe fn remove(&mut self, hash: u64, key: &Self::K) -> Option<NonNull<Self::H>> {
+    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
         match self.table.entry(
             hash,
             |p| p.as_ref().base().key() == key,
@@ -130,9 +130,9 @@ struct CacheShard<K, V, H, E, I>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
 {
     indexer: I,
     eviciton: E,
@@ -148,14 +148,14 @@ impl<K, V, H, E, I> CacheShard<K, V, H, E, I>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
 {
     fn new(
         capacity: usize,
         usage: Arc<AtomicUsize>,
-        eviction_config: E::C,
+        eviction_config: E::Config,
         object_pool: Arc<ArrayQueue<Box<H>>>,
     ) -> Self {
         Self {
@@ -310,9 +310,9 @@ impl<K, V, H, E, I> Drop for CacheShard<K, V, H, E, I>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
 {
     fn drop(&mut self) {
         // Since the shard is being drop, there must be no cache entries referenced outside. So we
@@ -325,13 +325,13 @@ pub struct CacheConfig<K, V, H, E, S = RandomState>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
     S: BuildHasher,
 {
     pub capacity: usize,
     pub shards: usize,
-    pub eviction_config: E::C,
+    pub eviction_config: E::Config,
     pub object_pool_capacity: usize,
     pub hash_builder: S,
 }
@@ -341,9 +341,9 @@ pub struct Cache<K, V, H, E, I, S = RandomState>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
     shards: Vec<Mutex<CacheShard<K, V, H, E, I>>>,
@@ -358,9 +358,9 @@ impl<K, V, H, E, I, S> Cache<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
     pub fn new(config: CacheConfig<K, V, H, E, S>) -> Self {
@@ -468,9 +468,9 @@ pub struct CacheEntry<K, V, H, E, I, S = RandomState>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
     cache: Arc<Cache<K, V, H, E, I, S>>,
@@ -481,9 +481,9 @@ impl<K, V, H, E, I, S> Drop for CacheEntry<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
     fn drop(&mut self) {
@@ -495,9 +495,9 @@ impl<K, V, H, E, I, S> Deref for CacheEntry<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
     type Target = V;
@@ -511,9 +511,9 @@ unsafe impl<K, V, H, E, I, S> Send for CacheEntry<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
 }
@@ -521,9 +521,9 @@ unsafe impl<K, V, H, E, I, S> Sync for CacheEntry<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
-    H: Handle<K = K, V = V>,
-    E: Eviction<H = H>,
-    I: Indexer<K = K, H = H>,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
 }

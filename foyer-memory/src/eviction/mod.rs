@@ -20,18 +20,18 @@ use crate::handle::Handle;
 ///
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
-    type H: Handle;
-    type C: Clone;
+    type Handle: Handle;
+    type Config: Clone;
 
     /// Create a new empty eviction container.
-    fn new(config: Self::C) -> Self;
+    fn new(config: Self::Config) -> Self;
 
     /// Push a handle `ptr` into the eviction container.
     ///
     /// # Safety
     ///
     /// The `ptr` must be kept holding until `pop` or `remove`.
-    unsafe fn push(&mut self, ptr: NonNull<Self::H>);
+    unsafe fn push(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Pop a handle `ptr` from the eviction container.
     ///
@@ -39,7 +39,7 @@ pub trait Eviction: Send + Sync + 'static {
     ///
     /// The `ptr` must be taken from the eviction container.
     /// Or it may become dangling and cause UB.
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::H>>;
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
 
     /// Notify the eviciton container that the `ptr` is accessed.
     /// The eviction container can adjust the order based on it.
@@ -47,7 +47,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// # Safety
     ///
     /// The lifetimes of all `ptr`s must not be modified.
-    unsafe fn access(&mut self, ptr: NonNull<Self::H>);
+    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove the given `ptr` from the eviction container.
     ///
@@ -55,7 +55,7 @@ pub trait Eviction: Send + Sync + 'static {
     ///
     /// The `ptr` must be taken from the eviction container.
     /// Or it may become dangling and cause UB.
-    unsafe fn remove(&mut self, ptr: NonNull<Self::H>);
+    unsafe fn remove(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove all `ptr`s from the eviction container and reset.
     ///
@@ -63,7 +63,7 @@ pub trait Eviction: Send + Sync + 'static {
     ///
     /// All `ptr` must be taken from the eviction container.
     /// Or it may become dangling and cause UB.
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::H>>;
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>>;
 
     /// Return `true` if the eviction container is empty.
     fn is_empty(&self) -> bool;

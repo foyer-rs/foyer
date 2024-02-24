@@ -36,8 +36,8 @@ where
     K: Key,
     V: Value,
 {
-    type K = K;
-    type V = V;
+    type Key = K;
+    type Value = V;
 
     fn new() -> Self {
         Self {
@@ -46,15 +46,15 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::K, value: Self::V, charge: usize) {
+    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize) {
         self.base.init(hash, key, value, charge);
     }
 
-    fn base(&self) -> &BaseHandle<Self::K, Self::V> {
+    fn base(&self) -> &BaseHandle<Self::Key, Self::Value> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::K, Self::V> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value> {
         &mut self.base
     }
 }
@@ -77,33 +77,33 @@ where
     K: Key,
     V: Value,
 {
-    type H = FifoHandle<K, V>;
-    type C = FifoConfig;
+    type Handle = FifoHandle<K, V>;
+    type Config = FifoConfig;
 
-    fn new(config: Self::C) -> Self {
+    fn new(config: Self::Config) -> Self {
         Self {
             queue: RemovableQueue::with_capacity(config.default_capacity),
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::H>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let token = self.queue.push(ptr);
         ptr.as_mut().token = Some(token);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::H>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         self.queue.pop()
     }
 
-    unsafe fn access(&mut self, _: NonNull<Self::H>) {}
+    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::H>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         debug_assert!(ptr.as_mut().token.is_some());
         let token = ptr.as_mut().token.take().unwrap_unchecked();
         self.queue.remove(token);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::H>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         self.queue.clear()
     }
 
