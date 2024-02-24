@@ -27,28 +27,41 @@ bitflags! {
 pub trait Handle: Send + Sync + 'static {
     type Key: Key;
     type Value: Value;
+    type Context: Default;
 
     fn new() -> Self;
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize);
+    fn init(
+        &mut self,
+        hash: u64,
+        key: Self::Key,
+        value: Self::Value,
+        charge: usize,
+        context: Self::Context,
+    );
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value>;
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value>;
+    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context>;
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context>;
 }
 
 #[derive(Debug)]
-pub struct BaseHandle<K, V>
+pub struct BaseHandle<K, V, C>
 where
     K: Key,
     V: Value,
 {
-    kv: Option<(K, V)>,
+    /// key, value, context
+    entry: Option<(K, V, C)>,
+    /// key hash
     hash: u64,
+    /// entry charge
     charge: usize,
+    /// external reference count
     refs: usize,
+    /// flags that used by the general cache abstraction
     flags: BaseHandleFlags,
 }
 
-impl<K, V> Default for BaseHandle<K, V>
+impl<K, V, C> Default for BaseHandle<K, V, C>
 where
     K: Key,
     V: Value,
@@ -58,7 +71,7 @@ where
     }
 }
 
-impl<K, V> BaseHandle<K, V>
+impl<K, V, C> BaseHandle<K, V, C>
 where
     K: Key,
     V: Value,
@@ -67,7 +80,7 @@ where
     #[inline(always)]
     pub fn new() -> Self {
         Self {
-            kv: None,
+            entry: None,
             hash: 0,
             charge: 0,
             refs: 0,
@@ -77,10 +90,10 @@ where
 
     /// Init handle with args.
     #[inline(always)]
-    pub fn init(&mut self, hash: u64, key: K, value: V, charge: usize) {
-        debug_assert!(self.kv.is_none());
+    pub fn init(&mut self, hash: u64, key: K, value: V, charge: usize, context: C) {
+        debug_assert!(self.entry.is_none());
         self.hash = hash;
-        self.kv = Some((key, value));
+        self.entry = Some((key, value, context));
         self.charge = charge;
         self.refs = 0;
         self.flags = BaseHandleFlags::empty();
@@ -89,14 +102,19 @@ where
     /// Take key and value from the handle and reset it to the uninited state.
     #[inline(always)]
     pub fn take(&mut self) -> (K, V) {
-        debug_assert!(self.kv.is_some());
-        unsafe { self.kv.take().unwrap_unchecked() }
+        debug_assert!(self.entry.is_some());
+        unsafe {
+            self.entry
+                .take()
+                .map(|(key, value, _)| (key, value))
+                .unwrap_unchecked()
+        }
     }
 
     /// Return `true` if the handle is inited.
     #[inline(always)]
     pub fn is_inited(&self) -> bool {
-        self.kv.is_some()
+        self.entry.is_some()
     }
 
     /// Get key hash.
@@ -116,8 +134,8 @@ where
     /// Panics if the handle is uninited.
     #[inline(always)]
     pub fn key(&self) -> &K {
-        debug_assert!(self.kv.is_some());
-        unsafe { self.kv.as_ref().map(|kv| &kv.0).unwrap_unchecked() }
+        debug_assert!(self.entry.is_some());
+        unsafe { self.entry.as_ref().map(|entry| &entry.0).unwrap_unchecked() }
     }
 
     /// Get value reference.
@@ -127,8 +145,19 @@ where
     /// Panics if the handle is uninited.
     #[inline(always)]
     pub fn value(&self) -> &V {
-        debug_assert!(self.kv.is_some());
-        unsafe { self.kv.as_ref().map(|kv| &kv.1).unwrap_unchecked() }
+        debug_assert!(self.entry.is_some());
+        unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
+    }
+
+    /// Get context reference.
+    ///  
+    /// # Panics
+    ///
+    /// Panics if the handle is uninited.
+    #[inline(always)]
+    pub fn context(&self) -> &C {
+        debug_assert!(self.entry.is_some());
+        unsafe { self.entry.as_ref().map(|entry| &entry.2).unwrap_unchecked() }
     }
 
     /// Get the charge of the handle.
@@ -192,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_base_handle_basic() {
-        let mut h = BaseHandle::<(), ()>::new();
+        let mut h = BaseHandle::<(), (), ()>::new();
         assert!(!h.is_in_cache());
         assert!(!h.is_in_eviction());
 

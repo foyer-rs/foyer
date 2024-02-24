@@ -22,12 +22,14 @@ use crate::{
     Key, Value,
 };
 
+pub type FifoContext = ();
+
 pub struct FifoHandle<K, V>
 where
     K: Key,
     V: Value,
 {
-    base: BaseHandle<K, V>,
+    base: BaseHandle<K, V, FifoContext>,
     token: Option<Token>,
 }
 
@@ -38,6 +40,7 @@ where
 {
     type Key = K;
     type Value = V;
+    type Context = FifoContext;
 
     fn new() -> Self {
         Self {
@@ -46,15 +49,22 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize) {
-        self.base.init(hash, key, value, charge);
+    fn init(
+        &mut self,
+        hash: u64,
+        key: Self::Key,
+        value: Self::Value,
+        charge: usize,
+        context: Self::Context,
+    ) {
+        self.base.init(hash, key, value, charge, context);
     }
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value> {
+    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context> {
         &mut self.base
     }
 }
@@ -136,7 +146,7 @@ mod tests {
 
     unsafe fn new_test_fifo_handle_ptr(key: u64, value: u64) -> NonNull<TestFifoHandle> {
         let mut handle = Box::new(TestFifoHandle::new());
-        handle.init(0, key, value, 0);
+        handle.init(0, key, value, 0, ());
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 

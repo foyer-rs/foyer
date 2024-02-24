@@ -174,20 +174,21 @@ where
         key: K,
         value: V,
         charge: usize,
-        last_reference_items: &mut Vec<(K, V)>,
+        context: H::Context,
+        last_reference_entries: &mut Vec<(K, V)>,
     ) -> NonNull<H> {
         let mut handle = self.object_pool.pop().unwrap_or_else(|| Box::new(H::new()));
-        handle.init(hash, key, value, charge);
+        handle.init(hash, key, value, charge, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
-        self.evict(charge, last_reference_items);
+        self.evict(charge, last_reference_entries);
 
         if let Some(old) = self.indexer.insert(ptr) {
             // There is no external refs of this handle, it MUST be in the eviction collection.
             if old.as_ref().base().refs() == 0 {
                 self.eviciton.remove(old);
                 let (key, value) = self.clear_handle(old);
-                last_reference_items.push((key, value));
+                last_reference_entries.push((key, value));
             }
         }
 
@@ -276,14 +277,14 @@ where
         }
     }
 
-    unsafe fn evict(&mut self, charge: usize, last_reference_items: &mut Vec<(K, V)>) {
+    unsafe fn evict(&mut self, charge: usize, last_reference_entries: &mut Vec<(K, V)>) {
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
             && let Some(evicted) = self.eviciton.pop()
         {
             let base = evicted.as_ref().base();
             self.indexer.remove(base.hash(), base.key());
             let (key, value) = self.clear_handle(evicted);
-            last_reference_items.push((key, value));
+            last_reference_entries.push((key, value));
         }
     }
 
@@ -395,13 +396,23 @@ where
         value: V,
         charge: usize,
     ) -> CacheEntry<K, V, H, E, I, S> {
+        self.insert_with_context(key, value, charge, H::Context::default())
+    }
+
+    pub fn insert_with_context(
+        self: &Arc<Self>,
+        key: K,
+        value: V,
+        charge: usize,
+        context: H::Context,
+    ) -> CacheEntry<K, V, H, E, I, S> {
         let hash = self.hash_builder.hash_one(&key);
 
         let mut to_deallocate = vec![];
 
         let entry = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
-            let ptr = shard.insert(hash, key, value, charge, &mut to_deallocate);
+            let ptr = shard.insert(hash, key, value, charge, context, &mut to_deallocate);
             CacheEntry {
                 cache: self.clone(),
                 ptr,
