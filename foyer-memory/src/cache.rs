@@ -135,7 +135,7 @@ where
     I: Indexer<Key = K, Handle = H>,
 {
     indexer: I,
-    eviciton: E,
+    eviction: E,
 
     capacity: usize,
     usage: Arc<AtomicUsize>,
@@ -158,9 +158,11 @@ where
         eviction_config: E::Config,
         object_pool: Arc<ArrayQueue<Box<H>>>,
     ) -> Self {
+        let indexer = I::new();
+        let eviction = unsafe { E::new(eviction_config) };
         Self {
-            indexer: I::new(),
-            eviciton: E::new(eviction_config),
+            indexer,
+            eviction,
             capacity,
             usage,
             object_pool,
@@ -186,7 +188,7 @@ where
         if let Some(old) = self.indexer.insert(ptr) {
             // There is no external refs of this handle, it MUST be in the eviction collection.
             if old.as_ref().base().refs() == 0 {
-                self.eviciton.remove(old);
+                self.eviction.remove(old);
                 let (key, value) = self.clear_handle(old);
                 last_reference_entries.push((key, value));
             }
@@ -214,7 +216,7 @@ where
         // Keep the handle in eviction if it is still in the cache and the cache is not over-sized.
         if base.is_in_cache() {
             if self.usage.load(Ordering::Relaxed) <= self.capacity {
-                self.eviciton.push(ptr);
+                self.eviction.push(ptr);
                 return None;
             }
             // Emergency remove the handle if there is no space in cache.
@@ -233,11 +235,9 @@ where
 
         // If the handle previously has no reference, it must exist in eviction, remove it.
         if base.refs() == 0 {
-            self.eviciton.remove(ptr);
+            self.eviction.remove(ptr);
         }
         base.inc_ref();
-
-        self.eviciton.access(ptr);
 
         Some(ptr)
     }
@@ -250,7 +250,7 @@ where
         let base = ptr.as_mut().base_mut();
 
         if base.refs() == 0 {
-            self.eviciton.remove(ptr);
+            self.eviction.remove(ptr);
             let (key, value) = self.clear_handle(ptr);
             return Some((key, value));
         }
@@ -268,7 +268,7 @@ where
     ///
     /// Panics if there is any entry referenced externally.
     unsafe fn clear(&mut self) {
-        let ptrs = self.eviciton.clear();
+        let ptrs = self.eviction.clear();
         for mut ptr in ptrs {
             let base = ptr.as_mut().base_mut();
             let p = self.indexer.remove(base.hash(), base.key()).unwrap();
@@ -279,7 +279,7 @@ where
 
     unsafe fn evict(&mut self, charge: usize, last_reference_entries: &mut Vec<(K, V)>) {
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
-            && let Some(evicted) = self.eviciton.pop()
+            && let Some(evicted) = self.eviction.pop()
         {
             let base = evicted.as_ref().base();
             self.indexer.remove(base.hash(), base.key());

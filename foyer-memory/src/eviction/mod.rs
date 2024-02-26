@@ -24,7 +24,9 @@ pub trait Eviction: Send + Sync + 'static {
     type Config: Clone;
 
     /// Create a new empty eviction container.
-    fn new(config: Self::Config) -> Self;
+    ///
+    /// # Safety
+    unsafe fn new(config: Self::Config) -> Self;
 
     /// Push a handle `ptr` into the eviction container.
     ///
@@ -42,11 +44,11 @@ pub trait Eviction: Send + Sync + 'static {
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
 
     /// Notify the eviciton container that the `ptr` is accessed.
-    /// The eviction container can adjust the order based on it.
+    /// The eviction container can update its statistics.
     ///
     /// # Safety
     ///
-    /// The lifetimes of all `ptr`s must not be modified.
+    /// The given `ptr` can be in the eviction container or not in the eviction container.
     unsafe fn access(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove the given `ptr` from the eviction container.
@@ -65,8 +67,16 @@ pub trait Eviction: Send + Sync + 'static {
     /// Or it may become dangling and cause UB.
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>>;
 
+    /// Return the count of the `ptr`s that in the eviction container.
+    ///
+    /// # Safety
+    unsafe fn len(&self) -> usize;
+
     /// Return `true` if the eviction container is empty.
-    fn is_empty(&self) -> bool;
+    ///
+    /// # Safety
+    unsafe fn is_empty(&self) -> bool;
 }
 
 pub mod fifo;
+pub mod lru;

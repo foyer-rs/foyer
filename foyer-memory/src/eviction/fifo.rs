@@ -90,7 +90,7 @@ where
     type Handle = FifoHandle<K, V>;
     type Config = FifoConfig;
 
-    fn new(config: Self::Config) -> Self {
+    unsafe fn new(config: Self::Config) -> Self {
         Self {
             queue: RemovableQueue::with_capacity(config.default_capacity),
         }
@@ -117,7 +117,11 @@ where
         self.queue.clear()
     }
 
-    fn is_empty(&self) -> bool {
+    unsafe fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    unsafe fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
 }
