@@ -12,21 +12,23 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::{hash::BuildHasher, ptr::NonNull};
 
-use crate::handle::Handle;
+use crate::{cache::CacheConfig, handle::Handle};
 
 /// The lifetime of `handle: Self::H` is managed by [`Indexer`].
 ///
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
     type Handle: Handle;
-    type Config: Clone;
+    type Config;
 
     /// Create a new empty eviction container.
     ///
     /// # Safety
-    unsafe fn new(config: Self::Config) -> Self;
+    unsafe fn new<S: BuildHasher>(config: &CacheConfig<Self, S>) -> Self
+    where
+        Self: Sized;
 
     /// Push a handle `ptr` into the eviction container.
     ///

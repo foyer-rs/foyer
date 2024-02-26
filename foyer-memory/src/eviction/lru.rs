@@ -12,38 +12,32 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::{hash::BuildHasher, ptr::NonNull};
 
 use crate::{
+    cache::CacheConfig,
     eviction::Eviction,
     handle::{BaseHandle, Handle},
     Key, Value,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LruConfig {
-    /// The ratio (percentage) of the high priority pool occupied.
+    /// The ratio of the high priority pool occupied.
     ///
     /// [`Lru`] guarantees that the high priority charges are always as larger as
-    /// but no larger that the total charges * high priority pool ratio.
+    /// but no larger that the capacity * high priority pool ratio.
     ///
     /// # Panic
     ///
-    /// Panics if the value is not in [0, 100].
-    pub high_priority_pool_ratio_percentage: usize,
+    /// Panics if the value is not in [0, 1.0].
+    pub high_priority_pool_ratio: f64,
 }
 
 #[derive(Debug)]
 pub enum LruContext {
     HighPriority,
     LowPriority,
-}
-
-#[derive(Debug)]
-enum NeedUpdatePointer {
-    NoNeed,
-    Forward,
-    Backward,
 }
 
 impl Default for LruContext {
@@ -130,7 +124,7 @@ where
     charges: usize,
     high_priority_charges: usize,
 
-    high_priority_pool_ratio_percentage: usize,
+    high_priority_charges_capacity: usize,
 
     len: usize,
 }
@@ -140,65 +134,13 @@ where
     K: Key,
     V: Value,
 {
-    unsafe fn update_low_priority_head(&mut self) {
-        loop {
-            match self.need_update_low_priority_head() {
-                NeedUpdatePointer::NoNeed => return,
-                NeedUpdatePointer::Forward => {
-                    debug_assert!(
-                        !self.is_head_ptr(self.low_priority_head.as_ref().next.unwrap_unchecked())
-                    );
-
-                    self.low_priority_head =
-                        self.low_priority_head.as_mut().next.unwrap_unchecked();
-                    self.high_priority_charges += self.low_priority_head.as_ref().base().charge();
-                    self.low_priority_head.as_mut().in_high_priority_pool = true;
-                }
-                NeedUpdatePointer::Backward => {
-                    debug_assert!(!self.is_head_ptr(self.low_priority_head));
-
-                    self.low_priority_head.as_mut().in_high_priority_pool = false;
-                    self.high_priority_charges -= self.low_priority_head.as_ref().base().charge();
-                    self.low_priority_head =
-                        self.low_priority_head.as_ref().prev.unwrap_unchecked();
-                }
-            }
+    unsafe fn may_overflow_high_priority_pool(&mut self) {
+        while self.high_priority_charges > self.high_priority_charges_capacity {
+            // overflow last entry in high priority pool to low priority pool
+            self.low_priority_head.as_mut().in_high_priority_pool = false;
+            self.high_priority_charges -= self.low_priority_head.as_ref().base().charge();
+            self.low_priority_head = self.low_priority_head.as_ref().prev.unwrap_unchecked();
         }
-    }
-
-    #[inline(always)]
-    unsafe fn need_update_low_priority_head(&self) -> NeedUpdatePointer {
-        if self.is_empty() {
-            return NeedUpdatePointer::NoNeed;
-        };
-
-        // if the following conditions are met, move the insert point forward:
-        //
-        // 1. high priority pool size is lower than threshold
-        // 2. there is node after the insert point (the next pointer does not point to head)
-        // 3. high priority pool size will not exceed the threshold with the next node
-        if self.high_priority_charges * 100
-            < self.charges * self.high_priority_pool_ratio_percentage
-            && let next = self.low_priority_head.as_ref().next.unwrap_unchecked()
-            && !self.is_head_ptr(next)
-            && (self.high_priority_charges + next.as_ref().base().charge()) * 100
-                <= self.charges * self.high_priority_pool_ratio_percentage
-        {
-            return NeedUpdatePointer::Forward;
-        }
-
-        // if the following conditions are met, move the insert point backward:
-        //
-        // 1. high priority pool size is higher than threshold
-        // 2. there is node before the insert point (the pointer does not point to head)
-        if self.high_priority_charges * 100
-            > self.charges * self.high_priority_pool_ratio_percentage
-            && !self.is_head_ptr(self.low_priority_head)
-        {
-            return NeedUpdatePointer::Backward;
-        }
-
-        NeedUpdatePointer::NoNeed
     }
 
     #[inline(always)]
@@ -281,12 +223,21 @@ where
     type Handle = LruHandle<K, V>;
     type Config = LruConfig;
 
-    unsafe fn new(config: Self::Config) -> Self {
+    unsafe fn new<S: BuildHasher>(config: &CacheConfig<Self, S>) -> Self
+    where
+        Self: Sized,
+    {
         assert!(
-            config.high_priority_pool_ratio_percentage <= 100,
+            config.eviction_config.high_priority_pool_ratio >= 0.0
+                && config.eviction_config.high_priority_pool_ratio <= 1.0,
             "high_priority_pool_ratio_percentage must be in [0, 100], given: {}",
-            config.high_priority_pool_ratio_percentage
+            config.eviction_config.high_priority_pool_ratio
         );
+
+        let high_priority_charges_capacity = config.capacity as f64
+            * config.eviction_config.high_priority_pool_ratio
+            / config.shards as f64;
+        let high_priority_charges_capacity = high_priority_charges_capacity as usize;
 
         let mut head = Box::new(LruHandle::new());
         let ptr = NonNull::new_unchecked(head.as_mut() as *mut _);
@@ -302,7 +253,7 @@ where
             low_priority_head,
             charges: 0,
             high_priority_charges: 0,
-            high_priority_pool_ratio_percentage: config.high_priority_pool_ratio_percentage,
+            high_priority_charges_capacity,
             len: 0,
         }
     }
@@ -313,25 +264,27 @@ where
         debug_assert!(handle.next.is_none());
         debug_assert!(handle.prev.is_none());
 
+        self.charges += handle.base().charge();
+        self.len += 1;
+
         match handle.base().context() {
             LruContext::HighPriority => {
                 handle.in_high_priority_pool = true;
                 self.insert_ptr_after_head(ptr);
+
                 self.high_priority_charges += handle.base().charge();
 
                 if self.is_head_ptr(self.low_priority_head) {
                     self.low_priority_head = ptr;
                 }
+
+                self.may_overflow_high_priority_pool();
             }
             LruContext::LowPriority => {
+                handle.in_high_priority_pool = false;
                 self.insert_ptr_after_low_priority_head(ptr);
             }
         }
-
-        self.charges += handle.base().charge();
-
-        self.len += 1;
-        self.update_low_priority_head();
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
@@ -347,7 +300,6 @@ where
         self.charges -= handle.base.charge();
 
         self.len -= 1;
-        self.update_low_priority_head();
 
         Some(ptr)
     }
@@ -356,7 +308,6 @@ where
 
     unsafe fn remove(&mut self, ptr: NonNull<Self::Handle>) {
         self.remove_ptr(ptr);
-
         let handle = ptr.as_ref();
 
         debug_assert!(handle.next.is_none());
@@ -368,7 +319,6 @@ where
         self.charges -= handle.base.charge();
 
         self.len -= 1;
-        self.update_low_priority_head();
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
@@ -412,6 +362,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ahash::RandomState;
     use itertools::Itertools;
 
     use super::*;
@@ -450,18 +401,82 @@ mod tests {
                 })
                 .collect_vec();
 
-            let config = LruConfig {
-                high_priority_pool_ratio_percentage: 50,
+            let config = CacheConfig {
+                capacity: 8,
+                shards: 1,
+                eviction_config: LruConfig {
+                    high_priority_pool_ratio: 0.5,
+                },
+                object_pool_capacity: 0,
+                hash_builder: RandomState::default(),
             };
+            let mut lru = TestLru::new(&config);
 
-            let mut lru = TestLru::new(config);
+            assert_eq!(lru.high_priority_charges_capacity, 4);
 
+            // [0, 1, 2, 3]
             lru.push(ptrs[0]);
             lru.push(ptrs[1]);
-            assert_eq!(lru.len, 2);
-            assert_eq!(lru.charges, 2);
-            assert_eq!(lru.high_priority_charges, 1);
+            lru.push(ptrs[2]);
+            lru.push(ptrs[3]);
+            assert_eq!(lru.len, 4);
+            assert_eq!(lru.charges, 4);
+            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.low_priority_head, ptrs[0]);
+
+            // 0, [1, 2, 3, 4]
+            lru.push(ptrs[4]);
+            assert_eq!(lru.len, 5);
+            assert_eq!(lru.charges, 5);
+            assert_eq!(lru.high_priority_charges, 4);
             assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            // 0, 10, [1, 2, 3, 4]
+            lru.push(ptrs[10]);
+            assert_eq!(lru.len, 6);
+            assert_eq!(lru.charges, 6);
+            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            // 10, [1, 2, 3, 4]
+            let p0 = lru.pop().unwrap();
+            assert_eq!(ptrs[0], p0);
+            assert_eq!(lru.len, 5);
+            assert_eq!(lru.charges, 5);
+            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            // 10, [1, 3, 4]
+            lru.remove(ptrs[2]);
+            assert_eq!(lru.len, 4);
+            assert_eq!(lru.charges, 4);
+            assert_eq!(lru.high_priority_charges, 3);
+            assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            // 10, 11, [1, 3, 4]
+            lru.push(ptrs[11]);
+            assert_eq!(lru.len, 5);
+            assert_eq!(lru.charges, 5);
+            assert_eq!(lru.high_priority_charges, 3);
+            assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            // 10, 11, 1, [3, 4, 5, 6]
+            lru.push(ptrs[5]);
+            lru.push(ptrs[6]);
+            assert_eq!(lru.len, 7);
+            assert_eq!(lru.charges, 7);
+            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.low_priority_head, ptrs[3]);
+
+            // 10, 11, 1, 3, [4, 5, 6, 0]
+            lru.push(ptrs[0]);
+            assert_eq!(lru.len, 8);
+            assert_eq!(lru.charges, 8);
+            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.low_priority_head, ptrs[4]);
+
+            let ps = lru.clear();
+            assert_eq!(ps, [10, 11, 1, 3, 4, 5, 6, 0].map(|i| ptrs[i]));
 
             for ptr in ptrs {
                 del_test_lru_handle_ptr(ptr);

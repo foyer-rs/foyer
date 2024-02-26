@@ -152,14 +152,14 @@ where
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
 {
-    fn new(
-        capacity: usize,
+    fn new<S: BuildHasher>(
+        config: &CacheConfig<E, S>,
         usage: Arc<AtomicUsize>,
-        eviction_config: E::Config,
         object_pool: Arc<ArrayQueue<Box<H>>>,
     ) -> Self {
         let indexer = I::new();
-        let eviction = unsafe { E::new(eviction_config) };
+        let eviction = unsafe { E::new(config) };
+        let capacity = config.capacity / config.shards;
         Self {
             indexer,
             eviction,
@@ -368,14 +368,7 @@ where
         let object_pool = Arc::new(ArrayQueue::new(config.object_pool_capacity));
         let shards = usages
             .iter()
-            .map(|usage| {
-                CacheShard::new(
-                    config.capacity / config.shards,
-                    usage.clone(),
-                    config.eviction_config.clone(),
-                    object_pool.clone(),
-                )
-            })
+            .map(|usage| CacheShard::new(&config, usage.clone(), object_pool.clone()))
             .map(Mutex::new)
             .collect_vec();
 
@@ -568,7 +561,7 @@ mod tests {
             capacity: CAPACITY,
             shards: 4,
             eviction_config: FifoConfig {
-                default_capacity: 16,
+                default_removable_capacity: 16,
             },
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),

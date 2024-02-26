@@ -12,11 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::{hash::BuildHasher, ptr::NonNull};
 
 use foyer_common::removable_queue::{RemovableQueue, Token};
 
 use crate::{
+    cache::CacheConfig,
     eviction::Eviction,
     handle::{BaseHandle, Handle},
     Key, Value,
@@ -71,7 +72,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct FifoConfig {
-    pub default_capacity: usize,
+    pub default_removable_capacity: usize,
 }
 
 pub struct Fifo<K, V>
@@ -90,9 +91,13 @@ where
     type Handle = FifoHandle<K, V>;
     type Config = FifoConfig;
 
-    unsafe fn new(config: Self::Config) -> Self {
+    unsafe fn new<S: BuildHasher>(config: &CacheConfig<Self, S>) -> Self
+    where
+        Self: Sized,
+    {
+        let capacity = config.eviction_config.default_removable_capacity / config.shards;
         Self {
-            queue: RemovableQueue::with_capacity(config.default_capacity),
+            queue: RemovableQueue::with_capacity(capacity),
         }
     }
 
@@ -141,6 +146,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ahash::RandomState;
     use itertools::Itertools;
 
     use super::*;
@@ -163,11 +169,17 @@ mod tests {
         unsafe {
             let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i, i)).collect_vec();
 
-            let config = FifoConfig {
-                default_capacity: 4,
+            let config = CacheConfig {
+                capacity: 0,
+                shards: 1,
+                eviction_config: FifoConfig {
+                    default_removable_capacity: 4,
+                },
+                object_pool_capacity: 0,
+                hash_builder: RandomState::default(),
             };
 
-            let mut fifo = TestFifo::new(config);
+            let mut fifo = TestFifo::new(&config);
 
             fifo.push(ptrs[0]);
             fifo.push(ptrs[1]);
