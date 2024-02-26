@@ -91,7 +91,7 @@ where
     type Handle = FifoHandle<K, V>;
     type Config = FifoConfig;
 
-    unsafe fn new<S: BuildHasher>(config: &CacheConfig<Self, S>) -> Self
+    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(config: &CacheConfig<Self, S>) -> Self
     where
         Self: Sized,
     {

@@ -26,7 +26,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// Create a new empty eviction container.
     ///
     /// # Safety
-    unsafe fn new<S: BuildHasher>(config: &CacheConfig<Self, S>) -> Self
+    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(config: &CacheConfig<Self, S>) -> Self
     where
         Self: Sized;
 

@@ -168,14 +168,20 @@ where
 
     /// Increase the external reference count of the handle, returns the new reference count.
     #[inline(always)]
-    pub fn inc_ref(&mut self) -> usize {
-        self.refs += 1;
+    pub fn inc_refs(&mut self) -> usize {
+        self.inc_refs_by(1)
+    }
+
+    /// Increase the external reference count of the handle, returns the new reference count.
+    #[inline(always)]
+    pub fn inc_refs_by(&mut self, val: usize) -> usize {
+        self.refs += val;
         self.refs
     }
 
     /// Decrease the external reference count of the handle, returns the new reference count.
     #[inline(always)]
-    pub fn dec_ref(&mut self) -> usize {
+    pub fn dec_refs(&mut self) -> usize {
         self.refs -= 1;
         self.refs
     }

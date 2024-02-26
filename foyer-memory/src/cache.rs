@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 use std::{
+    future::Future,
     hash::BuildHasher,
     ops::Deref,
     ptr::NonNull,
@@ -24,9 +25,13 @@ use std::{
 
 use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
-use hashbrown::{hash_table::Entry, HashTable};
+use hashbrown::{
+    hash_map::{Entry as HashMapEntry, HashMap},
+    hash_table::{Entry as HashTableEntry, HashTable},
+};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{eviction::Eviction, handle::Handle, Key, Value};
 
@@ -88,14 +93,14 @@ where
             |p| p.as_ref().base().key() == base.key(),
             |p| p.as_ref().base().hash(),
         ) {
-            Entry::Occupied(mut o) => {
+            HashTableEntry::Occupied(mut o) => {
                 std::mem::swap(o.get_mut(), &mut ptr);
                 let b = ptr.as_mut().base_mut();
-                debug_assert!(!b.is_in_cache());
+                debug_assert!(b.is_in_cache());
                 b.set_in_cache(false);
                 Some(ptr)
             }
-            Entry::Vacant(v) => {
+            HashTableEntry::Vacant(v) => {
                 v.insert(ptr);
                 None
             }
@@ -114,25 +119,27 @@ where
             |p| p.as_ref().base().key() == key,
             |p| p.as_ref().base().hash(),
         ) {
-            Entry::Occupied(o) => {
+            HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();
                 let b = p.as_mut().base_mut();
                 debug_assert!(b.is_in_cache());
                 b.set_in_cache(false);
                 Some(p)
             }
-            Entry::Vacant(_) => None,
+            HashTableEntry::Vacant(_) => None,
         }
     }
 }
 
-struct CacheShard<K, V, H, E, I>
+#[expect(clippy::type_complexity)]
+struct CacheShard<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
 {
     indexer: I,
     eviction: E,
@@ -140,19 +147,22 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
+    waiters: HashMap<K, Vec<oneshot::Sender<CacheEntry<K, V, H, E, I, S>>>>,
+
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: Arc<ArrayQueue<Box<H>>>,
 }
 
-impl<K, V, H, E, I> CacheShard<K, V, H, E, I>
+impl<K, V, H, E, I, S> CacheShard<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
 {
-    fn new<S: BuildHasher>(
+    fn new(
         config: &CacheConfig<E, S>,
         usage: Arc<AtomicUsize>,
         object_pool: Arc<ArrayQueue<Box<H>>>,
@@ -160,11 +170,13 @@ where
         let indexer = I::new();
         let eviction = unsafe { E::new(config) };
         let capacity = config.capacity / config.shards;
+        let waiters = HashMap::default();
         Self {
             indexer,
             eviction,
             capacity,
             usage,
+            waiters,
             object_pool,
         }
     }
@@ -195,7 +207,7 @@ where
         }
 
         self.usage.fetch_add(charge, Ordering::Relaxed);
-        ptr.as_mut().base_mut().inc_ref();
+        ptr.as_mut().base_mut().inc_refs();
 
         ptr
     }
@@ -208,7 +220,7 @@ where
 
         debug_assert!(!base.is_in_eviction());
 
-        if base.dec_ref() > 0 {
+        if base.dec_refs() > 0 {
             // Do nothing if the handle is still referenced externally.
             return None;
         }
@@ -237,7 +249,7 @@ where
         if base.refs() == 0 {
             self.eviction.remove(ptr);
         }
-        base.inc_ref();
+        base.inc_refs();
 
         Some(ptr)
     }
@@ -307,13 +319,14 @@ where
     }
 }
 
-impl<K, V, H, E, I> Drop for CacheShard<K, V, H, E, I>
+impl<K, V, H, E, I, S> Drop for CacheShard<K, V, H, E, I, S>
 where
     K: Key,
     V: Value,
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         // Since the shard is being drop, there must be no cache entries referenced outside. So we
@@ -325,13 +338,29 @@ where
 pub struct CacheConfig<E, S = RandomState>
 where
     E: Eviction,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
     pub capacity: usize,
     pub shards: usize,
     pub eviction_config: E::Config,
     pub object_pool_capacity: usize,
     pub hash_builder: S,
+}
+
+#[expect(clippy::type_complexity)]
+pub enum Entry<K, V, H, E, I, S, ER>
+where
+    K: Key,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+    ER: std::error::Error,
+{
+    Hit(CacheEntry<K, V, H, E, I, S>),
+    Wait(oneshot::Receiver<CacheEntry<K, V, H, E, I, S>>),
+    Miss(JoinHandle<std::result::Result<CacheEntry<K, V, H, E, I, S>, ER>>),
 }
 
 #[expect(clippy::type_complexity)]
@@ -342,9 +371,9 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
-    shards: Vec<Mutex<CacheShard<K, V, H, E, I>>>,
+    shards: Vec<Mutex<CacheShard<K, V, H, E, I, S>>>,
 
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
@@ -359,7 +388,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
     pub fn new(config: CacheConfig<E, S>) -> Self {
         let usages = (0..config.shards)
@@ -400,14 +429,28 @@ where
 
         let mut to_deallocate = vec![];
 
-        let entry = unsafe {
+        let (entry, waiters) = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
-            let ptr = shard.insert(hash, key, value, charge, context, &mut to_deallocate);
-            CacheEntry {
+            let waiters = shard.waiters.remove(&key);
+            let mut ptr = shard.insert(hash, key, value, charge, context, &mut to_deallocate);
+            if let Some(waiters) = waiters.as_ref() {
+                ptr.as_mut().base_mut().inc_refs_by(waiters.len());
+            }
+            let entry = CacheEntry {
                 cache: self.clone(),
                 ptr,
-            }
+            };
+            (entry, waiters)
         };
+
+        if let Some(waiters) = waiters {
+            for waiter in waiters {
+                let _ = waiter.send(CacheEntry {
+                    cache: self.clone(),
+                    ptr: entry.ptr,
+                });
+            }
+        }
 
         // Do not deallocate data within the lock section.
         // TODO: call listener here.
@@ -465,6 +508,62 @@ where
     }
 }
 
+// TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
+impl<K, V, H, E, I, S> Cache<K, V, H, E, I, S>
+where
+    K: Key + Clone,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> Entry<K, V, H, E, I, S, ER>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<(V, usize), ER>> + Send + 'static,
+        ER: std::error::Error + Send + 'static,
+    {
+        let hash = self.hash_builder.hash_one(&key);
+
+        unsafe {
+            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            if let Some(ptr) = shard.get(hash, &key) {
+                return Entry::Hit(CacheEntry {
+                    cache: self.clone(),
+                    ptr,
+                });
+            }
+            match shard.waiters.entry(key.clone()) {
+                HashMapEntry::Occupied(mut o) => {
+                    let (tx, rx) = oneshot::channel();
+                    o.get_mut().push(tx);
+                    Entry::Wait(rx)
+                }
+                HashMapEntry::Vacant(v) => {
+                    v.insert(vec![]);
+                    let cache = self.clone();
+                    let future = f();
+                    let join = tokio::spawn(async move {
+                        let (value, charge) = match future.await {
+                            Ok((value, charge)) => (value, charge),
+                            Err(e) => {
+                                let mut shard =
+                                    cache.shards[hash as usize % cache.shards.len()].lock();
+                                shard.waiters.remove(&key);
+                                return Err(e);
+                            }
+                        };
+                        let entry = cache.insert(key, value, charge);
+                        Ok(entry)
+                    });
+                    Entry::Miss(join)
+                }
+            }
+        }
+    }
+}
+
 pub struct CacheEntry<K, V, H, E, I, S = RandomState>
 where
     K: Key,
@@ -472,7 +571,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
     cache: Arc<Cache<K, V, H, E, I, S>>,
     ptr: NonNull<H>,
@@ -485,7 +584,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         unsafe { self.cache.release(self.ptr) }
@@ -499,7 +598,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
 
@@ -515,7 +614,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
 }
 unsafe impl<K, V, H, E, I, S> Sync for CacheEntry<K, V, H, E, I, S>
@@ -525,7 +624,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    S: BuildHasher,
+    S: BuildHasher + Send + Sync + 'static,
 {
 }
 
