@@ -322,12 +322,9 @@ where
     }
 }
 
-pub struct CacheConfig<K, V, H, E, S = RandomState>
+pub struct CacheConfig<E, S = RandomState>
 where
-    K: Key,
-    V: Value,
-    H: Handle<Key = K, Value = V>,
-    E: Eviction<Handle = H>,
+    E: Eviction,
     S: BuildHasher,
 {
     pub capacity: usize,
@@ -364,7 +361,7 @@ where
     I: Indexer<Key = K, Handle = H>,
     S: BuildHasher,
 {
-    pub fn new(config: CacheConfig<K, V, H, E, S>) -> Self {
+    pub fn new(config: CacheConfig<E, S>) -> Self {
         let usages = (0..config.shards)
             .map(|_| Arc::new(AtomicUsize::new(0)))
             .collect_vec();
@@ -553,7 +550,7 @@ mod tests {
         Fifo<u64, u64>,
         HashTableIndexer<u64, FifoHandle<u64, u64>>,
     >;
-    type TestFifoCacheConfig = CacheConfig<u64, u64, FifoHandle<u64, u64>, Fifo<u64, u64>>;
+    type TestFifoCacheConfig = CacheConfig<Fifo<u64, u64>>;
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
