@@ -150,7 +150,7 @@ mod tests {
 
     unsafe fn new_test_fifo_handle_ptr(key: u64, value: u64) -> NonNull<TestFifoHandle> {
         let mut handle = Box::new(TestFifoHandle::new());
-        handle.init(0, key, value, 0, ());
+        handle.init(0, key, value, 1, ());
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 
@@ -161,9 +161,7 @@ mod tests {
     #[test]
     fn test_fifo() {
         unsafe {
-            let ptrs = (0..16)
-                .map(|i| new_test_fifo_handle_ptr(i, i))
-                .collect_vec();
+            let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i, i)).collect_vec();
 
             let config = FifoConfig {
                 default_capacity: 4,

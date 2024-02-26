@@ -39,6 +39,7 @@ pub enum LruContext {
     LowPriority,
 }
 
+#[derive(Debug)]
 enum NeedUpdatePointer {
     NoNeed,
     Forward,
@@ -180,8 +181,8 @@ where
             < self.charges * self.high_priority_pool_ratio_percentage
             && let next = self.low_priority_head.as_ref().next.unwrap_unchecked()
             && !self.is_head_ptr(next)
-            && (self.high_priority_charges + next.as_ref().base().charge())
-                < self.charges * self.high_priority_pool_ratio_percentage
+            && (self.high_priority_charges + next.as_ref().base().charge()) * 100
+                <= self.charges * self.high_priority_pool_ratio_percentage
         {
             return NeedUpdatePointer::Forward;
         }
@@ -317,6 +318,10 @@ where
                 handle.in_high_priority_pool = true;
                 self.insert_ptr_after_head(ptr);
                 self.high_priority_charges += handle.base().charge();
+
+                if self.is_head_ptr(self.low_priority_head) {
+                    self.low_priority_head = ptr;
+                }
             }
             LruContext::LowPriority => {
                 self.insert_ptr_after_low_priority_head(ptr);
@@ -325,9 +330,8 @@ where
 
         self.charges += handle.base().charge();
 
-        self.update_low_priority_head();
-
         self.len += 1;
+        self.update_low_priority_head();
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
@@ -342,9 +346,8 @@ where
         }
         self.charges -= handle.base.charge();
 
-        self.update_low_priority_head();
-
         self.len -= 1;
+        self.update_low_priority_head();
 
         Some(ptr)
     }
@@ -364,9 +367,8 @@ where
         }
         self.charges -= handle.base.charge();
 
-        self.update_low_priority_head();
-
         self.len -= 1;
+        self.update_low_priority_head();
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
@@ -387,9 +389,11 @@ where
     }
 
     unsafe fn is_empty(&self) -> bool {
-        let res = self.is_head_ptr(self.head.next.unwrap_unchecked());
-        debug_assert_eq!(self.len == 0, res);
-        res
+        debug_assert_eq!(
+            self.len == 0,
+            self.is_head_ptr(self.head.next.unwrap_unchecked())
+        );
+        self.len == 0
     }
 }
 
@@ -407,4 +411,61 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use itertools::Itertools;
+
+    use super::*;
+
+    type TestLruHandle = LruHandle<u64, u64>;
+    type TestLru = Lru<u64, u64>;
+
+    unsafe fn new_test_lru_handle_ptr(
+        key: u64,
+        value: u64,
+        context: LruContext,
+    ) -> NonNull<TestLruHandle> {
+        let mut handle = Box::new(TestLruHandle::new());
+        handle.init(0, key, value, 1, context);
+        NonNull::new_unchecked(Box::into_raw(handle))
+    }
+
+    unsafe fn del_test_lru_handle_ptr(ptr: NonNull<TestLruHandle>) {
+        let _ = Box::from_raw(ptr.as_ptr());
+    }
+
+    #[test]
+    fn test_lru() {
+        unsafe {
+            let ptrs = (0..20)
+                .map(|i| {
+                    new_test_lru_handle_ptr(
+                        i,
+                        i,
+                        if i < 10 {
+                            LruContext::HighPriority
+                        } else {
+                            LruContext::LowPriority
+                        },
+                    )
+                })
+                .collect_vec();
+
+            let config = LruConfig {
+                high_priority_pool_ratio_percentage: 50,
+            };
+
+            let mut lru = TestLru::new(config);
+
+            lru.push(ptrs[0]);
+            lru.push(ptrs[1]);
+            assert_eq!(lru.len, 2);
+            assert_eq!(lru.charges, 2);
+            assert_eq!(lru.high_priority_charges, 1);
+            assert_eq!(lru.low_priority_head, ptrs[1]);
+
+            for ptr in ptrs {
+                del_test_lru_handle_ptr(ptr);
+            }
+        }
+    }
+}
