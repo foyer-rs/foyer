@@ -14,8 +14,6 @@
 
 use std::{hash::BuildHasher, ptr::NonNull};
 
-use foyer_common::removable_queue::{RemovableQueue, Token};
-
 use crate::{
     cache::CacheConfig,
     eviction::Eviction,
@@ -30,8 +28,23 @@ where
     K: Key,
     V: Value,
 {
+    prev: Option<NonNull<FifoHandle<K, V>>>,
+    next: Option<NonNull<FifoHandle<K, V>>>,
+
     base: BaseHandle<K, V, FifoContext>,
-    token: Option<Token>,
+}
+
+unsafe impl<K, V> Send for FifoHandle<K, V>
+where
+    K: Key,
+    V: Value,
+{
+}
+unsafe impl<K, V> Sync for FifoHandle<K, V>
+where
+    K: Key,
+    V: Value,
+{
 }
 
 impl<K, V> Handle for FifoHandle<K, V>
@@ -45,8 +58,9 @@ where
 
     fn new() -> Self {
         Self {
+            prev: None,
+            next: None,
             base: BaseHandle::new(),
-            token: None,
         }
     }
 
@@ -71,16 +85,88 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct FifoConfig {
-    pub default_removable_capacity: usize,
-}
+pub struct FifoConfig {}
 
 pub struct Fifo<K, V>
 where
     K: Key,
     V: Value,
 {
-    queue: RemovableQueue<NonNull<FifoHandle<K, V>>>,
+    /// Dummy head node of a ring linked list.
+    head: Box<FifoHandle<K, V>>,
+
+    len: usize,
+}
+
+impl<K, V> Fifo<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    #[inline(always)]
+    unsafe fn insert_ptr_after_head(&mut self, ptr: NonNull<FifoHandle<K, V>>) {
+        let pos = self.head_nonnull_ptr();
+        self.insert_ptr_after(ptr, pos);
+    }
+
+    #[inline(always)]
+    unsafe fn insert_ptr_after(
+        &mut self,
+        mut ptr: NonNull<FifoHandle<K, V>>,
+        mut pos: NonNull<FifoHandle<K, V>>,
+    ) {
+        let handle = ptr.as_mut();
+        let phandle = pos.as_mut();
+
+        debug_assert!(handle.prev.is_none());
+        debug_assert!(handle.next.is_none());
+        debug_assert!(phandle.prev.is_some());
+        debug_assert!(phandle.next.is_some());
+
+        handle.prev = Some(pos);
+        handle.next = phandle.next;
+
+        phandle.next.unwrap_unchecked().as_mut().prev = Some(ptr);
+        phandle.next = Some(ptr);
+    }
+
+    #[inline(always)]
+    unsafe fn remove_ptr_before_head(&mut self) -> Option<NonNull<FifoHandle<K, V>>> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let ptr = self.head.prev.unwrap_unchecked();
+        debug_assert_ne!(ptr, self.head_nonnull_ptr());
+
+        self.remove_ptr(ptr);
+
+        Some(ptr)
+    }
+
+    #[inline(always)]
+    unsafe fn remove_ptr(&mut self, mut ptr: NonNull<FifoHandle<K, V>>) {
+        let handle = ptr.as_mut();
+
+        debug_assert!(handle.prev.is_some());
+        debug_assert!(handle.next.is_some());
+
+        handle.prev.unwrap_unchecked().as_mut().next = handle.next;
+        handle.next.unwrap_unchecked().as_mut().prev = handle.prev;
+
+        handle.next = None;
+        handle.prev = None;
+    }
+
+    #[inline(always)]
+    unsafe fn head_nonnull_ptr(&mut self) -> NonNull<FifoHandle<K, V>> {
+        NonNull::new_unchecked(self.head.as_mut() as *mut _)
+    }
+
+    #[inline(always)]
+    unsafe fn is_head_ptr(&self, ptr: NonNull<FifoHandle<K, V>>) -> bool {
+        std::ptr::eq(self.head.as_ref(), ptr.as_ptr())
+    }
 }
 
 impl<K, V> Eviction for Fifo<K, V>
@@ -91,43 +177,65 @@ where
     type Handle = FifoHandle<K, V>;
     type Config = FifoConfig;
 
-    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(config: &CacheConfig<Self, S>) -> Self
+    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(_: &CacheConfig<Self, S>) -> Self
     where
         Self: Sized,
     {
-        let capacity = config.eviction_config.default_removable_capacity / config.shards;
-        Self {
-            queue: RemovableQueue::with_capacity(capacity),
-        }
+        let mut head = Box::new(FifoHandle::new());
+        let ptr = NonNull::new_unchecked(head.as_mut() as *mut _);
+        head.prev = Some(ptr);
+        head.next = Some(ptr);
+        Self { head, len: 0 }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let token = self.queue.push(ptr);
-        ptr.as_mut().token = Some(token);
+        self.insert_ptr_after_head(ptr);
+        self.len += 1;
+        ptr.as_mut().base_mut().set_in_eviction(true);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        self.queue.pop()
+        let mut res = self.remove_ptr_before_head();
+        if let Some(ptr) = res.as_mut() {
+            self.len -= 1;
+            ptr.as_mut().base_mut().set_in_eviction(false);
+        }
+        res
+    }
+
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) -> bool {
+        false
     }
 
     unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        debug_assert!(ptr.as_mut().token.is_some());
-        let token = ptr.as_mut().token.take().unwrap_unchecked();
-        self.queue.remove(token);
+        self.remove_ptr(ptr);
+        self.len -= 1;
+        ptr.as_mut().base_mut().set_in_eviction(false);
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
-        self.queue.clear()
+        let mut res = Vec::with_capacity(self.len());
+        while !self.is_empty() {
+            let mut ptr = self.remove_ptr_before_head().unwrap_unchecked();
+            self.len -= 1;
+            ptr.as_mut().base_mut().set_in_eviction(false);
+            res.push(ptr);
+        }
+        res
     }
 
     unsafe fn len(&self) -> usize {
-        self.queue.len()
+        self.len
     }
 
     unsafe fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        debug_assert_eq!(
+            self.len == 0,
+            self.is_head_ptr(self.head.next.unwrap_unchecked())
+        );
+        self.len == 0
     }
 }
 
@@ -172,9 +280,7 @@ mod tests {
             let config = CacheConfig {
                 capacity: 0,
                 shards: 1,
-                eviction_config: FifoConfig {
-                    default_removable_capacity: 4,
-                },
+                eviction_config: FifoConfig {},
                 object_pool_capacity: 0,
                 hash_builder: RandomState::default(),
             };

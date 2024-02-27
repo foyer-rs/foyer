@@ -115,7 +115,7 @@ where
     K: Key,
     V: Value,
 {
-    /// Dummy header node of a ring linked list.
+    /// Dummy head node of a ring linked list.
     head: Box<LruHandle<K, V>>,
     /// The pointer to the last element in the high priority pool.
     /// The low priority element will be inserted after the pointer initially.
@@ -285,11 +285,12 @@ where
                 self.insert_ptr_after_low_priority_head(ptr);
             }
         }
+        handle.base_mut().set_in_eviction(true);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        let ptr = self.remove_ptr_before_head()?;
-        let handle = ptr.as_ref();
+        let mut ptr = self.remove_ptr_before_head()?;
+        let handle = ptr.as_mut();
 
         debug_assert!(handle.next.is_none());
         debug_assert!(handle.prev.is_none());
@@ -298,17 +299,30 @@ where
             self.high_priority_charges -= handle.base.charge();
         }
         self.charges -= handle.base.charge();
-
         self.len -= 1;
+        handle.base_mut().set_in_eviction(false);
 
         Some(ptr)
     }
 
     unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn remove(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) -> bool {
+        let handle = ptr.as_mut();
+
+        if handle.base_mut().is_in_eviction() {
+            self.remove(ptr);
+            self.push(ptr);
+            false
+        } else {
+            self.push(ptr);
+            true
+        }
+    }
+
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         self.remove_ptr(ptr);
-        let handle = ptr.as_ref();
+        let handle = ptr.as_mut();
 
         debug_assert!(handle.next.is_none());
         debug_assert!(handle.prev.is_none());
@@ -317,8 +331,8 @@ where
             self.high_priority_charges -= handle.base.charge();
         }
         self.charges -= handle.base.charge();
-
         self.len -= 1;
+        handle.base_mut().set_in_eviction(false);
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {

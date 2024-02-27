@@ -29,5 +29,4 @@ pub mod erwlock;
 pub mod range;
 pub mod rate;
 pub mod rated_ticket;
-pub mod removable_queue;
 pub mod runtime;

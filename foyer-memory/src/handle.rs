@@ -19,7 +19,7 @@ use crate::{Key, Value};
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     struct BaseHandleFlags: u8 {
-        const IN_CACHE = 0b00000001;
+        const IN_INDEXER = 0b00000001;
         const IN_EVICTION = 0b00000010;
     }
 }
@@ -192,18 +192,24 @@ where
         self.refs
     }
 
+    /// Return `true` if there are external references.
     #[inline(always)]
-    pub fn set_in_cache(&mut self, in_cache: bool) {
+    pub fn has_refs(&self) -> bool {
+        self.refs() > 0
+    }
+
+    #[inline(always)]
+    pub fn set_in_indexer(&mut self, in_cache: bool) {
         if in_cache {
-            self.flags |= BaseHandleFlags::IN_CACHE;
+            self.flags |= BaseHandleFlags::IN_INDEXER;
         } else {
-            self.flags -= BaseHandleFlags::IN_CACHE;
+            self.flags -= BaseHandleFlags::IN_INDEXER;
         }
     }
 
     #[inline(always)]
-    pub fn is_in_cache(&self) -> bool {
-        !(self.flags & BaseHandleFlags::IN_CACHE).is_empty()
+    pub fn is_in_indexer(&self) -> bool {
+        !(self.flags & BaseHandleFlags::IN_INDEXER).is_empty()
     }
 
     #[inline(always)]
@@ -228,17 +234,17 @@ mod tests {
     #[test]
     fn test_base_handle_basic() {
         let mut h = BaseHandle::<(), (), ()>::new();
-        assert!(!h.is_in_cache());
+        assert!(!h.is_in_indexer());
         assert!(!h.is_in_eviction());
 
-        h.set_in_cache(true);
+        h.set_in_indexer(true);
         h.set_in_eviction(true);
-        assert!(h.is_in_cache());
+        assert!(h.is_in_indexer());
         assert!(h.is_in_eviction());
 
-        h.set_in_cache(false);
+        h.set_in_indexer(false);
         h.set_in_eviction(false);
-        assert!(!h.is_in_cache());
+        assert!(!h.is_in_indexer());
         assert!(!h.is_in_eviction());
     }
 }

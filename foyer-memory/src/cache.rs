@@ -25,111 +25,12 @@ use std::{
 
 use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
-use hashbrown::{
-    hash_map::{Entry as HashMapEntry, HashMap},
-    hash_table::{Entry as HashTableEntry, HashTable},
-};
+use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
-use crate::{eviction::Eviction, handle::Handle, Key, Value};
-
-#[expect(clippy::missing_safety_doc)]
-pub trait Indexer: Send + Sync + 'static {
-    type Key: Key;
-    type Handle: Handle<Key = Self::Key>;
-
-    fn new() -> Self;
-    unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
-    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
-    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
-}
-
-struct HashTableIndexer<K, H>
-where
-    K: Key,
-    H: Handle<Key = K>,
-{
-    table: HashTable<NonNull<H>>,
-}
-
-unsafe impl<K, H> Send for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: Handle<Key = K>,
-{
-}
-
-unsafe impl<K, H> Sync for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: Handle<Key = K>,
-{
-}
-
-impl<K, H> Indexer for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: Handle<Key = K>,
-{
-    type Key = K;
-    type Handle = H;
-
-    fn new() -> Self {
-        Self {
-            table: HashTable::new(),
-        }
-    }
-
-    unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
-        let base = ptr.as_mut().base_mut();
-
-        debug_assert!(!base.is_in_cache());
-        base.set_in_cache(true);
-
-        match self.table.entry(
-            base.hash(),
-            |p| p.as_ref().base().key() == base.key(),
-            |p| p.as_ref().base().hash(),
-        ) {
-            HashTableEntry::Occupied(mut o) => {
-                std::mem::swap(o.get_mut(), &mut ptr);
-                let b = ptr.as_mut().base_mut();
-                debug_assert!(b.is_in_cache());
-                b.set_in_cache(false);
-                Some(ptr)
-            }
-            HashTableEntry::Vacant(v) => {
-                v.insert(ptr);
-                None
-            }
-        }
-    }
-
-    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        self.table
-            .find(hash, |p| p.as_ref().base().key() == key)
-            .copied()
-    }
-
-    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        match self.table.entry(
-            hash,
-            |p| p.as_ref().base().key() == key,
-            |p| p.as_ref().base().hash(),
-        ) {
-            HashTableEntry::Occupied(o) => {
-                let (mut p, _) = o.remove();
-                let b = p.as_mut().base_mut();
-                debug_assert!(b.is_in_cache());
-                b.set_in_cache(false);
-                Some(p)
-            }
-            HashTableEntry::Vacant(_) => None,
-        }
-    }
-}
+use crate::{eviction::Eviction, handle::Handle, indexer::Indexer, Key, Value};
 
 #[expect(clippy::type_complexity)]
 struct CacheShard<K, V, H, E, I, S>
@@ -197,14 +98,20 @@ where
 
         self.evict(charge, last_reference_entries);
 
+        debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
-            // There is no external refs of this handle, it MUST be in the eviction collection.
-            if old.as_ref().base().refs() == 0 {
-                self.eviction.remove(old);
-                let (key, value) = self.clear_handle(old);
-                last_reference_entries.push((key, value));
+            debug_assert!(old.as_ref().base().is_in_eviction());
+            self.eviction.remove(old);
+            debug_assert!(!old.as_ref().base().is_in_eviction());
+            // Because the `old` handle is removed from the indexer, it will not be reinserted again.
+            if let Some(entry) = self.try_release_handle(old) {
+                last_reference_entries.push(entry);
             }
         }
+        self.eviction.push(ptr);
+
+        debug_assert!(ptr.as_ref().base().is_in_indexer());
+        debug_assert!(ptr.as_ref().base().is_in_indexer());
 
         self.usage.fetch_add(charge, Ordering::Relaxed);
         ptr.as_mut().base_mut().inc_refs();
@@ -212,44 +119,13 @@ where
         ptr
     }
 
-    /// Release the usage of a handle.
-    ///
-    /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
-    unsafe fn release(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
-        let base = ptr.as_mut().base_mut();
-
-        debug_assert!(!base.is_in_eviction());
-
-        if base.dec_refs() > 0 {
-            // Do nothing if the handle is still referenced externally.
-            return None;
-        }
-
-        // Keep the handle in eviction if it is still in the cache and the cache is not over-sized.
-        if base.is_in_cache() {
-            if self.usage.load(Ordering::Relaxed) <= self.capacity {
-                self.eviction.push(ptr);
-                return None;
-            }
-            // Emergency remove the handle if there is no space in cache.
-            self.indexer.remove(base.hash(), base.key());
-        }
-
-        debug_assert!(!base.is_in_eviction());
-
-        let (key, value) = self.clear_handle(ptr);
-        Some((key, value))
-    }
-
     unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
         let mut ptr = self.indexer.get(hash, key)?;
         let base = ptr.as_mut().base_mut();
+        debug_assert!(base.is_in_indexer());
 
-        // If the handle previously has no reference, it must exist in eviction, remove it.
-        if base.refs() == 0 {
-            self.eviction.remove(ptr);
-        }
         base.inc_refs();
+        self.eviction.access(ptr);
 
         Some(ptr)
     }
@@ -258,34 +134,30 @@ where
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
-        let mut ptr = self.indexer.remove(hash, key)?;
-        let base = ptr.as_mut().base_mut();
-
-        if base.refs() == 0 {
-            self.eviction.remove(ptr);
-            let (key, value) = self.clear_handle(ptr);
-            return Some((key, value));
-        }
-
-        None
+        let ptr = self.indexer.remove(hash, key)?;
+        self.try_release_handle(ptr)
     }
 
     /// Clear all cache entries.
-    ///
-    /// # Safety
-    ///
-    /// This method is safe only if there is no entry referenced externally.
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is any entry referenced externally.
-    unsafe fn clear(&mut self) {
-        let ptrs = self.eviction.clear();
-        for mut ptr in ptrs {
-            let base = ptr.as_mut().base_mut();
-            let p = self.indexer.remove(base.hash(), base.key()).unwrap();
-            debug_assert_eq!(ptr, p);
-            self.clear_handle(ptr);
+    unsafe fn clear(&mut self, last_reference_entries: &mut Vec<(K, V)>) {
+        // TODO(MrCroxx): Avoid collecting here?
+        let ptrs = self.indexer.drain().collect_vec();
+        let eptrs = self.eviction.clear();
+
+        // Assert that the handles in the indexer covers the handles in the eviction container.
+        if cfg!(debug_assertions) {
+            use std::{collections::HashSet as StdHashSet, hash::RandomState as StdRandomState};
+            let ptrs: StdHashSet<_, StdRandomState> = StdHashSet::from_iter(ptrs.iter().copied());
+            let eptrs: StdHashSet<_, StdRandomState> = StdHashSet::from_iter(eptrs.iter().copied());
+            debug_assert!((&eptrs - &ptrs).is_empty());
+        }
+
+        // The handles in the indexer covers the handles in the eviction container.
+        // So only the handles drained from the indexer need to be released.
+        for ptr in ptrs {
+            if let Some(entry) = self.try_release_handle(ptr) {
+                last_reference_entries.push(entry);
+            }
         }
     }
 
@@ -294,28 +166,67 @@ where
             && let Some(evicted) = self.eviction.pop()
         {
             let base = evicted.as_ref().base();
-            self.indexer.remove(base.hash(), base.key());
-            let (key, value) = self.clear_handle(evicted);
-            last_reference_entries.push((key, value));
+            debug_assert!(base.is_in_indexer());
+            debug_assert!(!base.is_in_eviction());
+            if let Some(entry) = self.try_release_handle(evicted) {
+                last_reference_entries.push(entry);
+            }
         }
     }
 
-    /// Clear a currently used handle and recycle it if possible.
-    unsafe fn clear_handle(&self, mut ptr: NonNull<H>) -> (K, V) {
+    /// Release a handle used by an external user.
+    ///
+    /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
+    unsafe fn try_release_external_handle(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
+        ptr.as_mut().base_mut().dec_refs();
+        self.try_release_handle(ptr)
+    }
+
+    /// Try release handle if there is no external reference and no reinsertion is needed.
+    ///
+    /// Return the entry if the handle is released.
+    ///
+    /// Recycle it if possible.
+    unsafe fn try_release_handle(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
         let base = ptr.as_mut().base_mut();
 
+        if base.has_refs() {
+            return None;
+        }
+
         debug_assert!(base.is_inited());
-        debug_assert!(!base.is_in_cache());
+        debug_assert!(!base.has_refs());
+
+        // If the entry is not updated or removed from the cache, try to reinsert it.
+        if base.is_in_indexer() {
+            // The usage is higher than the capacity means most handles are held externally,
+            // the cache shard cannot release enough charges for the new inserted entries.
+            // In this case, the reinsertion should be given up.
+            if self.usage.load(Ordering::Relaxed) <= self.capacity {
+                let in_eviction_before = base.is_in_eviction();
+                let reinserted = self.eviction.reinsert(ptr);
+                debug_assert!(!(in_eviction_before && reinserted));
+                if in_eviction_before || reinserted {
+                    return None;
+                }
+            }
+
+            // If the entry has not been reinserted, remove it from the indexer.
+            self.indexer.remove(base.hash(), base.key());
+        }
+
+        // Here the handle is neither in the indexer nor in the eviction container.
+        debug_assert!(!base.is_in_indexer());
         debug_assert!(!base.is_in_eviction());
-        debug_assert_eq!(base.refs(), 0);
+        debug_assert!(!base.has_refs());
 
         self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
-        let (key, value) = base.take();
+        let entry = base.take();
 
         let handle = Box::from_raw(ptr.as_ptr());
         let _ = self.object_pool.push(handle);
 
-        (key, value)
+        Some(entry)
     }
 }
 
@@ -329,9 +240,7 @@ where
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
-        // Since the shard is being drop, there must be no cache entries referenced outside. So we
-        // are safe to call clear.
-        unsafe { self.clear() }
+        unsafe { self.clear(&mut vec![]) }
     }
 }
 
@@ -484,6 +393,14 @@ where
         }
     }
 
+    pub fn clear(&self) {
+        let mut to_deallocate = vec![];
+        for shard in self.shards.iter() {
+            let mut shard = shard.lock();
+            unsafe { shard.clear(&mut to_deallocate) };
+        }
+    }
+
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -495,16 +412,16 @@ where
             .sum()
     }
 
-    unsafe fn release(&self, ptr: NonNull<H>) {
-        let kv = {
+    unsafe fn try_release_external_handle(&self, ptr: NonNull<H>) {
+        let entry = {
             let base = ptr.as_ref().base();
             let mut shard = self.shards[base.hash() as usize % self.shards.len()].lock();
-            shard.release(ptr)
+            shard.try_release_external_handle(ptr)
         };
 
         // Do not deallocate data within the lock section.
         // TODO: call listener here.
-        drop(kv);
+        drop(entry);
     }
 }
 
@@ -587,7 +504,7 @@ where
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
-        unsafe { self.cache.release(self.ptr) }
+        unsafe { self.cache.try_release_external_handle(self.ptr) }
     }
 }
 
@@ -633,7 +550,10 @@ mod tests {
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
-    use crate::eviction::fifo::{Fifo, FifoConfig, FifoHandle};
+    use crate::{
+        eviction::fifo::{Fifo, FifoConfig, FifoHandle},
+        indexer::HashTableIndexer,
+    };
 
     type TestFifoCache = Cache<
         u64,
@@ -659,9 +579,7 @@ mod tests {
         let config = TestFifoCacheConfig {
             capacity: CAPACITY,
             shards: 4,
-            eviction_config: FifoConfig {
-                default_removable_capacity: 16,
-            },
+            eviction_config: FifoConfig {},
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
         };

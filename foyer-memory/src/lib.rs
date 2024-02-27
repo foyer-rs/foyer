@@ -18,6 +18,7 @@
 pub mod cache;
 pub mod eviction;
 pub mod handle;
+pub mod indexer;
 
 use std::hash::Hash;
 
