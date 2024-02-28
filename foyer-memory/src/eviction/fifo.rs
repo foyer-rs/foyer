@@ -12,7 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{hash::BuildHasher, ptr::NonNull};
+use std::{fmt::Debug, hash::BuildHasher, ptr::NonNull};
+
+use foyer_intrusive::{
+    collections::dlist::{DList, DListLink},
+    intrusive_adapter,
+};
 
 use crate::{
     cache::CacheConfig,
@@ -28,24 +33,21 @@ where
     K: Key,
     V: Value,
 {
-    prev: Option<NonNull<FifoHandle<K, V>>>,
-    next: Option<NonNull<FifoHandle<K, V>>>,
-
+    link: DListLink,
     base: BaseHandle<K, V, FifoContext>,
 }
 
-unsafe impl<K, V> Send for FifoHandle<K, V>
+impl<K, V> Debug for FifoHandle<K, V>
 where
     K: Key,
     V: Value,
 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FifoHandle").finish()
+    }
 }
-unsafe impl<K, V> Sync for FifoHandle<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+
+intrusive_adapter! { FifoHandleDlistAdapter<K,V> = NonNull<FifoHandle<K,V>>: FifoHandle<K,V> { link: DListLink } where K:Key, V:Value }
 
 impl<K, V> Handle for FifoHandle<K, V>
 where
@@ -58,8 +60,7 @@ where
 
     fn new() -> Self {
         Self {
-            prev: None,
-            next: None,
+            link: DListLink::default(),
             base: BaseHandle::new(),
         }
     }
@@ -92,81 +93,7 @@ where
     K: Key,
     V: Value,
 {
-    /// Dummy head node of a ring linked list.
-    head: Box<FifoHandle<K, V>>,
-
-    len: usize,
-}
-
-impl<K, V> Fifo<K, V>
-where
-    K: Key,
-    V: Value,
-{
-    #[inline(always)]
-    unsafe fn insert_ptr_after_head(&mut self, ptr: NonNull<FifoHandle<K, V>>) {
-        let pos = self.head_nonnull_ptr();
-        self.insert_ptr_after(ptr, pos);
-    }
-
-    #[inline(always)]
-    unsafe fn insert_ptr_after(
-        &mut self,
-        mut ptr: NonNull<FifoHandle<K, V>>,
-        mut pos: NonNull<FifoHandle<K, V>>,
-    ) {
-        let handle = ptr.as_mut();
-        let phandle = pos.as_mut();
-
-        debug_assert!(handle.prev.is_none());
-        debug_assert!(handle.next.is_none());
-        debug_assert!(phandle.prev.is_some());
-        debug_assert!(phandle.next.is_some());
-
-        handle.prev = Some(pos);
-        handle.next = phandle.next;
-
-        phandle.next.unwrap_unchecked().as_mut().prev = Some(ptr);
-        phandle.next = Some(ptr);
-    }
-
-    #[inline(always)]
-    unsafe fn remove_ptr_before_head(&mut self) -> Option<NonNull<FifoHandle<K, V>>> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let ptr = self.head.prev.unwrap_unchecked();
-        debug_assert_ne!(ptr, self.head_nonnull_ptr());
-
-        self.remove_ptr(ptr);
-
-        Some(ptr)
-    }
-
-    #[inline(always)]
-    unsafe fn remove_ptr(&mut self, mut ptr: NonNull<FifoHandle<K, V>>) {
-        let handle = ptr.as_mut();
-
-        debug_assert!(handle.prev.is_some());
-        debug_assert!(handle.next.is_some());
-
-        handle.prev.unwrap_unchecked().as_mut().next = handle.next;
-        handle.next.unwrap_unchecked().as_mut().prev = handle.prev;
-
-        handle.next = None;
-        handle.prev = None;
-    }
-
-    #[inline(always)]
-    unsafe fn head_nonnull_ptr(&mut self) -> NonNull<FifoHandle<K, V>> {
-        NonNull::new_unchecked(self.head.as_mut() as *mut _)
-    }
-
-    #[inline(always)]
-    unsafe fn is_head_ptr(&self, ptr: NonNull<FifoHandle<K, V>>) -> bool {
-        std::ptr::eq(self.head.as_ref(), ptr.as_ptr())
-    }
+    dlist: DList<FifoHandleDlistAdapter<K, V>>,
 }
 
 impl<K, V> Eviction for Fifo<K, V>
@@ -181,26 +108,21 @@ where
     where
         Self: Sized,
     {
-        let mut head = Box::new(FifoHandle::new());
-        let ptr = NonNull::new_unchecked(head.as_mut() as *mut _);
-        head.prev = Some(ptr);
-        head.next = Some(ptr);
-        Self { head, len: 0 }
+        Self {
+            dlist: DList::new(),
+        }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        self.insert_ptr_after_head(ptr);
-        self.len += 1;
+        self.dlist.push_back(ptr);
         ptr.as_mut().base_mut().set_in_eviction(true);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        let mut res = self.remove_ptr_before_head();
-        if let Some(ptr) = res.as_mut() {
-            self.len -= 1;
+        self.dlist.pop_front().map(|mut ptr| {
             ptr.as_mut().base_mut().set_in_eviction(false);
-        }
-        res
+            ptr
+        })
     }
 
     unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) -> bool {
@@ -210,16 +132,18 @@ where
     unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        self.remove_ptr(ptr);
-        self.len -= 1;
+        let p = self
+            .dlist
+            .iter_mut_from_raw(ptr.as_mut().link.raw())
+            .remove()
+            .unwrap();
+        assert_eq!(p, ptr);
         ptr.as_mut().base_mut().set_in_eviction(false);
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
-        while !self.is_empty() {
-            let mut ptr = self.remove_ptr_before_head().unwrap_unchecked();
-            self.len -= 1;
+        while let Some(mut ptr) = self.dlist.pop_front() {
             ptr.as_mut().base_mut().set_in_eviction(false);
             res.push(ptr);
         }
@@ -227,15 +151,11 @@ where
     }
 
     unsafe fn len(&self) -> usize {
-        self.len
+        self.dlist.len()
     }
 
     unsafe fn is_empty(&self) -> bool {
-        debug_assert_eq!(
-            self.len == 0,
-            self.is_head_ptr(self.head.next.unwrap_unchecked())
-        );
-        self.len == 0
+        self.len() == 0
     }
 }
 
@@ -287,28 +207,29 @@ mod tests {
 
             let mut fifo = TestFifo::new(&config);
 
+            // 0, 1, 2, 3
             fifo.push(ptrs[0]);
             fifo.push(ptrs[1]);
             fifo.push(ptrs[2]);
             fifo.push(ptrs[3]);
 
+            // 2, 3
             let p0 = fifo.pop().unwrap();
             let p1 = fifo.pop().unwrap();
             assert_eq!(ptrs[0], p0);
             assert_eq!(ptrs[1], p1);
 
+            // 2, 3, 4, 5, 6
             fifo.push(ptrs[4]);
             fifo.push(ptrs[5]);
             fifo.push(ptrs[6]);
 
+            // 2, 6
             fifo.remove(ptrs[3]);
             fifo.remove(ptrs[4]);
             fifo.remove(ptrs[5]);
 
-            let p2 = fifo.pop().unwrap();
-            let p6 = fifo.pop().unwrap();
-            assert_eq!(ptrs[2], p2);
-            assert_eq!(ptrs[6], p6);
+            assert_eq!(fifo.clear(), vec![ptrs[2], ptrs[6]]);
 
             for ptr in ptrs {
                 del_test_fifo_handle_ptr(ptr);
