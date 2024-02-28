@@ -17,7 +17,7 @@ use std::{hash::Hasher, marker::PhantomData, ptr::NonNull};
 use foyer_common::code::{Key, Value};
 use twox_hash::XxHash64;
 
-use super::dlist::{DList, DListIter, DListIterMut, DListLink};
+use super::dlist::{Dlist, DlistIter, DlistIterMut, DlistLink};
 use crate::{
     core::{
         adapter::{KeyAdapter, Link},
@@ -28,10 +28,10 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct HashMapLink {
-    dlist_link: DListLink,
+    dlist_link: DlistLink,
 }
 
-intrusive_adapter! { HashMapLinkAdapter = NonNull<HashMapLink>: HashMapLink { dlist_link: DListLink } }
+intrusive_adapter! { HashMapLinkAdapter = NonNull<HashMapLink>: HashMapLink { dlist_link: DlistLink } }
 
 impl HashMapLink {
     pub fn raw(&self) -> NonNull<HashMapLink> {
@@ -54,7 +54,7 @@ where
     V: Value,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
-    slots: Vec<DList<HashMapLinkAdapter>>,
+    slots: Vec<Dlist<HashMapLinkAdapter>>,
 
     len: usize,
 
@@ -93,7 +93,7 @@ where
     pub fn new(bits: usize) -> Self {
         let mut slots = Vec::with_capacity(1 << bits);
         for _ in 0..(1 << bits) {
-            slots.push(DList::new());
+            slots.push(Dlist::new());
         }
         Self {
             slots,
@@ -189,7 +189,7 @@ where
         &mut self,
         key: &K,
         slot: usize,
-    ) -> Option<DListIterMut<'_, HashMapLinkAdapter>> {
+    ) -> Option<DlistIterMut<'_, HashMapLinkAdapter>> {
         let mut iter = self.slots[slot].iter_mut();
         iter.front();
         while iter.is_valid() {
@@ -210,7 +210,7 @@ where
         &self,
         key: &K,
         slot: usize,
-    ) -> Option<DListIter<'_, HashMapLinkAdapter>> {
+    ) -> Option<DlistIter<'_, HashMapLinkAdapter>> {
         let mut iter = self.slots[slot].iter();
         iter.front();
         while iter.is_valid() {
@@ -253,7 +253,7 @@ where
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     slot: usize,
-    iters: Vec<DListIter<'a, HashMapLinkAdapter>>,
+    iters: Vec<DlistIter<'a, HashMapLinkAdapter>>,
 
     adapter: A,
     _marker: PhantomData<(K, V)>,
