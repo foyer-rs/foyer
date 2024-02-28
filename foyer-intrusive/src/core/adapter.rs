@@ -331,27 +331,27 @@ mod tests {
     use crate::{collections::dlist::*, intrusive_adapter};
 
     #[derive(Debug)]
-    struct DListItem {
-        link: DListLink,
+    struct DlistItem {
+        link: DlistLink,
         val: u64,
     }
 
-    impl DListItem {
+    impl DlistItem {
         fn new(val: u64) -> Self {
             Self {
-                link: DListLink::default(),
+                link: DlistLink::default(),
                 val,
             }
         }
     }
 
-    intrusive_adapter! { DListItemAdapter = Box<DListItem>: DListItem { link: DListLink }}
-    key_adapter! { DListItemAdapter = DListItem { val: u64 } }
+    intrusive_adapter! { DlistItemAdapter = Box<DlistItem>: DlistItem { link: DlistLink }}
+    key_adapter! { DlistItemAdapter = DlistItem { val: u64 } }
 
     #[test]
     fn test_adapter_macro() {
-        let mut l = DList::<DListItemAdapter>::new();
-        l.push_front(Box::new(DListItem::new(1)));
+        let mut l = Dlist::<DlistItemAdapter>::new();
+        l.push_front(Box::new(DlistItem::new(1)));
         let v = l.iter().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1]);
     }
