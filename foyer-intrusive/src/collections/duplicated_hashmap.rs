@@ -102,7 +102,7 @@ where
                     while iter_group.is_valid() {
                         let link_group = iter_group.remove().unwrap();
                         let item = self.adapter.link2item(link_group);
-                        let _ = A::Pointer::from_raw(item.as_ptr());
+                        let _ = A::Pointer::from_ptr(item.as_ptr());
                     }
                 }
             }
@@ -131,7 +131,7 @@ where
 
     pub fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_raw(ptr) as *mut _);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
             let mut link_new = self.adapter.item2link(item_new);
 
             assert!(link_new.as_ref().group.is_empty());
@@ -170,7 +170,7 @@ where
                         let link = iter.remove().unwrap();
                         debug_assert!(!link.as_ref().is_linked());
                         let item = self.adapter.link2item(link);
-                        let ptr = A::Pointer::from_raw(item.as_ptr());
+                        let ptr = A::Pointer::from_ptr(item.as_ptr());
                         res.push(ptr);
                     }
                     debug_assert!(link.as_ref().group.is_empty());
@@ -273,7 +273,7 @@ where
         debug_assert!(!link.as_ref().group_link.is_linked());
         debug_assert!(link.as_ref().group.is_empty());
 
-        A::Pointer::from_raw(item.as_ptr())
+        A::Pointer::from_ptr(item.as_ptr())
     }
 
     /// # Safety
