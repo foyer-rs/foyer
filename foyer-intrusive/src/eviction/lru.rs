@@ -30,7 +30,7 @@ use std::{mem::ManuallyDrop, ptr::NonNull};
 
 use super::EvictionPolicy;
 use crate::{
-    collections::dlist::{Dlist, DlistIter, DlistLink},
+    collections::dlist::{DList, DListIter, DListLink},
     core::{
         adapter::{Adapter, Link},
         pointer::Pointer,
@@ -46,7 +46,7 @@ pub struct LruConfig {
 
 #[derive(Debug, Default)]
 pub struct LruLink {
-    link_lru: DlistLink,
+    link_lru: DListLink,
 
     is_in_tail: bool,
 }
@@ -63,7 +63,7 @@ impl Link for LruLink {
     }
 }
 
-intrusive_adapter! { LruLinkAdapter = NonNull<LruLink>: LruLink { link_lru: DlistLink } }
+intrusive_adapter! { LruLinkAdapter = NonNull<LruLink>: LruLink { link_lru: DListLink } }
 
 #[derive(Debug)]
 pub struct Lru<A>
@@ -72,7 +72,7 @@ where
     <A as Adapter>::Pointer: Clone,
 {
     /// lru list
-    lru: Dlist<LruLinkAdapter>,
+    lru: DList<LruLinkAdapter>,
 
     /// insertion point
     insertion_point: Option<NonNull<LruLink>>,
@@ -110,7 +110,7 @@ where
 {
     fn new(config: LruConfig) -> Self {
         Self {
-            lru: Dlist::new(),
+            lru: DList::new(),
 
             insertion_point: None,
 
@@ -146,7 +146,7 @@ where
 
             assert!(link.as_ref().is_linked());
 
-            self.ensure_not_insertion_point(link);
+            self.ensuer_not_insertion_point(link);
             self.lru
                 .iter_mut_from_raw(link.as_ref().link_lru.raw())
                 .remove()
@@ -169,7 +169,7 @@ where
 
             assert!(link.as_ref().is_linked());
 
-            self.ensure_not_insertion_point(link);
+            self.ensuer_not_insertion_point(link);
 
             self.move_to_lru_front(link);
 
@@ -239,7 +239,7 @@ where
         }
     }
 
-    unsafe fn ensure_not_insertion_point(&mut self, link: NonNull<LruLink>) {
+    unsafe fn ensuer_not_insertion_point(&mut self, link: NonNull<LruLink>) {
         if Some(link) == self.insertion_point {
             self.insertion_point = self.lru_prev(link);
             match &mut self.insertion_point {
@@ -290,7 +290,7 @@ where
     <A as Adapter>::Pointer: Clone,
 {
     lru: &'a Lru<A>,
-    iter: DlistIter<'a, LruLinkAdapter>,
+    iter: DListIter<'a, LruLinkAdapter>,
 
     ptr: ManuallyDrop<Option<<A as Adapter>::Pointer>>,
 }

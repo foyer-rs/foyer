@@ -20,51 +20,51 @@ use crate::core::{
 };
 
 #[derive(Debug, Default)]
-pub struct DlistLink {
-    prev: Option<NonNull<DlistLink>>,
-    next: Option<NonNull<DlistLink>>,
+pub struct DListLink {
+    prev: Option<NonNull<DListLink>>,
+    next: Option<NonNull<DListLink>>,
     is_linked: bool,
 }
 
-impl DlistLink {
-    pub fn raw(&self) -> NonNull<DlistLink> {
+impl DListLink {
+    pub fn raw(&self) -> NonNull<DListLink> {
         unsafe { NonNull::new_unchecked(self as *const _ as *mut _) }
     }
 
-    pub fn prev(&self) -> Option<NonNull<DlistLink>> {
+    pub fn prev(&self) -> Option<NonNull<DListLink>> {
         self.prev
     }
 
-    pub fn next(&self) -> Option<NonNull<DlistLink>> {
+    pub fn next(&self) -> Option<NonNull<DListLink>> {
         self.next
     }
 }
 
-unsafe impl Send for DlistLink {}
-unsafe impl Sync for DlistLink {}
+unsafe impl Send for DListLink {}
+unsafe impl Sync for DListLink {}
 
-impl Link for DlistLink {
+impl Link for DListLink {
     fn is_linked(&self) -> bool {
         self.is_linked
     }
 }
 
 #[derive(Debug)]
-pub struct Dlist<A>
+pub struct DList<A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
-    head: Option<NonNull<DlistLink>>,
-    tail: Option<NonNull<DlistLink>>,
+    head: Option<NonNull<DListLink>>,
+    tail: Option<NonNull<DListLink>>,
 
     len: usize,
 
     adapter: A,
 }
 
-impl<A> Drop for Dlist<A>
+impl<A> Drop for DList<A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     fn drop(&mut self) {
         let mut iter = self.iter_mut();
@@ -76,9 +76,9 @@ where
     }
 }
 
-impl<A> Dlist<A>
+impl<A> DList<A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     pub fn new() -> Self {
         Self {
@@ -144,15 +144,15 @@ where
         iter.remove()
     }
 
-    pub fn iter(&self) -> DlistIter<'_, A> {
-        DlistIter {
+    pub fn iter(&self) -> DListIter<'_, A> {
+        DListIter {
             link: None,
             dlist: self,
         }
     }
 
-    pub fn iter_mut(&mut self) -> DlistIterMut<'_, A> {
-        DlistIterMut {
+    pub fn iter_mut(&mut self) -> DListIterMut<'_, A> {
+        DListIterMut {
             link: None,
             dlist: self,
         }
@@ -170,9 +170,9 @@ where
     ///
     /// # Safety
     ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn iter_mut_from_raw(&mut self, link: NonNull<DlistLink>) -> DlistIterMut<'_, A> {
-        DlistIterMut {
+    /// `link` MUST be in this [`DList`].
+    pub unsafe fn iter_mut_from_raw(&mut self, link: NonNull<DListLink>) -> DListIterMut<'_, A> {
+        DListIterMut {
             link: Some(link),
             dlist: self,
         }
@@ -182,9 +182,9 @@ where
     ///
     /// # Safety
     ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn iter_from_raw(&self, link: NonNull<DlistLink>) -> DlistIter<'_, A> {
-        DlistIter {
+    /// `link` MUST be in this [`DList`].
+    pub unsafe fn iter_from_raw(&self, link: NonNull<DListLink>) -> DListIter<'_, A> {
+        DListIter {
             link: Some(link),
             dlist: self,
         }
@@ -193,7 +193,7 @@ where
     /// # Safety
     ///
     /// `self` must be empty. `src` will be set empty after operation.
-    pub unsafe fn replace_with(&mut self, src: &mut Dlist<A>) {
+    pub unsafe fn replace_with(&mut self, src: &mut DList<A>) {
         debug_assert!(self.head.is_none());
         debug_assert!(self.tail.is_none());
         debug_assert_eq!(self.len, 0);
@@ -208,17 +208,17 @@ where
     }
 }
 
-pub struct DlistIter<'a, A>
+pub struct DListIter<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     link: Option<NonNull<A::Link>>,
-    dlist: &'a Dlist<A>,
+    dlist: &'a DList<A>,
 }
 
-impl<'a, A> DlistIter<'a, A>
+impl<'a, A> DListIter<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     pub fn is_valid(&self) -> bool {
         self.link.is_some()
@@ -274,17 +274,17 @@ where
     }
 }
 
-pub struct DlistIterMut<'a, A>
+pub struct DListIterMut<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     link: Option<NonNull<A::Link>>,
-    dlist: &'a mut Dlist<A>,
+    dlist: &'a mut DList<A>,
 }
 
-impl<'a, A> DlistIterMut<'a, A>
+impl<'a, A> DListIterMut<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     pub fn is_valid(&self) -> bool {
         self.link.is_some()
@@ -336,7 +336,7 @@ where
         self.link = self.dlist.tail;
     }
 
-    /// Removes the current item from [`Dlist`] and move next.
+    /// Removes the current item from [`DList`] and move next.
     pub fn remove(&mut self) -> Option<A::Pointer> {
         unsafe {
             if !self.is_valid() {
@@ -467,9 +467,9 @@ where
     }
 }
 
-impl<'a, A> Iterator for DlistIter<'a, A>
+impl<'a, A> Iterator for DListIter<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     type Item = &'a <A::Pointer as Pointer>::Item;
 
@@ -482,9 +482,9 @@ where
     }
 }
 
-impl<'a, A> Iterator for DlistIterMut<'a, A>
+impl<'a, A> Iterator for DListIterMut<'a, A>
 where
-    A: Adapter<Link = DlistLink>,
+    A: Adapter<Link = DListLink>,
 {
     type Item = &'a mut <A::Pointer as Pointer>::Item;
 
@@ -511,27 +511,27 @@ mod tests {
     use crate::intrusive_adapter;
 
     #[derive(Debug)]
-    struct DlistItem {
-        link: DlistLink,
+    struct DListItem {
+        link: DListLink,
         val: u64,
     }
 
-    impl DlistItem {
+    impl DListItem {
         fn new(val: u64) -> Self {
             Self {
-                link: DlistLink::default(),
+                link: DListLink::default(),
                 val,
             }
         }
     }
 
     #[derive(Debug, Default)]
-    struct DlistAdapter;
+    struct DListAdapter;
 
-    unsafe impl Adapter for DlistAdapter {
-        type Pointer = Box<DlistItem>;
+    unsafe impl Adapter for DListAdapter {
+        type Pointer = Box<DListItem>;
 
-        type Link = DlistLink;
+        type Link = DListLink;
 
         fn new() -> Self {
             Self
@@ -541,26 +541,26 @@ mod tests {
             &self,
             link: *const Self::Link,
         ) -> *const <Self::Pointer as Pointer>::Item {
-            crate::container_of!(link, DlistItem, link)
+            crate::container_of!(link, DListItem, link)
         }
 
         unsafe fn item2link(
             &self,
             item: *const <Self::Pointer as Pointer>::Item,
         ) -> *const Self::Link {
-            (item as *const u8).add(crate::offset_of!(DlistItem, link)) as *const _
+            (item as *const u8).add(crate::offset_of!(DListItem, link)) as *const _
         }
     }
 
-    intrusive_adapter! { DlistArcAdapter = Arc<DlistItem>: DlistItem { link: DlistLink } }
+    intrusive_adapter! { DListArcAdapter = Arc<DListItem>: DListItem { link: DListLink } }
 
     #[test]
     fn test_dlist_simple() {
-        let mut l = Dlist::<DlistAdapter>::new();
+        let mut l = DList::<DListAdapter>::new();
 
-        l.push_back(Box::new(DlistItem::new(2)));
-        l.push_front(Box::new(DlistItem::new(1)));
-        l.push_back(Box::new(DlistItem::new(3)));
+        l.push_back(Box::new(DListItem::new(2)));
+        l.push_front(Box::new(DListItem::new(1)));
+        l.push_back(Box::new(DListItem::new(3)));
 
         let v = l.iter_mut().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1, 2, 3]);
@@ -587,9 +587,9 @@ mod tests {
 
     #[test]
     fn test_arc_drop() {
-        let mut l = Dlist::<DlistArcAdapter>::new();
+        let mut l = DList::<DListArcAdapter>::new();
 
-        let items = (0..10).map(|i| Arc::new(DlistItem::new(i))).collect_vec();
+        let items = (0..10).map(|i| Arc::new(DListItem::new(i))).collect_vec();
         for item in items.iter() {
             l.push_back(item.clone());
         }
