@@ -15,7 +15,7 @@
 use std::{fmt::Debug, hash::BuildHasher, ptr::NonNull};
 
 use foyer_intrusive::{
-    collections::dlist::{DList, DListLink},
+    collections::dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
 
@@ -33,7 +33,7 @@ where
     K: Key,
     V: Value,
 {
-    link: DListLink,
+    link: DlistLink,
     base: BaseHandle<K, V, FifoContext>,
 }
 
@@ -47,7 +47,7 @@ where
     }
 }
 
-intrusive_adapter! { FifoHandleDlistAdapter<K,V> = NonNull<FifoHandle<K,V>>: FifoHandle<K,V> { link: DListLink } where K:Key, V:Value }
+intrusive_adapter! { FifoHandleDlistAdapter<K,V> = NonNull<FifoHandle<K,V>>: FifoHandle<K,V> { link: DlistLink } where K:Key, V:Value }
 
 impl<K, V> Handle for FifoHandle<K, V>
 where
@@ -60,7 +60,7 @@ where
 
     fn new() -> Self {
         Self {
-            link: DListLink::default(),
+            link: DlistLink::default(),
             base: BaseHandle::new(),
         }
     }
@@ -93,7 +93,7 @@ where
     K: Key,
     V: Value,
 {
-    dlist: DList<FifoHandleDlistAdapter<K, V>>,
+    dlist: Dlist<FifoHandleDlistAdapter<K, V>>,
 }
 
 impl<K, V> Eviction for Fifo<K, V>
@@ -109,7 +109,7 @@ where
         Self: Sized,
     {
         Self {
-            dlist: DList::new(),
+            dlist: Dlist::new(),
         }
     }
 

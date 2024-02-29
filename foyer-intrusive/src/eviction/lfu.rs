@@ -37,7 +37,7 @@ use twox_hash::XxHash64;
 
 use super::EvictionPolicy;
 use crate::{
-    collections::dlist::{DList, DListIter, DListLink},
+    collections::dlist::{Dlist, DlistIter, DlistLink},
     core::{
         adapter::{Adapter, KeyAdapter, Link},
         pointer::Pointer,
@@ -69,8 +69,8 @@ enum LruType {
 
 #[derive(Debug, Default)]
 pub struct LfuLink {
-    link_tiny: DListLink,
-    link_main: DListLink,
+    link_tiny: DlistLink,
+    link_main: DlistLink,
 }
 
 impl Link for LfuLink {
@@ -94,8 +94,8 @@ impl LfuLink {
     }
 }
 
-intrusive_adapter! { LfuLinkTinyDListAdapter = NonNull<LfuLink>: LfuLink { link_tiny: DListLink } }
-intrusive_adapter! { LfuLinkMainDListAdapter = NonNull<LfuLink>: LfuLink { link_main: DListLink } }
+intrusive_adapter! { LfuLinkTinyDlistAdapter = NonNull<LfuLink>: LfuLink { link_tiny: DlistLink } }
+intrusive_adapter! { LfuLinkMainDlistAdapter = NonNull<LfuLink>: LfuLink { link_main: DlistLink } }
 
 /// Implements the W-TinyLFU cache eviction policy as described in -
 ///
@@ -131,10 +131,10 @@ where
     <A as Adapter>::Pointer: Clone,
 {
     /// tiny lru list
-    lru_tiny: DList<LfuLinkTinyDListAdapter>,
+    lru_tiny: Dlist<LfuLinkTinyDlistAdapter>,
 
     /// main lru list
-    lru_main: DList<LfuLinkMainDListAdapter>,
+    lru_main: Dlist<LfuLinkMainDlistAdapter>,
 
     /// the window length counter
     window_size: usize,
@@ -180,8 +180,8 @@ where
 {
     pub fn new(config: LfuConfig) -> Self {
         let mut res = Self {
-            lru_tiny: DList::new(),
-            lru_main: DList::new(),
+            lru_tiny: Dlist::new(),
+            lru_main: Dlist::new(),
 
             window_size: 0,
             max_window_size: 0,
@@ -415,8 +415,8 @@ where
     <A as Adapter>::Pointer: Clone,
 {
     lfu: &'a Lfu<A>,
-    iter_tiny: DListIter<'a, LfuLinkTinyDListAdapter>,
-    iter_main: DListIter<'a, LfuLinkMainDListAdapter>,
+    iter_tiny: DlistIter<'a, LfuLinkTinyDlistAdapter>,
+    iter_main: DlistIter<'a, LfuLinkMainDlistAdapter>,
 
     ptr: ManuallyDrop<Option<<A as Adapter>::Pointer>>,
 }

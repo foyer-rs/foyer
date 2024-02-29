@@ -32,7 +32,7 @@ use itertools::Itertools;
 
 use super::EvictionPolicy;
 use crate::{
-    collections::dlist::{DList, DListIter, DListLink},
+    collections::dlist::{Dlist, DlistIter, DlistLink},
     core::{
         adapter::{Adapter, Link, PriorityAdapter},
         pointer::Pointer,
@@ -52,7 +52,7 @@ pub struct SegmentedFifoConfig {
 
 #[derive(Debug, Default)]
 pub struct SegmentedFifoLink {
-    link_queue: DListLink,
+    link_queue: DlistLink,
 
     priority: usize,
 }
@@ -69,7 +69,7 @@ impl Link for SegmentedFifoLink {
     }
 }
 
-intrusive_adapter! { SegmentedFifoLinkAdapter = NonNull<SegmentedFifoLink>: SegmentedFifoLink { link_queue: DListLink } }
+intrusive_adapter! { SegmentedFifoLinkAdapter = NonNull<SegmentedFifoLink>: SegmentedFifoLink { link_queue: DlistLink } }
 
 /// Segmented FIFO policy
 ///
@@ -109,7 +109,7 @@ where
     A::Pointer: Clone,
 {
     // Note: All queue share the same dlist link.
-    segments: Vec<DList<SegmentedFifoLinkAdapter>>,
+    segments: Vec<Dlist<SegmentedFifoLinkAdapter>>,
 
     config: SegmentedFifoConfig,
     total_ratio: usize,
@@ -142,7 +142,7 @@ where
 {
     pub fn new(config: SegmentedFifoConfig) -> Self {
         let segments = (0..config.segment_ratios.len())
-            .map(|_| DList::new())
+            .map(|_| Dlist::new())
             .collect_vec();
         let total_ratio = config.segment_ratios.iter().sum();
 
@@ -249,7 +249,7 @@ where
     A::Pointer: Clone,
 {
     sfifo: &'a SegmentedFifo<A>,
-    iter_segments: Vec<DListIter<'a, SegmentedFifoLinkAdapter>>,
+    iter_segments: Vec<DlistIter<'a, SegmentedFifoLinkAdapter>>,
     segment: usize,
 
     ptr: ManuallyDrop<Option<A::Pointer>>,
