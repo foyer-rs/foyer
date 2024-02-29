@@ -77,7 +77,7 @@ where
                 while iter.is_valid() {
                     let link = iter.remove().unwrap();
                     let item = self.adapter.link2item(link);
-                    let _ = A::Pointer::from_raw(item.as_ptr());
+                    let _ = A::Pointer::from_ptr(item.as_ptr());
                 }
             }
         }
@@ -105,7 +105,7 @@ where
 
     pub fn insert(&mut self, ptr: A::Pointer) -> Option<A::Pointer> {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_raw(ptr) as *mut _);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
             let link_new = self.adapter.item2link(item_new);
 
             let key_new = self.adapter.item2key(item_new).as_ref();
@@ -179,7 +179,7 @@ where
             .iter_mut_from_raw(link.as_ref().dlist_link.raw())
             .remove();
         self.len -= 1;
-        A::Pointer::from_raw(item.as_ptr())
+        A::Pointer::from_ptr(item.as_ptr())
     }
 
     /// # Safety
@@ -232,7 +232,7 @@ where
             Some(mut iter) => {
                 let link = iter.remove().unwrap();
                 let item = self.adapter.link2item(link);
-                let ptr = A::Pointer::from_raw(item.as_ptr());
+                let ptr = A::Pointer::from_ptr(item.as_ptr());
                 Some(ptr)
             }
             None => None,
