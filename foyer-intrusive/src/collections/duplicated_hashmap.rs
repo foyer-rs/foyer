@@ -17,7 +17,7 @@ use std::{fmt::Debug, hash::Hasher, marker::PhantomData, ptr::NonNull};
 use foyer_common::code::{Key, Value};
 use twox_hash::XxHash64;
 
-use super::dlist::{Dlist, DlistIter, DlistIterMut, DlistLink};
+use super::dlist::{DList, DListIter, DListIterMut, DListLink};
 use crate::{
     core::{
         adapter::{Adapter, KeyAdapter, Link},
@@ -27,17 +27,17 @@ use crate::{
 };
 
 pub struct DuplicatedHashMapLink {
-    slot_link: DlistLink,
-    group_link: DlistLink,
-    group: Dlist<DuplicatedHashMapLinkGroupAdapter>,
+    slot_link: DListLink,
+    group_link: DListLink,
+    group: DList<DuplicatedHashMapLinkGroupAdapter>,
 }
 
 impl Default for DuplicatedHashMapLink {
     fn default() -> Self {
         Self {
-            slot_link: DlistLink::default(),
-            group_link: DlistLink::default(),
-            group: Dlist::new(),
+            slot_link: DListLink::default(),
+            group_link: DListLink::default(),
+            group: DList::new(),
         }
     }
 }
@@ -51,8 +51,8 @@ impl Debug for DuplicatedHashMapLink {
     }
 }
 
-intrusive_adapter! { DuplicatedHashMapLinkSlotAdapter = NonNull<DuplicatedHashMapLink>: DuplicatedHashMapLink { slot_link: DlistLink } }
-intrusive_adapter! { DuplicatedHashMapLinkGroupAdapter = NonNull<DuplicatedHashMapLink>: DuplicatedHashMapLink { group_link: DlistLink } }
+intrusive_adapter! { DuplicatedHashMapLinkSlotAdapter = NonNull<DuplicatedHashMapLink>: DuplicatedHashMapLink { slot_link: DListLink } }
+intrusive_adapter! { DuplicatedHashMapLinkGroupAdapter = NonNull<DuplicatedHashMapLink>: DuplicatedHashMapLink { group_link: DListLink } }
 
 impl DuplicatedHashMapLink {
     pub fn raw(&self) -> NonNull<DuplicatedHashMapLink> {
@@ -75,7 +75,7 @@ where
     V: Value,
     A: KeyAdapter<Key = K, Link = DuplicatedHashMapLink>,
 {
-    slots: Vec<Dlist<DuplicatedHashMapLinkSlotAdapter>>,
+    slots: Vec<DList<DuplicatedHashMapLinkSlotAdapter>>,
 
     len: usize,
 
@@ -119,7 +119,7 @@ where
     pub fn new(bits: usize) -> Self {
         let mut slots = Vec::with_capacity(1 << bits);
         for _ in 0..(1 << bits) {
-            slots.push(Dlist::new());
+            slots.push(DList::new());
         }
         Self {
             slots,
@@ -284,7 +284,7 @@ where
         &mut self,
         key: &K,
         slot: usize,
-    ) -> Option<DlistIterMut<'_, DuplicatedHashMapLinkSlotAdapter>> {
+    ) -> Option<DListIterMut<'_, DuplicatedHashMapLinkSlotAdapter>> {
         let mut iter = self.slots[slot].iter_mut();
         iter.front();
         while iter.is_valid() {
@@ -305,7 +305,7 @@ where
         &self,
         key: &K,
         slot: usize,
-    ) -> Option<DlistIter<'_, DuplicatedHashMapLinkSlotAdapter>> {
+    ) -> Option<DListIter<'_, DuplicatedHashMapLinkSlotAdapter>> {
         let mut iter = self.slots[slot].iter();
         iter.front();
         while iter.is_valid() {
