@@ -203,16 +203,17 @@ where
             // the cache shard cannot release enough charges for the new inserted entries.
             // In this case, the reinsertion should be given up.
             if self.usage.load(Ordering::Relaxed) <= self.capacity {
-                let in_eviction_before = base.is_in_eviction();
-                let reinserted = self.eviction.reinsert(ptr);
-                debug_assert!(!(in_eviction_before && reinserted));
-                if in_eviction_before || reinserted {
+                self.eviction.reinsert(ptr);
+                if ptr.as_ref().base().is_in_eviction() {
                     return None;
                 }
             }
 
             // If the entry has not been reinserted, remove it from the indexer.
             self.indexer.remove(base.hash(), base.key());
+            if ptr.as_ref().base().is_in_eviction() {
+                self.eviction.remove(ptr);
+            }
         }
 
         // Here the handle is neither in the indexer nor in the eviction container.

@@ -47,7 +47,7 @@ where
     }
 }
 
-intrusive_adapter! { FifoHandleDlistAdapter<K,V> = NonNull<FifoHandle<K,V>>: FifoHandle<K,V> { link: DlistLink } where K:Key, V:Value }
+intrusive_adapter! { FifoHandleDlistAdapter<K, V> = NonNull<FifoHandle<K, V>>: FifoHandle<K, V> { link: DlistLink } where K: Key, V: Value }
 
 impl<K, V> Handle for FifoHandle<K, V>
 where
@@ -125,9 +125,7 @@ where
         })
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) -> bool {
-        false
-    }
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
