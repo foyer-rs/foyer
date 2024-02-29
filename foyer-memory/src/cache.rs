@@ -100,11 +100,12 @@ where
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
+            debug_assert!(!old.as_ref().base().is_in_indexer());
             debug_assert!(old.as_ref().base().is_in_eviction());
             self.eviction.remove(old);
             debug_assert!(!old.as_ref().base().is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
-            if let Some(entry) = self.try_release_handle(old) {
+            if let Some(entry) = self.try_release_handle(old, false) {
                 last_reference_entries.push(entry);
             }
         }
@@ -135,7 +136,8 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
         let ptr = self.indexer.remove(hash, key)?;
-        self.try_release_handle(ptr)
+        debug_assert!(!ptr.as_ref().base().is_in_indexer());
+        self.try_release_handle(ptr, false)
     }
 
     /// Clear all cache entries.
@@ -155,7 +157,8 @@ where
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
         for ptr in ptrs {
-            if let Some(entry) = self.try_release_handle(ptr) {
+            debug_assert!(!ptr.as_ref().base().is_in_indexer());
+            if let Some(entry) = self.try_release_handle(ptr, false) {
                 last_reference_entries.push(entry);
             }
         }
@@ -168,7 +171,7 @@ where
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
             debug_assert!(!base.is_in_eviction());
-            if let Some(entry) = self.try_release_handle(evicted) {
+            if let Some(entry) = self.try_release_handle(evicted, false) {
                 last_reference_entries.push(entry);
             }
         }
@@ -179,7 +182,7 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn try_release_external_handle(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
         ptr.as_mut().base_mut().dec_refs();
-        self.try_release_handle(ptr)
+        self.try_release_handle(ptr, true)
     }
 
     /// Try release handle if there is no external reference and no reinsertion is needed.
@@ -187,7 +190,7 @@ where
     /// Return the entry if the handle is released.
     ///
     /// Recycle it if possible.
-    unsafe fn try_release_handle(&mut self, mut ptr: NonNull<H>) -> Option<(K, V)> {
+    unsafe fn try_release_handle(&mut self, mut ptr: NonNull<H>, reinsert: bool) -> Option<(K, V)> {
         let base = ptr.as_mut().base_mut();
 
         if base.has_refs() {
@@ -197,19 +200,19 @@ where
         debug_assert!(base.is_inited());
         debug_assert!(!base.has_refs());
 
-        // If the entry is not updated or removed from the cache, try to reinsert it.
+        // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and the eviction container.
         if base.is_in_indexer() {
             // The usage is higher than the capacity means most handles are held externally,
             // the cache shard cannot release enough charges for the new inserted entries.
             // In this case, the reinsertion should be given up.
-            if self.usage.load(Ordering::Relaxed) <= self.capacity {
+            if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
                 self.eviction.reinsert(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
                     return None;
                 }
             }
 
-            // If the entry has not been reinserted, remove it from the indexer.
+            // If the entry has not been reinserted, remove it from the indexer and the eviction container (if needed).
             self.indexer.remove(base.hash(), base.key());
             if ptr.as_ref().base().is_in_eviction() {
                 self.eviction.remove(ptr);
