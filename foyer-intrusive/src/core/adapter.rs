@@ -50,12 +50,18 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
-    unsafe fn link2item(&self, link: *const Self::Link) -> *const <Self::Pointer as Pointer>::Item;
+    unsafe fn link2item(
+        &self,
+        link: std::ptr::NonNull<Self::Link>,
+    ) -> std::ptr::NonNull<<Self::Pointer as Pointer>::Item>;
 
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
-    unsafe fn item2link(&self, item: *const <Self::Pointer as Pointer>::Item) -> *const Self::Link;
+    unsafe fn item2link(
+        &self,
+        item: std::ptr::NonNull<<Self::Pointer as Pointer>::Item>,
+    ) -> std::ptr::NonNull<Self::Link>;
 }
 
 /// # Safety
@@ -69,7 +75,10 @@ pub unsafe trait KeyAdapter: Adapter {
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
-    unsafe fn item2key(&self, item: *const <Self::Pointer as Pointer>::Item) -> *const Self::Key;
+    unsafe fn item2key(
+        &self,
+        item: std::ptr::NonNull<<Self::Pointer as Pointer>::Item>,
+    ) -> std::ptr::NonNull<Self::Key>;
 }
 
 /// # Safety
@@ -85,8 +94,8 @@ pub unsafe trait PriorityAdapter: Adapter {
     /// Pointer operations MUST be valid.
     unsafe fn item2priority(
         &self,
-        item: *const <Self::Pointer as Pointer>::Item,
-    ) -> *const Self::Priority;
+        item: std::ptr::NonNull<<Self::Pointer as Pointer>::Item>,
+    ) -> std::ptr::NonNull<Self::Priority>;
 }
 
 /// Macro to generate an implementation of [`Adapter`] for instrusive container and items.
@@ -150,16 +159,16 @@ macro_rules! intrusive_adapter {
 
             unsafe fn link2item(
                 &self,
-                link: *const Self::Link,
-            ) -> *const <Self::Pointer as $crate::core::pointer::Pointer>::Item {
-                $crate::container_of!(link, $item, $field)
+                link: std::ptr::NonNull<Self::Link>,
+            ) -> std::ptr::NonNull<<Self::Pointer as $crate::core::pointer::Pointer>::Item> {
+                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $field) as *mut _)
             }
 
             unsafe fn item2link(
                 &self,
-                item: *const <Self::Pointer as $crate::core::pointer::Pointer>::Item,
-            ) -> *const Self::Link {
-                (item as *const u8).add($crate::offset_of!($item, $field)) as *const _
+                item: std::ptr::NonNull<<Self::Pointer as $crate::core::pointer::Pointer>::Item>,
+            ) -> std::ptr::NonNull<Self::Link> {
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add($crate::offset_of!($item, $field)) as *mut Self::Link)
             }
         }
 
@@ -232,9 +241,9 @@ macro_rules! key_adapter {
 
             unsafe fn item2key(
                 &self,
-                item: *const <Self::Pointer as $crate::core::pointer::Pointer>::Item,
-            ) -> *const Self::Key {
-                (item as *const u8).add($crate::offset_of!($item, $field)) as *const _
+                item: std::ptr::NonNull<<Self::Pointer as $crate::core::pointer::Pointer>::Item>,
+            ) -> std::ptr::NonNull<Self::Key> {
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *const u8).add($crate::offset_of!($item, $field)) as *mut _)
             }
         }
     };
@@ -301,9 +310,9 @@ macro_rules! priority_adapter {
 
             unsafe fn item2priority(
                 &self,
-                item: *const <Self::Pointer as $crate::core::pointer::Pointer>::Item,
-            ) -> *const Self::Priority {
-                (item as *const u8).add($crate::offset_of!($item, $field)) as *const _
+                item: std::ptr::NonNull< <Self::Pointer as $crate::core::pointer::Pointer>::Item>,
+            ) -> std::ptr::NonNull<Self::Priority>{
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *const u8).add($crate::offset_of!($item, $field)) as *mut _)
             }
         }
     };
