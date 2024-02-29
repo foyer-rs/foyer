@@ -160,13 +160,12 @@ where
 
     fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item = A::Pointer::into_raw(ptr);
-            let mut link =
-                NonNull::new_unchecked(self.adapter.item2link(item) as *mut SegmentedFifoLink);
+            let item = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
+            let mut link = self.adapter.item2link(item);
 
             assert!(!link.as_ref().is_linked());
 
-            let priority = *self.adapter.item2priority(item);
+            let priority = *self.adapter.item2priority(item).as_ref();
             link.as_mut().priority = priority.into();
 
             self.segments[priority.into()].push_back(link);
@@ -179,9 +178,8 @@ where
 
     fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         unsafe {
-            let item = A::Pointer::as_ptr(ptr);
-            let link =
-                NonNull::new_unchecked(self.adapter.item2link(item) as *mut SegmentedFifoLink);
+            let item = NonNull::new_unchecked(A::Pointer::as_ptr(ptr) as *mut _);
+            let link = self.adapter.item2link(item);
 
             assert!(link.as_ref().is_linked());
 
@@ -195,7 +193,7 @@ where
 
             self.len -= 1;
 
-            A::Pointer::from_raw(item)
+            A::Pointer::from_ptr(item.as_ptr())
         }
     }
 
@@ -263,8 +261,8 @@ where
     unsafe fn update_ptr(&mut self, link: NonNull<SegmentedFifoLink>) {
         std::mem::forget(self.ptr.take());
 
-        let item = self.sfifo.adapter.link2item(link.as_ptr());
-        let ptr = A::Pointer::from_raw(item);
+        let item = self.sfifo.adapter.link2item(link);
+        let ptr = A::Pointer::from_ptr(item.as_ptr());
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 

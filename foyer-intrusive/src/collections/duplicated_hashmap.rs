@@ -101,8 +101,8 @@ where
                     iter_group.front();
                     while iter_group.is_valid() {
                         let link_group = iter_group.remove().unwrap();
-                        let item = self.adapter.link2item(link_group.as_ptr());
-                        let _ = A::Pointer::from_raw(item);
+                        let item = self.adapter.link2item(link_group);
+                        let _ = A::Pointer::from_ptr(item.as_ptr());
                     }
                 }
             }
@@ -131,13 +131,12 @@ where
 
     pub fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = A::Pointer::into_raw(ptr);
-            let mut link_new =
-                NonNull::new_unchecked(self.adapter.item2link(item_new) as *mut A::Link);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
+            let mut link_new = self.adapter.item2link(item_new);
 
             assert!(link_new.as_ref().group.is_empty());
 
-            let key_new = &*self.adapter.item2key(item_new);
+            let key_new = self.adapter.item2key(item_new).as_ref();
             let hash = self.hash_key(key_new);
             let slot = (self.slots.len() - 1) & hash as usize;
 
@@ -170,8 +169,8 @@ where
                     while iter.is_valid() {
                         let link = iter.remove().unwrap();
                         debug_assert!(!link.as_ref().is_linked());
-                        let item = self.adapter.link2item(link.as_ptr());
-                        let ptr = A::Pointer::from_raw(item);
+                        let item = self.adapter.link2item(link);
+                        let ptr = A::Pointer::from_ptr(item.as_ptr());
                         res.push(ptr);
                     }
                     debug_assert!(link.as_ref().group.is_empty());
@@ -196,7 +195,7 @@ where
                     iter.front();
                     while iter.is_valid() {
                         let link = iter.get().unwrap();
-                        let item = &*self.adapter.link2item(link as *const _);
+                        let item = self.adapter.link2item(link.raw()).as_ref();
                         res.push(item);
                         iter.next();
                     }
@@ -223,8 +222,8 @@ where
         mut link: NonNull<DuplicatedHashMapLink>,
     ) -> A::Pointer {
         assert!(link.as_ref().is_linked());
-        let item = self.adapter.link2item(link.as_ptr());
-        let key = &*self.adapter.item2key(item);
+        let item = self.adapter.link2item(link);
+        let key = self.adapter.item2key(item).as_ref();
         let hash = self.hash_key(key);
         let slot = (self.slots.len() - 1) & hash as usize;
 
@@ -257,7 +256,7 @@ where
                     header = &*header.prev().unwrap().as_ptr();
                 }
                 let adapter = DuplicatedHashMapLinkGroupAdapter::new();
-                &mut *(adapter.link2item(header as *const _) as *mut DuplicatedHashMapLink)
+                adapter.link2item(header.raw()).as_mut()
             };
             debug_assert!(header_link.slot_link.is_linked());
 
@@ -274,7 +273,7 @@ where
         debug_assert!(!link.as_ref().group_link.is_linked());
         debug_assert!(link.as_ref().group.is_empty());
 
-        A::Pointer::from_raw(item)
+        A::Pointer::from_ptr(item.as_ptr())
     }
 
     /// # Safety
@@ -288,8 +287,8 @@ where
         let mut iter = self.slots[slot].iter_mut();
         iter.front();
         while iter.is_valid() {
-            let item = self.adapter.link2item(iter.get().unwrap().raw().as_ptr());
-            let ikey = &*self.adapter.item2key(item);
+            let item = self.adapter.link2item(iter.get().unwrap().raw());
+            let ikey = self.adapter.item2key(item).as_ref();
             if ikey == key {
                 return Some(iter);
             }
@@ -309,8 +308,8 @@ where
         let mut iter = self.slots[slot].iter();
         iter.front();
         while iter.is_valid() {
-            let item = self.adapter.link2item(iter.get().unwrap().raw().as_ptr());
-            let ikey = &*self.adapter.item2key(item);
+            let item = self.adapter.link2item(iter.get().unwrap().raw());
+            let ikey = self.adapter.item2key(item).as_ref();
             if ikey == key {
                 return Some(iter);
             }

@@ -93,34 +93,32 @@ where
     pub fn front(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
-                .map(|link| self.adapter.link2item(link.as_ptr()))
-                .map(|link| &*link)
+                .map(|link| self.adapter.link2item(link))
+                .map(|link| link.as_ref())
         }
     }
 
     pub fn back(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
-                .map(|link| self.adapter.link2item(link.as_ptr()))
-                .map(|link| &*link)
+                .map(|link| self.adapter.link2item(link))
+                .map(|link| link.as_ref())
         }
     }
 
     pub fn front_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
-                .map(|link| self.adapter.link2item(link.as_ptr()))
-                .map(|link| link as *mut _)
-                .map(|link| &mut *link)
+                .map(|link| self.adapter.link2item(link))
+                .map(|mut link| link.as_mut())
         }
     }
 
     pub fn back_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
-                .map(|link| self.adapter.link2item(link.as_ptr()))
-                .map(|link| link as *mut _)
-                .map(|link| &mut *link)
+                .map(|link| self.adapter.link2item(link))
+                .map(|mut link| link.as_mut())
         }
     }
 
@@ -164,6 +162,17 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Remove an node that holds the given raw link.
+    ///
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`Dlist`].
+    pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> A::Pointer {
+        let mut iter = self.iter_mut_from_raw(link);
+        debug_assert!(iter.is_valid());
+        iter.remove().unwrap_unchecked()
     }
 
     /// Create mutable iterator directly on raw link.
@@ -226,7 +235,7 @@ where
 
     pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
-            .map(|link| unsafe { &*self.dlist.adapter.link2item(link.as_ptr()) })
+            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
     }
 
     /// Move to next.
@@ -292,12 +301,12 @@ where
 
     pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
-            .map(|link| unsafe { &*self.dlist.adapter.link2item(link.as_ptr()) })
+            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
     }
 
     pub fn get_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         self.link
-            .map(|link| unsafe { &mut *(self.dlist.adapter.link2item(link.as_ptr()) as *mut _) })
+            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_mut() })
     }
 
     /// Move to next.
@@ -345,8 +354,8 @@ where
 
             let mut link = self.link.unwrap();
 
-            let item = self.dlist.adapter.link2item(link.as_ptr());
-            let ptr = A::Pointer::from_raw(item);
+            let item = self.dlist.adapter.link2item(link);
+            let ptr = A::Pointer::from_ptr(item.as_ptr());
 
             // fix head and tail if node is either of that
             let mut prev = link.as_ref().prev;
@@ -383,9 +392,8 @@ where
     /// If iter is on null, link to tail.
     pub fn insert_before(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = A::Pointer::into_raw(ptr);
-            let mut link_new =
-                NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
+            let mut link_new = self.dlist.adapter.item2link(item_new);
             assert!(!link_new.as_ref().is_linked());
 
             match self.link {
@@ -411,9 +419,8 @@ where
     /// If iter is on null, link to head.
     pub fn insert_after(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = A::Pointer::into_raw(ptr);
-            let mut link_new =
-                NonNull::new_unchecked(self.dlist.adapter.item2link(item_new) as *mut A::Link);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
+            let mut link_new = self.dlist.adapter.item2link(item_new);
             assert!(!link_new.as_ref().is_linked());
 
             match self.link {
@@ -476,7 +483,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
         match self.link {
-            Some(link) => Some(unsafe { &*(self.dlist.adapter.link2item(link.as_ptr())) }),
+            Some(link) => Some(unsafe { self.dlist.adapter.link2item(link).as_ref() }),
             None => None,
         }
     }
@@ -491,9 +498,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
         match self.link {
-            Some(link) => {
-                Some(unsafe { &mut *(self.dlist.adapter.link2item(link.as_ptr()) as *mut _) })
-            }
+            Some(link) => Some(unsafe { self.dlist.adapter.link2item(link).as_mut() }),
             None => None,
         }
     }
@@ -539,16 +544,18 @@ mod tests {
 
         unsafe fn link2item(
             &self,
-            link: *const Self::Link,
-        ) -> *const <Self::Pointer as Pointer>::Item {
-            crate::container_of!(link, DlistItem, link)
+            link: NonNull<Self::Link>,
+        ) -> NonNull<<Self::Pointer as Pointer>::Item> {
+            NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link) as *mut _)
         }
 
         unsafe fn item2link(
             &self,
-            item: *const <Self::Pointer as Pointer>::Item,
-        ) -> *const Self::Link {
-            (item as *const u8).add(crate::offset_of!(DlistItem, link)) as *const _
+            item: NonNull<<Self::Pointer as Pointer>::Item>,
+        ) -> NonNull<Self::Link> {
+            NonNull::new_unchecked(
+                (item.as_ptr() as *const u8).add(crate::offset_of!(DlistItem, link)) as *mut _,
+            )
         }
     }
 
