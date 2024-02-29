@@ -30,7 +30,7 @@ use std::{mem::ManuallyDrop, ptr::NonNull};
 
 use super::EvictionPolicy;
 use crate::{
-    collections::dlist::{DList, DListIter, DListLink},
+    collections::dlist::{Dlist, DlistIter, DlistLink},
     core::{
         adapter::{Adapter, Link},
         pointer::Pointer,
@@ -43,7 +43,7 @@ pub struct FifoConfig;
 
 #[derive(Debug, Default)]
 pub struct FifoLink {
-    link: DListLink,
+    link: DlistLink,
 }
 
 impl FifoLink {
@@ -58,7 +58,7 @@ impl Link for FifoLink {
     }
 }
 
-intrusive_adapter! { FifoLinkAdapter = NonNull<FifoLink>: FifoLink { link: DListLink } }
+intrusive_adapter! { FifoLinkAdapter = NonNull<FifoLink>: FifoLink { link: DlistLink } }
 
 /// FIFO policy
 #[derive(Debug)]
@@ -67,7 +67,7 @@ where
     A: Adapter<Link = FifoLink>,
     <A as Adapter>::Pointer: Clone,
 {
-    queue: DList<FifoLinkAdapter>,
+    queue: Dlist<FifoLinkAdapter>,
 
     _config: FifoConfig,
 
@@ -99,7 +99,7 @@ where
 {
     pub fn new(config: FifoConfig) -> Self {
         Self {
-            queue: DList::new(),
+            queue: Dlist::new(),
 
             _config: config,
 
@@ -165,7 +165,7 @@ where
     <A as Adapter>::Pointer: Clone,
 {
     fifo: &'a Fifo<A>,
-    iter: DListIter<'a, FifoLinkAdapter>,
+    iter: DlistIter<'a, FifoLinkAdapter>,
 
     ptr: ManuallyDrop<Option<<A as Adapter>::Pointer>>,
 }
