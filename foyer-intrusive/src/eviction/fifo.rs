@@ -111,8 +111,8 @@ where
 
     fn insert(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item = A::Pointer::into_raw(ptr);
-            let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut FifoLink);
+            let item = NonNull::new_unchecked(A::Pointer::into_raw(ptr) as *mut _);
+            let link = self.adapter.item2link(item);
 
             assert!(!link.as_ref().is_linked());
 
@@ -124,8 +124,8 @@ where
 
     fn remove(&mut self, ptr: &A::Pointer) -> A::Pointer {
         unsafe {
-            let item = A::Pointer::as_ptr(ptr);
-            let link = NonNull::new_unchecked(self.adapter.item2link(item) as *mut FifoLink);
+            let item = NonNull::new_unchecked(A::Pointer::as_ptr(ptr) as *mut _);
+            let link = self.adapter.item2link(item);
 
             assert!(link.as_ref().is_linked());
 
@@ -136,7 +136,7 @@ where
 
             self.len -= 1;
 
-            A::Pointer::from_raw(item)
+            A::Pointer::from_raw(item.as_ptr())
         }
     }
 
@@ -178,8 +178,8 @@ where
     unsafe fn update_ptr(&mut self, link: NonNull<FifoLink>) {
         std::mem::forget(self.ptr.take());
 
-        let item = self.fifo.adapter.link2item(link.as_ptr());
-        let ptr = A::Pointer::from_raw(item);
+        let item = self.fifo.adapter.link2item(link);
+        let ptr = A::Pointer::from_raw(item.as_ptr());
         self.ptr = ManuallyDrop::new(Some(ptr));
     }
 
