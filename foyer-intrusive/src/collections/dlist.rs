@@ -355,7 +355,7 @@ where
             let mut link = self.link.unwrap();
 
             let item = self.dlist.adapter.link2item(link);
-            let ptr = A::Pointer::from_raw(item.as_ptr());
+            let ptr = A::Pointer::from_ptr(item.as_ptr());
 
             // fix head and tail if node is either of that
             let mut prev = link.as_ref().prev;
@@ -392,7 +392,7 @@ where
     /// If iter is on null, link to tail.
     pub fn insert_before(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_raw(ptr) as *mut _);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
             let mut link_new = self.dlist.adapter.item2link(item_new);
             assert!(!link_new.as_ref().is_linked());
 
@@ -419,7 +419,7 @@ where
     /// If iter is on null, link to head.
     pub fn insert_after(&mut self, ptr: A::Pointer) {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_raw(ptr) as *mut _);
+            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
             let mut link_new = self.dlist.adapter.item2link(item_new);
             assert!(!link_new.as_ref().is_linked());
 
