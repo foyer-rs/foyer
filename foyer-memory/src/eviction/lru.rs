@@ -40,7 +40,7 @@ pub struct LruConfig {
     pub high_priority_pool_ratio: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum LruContext {
     HighPriority,
     LowPriority,
