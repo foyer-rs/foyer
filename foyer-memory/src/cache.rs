@@ -25,6 +25,7 @@ use std::{
 
 use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
+use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -285,10 +286,80 @@ where
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
 {
+    Invalid,
     Hit(CacheEntry<K, V, H, E, I, S>),
     Wait(oneshot::Receiver<CacheEntry<K, V, H, E, I, S>>),
     Miss(JoinHandle<std::result::Result<CacheEntry<K, V, H, E, I, S>, ER>>),
 }
+
+impl<K, V, H, E, I, S, ER> Default for Entry<K, V, H, E, I, S, ER>
+where
+    K: Key,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+    ER: std::error::Error,
+{
+    fn default() -> Self {
+        Self::Invalid
+    }
+}
+
+impl<K, V, H, E, I, S, ER> Future for Entry<K, V, H, E, I, S, ER>
+where
+    K: Key,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+    ER: std::error::Error + From<oneshot::error::RecvError>,
+{
+    type Output = std::result::Result<CacheEntry<K, V, H, E, I, S>, ER>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match &mut *self {
+            Self::Invalid => unreachable!(),
+            Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
+                Entry::Hit(entry) => entry,
+                _ => unreachable!(),
+            })),
+            Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
+            Self::Miss(join_handle) => join_handle
+                .poll_unpin(cx)
+                .map(|join_result| join_result.unwrap()),
+        }
+    }
+}
+
+// impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Future
+//     for LookupResponse<K, T, E>
+// {
+//     type Output = Result<CacheableEntry<K, T>, E>;
+
+//     fn poll(
+//         mut self: std::pin::Pin<&mut Self>,
+//         cx: &mut std::task::Context<'_>,
+//     ) -> std::task::Poll<Self::Output> {
+// match &mut *self {
+//     Self::Invalid => unreachable!(),
+//     Self::Cached(_) => std::task::Poll::Ready(Ok(
+//         must_match!(std::mem::take(&mut *self), Self::Cached(entry) => entry),
+//     )),
+//     Self::WaitPendingRequest(receiver) => {
+//         receiver.poll_unpin(cx).map_err(|recv_err| recv_err.into())
+//     }
+//     Self::Miss(join_handle) => join_handle
+//         .poll_unpin(cx)
+//         .map(|join_result| join_result.unwrap()),
+//         }
+//     }
+// }
 
 #[expect(clippy::type_complexity)]
 pub struct Cache<K, V, H, E, I, S = RandomState>
