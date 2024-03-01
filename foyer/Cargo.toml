@@ -15,5 +15,6 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 foyer-common = { version = "0.3", path = "../foyer-common" }
 foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
+foyer-memory = { version = "0.1", path = "../foyer-memory" }
 foyer-storage = { version = "0.4", path = "../foyer-storage" }
 foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
