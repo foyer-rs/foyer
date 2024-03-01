@@ -15,6 +15,7 @@
 use super::Eviction;
 use crate::handle::Handle;
 
+#[expect(clippy::type_complexity)]
 pub trait TestEviction: Eviction {
     fn dump(
         &self,
