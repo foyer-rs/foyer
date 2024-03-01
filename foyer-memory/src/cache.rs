@@ -456,7 +456,9 @@ where
     pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> Entry<K, V, H, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, usize), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(V, usize, Option<H::Context>), ER>>
+            + Send
+            + 'static,
         ER: std::error::Error + Send + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
@@ -480,8 +482,8 @@ where
                     let cache = self.clone();
                     let future = f();
                     let join = tokio::spawn(async move {
-                        let (value, charge) = match future.await {
-                            Ok((value, charge)) => (value, charge),
+                        let (value, charge, context) = match future.await {
+                            Ok((value, charge, context)) => (value, charge, context),
                             Err(e) => {
                                 let mut shard =
                                     cache.shards[hash as usize % cache.shards.len()].lock();
@@ -489,7 +491,13 @@ where
                                 return Err(e);
                             }
                         };
-                        let entry = cache.insert(key, value, charge);
+
+                        let entry = if let Some(context) = context {
+                            cache.insert_with_context(key, value, charge, context)
+                        } else {
+                            cache.insert(key, value, charge)
+                        };
+
                         Ok(entry)
                     });
                     Entry::Miss(join)
