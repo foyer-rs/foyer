@@ -299,12 +299,32 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use ahash::RandomState;
     use foyer_intrusive::core::pointer::Pointer;
     use itertools::Itertools;
 
     use super::*;
+    use crate::eviction::test_utils::TestEviction;
+
+    impl<K, V> TestEviction for Lru<K, V>
+    where
+        K: Key + Clone,
+        V: Value + Clone,
+    {
+        fn dump(
+            &self,
+        ) -> Vec<(
+            <Self::Handle as Handle>::Key,
+            <Self::Handle as Handle>::Value,
+        )> {
+            self.list
+                .iter()
+                .chain(self.high_priority_list.iter())
+                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .collect_vec()
+        }
+    }
 
     type TestLruHandle = LruHandle<u64, u64>;
     type TestLru = Lru<u64, u64>;

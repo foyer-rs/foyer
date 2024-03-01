@@ -103,3 +103,6 @@ pub trait Eviction: Send + Sync + 'static {
 
 pub mod fifo;
 pub mod lru;
+
+#[cfg(test)]
+pub mod test_utils;

@@ -93,7 +93,7 @@ where
     K: Key,
     V: Value,
 {
-    dlist: Dlist<FifoHandleDlistAdapter<K, V>>,
+    queue: Dlist<FifoHandleDlistAdapter<K, V>>,
 }
 
 impl<K, V> Eviction for Fifo<K, V>
@@ -109,17 +109,17 @@ where
         Self: Sized,
     {
         Self {
-            dlist: Dlist::new(),
+            queue: Dlist::new(),
         }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        self.dlist.push_back(ptr);
+        self.queue.push_back(ptr);
         ptr.as_mut().base_mut().set_in_eviction(true);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        self.dlist.pop_front().map(|mut ptr| {
+        self.queue.pop_front().map(|mut ptr| {
             ptr.as_mut().base_mut().set_in_eviction(false);
             ptr
         })
@@ -131,7 +131,7 @@ where
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let p = self
-            .dlist
+            .queue
             .iter_mut_from_raw(ptr.as_mut().link.raw())
             .remove()
             .unwrap();
@@ -141,7 +141,7 @@ where
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
-        while let Some(mut ptr) = self.dlist.pop_front() {
+        while let Some(mut ptr) = self.queue.pop_front() {
             ptr.as_mut().base_mut().set_in_eviction(false);
             res.push(ptr);
         }
@@ -149,7 +149,7 @@ where
     }
 
     unsafe fn len(&self) -> usize {
-        self.dlist.len()
+        self.queue.len()
     }
 
     unsafe fn is_empty(&self) -> bool {
@@ -171,11 +171,30 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use ahash::RandomState;
     use itertools::Itertools;
 
     use super::*;
+    use crate::eviction::test_utils::TestEviction;
+
+    impl<K, V> TestEviction for Fifo<K, V>
+    where
+        K: Key + Clone,
+        V: Value + Clone,
+    {
+        fn dump(
+            &self,
+        ) -> Vec<(
+            <Self::Handle as Handle>::Key,
+            <Self::Handle as Handle>::Value,
+        )> {
+            self.queue
+                .iter()
+                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .collect_vec()
+        }
+    }
 
     type TestFifoHandle = FifoHandle<u64, u64>;
     type TestFifo = Fifo<u64, u64>;

@@ -30,7 +30,16 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
-use crate::{eviction::Eviction, handle::Handle, indexer::Indexer, Key, Value};
+use crate::{
+    eviction::{
+        fifo::{Fifo, FifoHandle},
+        lru::{Lru, LruHandle},
+        Eviction,
+    },
+    handle::Handle,
+    indexer::{HashTableIndexer, Indexer},
+    Key, Value,
+};
 
 #[expect(clippy::type_complexity)]
 struct CacheShard<K, V, H, E, I, S>
@@ -101,8 +110,9 @@ where
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
             debug_assert!(!old.as_ref().base().is_in_indexer());
-            debug_assert!(old.as_ref().base().is_in_eviction());
-            self.eviction.remove(old);
+            if old.as_ref().base().is_in_eviction() {
+                self.eviction.remove(old);
+            }
             debug_assert!(!old.as_ref().base().is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
             if let Some(entry) = self.try_release_handle(old, false) {
@@ -136,7 +146,11 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
         let ptr = self.indexer.remove(hash, key)?;
+        if ptr.as_ref().base().is_in_eviction() {
+            self.eviction.remove(ptr);
+        }
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
+        debug_assert!(!ptr.as_ref().base().is_in_eviction());
         self.try_release_handle(ptr, false)
     }
 
@@ -498,6 +512,53 @@ where
     ptr: NonNull<H>,
 }
 
+impl<K, V, H, E, I, S> CacheEntry<K, V, H, E, I, S>
+where
+    K: Key,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    pub fn key(&self) -> &H::Key {
+        unsafe { self.ptr.as_ref().base().key() }
+    }
+
+    pub fn value(&self) -> &H::Value {
+        unsafe { self.ptr.as_ref().base().value() }
+    }
+
+    pub fn charge(&self) -> usize {
+        unsafe { self.ptr.as_ref().base().charge() }
+    }
+}
+
+impl<K, V, H, E, I, S> Clone for CacheEntry<K, V, H, E, I, S>
+where
+    K: Key,
+    V: Value,
+    H: Handle<Key = K, Value = V>,
+    E: Eviction<Handle = H>,
+    I: Indexer<Key = K, Handle = H>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        let mut ptr = self.ptr;
+
+        unsafe {
+            let base = ptr.as_mut().base_mut();
+            debug_assert!(base.has_refs());
+            base.inc_refs();
+        }
+
+        Self {
+            cache: self.cache.clone(),
+            ptr,
+        }
+    }
+}
+
 impl<K, V, H, E, I, S> Drop for CacheEntry<K, V, H, E, I, S>
 where
     K: Key,
@@ -524,7 +585,7 @@ where
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.ptr.as_ref().base().value() }
+        self.value()
     }
 }
 
@@ -549,45 +610,47 @@ where
 {
 }
 
+pub type FifoCache<K, V, S = RandomState> =
+    Cache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, S>;
+pub type FifoCacheConfig<K, V, S = RandomState> = CacheConfig<Fifo<K, V>, S>;
+pub type FifoCacheEntry<K, V, S = RandomState> =
+    CacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, S>;
+
+pub type LruCache<K, V, S = RandomState> =
+    Cache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, S>;
+pub type LruCacheConfig<K, V, S = RandomState> = CacheConfig<Lru<K, V>, S>;
+pub type LruCacheEntry<K, V, S = RandomState> =
+    CacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, S>;
+
 #[cfg(test)]
 mod tests {
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
-    use crate::{
-        eviction::fifo::{Fifo, FifoConfig, FifoHandle},
-        indexer::HashTableIndexer,
-    };
-
-    type TestFifoCache = Cache<
-        u64,
-        u64,
-        FifoHandle<u64, u64>,
-        Fifo<u64, u64>,
-        HashTableIndexer<u64, FifoHandle<u64, u64>>,
-    >;
-    type TestFifoCacheConfig = CacheConfig<Fifo<u64, u64>>;
+    use crate::eviction::{fifo::FifoConfig, test_utils::TestEviction};
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<TestFifoCache>();
-        is_send_sync_static::<TestFifoCacheConfig>();
+        is_send_sync_static::<FifoCache<(), ()>>();
+        is_send_sync_static::<FifoCacheConfig<(), ()>>();
+        is_send_sync_static::<LruCache<(), ()>>();
+        is_send_sync_static::<LruCacheConfig<(), ()>>();
     }
 
     #[test]
     fn test_cache_fuzzy() {
         const CAPACITY: usize = 256;
 
-        let config = TestFifoCacheConfig {
+        let config = FifoCacheConfig {
             capacity: CAPACITY,
             shards: 4,
             eviction_config: FifoConfig {},
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
         };
-        let cache = Arc::new(TestFifoCache::new(config));
+        let cache = Arc::new(FifoCache::<u64, u64>::new(config));
 
         let mut rng = SmallRng::seed_from_u64(114514);
         for _ in 0..100000 {
@@ -600,5 +663,83 @@ mod tests {
             cache.insert(key, key, 1);
         }
         assert_eq!(cache.usage(), CAPACITY);
+    }
+
+    fn insert(
+        cache: &Arc<FifoCache<u64, String>>,
+        key: u64,
+        value: &str,
+    ) -> FifoCacheEntry<u64, String> {
+        cache.insert(key, value.to_string(), value.len())
+    }
+
+    #[test]
+    fn test_reference() {
+        let config = FifoCacheConfig {
+            capacity: 10,
+            shards: 1,
+            eviction_config: FifoConfig {},
+            object_pool_capacity: 1,
+            hash_builder: RandomState::default(),
+        };
+        let cache = Arc::new(FifoCache::<u64, String>::new(config));
+
+        unsafe {
+            let e1 = insert(&cache, 114, "xx");
+            let ptr = e1.ptr;
+            assert_eq!(cache.usage(), 2);
+            assert_eq!(ptr.as_ref().base().refs(), 1);
+
+            let e2 = e1.clone();
+            assert_eq!(ptr.as_ref().base().refs(), 2);
+
+            let e3 = cache.get(&114).unwrap();
+            assert_eq!(ptr.as_ref().base().refs(), 3);
+
+            drop(e2);
+            assert_eq!(ptr.as_ref().base().refs(), 2);
+            drop(e3);
+            assert_eq!(ptr.as_ref().base().refs(), 1);
+            drop(e1);
+            assert_eq!(ptr.as_ref().base().refs(), 0);
+
+            assert_eq!(cache.usage(), 2);
+
+            insert(&cache, 514, "QwQ");
+            assert_eq!(cache.usage(), 5);
+
+            insert(&cache, 114, "(0.0)");
+            assert_eq!(cache.usage(), 8);
+
+            assert_eq!(
+                cache.shards[0].lock().eviction.dump(),
+                vec![(514, "QwQ".to_string()), (114, "(0.0)".to_string())],
+            );
+
+            let e4 = cache.get(&514).unwrap();
+            let e5 = insert(&cache, 514, "bili");
+
+            assert_eq!(e4.ptr.as_ref().base().refs(), 1);
+            assert_eq!(e5.ptr.as_ref().base().refs(), 1);
+
+            // remains: 514 => QwQ (3), 514 => bili (4)
+            // evicted: 114 => (0.0) (5)
+            assert_eq!(cache.usage(), 7);
+
+            assert!(cache.get(&114).is_none());
+            assert_eq!(cache.get(&514).unwrap().value(), "bili");
+            assert_eq!(e4.value(), "QwQ");
+
+            cache.remove(&514);
+            assert_eq!(e5.value(), "bili");
+
+            drop(e5);
+            assert!(cache.get(&514).is_none());
+            assert_eq!(e4.value(), "QwQ");
+
+            assert_eq!(cache.usage(), 3);
+            drop(e4);
+            assert_eq!(cache.usage(), 0);
+        }
     }
 }
