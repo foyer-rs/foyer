@@ -106,9 +106,7 @@ where
     }
 
     pub fn eviction_push(&self, region_id: RegionId) {
-        self.eviction
-            .write()
-            .push(self.items[region_id as usize].clone());
+        self.eviction.write().push(self.items[region_id as usize].clone());
     }
 
     pub fn eviction_pop(&self) -> Option<RegionId> {

@@ -217,10 +217,7 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`HashMap`].
-    pub unsafe fn remove_in_place(
-        &mut self,
-        mut link: NonNull<DuplicatedHashMapLink>,
-    ) -> A::Pointer {
+    pub unsafe fn remove_in_place(&mut self, mut link: NonNull<DuplicatedHashMapLink>) -> A::Pointer {
         assert!(link.as_ref().is_linked());
         let item = self.adapter.link2item(link);
         let key = self.adapter.item2key(item).as_ref();
@@ -300,11 +297,7 @@ where
     /// # Safety
     ///
     /// there must be at most one matches in the slot
-    unsafe fn lookup_inner(
-        &self,
-        key: &K,
-        slot: usize,
-    ) -> Option<DlistIter<'_, DuplicatedHashMapLinkSlotAdapter>> {
+    unsafe fn lookup_inner(&self, key: &K, slot: usize) -> Option<DlistIter<'_, DuplicatedHashMapLinkSlotAdapter>> {
         let mut iter = self.slots[slot].iter();
         iter.front();
         while iter.is_valid() {

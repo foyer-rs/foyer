@@ -17,10 +17,5 @@ use crate::handle::Handle;
 
 #[expect(clippy::type_complexity)]
 pub trait TestEviction: Eviction {
-    fn dump(
-        &self,
-    ) -> Vec<(
-        <Self::Handle as Handle>::Key,
-        <Self::Handle as Handle>::Value,
-    )>;
+    fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)>;
 }

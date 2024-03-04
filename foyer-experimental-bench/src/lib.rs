@@ -42,11 +42,10 @@ pub fn init_logger() {
     use tracing::Level;
     use tracing_subscriber::{filter::Targets, prelude::*};
 
-    let trace_config =
-        Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-            SERVICE_NAME,
-            "foyer-storage-bench",
-        )]));
+    let trace_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
+        SERVICE_NAME,
+        "foyer-storage-bench",
+    )]));
     let batch_config = BatchConfig::default()
         .with_max_queue_size(1048576)
         .with_max_export_batch_size(4096)
@@ -133,11 +132,7 @@ pub fn io_monitor(config: IoMonitorConfig) -> IoMonitorGuard {
                     &last_metrics_dump,
                     &new_metrics_dump,
                 );
-                println!(
-                    "Report [{}s/{}s]",
-                    start.elapsed().as_secs(),
-                    config.total_secs
-                );
+                println!("Report [{}s/{}s]", start.elapsed().as_secs(), config.total_secs);
                 println!("{}", analysis);
                 last_io_stat = new_io_stat;
                 last_metrics_dump = new_metrics_dump;

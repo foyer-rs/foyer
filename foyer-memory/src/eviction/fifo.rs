@@ -65,14 +65,7 @@ where
         }
     }
 
-    fn init(
-        &mut self,
-        hash: u64,
-        key: Self::Key,
-        value: Self::Value,
-        charge: usize,
-        context: Self::Context,
-    ) {
+    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
         self.base.init(hash, key, value, charge, context);
     }
 
@@ -108,9 +101,7 @@ where
     where
         Self: Sized,
     {
-        Self {
-            queue: Dlist::new(),
-        }
+        Self { queue: Dlist::new() }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
@@ -130,11 +121,7 @@ where
     unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let p = self
-            .queue
-            .iter_mut_from_raw(ptr.as_mut().link.raw())
-            .remove()
-            .unwrap();
+        let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
         assert_eq!(p, ptr);
         ptr.as_mut().base_mut().set_in_eviction(false);
     }
@@ -183,12 +170,7 @@ pub mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(
-            &self,
-        ) -> Vec<(
-            <Self::Handle as Handle>::Key,
-            <Self::Handle as Handle>::Value,
-        )> {
+        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
             self.queue
                 .iter()
                 .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))

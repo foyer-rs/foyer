@@ -91,14 +91,7 @@ where
         }
     }
 
-    fn init(
-        &mut self,
-        hash: u64,
-        key: Self::Key,
-        value: Self::Value,
-        charge: usize,
-        context: Self::Context,
-    ) {
+    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
         self.base.init(hash, key, value, charge, context)
     }
 
@@ -173,9 +166,8 @@ where
             config.eviction_config.high_priority_pool_ratio
         );
 
-        let high_priority_charges_capacity = config.capacity as f64
-            * config.eviction_config.high_priority_pool_ratio
-            / config.shards as f64;
+        let high_priority_charges_capacity =
+            config.capacity as f64 * config.eviction_config.high_priority_pool_ratio / config.shards as f64;
         let high_priority_charges_capacity = high_priority_charges_capacity as usize;
 
         Self {
@@ -209,10 +201,7 @@ where
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        let mut ptr = self
-            .list
-            .pop_front()
-            .or_else(|| self.high_priority_list.pop_front())?;
+        let mut ptr = self.list.pop_front().or_else(|| self.high_priority_list.pop_front())?;
 
         let handle = ptr.as_mut();
         debug_assert!(!handle.link.is_linked());
@@ -312,12 +301,7 @@ pub mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(
-            &self,
-        ) -> Vec<(
-            <Self::Handle as Handle>::Key,
-            <Self::Handle as Handle>::Value,
-        )> {
+        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
             self.list
                 .iter()
                 .chain(self.high_priority_list.iter())
@@ -329,11 +313,7 @@ pub mod tests {
     type TestLruHandle = LruHandle<u64, u64>;
     type TestLru = Lru<u64, u64>;
 
-    unsafe fn new_test_lru_handle_ptr(
-        key: u64,
-        value: u64,
-        context: LruContext,
-    ) -> NonNull<TestLruHandle> {
+    unsafe fn new_test_lru_handle_ptr(key: u64, value: u64, context: LruContext) -> NonNull<TestLruHandle> {
         let mut handle = Box::new(TestLruHandle::new());
         handle.init(0, key, value, 1, context);
         NonNull::new_unchecked(Box::into_raw(handle))
@@ -343,9 +323,7 @@ pub mod tests {
         let _ = Box::from_raw(ptr.as_ptr());
     }
 
-    unsafe fn dump_test_lru(
-        lru: &TestLru,
-    ) -> (Vec<NonNull<TestLruHandle>>, Vec<NonNull<TestLruHandle>>) {
+    unsafe fn dump_test_lru(lru: &TestLru) -> (Vec<NonNull<TestLruHandle>>, Vec<NonNull<TestLruHandle>>) {
         (
             lru.list
                 .iter()
@@ -396,10 +374,7 @@ pub mod tests {
             assert_eq!(lru.len(), 4);
             assert_eq!(lru.high_priority_charges, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![], vec![ptrs[0], ptrs[1], ptrs[2], ptrs[3]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![], vec![ptrs[0], ptrs[1], ptrs[2], ptrs[3]]));
 
             // 0, [1, 2, 3, 4]
             lru.push(ptrs[4]);
@@ -418,10 +393,7 @@ pub mod tests {
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
-                (
-                    vec![ptrs[0], ptrs[10]],
-                    vec![ptrs[1], ptrs[2], ptrs[3], ptrs[4]]
-                )
+                (vec![ptrs[0], ptrs[10]], vec![ptrs[1], ptrs[2], ptrs[3], ptrs[4]])
             );
 
             // 10, [1, 2, 3, 4]
@@ -440,10 +412,7 @@ pub mod tests {
             assert_eq!(lru.len(), 4);
             assert_eq!(lru.high_priority_charges, 3);
             assert_eq!(lru.high_priority_list.len(), 3);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![ptrs[10]], vec![ptrs[1], ptrs[3], ptrs[4]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![ptrs[10]], vec![ptrs[1], ptrs[3], ptrs[4]]));
 
             // 10, 11, [1, 3, 4]
             lru.push(ptrs[11]);

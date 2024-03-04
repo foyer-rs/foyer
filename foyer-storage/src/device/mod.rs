@@ -98,9 +98,7 @@ pub trait DeviceExt: Device {
 
             while range.start + offset < range.end {
                 let len = std::cmp::min(self.io_size(), size - offset);
-                let (res, b) = self
-                    .read(buf, offset..offset + len, region, range.start + offset)
-                    .await;
+                let (res, b) = self.read(buf, offset..offset + len, region, range.start + offset).await;
                 let bytes = res?;
                 offset += bytes;
                 buf = b;

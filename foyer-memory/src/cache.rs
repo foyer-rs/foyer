@@ -73,11 +73,7 @@ where
     I: Indexer<Key = K, Handle = H>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn new(
-        config: &CacheConfig<E, S>,
-        usage: Arc<AtomicUsize>,
-        object_pool: Arc<ArrayQueue<Box<H>>>,
-    ) -> Self {
+    fn new(config: &CacheConfig<E, S>, usage: Arc<AtomicUsize>, object_pool: Arc<ArrayQueue<Box<H>>>) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(config) };
         let capacity = config.capacity / config.shards;
@@ -215,7 +211,8 @@ where
         debug_assert!(base.is_inited());
         debug_assert!(!base.has_refs());
 
-        // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and the eviction container.
+        // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and
+        // the eviction container.
         if base.is_in_indexer() {
             // The usage is higher than the capacity means most handles are held externally,
             // the cache shard cannot release enough charges for the new inserted entries.
@@ -319,10 +316,7 @@ where
 {
     type Output = std::result::Result<CacheEntry<K, V, H, E, I, S>, ER>;
 
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
             Self::Invalid => unreachable!(),
             Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
@@ -330,9 +324,7 @@ where
                 _ => unreachable!(),
             })),
             Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
-            Self::Miss(join_handle) => join_handle
-                .poll_unpin(cx)
-                .map(|join_result| join_result.unwrap()),
+            Self::Miss(join_handle) => join_handle.poll_unpin(cx).map(|join_result| join_result.unwrap()),
         }
     }
 }
@@ -365,9 +357,7 @@ where
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn new(config: CacheConfig<E, S>) -> Self {
-        let usages = (0..config.shards)
-            .map(|_| Arc::new(AtomicUsize::new(0)))
-            .collect_vec();
+        let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let object_pool = Arc::new(ArrayQueue::new(config.object_pool_capacity));
         let shards = usages
             .iter()
@@ -383,12 +373,7 @@ where
         }
     }
 
-    pub fn insert(
-        self: &Arc<Self>,
-        key: K,
-        value: V,
-        charge: usize,
-    ) -> CacheEntry<K, V, H, E, I, S> {
+    pub fn insert(self: &Arc<Self>, key: K, value: V, charge: usize) -> CacheEntry<K, V, H, E, I, S> {
         self.insert_with_context(key, value, charge, H::Context::default())
     }
 
@@ -471,10 +456,7 @@ where
     }
 
     pub fn usage(&self) -> usize {
-        self.usages
-            .iter()
-            .map(|usage| usage.load(Ordering::Relaxed))
-            .sum()
+        self.usages.iter().map(|usage| usage.load(Ordering::Relaxed)).sum()
     }
 
     unsafe fn try_release_external_handle(&self, ptr: NonNull<H>) {
@@ -503,9 +485,7 @@ where
     pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> Entry<K, V, H, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, usize, Option<H::Context>), ER>>
-            + Send
-            + 'static,
+        FU: Future<Output = std::result::Result<(V, usize, Option<H::Context>), ER>> + Send + 'static,
         ER: std::error::Error + Send + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
@@ -532,8 +512,7 @@ where
                         let (value, charge, context) = match future.await {
                             Ok((value, charge, context)) => (value, charge, context),
                             Err(e) => {
-                                let mut shard =
-                                    cache.shards[hash as usize % cache.shards.len()].lock();
+                                let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
                                 shard.waiters.remove(&key);
                                 return Err(e);
                             }
@@ -720,11 +699,7 @@ mod tests {
         assert_eq!(cache.usage(), CAPACITY);
     }
 
-    fn insert(
-        cache: &Arc<FifoCache<u64, String>>,
-        key: u64,
-        value: &str,
-    ) -> FifoCacheEntry<u64, String> {
+    fn insert(cache: &Arc<FifoCache<u64, String>>, key: u64, value: &str) -> FifoCacheEntry<u64, String> {
         cache.insert(key, value.to_string(), value.len())
     }
 

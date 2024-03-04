@@ -60,9 +60,6 @@ mod tests {
 
     #[test]
     fn test_error_size() {
-        assert_eq!(
-            std::mem::size_of::<DeviceError>(),
-            std::mem::size_of::<usize>()
-        );
+        assert_eq!(std::mem::size_of::<DeviceError>(), std::mem::size_of::<usize>());
     }
 }

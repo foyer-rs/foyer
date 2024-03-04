@@ -169,13 +169,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_of_raw(
-        &self,
-        link: NonNull<DlistLink>,
-    ) -> Option<&<A::Pointer as Pointer>::Item> {
-        link.as_ref()
-            .prev()
-            .map(|link| self.adapter.link2item(link).as_ref())
+    pub unsafe fn prev_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_ref())
     }
 
     /// Get the mutable prev element of the given `link`.
@@ -183,13 +178,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_mut_of_raw(
-        &self,
-        link: NonNull<DlistLink>,
-    ) -> Option<&mut <A::Pointer as Pointer>::Item> {
-        link.as_ref()
-            .prev()
-            .map(|link| self.adapter.link2item(link).as_mut())
+    pub unsafe fn prev_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_mut())
     }
 
     /// Get the next element of the given `link`.
@@ -197,13 +187,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_of_raw(
-        &self,
-        link: NonNull<DlistLink>,
-    ) -> Option<&<A::Pointer as Pointer>::Item> {
-        link.as_ref()
-            .next()
-            .map(|link| self.adapter.link2item(link).as_ref())
+    pub unsafe fn next_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2item(link).as_ref())
     }
 
     /// Get the mutable next element of the given `link`.
@@ -211,13 +196,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_mut_of_raw(
-        &self,
-        link: NonNull<DlistLink>,
-    ) -> Option<&mut <A::Pointer as Pointer>::Item> {
-        link.as_ref()
-            .next()
-            .map(|link| self.adapter.link2item(link).as_mut())
+    pub unsafe fn next_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2item(link).as_mut())
     }
 
     /// Remove an node that holds the given raw link.
@@ -599,20 +579,12 @@ mod tests {
             Self
         }
 
-        unsafe fn link2item(
-            &self,
-            link: NonNull<Self::Link>,
-        ) -> NonNull<<Self::Pointer as Pointer>::Item> {
+        unsafe fn link2item(&self, link: NonNull<Self::Link>) -> NonNull<<Self::Pointer as Pointer>::Item> {
             NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link) as *mut _)
         }
 
-        unsafe fn item2link(
-            &self,
-            item: NonNull<<Self::Pointer as Pointer>::Item>,
-        ) -> NonNull<Self::Link> {
-            NonNull::new_unchecked(
-                (item.as_ptr() as *const u8).add(crate::offset_of!(DlistItem, link)) as *mut _,
-            )
+        unsafe fn item2link(&self, item: NonNull<<Self::Pointer as Pointer>::Item>) -> NonNull<Self::Link> {
+            NonNull::new_unchecked((item.as_ptr() as *const u8).add(crate::offset_of!(DlistItem, link)) as *mut _)
         }
     }
 

@@ -30,14 +30,7 @@ pub trait Handle: Send + Sync + 'static {
     type Context: Default;
 
     fn new() -> Self;
-    fn init(
-        &mut self,
-        hash: u64,
-        key: Self::Key,
-        value: Self::Value,
-        charge: usize,
-        context: Self::Context,
-    );
+    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context);
 
     fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context>;
     fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context>;
@@ -103,12 +96,7 @@ where
     #[inline(always)]
     pub fn take(&mut self) -> (K, V) {
         debug_assert!(self.entry.is_some());
-        unsafe {
-            self.entry
-                .take()
-                .map(|(key, value, _)| (key, value))
-                .unwrap_unchecked()
-        }
+        unsafe { self.entry.take().map(|(key, value, _)| (key, value)).unwrap_unchecked() }
     }
 
     /// Return `true` if the handle is inited.

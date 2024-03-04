@@ -128,9 +128,7 @@ where
     D: Device,
 {
     pub fn new(id: RegionId, device: D) -> Self {
-        let inner = RegionInner {
-            waits: BTreeMap::new(),
-        };
+        let inner = RegionInner { waits: BTreeMap::new() };
         Self {
             id,
             inner: Arc::new(Mutex::new(inner)),
@@ -156,10 +154,7 @@ where
     /// Load region data by view from device.
     #[expect(clippy::type_complexity)]
     #[tracing::instrument(skip(self, view))]
-    pub async fn load(
-        &self,
-        view: RegionView,
-    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
+    pub async fn load(&self, view: RegionView) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
         let res = self
             .load_range(view.offset as usize..view.offset as usize + view.len as usize)
             .await;

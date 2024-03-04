@@ -105,9 +105,7 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let error = (v.load(Ordering::Relaxed) as isize
-            - RATE as isize * DURATION.as_secs() as isize)
-            .unsigned_abs();
+        let error = (v.load(Ordering::Relaxed) as isize - RATE as isize * DURATION.as_secs() as isize).unsigned_abs();
         let eratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
         assert!(eratio < ERATIO, "eratio: {}, target: {}", eratio, ERATIO);
     }

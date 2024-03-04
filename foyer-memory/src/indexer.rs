@@ -92,17 +92,14 @@ where
     }
 
     unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        self.table
-            .find(hash, |p| p.as_ref().base().key() == key)
-            .copied()
+        self.table.find(hash, |p| p.as_ref().base().key() == key).copied()
     }
 
     unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        match self.table.entry(
-            hash,
-            |p| p.as_ref().base().key() == key,
-            |p| p.as_ref().base().hash(),
-        ) {
+        match self
+            .table
+            .entry(hash, |p| p.as_ref().base().key() == key, |p| p.as_ref().base().hash())
+        {
             HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();
                 let b = p.as_mut().base_mut();
