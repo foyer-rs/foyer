@@ -337,30 +337,6 @@ where
     }
 }
 
-// impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Future
-//     for LookupResponse<K, T, E>
-// {
-//     type Output = Result<CacheableEntry<K, T>, E>;
-
-//     fn poll(
-//         mut self: std::pin::Pin<&mut Self>,
-//         cx: &mut std::task::Context<'_>,
-//     ) -> std::task::Poll<Self::Output> {
-// match &mut *self {
-//     Self::Invalid => unreachable!(),
-//     Self::Cached(_) => std::task::Poll::Ready(Ok(
-//         must_match!(std::mem::take(&mut *self), Self::Cached(entry) => entry),
-//     )),
-//     Self::WaitPendingRequest(receiver) => {
-//         receiver.poll_unpin(cx).map_err(|recv_err| recv_err.into())
-//     }
-//     Self::Miss(join_handle) => join_handle
-//         .poll_unpin(cx)
-//         .map(|join_result| join_result.unwrap()),
-//         }
-//     }
-// }
-
 #[expect(clippy::type_complexity)]
 pub struct Cache<K, V, H, E, I, S = RandomState>
 where
