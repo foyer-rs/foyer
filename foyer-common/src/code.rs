@@ -99,17 +99,7 @@ pub trait Cursor: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
 /// If cloning a [`Key`] is expensive, wrap it with [`std::sync::Arc`].
 #[expect(unused_variables)]
 pub trait Key:
-    Sized
-    + Send
-    + Sync
-    + 'static
-    + std::hash::Hash
-    + Eq
-    + PartialEq
-    + Ord
-    + PartialOrd
-    + std::fmt::Debug
-    + Clone
+    Sized + Send + Sync + 'static + std::hash::Hash + Eq + PartialEq + Ord + PartialOrd + std::fmt::Debug + Clone
 {
     type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
 

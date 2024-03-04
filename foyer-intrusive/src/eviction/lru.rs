@@ -216,20 +216,15 @@ where
 
             assert!(self.insertion_point.is_some());
 
-            let expected_tail_len =
-                (self.lru.len() as f64 * (1.0 - self.config.lru_insertion_point_fraction)) as usize;
+            let expected_tail_len = (self.lru.len() as f64 * (1.0 - self.config.lru_insertion_point_fraction)) as usize;
 
             let mut curr = self.insertion_point.unwrap();
-            while self.tail_len < expected_tail_len
-                && Some(curr) != self.lru.front().map(LruLink::raw)
-            {
+            while self.tail_len < expected_tail_len && Some(curr) != self.lru.front().map(LruLink::raw) {
                 curr = self.lru_prev(curr).unwrap();
                 curr.as_mut().is_in_tail = true;
                 self.tail_len += 1;
             }
-            while self.tail_len > expected_tail_len
-                && Some(curr) != self.lru.back().map(LruLink::raw)
-            {
+            while self.tail_len > expected_tail_len && Some(curr) != self.lru.back().map(LruLink::raw) {
                 curr.as_mut().is_in_tail = false;
                 self.tail_len -= 1;
                 curr = self.lru_next(curr).unwrap();

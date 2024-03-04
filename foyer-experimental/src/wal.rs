@@ -147,11 +147,7 @@ impl<H: HashValue> TombstoneLog<H> {
 
         path.push(format!("tombstone-{:08X}", config.id));
 
-        let file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .create(true)
-            .open(path)?;
+        let file = OpenOptions::new().write(true).read(true).create(true).open(path)?;
 
         let inner = Arc::new(TombstoneLogInner {
             inflights: Mutex::new(vec![]),
@@ -267,12 +263,7 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
             match self.file.write_all(&buffer) {
                 Ok(()) => {}
                 Err(e) => {
-                    self.task_tx
-                        .send(FlushNotifyTask {
-                            txs,
-                            io_result: Err(e),
-                        })
-                        .unwrap();
+                    self.task_tx.send(FlushNotifyTask { txs, io_result: Err(e) }).unwrap();
                     continue;
                 }
             }
@@ -282,23 +273,13 @@ impl<H: HashValue> TombstoneLogFlusher<H> {
             match self.file.sync_data() {
                 Ok(()) => {}
                 Err(e) => {
-                    self.task_tx
-                        .send(FlushNotifyTask {
-                            txs,
-                            io_result: Err(e),
-                        })
-                        .unwrap();
+                    self.task_tx.send(FlushNotifyTask { txs, io_result: Err(e) }).unwrap();
                     continue;
                 }
             }
             drop(timer_sync);
 
-            self.task_tx
-                .send(FlushNotifyTask {
-                    txs,
-                    io_result: Ok(()),
-                })
-                .unwrap();
+            self.task_tx.send(FlushNotifyTask { txs, io_result: Ok(()) }).unwrap();
 
             drop(timer);
         }

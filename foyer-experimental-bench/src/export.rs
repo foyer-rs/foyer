@@ -43,11 +43,9 @@ impl MetricsExporter {
                 };
                 let io = hyper_util::rt::TokioIo::new(stream);
                 tokio::spawn(async move {
-                    if let Err(e) = hyper_util::server::conn::auto::Builder::new(
-                        hyper_util::rt::TokioExecutor::new(),
-                    )
-                    .serve_connection(io, service_fn(Self::serve))
-                    .await
+                    if let Err(e) = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                        .serve_connection(io, service_fn(Self::serve))
+                        .await
                     {
                         tracing::error!("Prometheus service error: {}", e);
                     }

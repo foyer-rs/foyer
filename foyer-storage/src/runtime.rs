@@ -170,10 +170,7 @@ where
 
     async fn close(&self) -> Result<()> {
         let store = self.store.clone();
-        self.runtime
-            .spawn(async move { store.close().await })
-            .await
-            .unwrap()
+        self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
     fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {

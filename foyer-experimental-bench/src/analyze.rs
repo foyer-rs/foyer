@@ -130,19 +130,13 @@ impl Default for Metrics {
         Self {
             insert_ios: Arc::new(AtomicUsize::new(0)),
             insert_bytes: Arc::new(AtomicUsize::new(0)),
-            insert_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
-            )),
+            insert_lats: Arc::new(RwLock::new(Histogram::new_with_bounds(1, 10_000_000, 2).unwrap())),
 
             get_ios: Arc::new(AtomicUsize::new(0)),
             get_bytes: Arc::new(AtomicUsize::new(0)),
             get_miss_ios: Arc::new(AtomicUsize::new(0)),
-            get_hit_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
-            )),
-            get_miss_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
-            )),
+            get_hit_lats: Arc::new(RwLock::new(Histogram::new_with_bounds(1, 10_000_000, 2).unwrap())),
+            get_miss_lats: Arc::new(RwLock::new(Histogram::new_with_bounds(1, 10_000_000, 2).unwrap())),
         }
     }
 }
@@ -192,22 +186,14 @@ impl std::fmt::Display for Analysis {
         let disk_total_throughput = disk_read_throughput + disk_write_throughput;
 
         // disk statics
-        writeln!(
-            f,
-            "disk total iops: {:.1}",
-            self.disk_write_iops + self.disk_read_iops
-        )?;
+        writeln!(f, "disk total iops: {:.1}", self.disk_write_iops + self.disk_read_iops)?;
         writeln!(
             f,
             "disk total throughput: {}/s",
             disk_total_throughput.to_string_as(true)
         )?;
         writeln!(f, "disk read iops: {:.1}", self.disk_read_iops)?;
-        writeln!(
-            f,
-            "disk read throughput: {}/s",
-            disk_read_throughput.to_string_as(true)
-        )?;
+        writeln!(f, "disk read throughput: {}/s", disk_read_throughput.to_string_as(true))?;
         writeln!(f, "disk write iops: {:.1}", self.disk_write_iops)?;
         writeln!(
             f,
@@ -218,11 +204,7 @@ impl std::fmt::Display for Analysis {
         // insert statics
         let insert_throughput = ByteSize::b(self.insert_throughput as u64);
         writeln!(f, "insert iops: {:.1}/s", self.insert_iops)?;
-        writeln!(
-            f,
-            "insert throughput: {}/s",
-            insert_throughput.to_string_as(true)
-        )?;
+        writeln!(f, "insert throughput: {}/s", insert_throughput.to_string_as(true))?;
         writeln!(f, "insert lat p50: {}us", self.insert_lat_p50)?;
         writeln!(f, "insert lat p90: {}us", self.insert_lat_p90)?;
         writeln!(f, "insert lat p99: {}us", self.insert_lat_p99)?;
@@ -264,15 +246,13 @@ pub fn analyze(
 ) -> Analysis {
     let secs = duration.as_secs_f64();
     let disk_read_iops = (iostat_end.read_ios - iostat_start.read_ios) as f64 / secs;
-    let disk_read_throughput =
-        (iostat_end.read_sectors - iostat_start.read_sectors) as f64 * SECTOR_SIZE as f64 / secs;
+    let disk_read_throughput = (iostat_end.read_sectors - iostat_start.read_sectors) as f64 * SECTOR_SIZE as f64 / secs;
     let disk_write_iops = (iostat_end.write_ios - iostat_start.write_ios) as f64 / secs;
     let disk_write_throughput =
         (iostat_end.write_sectors - iostat_start.write_sectors) as f64 * SECTOR_SIZE as f64 / secs;
 
     let insert_iops = (metrics_dump_end.insert_ios - metrics_dump_start.insert_ios) as f64 / secs;
-    let insert_throughput =
-        (metrics_dump_end.insert_bytes - metrics_dump_start.insert_bytes) as f64 / secs;
+    let insert_throughput = (metrics_dump_end.insert_bytes - metrics_dump_start.insert_bytes) as f64 / secs;
 
     let get_iops = (metrics_dump_end.get_ios - metrics_dump_start.get_ios) as f64 / secs;
     let get_miss = (metrics_dump_end.get_miss_ios - metrics_dump_start.get_miss_ios) as f64

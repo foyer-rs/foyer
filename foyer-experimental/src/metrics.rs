@@ -16,9 +16,8 @@ use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
     core::{AtomicU64, GenericGauge, GenericGaugeVec},
-    exponential_buckets, opts, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec,
-    Registry,
+    exponential_buckets, opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, Registry,
 };
 
 type UintGaugeVec = GenericGaugeVec<AtomicU64>;
@@ -27,9 +26,7 @@ type UintGauge = GenericGauge<AtomicU64>;
 macro_rules! register_gauge_vec {
     ($TYPE:ident, $OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let gauge_vec = $TYPE::new($OPTS, $LABELS_NAMES).unwrap();
-        $REGISTRY
-            .register(Box::new(gauge_vec.clone()))
-            .map(|_| gauge_vec)
+        $REGISTRY.register(Box::new(gauge_vec.clone())).map(|_| gauge_vec)
     }};
 }
 
@@ -160,30 +157,18 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new(global: &GlobalMetrics, foyer: &str) -> Self {
-        let inner_op_duration_wal_flush = global
-            .inner_op_duration
-            .with_label_values(&[foyer, "wal", "flush"]);
-        let inner_op_bytes_wal_flush = global
-            .inner_op_bytes
-            .with_label_values(&[foyer, "wal", "flush"]);
+        let inner_op_duration_wal_flush = global.inner_op_duration.with_label_values(&[foyer, "wal", "flush"]);
+        let inner_op_bytes_wal_flush = global.inner_op_bytes.with_label_values(&[foyer, "wal", "flush"]);
         let inner_op_bytes_distribution_wal_flush = global
             .inner_op_bytes_distribution
             .with_label_values(&[foyer, "wal", "flush"]);
 
-        let inner_op_duration_wal_write = global
-            .inner_op_duration
-            .with_label_values(&[foyer, "wal", "write"]);
+        let inner_op_duration_wal_write = global.inner_op_duration.with_label_values(&[foyer, "wal", "write"]);
 
-        let inner_op_duration_wal_sync = global
-            .inner_op_duration
-            .with_label_values(&[foyer, "wal", "sync"]);
+        let inner_op_duration_wal_sync = global.inner_op_duration.with_label_values(&[foyer, "wal", "sync"]);
 
-        let inner_op_duration_wal_append = global
-            .inner_op_duration
-            .with_label_values(&[foyer, "wal", "append"]);
-        let inner_op_duration_wal_notify = global
-            .inner_op_duration
-            .with_label_values(&[foyer, "wal", "notify"]);
+        let inner_op_duration_wal_append = global.inner_op_duration.with_label_values(&[foyer, "wal", "append"]);
+        let inner_op_duration_wal_notify = global.inner_op_duration.with_label_values(&[foyer, "wal", "notify"]);
 
         let total_bytes = global.total_bytes.with_label_values(&[foyer, "", ""]);
 

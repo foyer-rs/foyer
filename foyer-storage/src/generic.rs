@@ -232,23 +232,15 @@ where
             device.clone(),
         ));
 
-        let catalog = Arc::new(Catalog::new(
-            device.regions(),
-            config.catalog_bits,
-            metrics.clone(),
-        ));
+        let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_bits, metrics.clone()));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
-        let flusher_stop_rxs = (0..config.flushers)
-            .map(|_| flushers_stop_tx.subscribe())
-            .collect_vec();
+        let flusher_stop_rxs = (0..config.flushers).map(|_| flushers_stop_tx.subscribe()).collect_vec();
         #[expect(clippy::type_complexity)]
         let (flusher_entry_txs, flusher_entry_rxs): (
             Vec<mpsc::UnboundedSender<Entry<K, V>>>,
             Vec<mpsc::UnboundedReceiver<Entry<K, V>>>,
-        ) = (0..config.flushers)
-            .map(|_| mpsc::unbounded_channel())
-            .unzip();
+        ) = (0..config.flushers).map(|_| mpsc::unbounded_channel()).unzip();
 
         let (reclaimers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
         let reclaimer_stop_rxs = (0..config.reclaimers)
@@ -271,9 +263,7 @@ where
             compression: config.compression,
             _marker: PhantomData,
         };
-        let store = Self {
-            inner: Arc::new(inner),
-        };
+        let store = Self { inner: Arc::new(inner) };
 
         let admission_context = AdmissionContext {
             catalog: catalog.clone(),
@@ -418,10 +408,7 @@ where
 
                 let res = match read_entry::<K, V>(buf.as_ref()) {
                     Ok((_key, value)) => {
-                        self.inner
-                            .metrics
-                            .op_bytes_lookup
-                            .inc_by(value.serialized_len() as u64);
+                        self.inner.metrics.op_bytes_lookup.inc_by(value.serialized_len() as u64);
                         Ok(Some(value))
                     }
                     Err(e) => {
@@ -545,11 +532,7 @@ where
     }
 
     #[tracing::instrument(skip(self, value))]
-    async fn apply_writer(
-        &self,
-        mut writer: GenericStoreWriter<K, V, D, EP, EL>,
-        value: V,
-    ) -> Result<bool> {
+    async fn apply_writer(&self, mut writer: GenericStoreWriter<K, V, D, EP, EL>, value: V) -> Result<bool> {
         debug_assert!(!writer.is_inserted);
 
         if !writer.judge() {
@@ -797,9 +780,7 @@ impl EntryHeader {
         let v = buf.get_u32();
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
-            return Err(
-                anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into(),
-            );
+            return Err(anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into());
         }
         let compression = Compression::try_from(v as u8)?;
 
@@ -833,14 +814,12 @@ where
     let value = match header.compression {
         Compression::None => V::read(compressed)?,
         Compression::Zstd => {
-            let mut decompressed =
-                Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
+            let mut decompressed = Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
             zstd::stream::copy_decode(compressed, &mut decompressed).map_err(CodingError::from)?;
             V::read(&decompressed[..])?
         }
         Compression::Lz4 => {
-            let mut decompressed =
-                Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
+            let mut decompressed = Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
             let mut decoder = lz4::Decoder::new(compressed).map_err(CodingError::from)?;
             std::io::copy(&mut decoder, &mut decompressed).map_err(CodingError::from)?;
             let (_r, res) = decoder.finish();
@@ -855,12 +834,7 @@ where
 
     let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
     if checksum != header.checksum {
-        return Err(anyhow!(
-            "magic mismatch, expected: {}, got: {}",
-            header.checksum,
-            checksum
-        )
-        .into());
+        return Err(anyhow!("magic mismatch, expected: {}, got: {}", header.checksum, checksum).into());
     }
 
     Ok((key, value))
@@ -918,11 +892,7 @@ where
             return Ok(None);
         }
 
-        let Some(slice) = self
-            .region
-            .load_range(self.cursor..self.cursor + align)
-            .await?
-        else {
+        let Some(slice) = self.region.load_range(self.cursor..self.cursor + align).await? else {
             return Ok(None);
         };
 
@@ -936,9 +906,7 @@ where
         );
 
         let abs_start = self.cursor + EntryHeader::serialized_len() + header.value_len as usize;
-        let abs_end = self.cursor
-            + EntryHeader::serialized_len()
-            + (header.key_len + header.value_len) as usize;
+        let abs_end = self.cursor + EntryHeader::serialized_len() + (header.key_len + header.value_len) as usize;
 
         if abs_start >= abs_end || abs_end > region_size {
             // Double check wrong entry.
@@ -1108,11 +1076,9 @@ mod tests {
         test_utils::JudgeRecorder,
     };
 
-    type TestStore =
-        GenericStore<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+    type TestStore = GenericStore<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
-    type TestStoreConfig =
-        GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
+    type TestStoreConfig = GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
     #[tokio::test]
     #[expect(clippy::identity_op)]
@@ -1123,10 +1089,8 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
 
         let recorder = Arc::new(JudgeRecorder::default());
-        let admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> =
-            vec![recorder.clone()];
-        let reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> =
-            vec![recorder.clone()];
+        let admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![recorder.clone()];
+        let reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![recorder.clone()];
 
         let config = TestStoreConfig {
             name: "".to_string(),
@@ -1166,10 +1130,7 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(
-                    store.lookup(&i).await.unwrap().unwrap(),
-                    vec![i as u8; 1 * MB],
-                );
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * MB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }
@@ -1200,10 +1161,7 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(
-                    store.lookup(&i).await.unwrap().unwrap(),
-                    vec![i as u8; 1 * MB],
-                );
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * MB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }

@@ -103,12 +103,8 @@ where
     V: Value,
 {
     pub fn new(regions: usize, bits: usize, metrics: Arc<Metrics>) -> Self {
-        let infos = (0..1 << bits)
-            .map(|_| RwLock::new(BTreeMap::new()))
-            .collect_vec();
-        let regions = (0..regions)
-            .map(|_| Mutex::new(BTreeMap::new()))
-            .collect_vec();
+        let infos = (0..1 << bits).map(|_| RwLock::new(BTreeMap::new())).collect_vec();
+        let regions = (0..regions).map(|_| Mutex::new(BTreeMap::new())).collect_vec();
         Self {
             bits,
             items: infos,

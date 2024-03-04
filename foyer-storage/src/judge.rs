@@ -34,9 +34,7 @@ impl Judges {
     }
 
     pub fn with_mask(size: usize, mask: Bitmap<64>) -> Self {
-        let mut umask = mask.bitand(Bitmap::from_value(
-            1u64.wrapping_shl(size as u32).wrapping_sub(1),
-        ));
+        let mut umask = mask.bitand(Bitmap::from_value(1u64.wrapping_shl(size as u32).wrapping_sub(1)));
         umask.invert();
 
         Self {

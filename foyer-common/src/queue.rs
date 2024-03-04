@@ -124,14 +124,8 @@ mod tests {
         let queue = AsyncQueue::new();
         let mut read_future1 = pin!(queue.acquire());
         let mut read_future2 = pin!(queue.acquire());
-        assert_eq!(
-            Pending,
-            poll_fn(|cx| Poll::Ready(read_future1.as_mut().poll(cx))).await
-        );
-        assert_eq!(
-            Pending,
-            poll_fn(|cx| Poll::Ready(read_future2.as_mut().poll(cx))).await
-        );
+        assert_eq!(Pending, poll_fn(|cx| Poll::Ready(read_future1.as_mut().poll(cx))).await);
+        assert_eq!(Pending, poll_fn(|cx| Poll::Ready(read_future2.as_mut().poll(cx))).await);
         queue.release(1);
         queue.release(2);
         assert_eq!(1, read_future1.await);
