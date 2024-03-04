@@ -26,10 +26,7 @@ pub trait EvictionPolicy: Send + Sync + Debug + 'static {
 
     fn insert(&mut self, ptr: <Self::Adapter as Adapter>::Pointer);
 
-    fn remove(
-        &mut self,
-        ptr: &<Self::Adapter as Adapter>::Pointer,
-    ) -> <Self::Adapter as Adapter>::Pointer;
+    fn remove(&mut self, ptr: &<Self::Adapter as Adapter>::Pointer) -> <Self::Adapter as Adapter>::Pointer;
 
     fn access(&mut self, ptr: &<Self::Adapter as Adapter>::Pointer);
 

@@ -47,10 +47,7 @@ where
 
     for _ in 0..INSERTS as u64 {
         index += 1;
-        store
-            .insert(index, vec![index as u8; 1 * KB])
-            .await
-            .unwrap();
+        store.insert(index, vec![index as u8; 1 * KB]).await.unwrap();
     }
 
     store.close().await.unwrap();
@@ -59,10 +56,7 @@ where
 
     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
         if remains.contains(&i) {
-            assert_eq!(
-                store.lookup(&i).await.unwrap().unwrap(),
-                vec![i as u8; 1 * KB],
-            );
+            assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * KB],);
         } else {
             assert!(store.lookup(&i).await.unwrap().is_none());
         }
@@ -80,10 +74,7 @@ where
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             if remains.contains(&i) {
-                assert_eq!(
-                    store.lookup(&i).await.unwrap().unwrap(),
-                    vec![i as u8; 1 * KB],
-                );
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * KB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }
@@ -91,10 +82,7 @@ where
 
         for _ in 0..INSERTS as u64 {
             index += 1;
-            store
-                .insert(index, vec![index as u8; 1 * KB])
-                .await
-                .unwrap();
+            store.insert(index, vec![index as u8; 1 * KB]).await.unwrap();
         }
 
         store.close().await.unwrap();
@@ -103,10 +91,7 @@ where
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             if remains.contains(&i) {
-                assert_eq!(
-                    store.lookup(&i).await.unwrap().unwrap(),
-                    vec![i as u8; 1 * KB],
-                );
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * KB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }

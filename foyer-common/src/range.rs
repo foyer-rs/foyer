@@ -48,15 +48,8 @@ mod private {
 
 use private::ZeroOne;
 
-pub trait Idx = PartialOrd<Self>
-    + Add<Output = Self>
-    + Sub<Output = Self>
-    + Clone
-    + Copy
-    + Send
-    + Sync
-    + 'static
-    + ZeroOne;
+pub trait Idx =
+    PartialOrd<Self> + Add<Output = Self> + Sub<Output = Self> + Clone + Copy + Send + Sync + 'static + ZeroOne;
 
 pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
     fn start(&self) -> Option<T> {

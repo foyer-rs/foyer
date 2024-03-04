@@ -29,24 +29,15 @@ impl AlignedAllocator {
 }
 
 unsafe impl Allocator for AlignedAllocator {
-    fn allocate(
-        &self,
-        layout: std::alloc::Layout,
-    ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        let layout = std::alloc::Layout::from_size_align(
-            layout.size(),
-            bits::align_up(self.align, layout.align()),
-        )
-        .unwrap();
+    fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
+        let layout =
+            std::alloc::Layout::from_size_align(layout.size(), bits::align_up(self.align, layout.align())).unwrap();
         Global.allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        let layout = std::alloc::Layout::from_size_align(
-            layout.size(),
-            bits::align_up(self.align, layout.align()),
-        )
-        .unwrap();
+        let layout =
+            std::alloc::Layout::from_size_align(layout.size(), bits::align_up(self.align, layout.align())).unwrap();
         Global.deallocate(ptr, layout)
     }
 }

@@ -42,8 +42,7 @@ pub use memoffset::offset_of;
 #[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $field))
-            as *const $container
+        ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $field)) as *const $container
     };
 }
 

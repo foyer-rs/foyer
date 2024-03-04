@@ -16,9 +16,8 @@ use std::sync::{LazyLock, OnceLock};
 
 use prometheus::{
     core::{AtomicU64, GenericGauge, GenericGaugeVec},
-    exponential_buckets, opts, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Registry,
+    exponential_buckets, opts, register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Registry,
 };
 type UintGaugeVec = GenericGaugeVec<AtomicU64>;
 type UintGauge = GenericGauge<AtomicU64>;
@@ -26,9 +25,7 @@ type UintGauge = GenericGauge<AtomicU64>;
 macro_rules! register_gauge_vec {
     ($TYPE:ident, $OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let gauge_vec = $TYPE::new($OPTS, $LABELS_NAMES).unwrap();
-        $REGISTRY
-            .register(Box::new(gauge_vec.clone()))
-            .map(|_| gauge_vec)
+        $REGISTRY.register(Box::new(gauge_vec.clone())).map(|_| gauge_vec)
     }};
 }
 
@@ -189,25 +186,13 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new(global: &GlobalMetrics, foyer: &str) -> Self {
-        let op_duration_insert_inserted = global
-            .op_duration
-            .with_label_values(&[foyer, "insert", "inserted"]);
-        let op_duration_insert_filtered = global
-            .op_duration
-            .with_label_values(&[foyer, "insert", "filtered"]);
-        let op_duration_insert_dropped = global
-            .op_duration
-            .with_label_values(&[foyer, "insert", "dropped"]);
-        let op_duration_lookup_hit = global
-            .op_duration
-            .with_label_values(&[foyer, "lookup", "hit"]);
-        let op_duration_lookup_miss = global
-            .op_duration
-            .with_label_values(&[foyer, "lookup", "miss"]);
+        let op_duration_insert_inserted = global.op_duration.with_label_values(&[foyer, "insert", "inserted"]);
+        let op_duration_insert_filtered = global.op_duration.with_label_values(&[foyer, "insert", "filtered"]);
+        let op_duration_insert_dropped = global.op_duration.with_label_values(&[foyer, "insert", "dropped"]);
+        let op_duration_lookup_hit = global.op_duration.with_label_values(&[foyer, "lookup", "hit"]);
+        let op_duration_lookup_miss = global.op_duration.with_label_values(&[foyer, "lookup", "miss"]);
         let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
-        let slow_op_duration_reclaim = global
-            .slow_op_duration
-            .with_label_values(&[foyer, "reclaim", ""]);
+        let slow_op_duration_reclaim = global.slow_op_duration.with_label_values(&[foyer, "reclaim", ""]);
 
         let op_bytes_insert = global.op_bytes.with_label_values(&[foyer, "insert", ""]);
         let op_bytes_lookup = global.op_bytes.with_label_values(&[foyer, "lookup", ""]);
@@ -235,10 +220,7 @@ impl Metrics {
             global
                 .inner_op_duration
                 .with_label_values(&[foyer, "update_catalog", ""]);
-        let inner_op_duration_entry_flush =
-            global
-                .inner_op_duration
-                .with_label_values(&[foyer, "entry_flush", ""]);
+        let inner_op_duration_entry_flush = global.inner_op_duration.with_label_values(&[foyer, "entry_flush", ""]);
         let inner_op_duration_flusher_handle =
             global
                 .inner_op_duration

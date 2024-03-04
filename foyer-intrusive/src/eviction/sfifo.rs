@@ -141,9 +141,7 @@ where
     A::Pointer: Clone,
 {
     pub fn new(config: SegmentedFifoConfig) -> Self {
-        let segments = (0..config.segment_ratios.len())
-            .map(|_| Dlist::new())
-            .collect_vec();
+        let segments = (0..config.segment_ratios.len()).map(|_| Dlist::new()).collect_vec();
         let total_ratio = config.segment_ratios.iter().sum();
 
         Self {
@@ -215,8 +213,7 @@ where
             //      and a segment ratio of [1, 1, 1]
             for high in (1..self.segments.len()).rev() {
                 let low = high - 1;
-                let limit = (total as f64 * self.config.segment_ratios[high] as f64
-                    / self.total_ratio as f64) as usize;
+                let limit = (total as f64 * self.config.segment_ratios[high] as f64 / self.total_ratio as f64) as usize;
                 while self.segments[high].len() > limit {
                     let mut link = self.segments[high].pop_front().unwrap();
                     link.as_mut().priority = low;

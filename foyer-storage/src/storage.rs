@@ -69,22 +69,14 @@ pub trait Storage: Send + Sync + Debug + Clone + 'static {
 pub trait StorageExt: Storage {
     #[must_use]
     #[tracing::instrument(skip(self, value))]
-    fn insert(
-        &self,
-        key: Self::Key,
-        value: Self::Value,
-    ) -> impl Future<Output = Result<bool>> + Send {
+    fn insert(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         self.writer(key, weight).finish(value)
     }
 
     #[must_use]
     #[tracing::instrument(skip(self, value))]
-    fn insert_if_not_exists(
-        &self,
-        key: Self::Key,
-        value: Self::Value,
-    ) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_if_not_exists(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
         async move {
             if self.exists(&key)? {
                 return Ok(false);
@@ -101,12 +93,7 @@ pub trait StorageExt: Storage {
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
     #[tracing::instrument(skip(self, f))]
-    fn insert_with<F>(
-        &self,
-        key: Self::Key,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with<F>(&self, key: Self::Key, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> anyhow::Result<Self::Value> + Send,
     {
@@ -233,12 +220,8 @@ pub trait AsyncStorageExt: Storage {
         });
     }
 
-    fn insert_if_not_exists_async_with_callback<F, FU>(
-        &self,
-        key: Self::Key,
-        value: Self::Value,
-        f: F,
-    ) where
+    fn insert_if_not_exists_async_with_callback<F, FU>(&self, key: Self::Key, value: Self::Value, f: F)
+    where
         F: FnOnce(Result<bool>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
     {
@@ -255,11 +238,7 @@ impl<S: Storage> AsyncStorageExt for S {}
 
 pub trait ForceStorageExt: Storage {
     #[tracing::instrument(skip(self, value))]
-    fn insert_force(
-        &self,
-        key: Self::Key,
-        value: Self::Value,
-    ) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_force(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         let mut writer = self.writer(key, weight);
         writer.force();
@@ -273,12 +252,7 @@ pub trait ForceStorageExt: Storage {
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with<F>(
-        &self,
-        key: Self::Key,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with<F>(&self, key: Self::Key, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> anyhow::Result<Self::Value> + Send,
     {
@@ -419,20 +393,11 @@ mod tests {
         assert!(storage.insert(1, vec![b'x'; KB]).await.unwrap());
         assert!(storage.exists(&1).unwrap());
 
-        assert!(!storage
-            .insert_if_not_exists(1, vec![b'x'; KB])
-            .await
-            .unwrap());
-        assert!(storage
-            .insert_if_not_exists(2, vec![b'x'; KB])
-            .await
-            .unwrap());
+        assert!(!storage.insert_if_not_exists(1, vec![b'x'; KB]).await.unwrap());
+        assert!(storage.insert_if_not_exists(2, vec![b'x'; KB]).await.unwrap());
         assert!(storage.exists(&2).unwrap());
 
-        assert!(storage
-            .insert_with(3, || { Ok(vec![b'x'; KB]) }, KB)
-            .await
-            .unwrap());
+        assert!(storage.insert_with(3, || { Ok(vec![b'x'; KB]) }, KB).await.unwrap());
         assert!(storage.exists(&3).unwrap());
 
         assert!(storage
@@ -462,10 +427,7 @@ mod tests {
         assert!(storage.exists(&6).unwrap());
     }
 
-    async fn exists_with_retry(
-        storage: &impl Storage<Key = u64, Value = Vec<u8>>,
-        key: &u64,
-    ) -> bool {
+    async fn exists_with_retry(storage: &impl Storage<Key = u64, Value = Vec<u8>>, key: &u64) -> bool {
         tokio::time::sleep(Duration::from_millis(1)).await;
         for _ in 0..10 {
             if storage.exists(key).unwrap() {

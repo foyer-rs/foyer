@@ -108,9 +108,7 @@ mod tests {
         const CASES: usize = 10;
         const ERATIO: f64 = 0.05;
 
-        let handles = (0..CASES)
-            .map(|_| std::thread::spawn(move || case(f)))
-            .collect_vec();
+        let handles = (0..CASES).map(|_| std::thread::spawn(move || case(f))).collect_vec();
         let mut eratios = vec![];
         for handle in handles {
             let eratio = handle.join().unwrap();
@@ -174,9 +172,7 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let error = (v.load(Ordering::Relaxed) as isize
-            - RATE as isize * DURATION.as_secs() as isize)
-            .unsigned_abs();
+        let error = (v.load(Ordering::Relaxed) as isize - RATE as isize * DURATION.as_secs() as isize).unsigned_abs();
         error as f64 / (RATE as f64 * DURATION.as_secs_f64())
     }
 }

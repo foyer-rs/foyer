@@ -82,13 +82,7 @@ impl Device for FsDevice {
         Self::open(config).await
     }
 
-    async fn write<B>(
-        &self,
-        buf: B,
-        range: impl IoRange,
-        region: RegionId,
-        offset: usize,
-    ) -> (DeviceResult<usize>, B)
+    async fn write<B>(&self, buf: B, range: impl IoRange, region: RegionId, offset: usize) -> (DeviceResult<usize>, B)
     where
         B: IoBuf,
     {
@@ -106,8 +100,7 @@ impl Device for FsDevice {
 
         asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[range], offset as i64)
-                .map_err(DeviceError::from);
+            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[range], offset as i64).map_err(DeviceError::from);
             (res, buf)
         })
         .await
@@ -137,8 +130,7 @@ impl Device for FsDevice {
 
         asyncify(move || {
             let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[range], offset as i64)
-                .map_err(DeviceError::from);
+            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[range], offset as i64).map_err(DeviceError::from);
             (res, buf)
         })
         .await
@@ -234,9 +226,7 @@ impl FsDevice {
             io_buffer_allocator,
         };
 
-        Ok(Self {
-            inner: Arc::new(inner),
-        })
+        Ok(Self { inner: Arc::new(inner) })
     }
 
     fn fd(&self, region: RegionId) -> RawFd {

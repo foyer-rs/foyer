@@ -87,8 +87,7 @@ where
     D: Device,
 {
     pub fn new(device: D) -> Self {
-        let default_buffer_capacity =
-            align_up(device.align(), device.io_size() + device.io_size() / 2);
+        let default_buffer_capacity = align_up(device.align(), device.io_size() + device.io_size() / 2);
         let buffer = device.io_buffer(0, default_buffer_capacity);
         Self {
             buffer,
@@ -117,10 +116,7 @@ where
     /// Flush io buffer if necessary, and reset io buffer to a new region.
     ///
     /// Returns fully flushed entries.
-    pub async fn rotate(
-        &mut self,
-        region: RegionId,
-    ) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
+    pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
         let entries = self.flush().await?;
         debug_assert!(self.buffer.is_empty());
         self.region = Some(region);
@@ -233,8 +229,7 @@ where
                 std::io::copy(&mut vcursor, &mut self.buffer).map_err(DeviceError::from)?;
             }
             Compression::Zstd => {
-                zstd::stream::copy_encode(&mut vcursor, &mut self.buffer, 0)
-                    .map_err(DeviceError::from)?;
+                zstd::stream::copy_encode(&mut vcursor, &mut self.buffer, 0).map_err(DeviceError::from)?;
             }
             Compression::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
@@ -257,8 +252,7 @@ where
 
         // calculate checksum
         cursor -= compressed_value_len + encoded_key_len;
-        let checksum =
-            checksum(&self.buffer[cursor..cursor + compressed_value_len + encoded_key_len]);
+        let checksum = checksum(&self.buffer[cursor..cursor + compressed_value_len + encoded_key_len]);
 
         // write entry header
         cursor -= EntryHeader::serialized_len();
