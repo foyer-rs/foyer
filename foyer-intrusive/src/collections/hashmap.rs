@@ -185,11 +185,7 @@ where
     /// # Safety
     ///
     /// there must be at most one matches in the slot
-    unsafe fn lookup_inner_mut(
-        &mut self,
-        key: &K,
-        slot: usize,
-    ) -> Option<DlistIterMut<'_, HashMapLinkAdapter>> {
+    unsafe fn lookup_inner_mut(&mut self, key: &K, slot: usize) -> Option<DlistIterMut<'_, HashMapLinkAdapter>> {
         let mut iter = self.slots[slot].iter_mut();
         iter.front();
         while iter.is_valid() {
@@ -206,11 +202,7 @@ where
     /// # Safety
     ///
     /// there must be at most one matches in the slot
-    unsafe fn lookup_inner(
-        &self,
-        key: &K,
-        slot: usize,
-    ) -> Option<DlistIter<'_, HashMapLinkAdapter>> {
+    unsafe fn lookup_inner(&self, key: &K, slot: usize) -> Option<DlistIter<'_, HashMapLinkAdapter>> {
         let mut iter = self.slots[slot].iter();
         iter.front();
         while iter.is_valid() {

@@ -213,9 +213,7 @@ where
         self.metrics
             .op_bytes_reclaim
             .inc_by(region.device().region_size() as u64);
-        self.metrics
-            .total_bytes
-            .sub(region.device().region_size() as u64);
+        self.metrics.total_bytes.sub(region.device().region_size() as u64);
 
         Ok(())
     }

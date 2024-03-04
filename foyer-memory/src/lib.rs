@@ -228,8 +228,7 @@ mod tests {
     }
 
     type FifoCacheConfig = CacheConfig<SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>>;
-    type FifoCache =
-        Cache<K, V, SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>, SegmentedFifoLink>;
+    type FifoCache = Cache<K, V, SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>, SegmentedFifoLink>;
 
     #[test]
     fn test_fifo_cache_simple() {

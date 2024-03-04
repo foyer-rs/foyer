@@ -107,12 +107,7 @@ async fn write(log: TombstoneLog<u64>, args: Args, rt: Arc<BackgroundShutdownRun
     let start = Instant::now();
     let mut log = log;
 
-    let mut rng = StdRng::seed_from_u64(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as _,
-    );
+    let mut rng = StdRng::seed_from_u64(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as _);
     loop {
         if start.elapsed() >= Duration::from_secs(args.time as _) {
             return;

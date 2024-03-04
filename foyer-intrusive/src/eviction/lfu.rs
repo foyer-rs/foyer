@@ -213,9 +213,8 @@ where
             self.update_frequencies(link);
 
             // If tiny cache is full, unconditionally promote tail to main cache.
-            let expected_tiny_len = (self.config.tiny_lru_capacity_ratio
-                * (self.lru_tiny.len() + self.lru_main.len()) as f64)
-                as usize;
+            let expected_tiny_len =
+                (self.config.tiny_lru_capacity_ratio * (self.lru_tiny.len() + self.lru_main.len()) as f64) as usize;
             if self.lru_tiny.len() > expected_tiny_len {
                 let raw = self.lru_tiny.back().unwrap().raw();
                 self.switch_to_lru_front(raw);
@@ -614,11 +613,7 @@ mod tests {
         assert_eq!(items[100].link.lru_type(), LruType::Tiny);
 
         assert_eq!(
-            [100]
-                .into_iter()
-                .chain(1..100)
-                .chain([0].into_iter())
-                .collect_vec(),
+            [100].into_iter().chain(1..100).chain([0].into_iter()).collect_vec(),
             lfu.iter().map(|item| item.key).collect_vec()
         );
 

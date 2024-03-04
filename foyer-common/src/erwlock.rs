@@ -14,9 +14,7 @@
 
 use std::sync::Arc;
 
-use parking_lot::{
-    lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
+use parking_lot::{lock_api::ArcRwLockWriteGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub trait ErwLockInner {
     type R;

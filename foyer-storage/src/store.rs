@@ -30,32 +30,23 @@ use crate::{
     storage::{Storage, StorageWriter},
 };
 
-pub type LruFsStore<K, V> =
-    GenericStore<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
+pub type LruFsStore<K, V> = GenericStore<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
 
-pub type LruFsStoreConfig<K, V> =
-    GenericStoreConfig<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>>;
+pub type LruFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>>;
 
-pub type LruFsStoreWriter<K, V> =
-    GenericStoreWriter<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
+pub type LruFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
 
-pub type LfuFsStore<K, V> =
-    GenericStore<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
+pub type LfuFsStore<K, V> = GenericStore<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
 
-pub type LfuFsStoreConfig<K, V> =
-    GenericStoreConfig<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>>;
+pub type LfuFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>>;
 
-pub type LfuFsStoreWriter<K, V> =
-    GenericStoreWriter<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
+pub type LfuFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
 
-pub type FifoFsStore<K, V> =
-    GenericStore<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+pub type FifoFsStore<K, V> = GenericStore<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
-pub type FifoFsStoreConfig<K, V> =
-    GenericStoreConfig<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
+pub type FifoFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
-pub type FifoFsStoreWriter<K, V> =
-    GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+pub type FifoFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
 #[derive(Debug)]
 pub struct NoneStoreWriter<K: Key, V: Value> {
@@ -176,15 +167,9 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::LruFsStoreConfig { config } => Self::LruFsStoreConfig {
-                config: config.clone(),
-            },
-            Self::LfuFsStoreConfig { config } => Self::LfuFsStoreConfig {
-                config: config.clone(),
-            },
-            Self::FifoFsStoreConfig { config } => Self::FifoFsStoreConfig {
-                config: config.clone(),
-            },
+            Self::LruFsStoreConfig { config } => Self::LruFsStoreConfig { config: config.clone() },
+            Self::LfuFsStoreConfig { config } => Self::LfuFsStoreConfig { config: config.clone() },
+            Self::FifoFsStoreConfig { config } => Self::FifoFsStoreConfig { config: config.clone() },
             Self::NoneStoreConfig => Self::NoneStoreConfig,
         }
     }
@@ -291,18 +276,10 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::LruFsStore { store } => Self::LruFsStore {
-                store: store.clone(),
-            },
-            Self::LfuFsStore { store } => Self::LfuFsStore {
-                store: store.clone(),
-            },
-            Self::FifoFsStore { store } => Self::FifoFsStore {
-                store: store.clone(),
-            },
-            Self::NoneStore { store } => Self::NoneStore {
-                store: store.clone(),
-            },
+            Self::LruFsStore { store } => Self::LruFsStore { store: store.clone() },
+            Self::LfuFsStore { store } => Self::LfuFsStore { store: store.clone() },
+            Self::FifoFsStore { store } => Self::FifoFsStore { store: store.clone() },
+            Self::NoneStore { store } => Self::NoneStore { store: store.clone() },
         }
     }
 }

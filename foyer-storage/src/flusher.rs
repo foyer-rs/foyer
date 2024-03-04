@@ -152,10 +152,7 @@ where
         // current region is full, rotate flush buffer region and retry
 
         // 1. get a clean region
-        let acquire_clean_region_timer = self
-            .metrics
-            .inner_op_duration_acquire_clean_region
-            .start_timer();
+        let acquire_clean_region_timer = self.metrics.inner_op_duration_acquire_clean_region.start_timer();
         let new_region = self
             .region_manager
             .clean_regions()
@@ -171,12 +168,9 @@ where
             self.region_manager.eviction_push(old_region);
         }
 
-        self.metrics.total_bytes.add(
-            self.region_manager
-                .region(&new_region)
-                .device()
-                .region_size() as u64,
-        );
+        self.metrics
+            .total_bytes
+            .add(self.region_manager.region(&new_region).device().region_size() as u64);
 
         // 3. retry write
         let entries = match self.buffer.write(entry).await {
@@ -209,10 +203,7 @@ where
         {
             bytes += len;
             let index = Index::Region {
-                view: self
-                    .region_manager
-                    .region(&region)
-                    .view(offset as u32, len as u32),
+                view: self.region_manager.region(&region).view(offset as u32, len as u32),
             };
             let item = Item::new(sequence, index);
             self.catalog.insert(key, item);

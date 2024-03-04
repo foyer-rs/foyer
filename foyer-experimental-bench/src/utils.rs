@@ -45,9 +45,7 @@ pub enum FsType {
 pub fn detect_fs_type(path: impl AsRef<Path>) -> FsType {
     #[cfg(target_os = "linux")]
     {
-        use nix::sys::statfs::{
-            statfs, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC, XFS_SUPER_MAGIC,
-        };
+        use nix::sys::statfs::{statfs, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC, XFS_SUPER_MAGIC};
         let fs_stat = statfs(path.as_ref()).unwrap();
         match fs_stat.filesystem_type() {
             XFS_SUPER_MAGIC => FsType::Xfs,

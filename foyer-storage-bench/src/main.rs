@@ -190,12 +190,8 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::StoreConfig { config } => Self::StoreConfig {
-                config: config.clone(),
-            },
-            Self::RuntimeStoreConfig { config } => Self::RuntimeStoreConfig {
-                config: config.clone(),
-            },
+            Self::StoreConfig { config } => Self::StoreConfig { config: config.clone() },
+            Self::RuntimeStoreConfig { config } => Self::RuntimeStoreConfig { config: config.clone() },
         }
     }
 }
@@ -305,12 +301,8 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::Store { store } => Self::Store {
-                store: store.clone(),
-            },
-            Self::RuntimeStore { store } => Self::RuntimeStore {
-                store: store.clone(),
-            },
+            Self::Store { store } => Self::Store { store: store.clone() },
+            Self::RuntimeStore { store } => Self::RuntimeStore { store: store.clone() },
         }
     }
 }
@@ -327,9 +319,7 @@ where
 
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
-            BenchStoreConfig::StoreConfig { config } => {
-                Store::open(config).await.map(|store| Self::Store { store })
-            }
+            BenchStoreConfig::StoreConfig { config } => Store::open(config).await.map(|store| Self::Store { store }),
             BenchStoreConfig::RuntimeStoreConfig { config } => RuntimeStore::open(config)
                 .await
                 .map(|store| Self::RuntimeStore { store }),
@@ -389,14 +379,8 @@ where
 #[derive(Debug)]
 enum TimeSeriesDistribution {
     None,
-    Uniform {
-        interval: Duration,
-    },
-    Zipf {
-        n: usize,
-        s: f64,
-        interval: Duration,
-    },
+    Uniform { interval: Duration },
+    Zipf { n: usize, s: f64, interval: Duration },
 }
 
 impl TimeSeriesDistribution {
@@ -405,15 +389,15 @@ impl TimeSeriesDistribution {
             "none" => TimeSeriesDistribution::None,
             "uniform" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
-                let interval = ((args.entry_size_min + args.entry_size_max) >> 1) as f64
-                    / (args.w_rate * 1024.0 * 1024.0);
+                let interval =
+                    ((args.entry_size_min + args.entry_size_max) >> 1) as f64 / (args.w_rate * 1024.0 * 1024.0);
                 let interval = Duration::from_secs_f64(interval);
                 TimeSeriesDistribution::Uniform { interval }
             }
             "zipf" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
-                let interval = ((args.entry_size_min + args.entry_size_max) >> 1) as f64
-                    / (args.w_rate * 1024.0 * 1024.0);
+                let interval =
+                    ((args.entry_size_min + args.entry_size_max) >> 1) as f64 / (args.w_rate * 1024.0 * 1024.0);
                 let interval = Duration::from_secs_f64(interval);
                 display_zipf_sample(args.distribution_zipf_n, args.distribution_zipf_s);
                 TimeSeriesDistribution::Zipf {
@@ -455,11 +439,10 @@ fn init_logger() {
     use tracing::Level;
     use tracing_subscriber::{filter::Targets, prelude::*};
 
-    let trace_config =
-        Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-            SERVICE_NAME,
-            "foyer-storage-bench",
-        )]));
+    let trace_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
+        SERVICE_NAME,
+        "foyer-storage-bench",
+    )]));
     let batch_config = BatchConfig::default()
         .with_max_queue_size(1048576)
         .with_max_export_batch_size(4096)
@@ -534,10 +517,7 @@ async fn main() {
 
     println!("{:#?}", args);
 
-    assert!(
-        args.lookup_range > 0,
-        "\"--lookup-range\" value must be greater than 0"
-    );
+    assert!(args.lookup_range > 0, "\"--lookup-range\" value must be greater than 0");
 
     create_dir_all(&args.dir).unwrap();
 
@@ -620,9 +600,7 @@ async fn main() {
             },
         }
     } else {
-        BenchStoreConfig::StoreConfig {
-            config: config.into(),
-        }
+        BenchStoreConfig::StoreConfig { config: config.into() }
     };
 
     println!("{config:#?}");
@@ -644,12 +622,7 @@ async fn main() {
         )
     });
 
-    let handle_bench = tokio::spawn(bench(
-        args.clone(),
-        store.clone(),
-        metrics.clone(),
-        stop_tx.clone(),
-    ));
+    let handle_bench = tokio::spawn(bench(args.clone(), store.clone(), metrics.clone(), stop_tx.clone()));
 
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
@@ -694,9 +667,7 @@ async fn bench(
         Some(args.r_rate * 1024.0 * 1024.0)
     };
 
-    let counts = (0..args.writers)
-        .map(|_| AtomicU64::default())
-        .collect_vec();
+    let counts = (0..args.writers).map(|_| AtomicU64::default()).collect_vec();
 
     let distribution = TimeSeriesDistribution::new(&args);
 
@@ -712,14 +683,7 @@ async fn bench(
     });
 
     let w_handles = (0..args.writers)
-        .map(|id| {
-            tokio::spawn(write(
-                id as u64,
-                store.clone(),
-                context.clone(),
-                stop_tx.subscribe(),
-            ))
-        })
+        .map(|id| tokio::spawn(write(id as u64, store.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
     let r_handles = (0..args.readers)
         .map(|_| tokio::spawn(read(store.clone(), context.clone(), stop_tx.subscribe())))
@@ -810,9 +774,7 @@ async fn write(
 
             if inserted {
                 ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-                ctx.metrics
-                    .insert_bytes
-                    .fetch_add(entry_size, Ordering::Relaxed);
+                ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
         };
 
@@ -831,8 +793,7 @@ async fn write(
                 store.insert_async_with_callback(idx, data, callback);
                 let intervals = zipf_intervals.as_ref().unwrap();
 
-                let group = match intervals.binary_search_by_key(&(c as usize % K), |(sum, _)| *sum)
-                {
+                let group = match intervals.binary_search_by_key(&(c as usize % K), |(sum, _)| *sum) {
                     Ok(i) => i,
                     Err(i) => i.min(G - 1),
                 };
@@ -872,8 +833,7 @@ async fn read(
             tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
-        let c =
-            rng.gen_range(std::cmp::max(c_max, context.lookup_range) - context.lookup_range..c_max);
+        let c = rng.gen_range(std::cmp::max(c_max, context.lookup_range) - context.lookup_range..c_max);
         let idx = w + c * step;
 
         let time = Instant::now();
@@ -886,10 +846,7 @@ async fn read(
             if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
-            context
-                .metrics
-                .get_bytes
-                .fetch_add(entry_size, Ordering::Relaxed);
+            context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
 
             if let Some(limiter) = &mut limiter
                 && let Some(wait) = limiter.consume(entry_size as f64)

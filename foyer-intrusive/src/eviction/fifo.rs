@@ -129,10 +129,7 @@ where
 
             assert!(link.as_ref().is_linked());
 
-            self.queue
-                .iter_mut_from_raw(link.as_ref().link.raw())
-                .remove()
-                .unwrap();
+            self.queue.iter_mut_from_raw(link.as_ref().link.raw()).remove().unwrap();
 
             self.len -= 1;
 
@@ -324,10 +321,7 @@ mod tests {
         let v = fifo.iter().map(|item| item.key).collect_vec();
         assert_eq!(v, (0..10).collect_vec());
 
-        let v = (0..5)
-            .map(|_| fifo.pop().unwrap())
-            .map(|item| item.key)
-            .collect_vec();
+        let v = (0..5).map(|_| fifo.pop().unwrap()).map(|item| item.key).collect_vec();
         assert_eq!(v, (0..5).collect_vec());
 
         let v = fifo.iter().map(|item| item.key).collect_vec();
