@@ -233,7 +233,7 @@ where
 
         let frequencies = CMSketchU16::new_with_size(
             config.eviction_config.cmsketch_width,
-            config.eviction_config.cmsketch_width,
+            config.eviction_config.cmsketch_depth,
         );
         let decay = config.eviction_config.cmsketch_decay;
 
@@ -271,9 +271,9 @@ where
             debug_assert!(!self.window.is_empty());
             let mut ptr = self.window.pop_front().unwrap_unchecked();
             let handle = ptr.as_mut();
-            self.increase_queue_charges(handle);
-            handle.queue = Queue::Probation;
             self.decrease_queue_charges(handle);
+            handle.queue = Queue::Probation;
+            self.increase_queue_charges(handle);
             self.probation.push_back(ptr);
         }
     }
@@ -341,9 +341,9 @@ where
                     debug_assert!(!self.protected.is_empty());
                     let mut ptr = self.protected.pop_front().unwrap_unchecked();
                     let handle = ptr.as_mut();
-                    self.increase_queue_charges(handle);
-                    handle.queue = Queue::Probation;
                     self.decrease_queue_charges(handle);
+                    handle.queue = Queue::Probation;
+                    self.increase_queue_charges(handle);
                     self.probation.push_back(ptr);
                 }
             }
@@ -419,4 +419,161 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use ahash::RandomState;
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::eviction::test_utils::TestEviction;
+
+    impl<K, V> TestEviction for Lfu<K, V>
+    where
+        K: Key + Clone,
+        V: Value + Clone,
+    {
+        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+            self.window
+                .iter()
+                .chain(self.probation.iter())
+                .chain(self.protected.iter())
+                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .collect_vec()
+        }
+    }
+
+    type TestLfu = Lfu<u64, u64>;
+    type TestLfuHandle = LfuHandle<u64, u64>;
+
+    unsafe fn assert_test_lfu(
+        lfu: &TestLfu,
+        len: usize,
+        window: usize,
+        probation: usize,
+        protected: usize,
+        entries: Vec<u64>,
+    ) {
+        assert_eq!(lfu.len(), len);
+        assert_eq!(lfu.window.len(), window);
+        assert_eq!(lfu.probation.len(), probation);
+        assert_eq!(lfu.protected.len(), protected);
+        assert_eq!(lfu.window_charges, window);
+        assert_eq!(lfu.probation_charges, probation);
+        assert_eq!(lfu.protected_charges, protected);
+        let es = lfu
+            .dump()
+            .into_iter()
+            .map(|(k, v)| {
+                assert_eq!(k, v);
+                k
+            })
+            .collect_vec();
+        assert_eq!(es, entries);
+    }
+
+    fn assert_min_frequency(lfu: &TestLfu, hash: u64, count: usize) {
+        let freq = lfu.frequencies.count(hash);
+        assert!(freq >= count as u16, "assert {freq} >= {count} failed for {hash}");
+    }
+
+    #[test]
+    fn test_lfu() {
+        unsafe {
+            let ptrs = (0..100)
+                .map(|i| {
+                    let mut handle = Box::new(TestLfuHandle::new());
+                    handle.init(i, i, i, 1, ());
+                    NonNull::new_unchecked(Box::into_raw(handle))
+                })
+                .collect_vec();
+
+            // window: 2, probation: 2, protected: 6
+            let config = CacheConfig {
+                capacity: 10,
+                shards: 1,
+                eviction_config: LfuConfig {
+                    window_capacity_ratio: 0.2,
+                    protected_capacity_ratio: 0.6,
+                    cmsketch_width: 10,
+                    cmsketch_depth: 2,
+                    cmsketch_decay: 12,
+                },
+                object_pool_capacity: 0,
+                hash_builder: RandomState::default(),
+            };
+            let mut lfu = TestLfu::new(&config);
+
+            assert_eq!(lfu.window_charges_capacity, 2);
+            assert_eq!(lfu.protected_charges_capacity, 6);
+
+            lfu.push(ptrs[0]);
+            lfu.push(ptrs[1]);
+            assert_test_lfu(&lfu, 2, 2, 0, 0, vec![0, 1]);
+
+            lfu.push(ptrs[2]);
+            lfu.push(ptrs[3]);
+            assert_test_lfu(&lfu, 4, 2, 2, 0, vec![2, 3, 0, 1]);
+
+            (4..10).for_each(|i| lfu.push(ptrs[i]));
+            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![8, 9, 0, 1, 2, 3, 4, 5, 6, 7]);
+
+            (0..10).for_each(|i| assert_min_frequency(&lfu, i, 1));
+
+            // [8, 9] [1, 2, 3, 4, 5, 6, 7]
+            let p0 = lfu.pop().unwrap();
+            assert_eq!(p0, ptrs[0]);
+
+            // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
+            lfu.reinsert(p0);
+            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![9, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+
+            // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
+            lfu.reinsert(ptrs[9]);
+            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![0, 9, 1, 2, 3, 4, 5, 6, 7, 8]);
+
+            // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
+            (3..7).for_each(|i| lfu.reinsert(ptrs[i]));
+            assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 3, 4, 5, 6]);
+
+            // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
+            (3..5).for_each(|i| lfu.reinsert(ptrs[i]));
+            assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 5, 6, 3, 4]);
+
+            // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
+            [1, 2, 7, 8].into_iter().for_each(|i| lfu.reinsert(ptrs[i]));
+            assert_test_lfu(&lfu, 10, 2, 2, 6, vec![0, 9, 5, 6, 3, 4, 1, 2, 7, 8]);
+
+            // [0, 9] [6] [3, 4, 1, 2, 7, 8]
+            let p5 = lfu.pop().unwrap();
+            assert_eq!(p5, ptrs[5]);
+            assert_test_lfu(&lfu, 9, 2, 1, 6, vec![0, 9, 6, 3, 4, 1, 2, 7, 8]);
+
+            (10..13).for_each(|i| lfu.push(ptrs[i]));
+
+            // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
+            assert_test_lfu(&lfu, 12, 2, 4, 6, vec![11, 12, 6, 0, 9, 10, 3, 4, 1, 2, 7, 8]);
+            (1..13).for_each(|i| assert_min_frequency(&lfu, i, 0));
+            lfu.access(ptrs[0]);
+            assert_min_frequency(&lfu, 0, 2);
+
+            // evict 11 because freq(11) < freq(0)
+            // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
+            let p6 = lfu.pop().unwrap();
+            let p11 = lfu.pop().unwrap();
+            assert_eq!(p6, ptrs[6]);
+            assert_eq!(p11, ptrs[11]);
+            assert_test_lfu(&lfu, 10, 1, 3, 6, vec![12, 0, 9, 10, 3, 4, 1, 2, 7, 8]);
+
+            assert_eq!(
+                lfu.clear(),
+                [12, 0, 9, 10, 3, 4, 1, 2, 7, 8]
+                    .into_iter()
+                    .map(|i| ptrs[i])
+                    .collect_vec()
+            );
+
+            for ptr in ptrs {
+                let _ = Box::from_raw(ptr.as_ptr());
+            }
+        }
+    }
+}
