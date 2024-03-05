@@ -15,6 +15,7 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 ahash = "0.8"
 bitflags = "2"
+cmsketch = "0.1"
 crossbeam = "0.8"
 foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
@@ -24,7 +25,6 @@ itertools = "0.12"
 libc = "0.2"
 parking_lot = "0.12"
 tokio = { workspace = true }
-cmsketch = "0.1"
 
 [dev-dependencies]
 bytesize = "1"

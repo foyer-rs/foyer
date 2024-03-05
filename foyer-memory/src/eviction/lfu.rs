@@ -125,7 +125,7 @@ where
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
-/// A new-comming and hot entry is kept in `window`.
+/// A newcoming and hot entry is kept in `window`.
 ///
 /// When `window` is full, entries from it will overflow to `probation`.
 ///
@@ -266,7 +266,7 @@ where
         self.increase_queue_charges(handle);
         self.update_frequencies(handle.base().hash());
 
-        // If `window`` charges exeeds the capacity, overflow entry from `window` to `probation`.
+        // If `window`` charges exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_charges > self.window_charges_capacity {
             debug_assert!(!self.window.is_empty());
             let mut ptr = self.window.pop_front().unwrap_unchecked();
@@ -336,7 +336,7 @@ where
                 self.increase_queue_charges(handle);
                 self.protected.push_back(ptr);
 
-                // If `protected` charges exeeds the capacity, overflow entry from `protected` to `probation`.
+                // If `protected` charges exceeds the capacity, overflow entry from `protected` to `probation`.
                 while self.protected_charges > self.protected_charges_capacity {
                     debug_assert!(!self.protected.is_empty());
                     let mut ptr = self.protected.pop_front().unwrap_unchecked();
