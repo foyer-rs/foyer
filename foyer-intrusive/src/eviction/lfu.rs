@@ -50,7 +50,7 @@ const ERROR_THRESHOLD: f64 = 5.0;
 const HASH_COUNT: usize = 4;
 const DECAY_FACTOR: f64 = 0.5;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct LfuConfig {
     /// The multiplier for window len given the cache size.
     pub window_to_cache_size_ratio: usize,
