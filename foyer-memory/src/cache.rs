@@ -39,6 +39,7 @@ use crate::{
     },
     handle::Handle,
     indexer::{HashTableIndexer, Indexer},
+    metrics::MetricsShard,
     Key, Value,
 };
 
@@ -62,6 +63,8 @@ where
 
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: Arc<ArrayQueue<Box<H>>>,
+
+    metrics: MetricsShard,
 }
 
 impl<K, V, H, E, I, S> CacheShard<K, V, H, E, I, S>
@@ -78,6 +81,7 @@ where
         let eviction = unsafe { E::new(config) };
         let capacity = config.capacity / config.shards;
         let waiters = HashMap::default();
+        let metrics = MetricsShard::default();
         Self {
             indexer,
             eviction,
@@ -85,6 +89,7 @@ where
             usage,
             waiters,
             object_pool,
+            metrics,
         }
     }
 
@@ -106,6 +111,8 @@ where
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
+            self.metrics.replace += 1;
+
             debug_assert!(!old.as_ref().base().is_in_indexer());
             if old.as_ref().base().is_in_eviction() {
                 self.eviction.remove(old);
@@ -115,6 +122,8 @@ where
             if let Some(entry) = self.try_release_handle(old, false) {
                 last_reference_entries.push(entry);
             }
+        } else {
+            self.metrics.insert += 1
         }
         self.eviction.push(ptr);
 
@@ -128,7 +137,16 @@ where
     }
 
     unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
-        let mut ptr = self.indexer.get(hash, key)?;
+        let mut ptr = match self.indexer.get(hash, key) {
+            Some(ptr) => {
+                self.metrics.hit += 1;
+                ptr
+            }
+            None => {
+                self.metrics.miss += 1;
+                return None;
+            }
+        };
         let base = ptr.as_mut().base_mut();
         debug_assert!(base.is_in_indexer());
 
@@ -143,6 +161,7 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
         let ptr = self.indexer.remove(hash, key)?;
+        self.metrics.remove += 1;
         if ptr.as_ref().base().is_in_eviction() {
             self.eviction.remove(ptr);
         }
@@ -165,6 +184,8 @@ where
             debug_assert!((&eptrs - &ptrs).is_empty());
         }
 
+        self.metrics.remove += ptrs.len();
+
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
         for ptr in ptrs {
@@ -179,6 +200,7 @@ where
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
             && let Some(evicted) = self.eviction.pop()
         {
+            self.metrics.evict += 1;
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
             debug_assert!(!base.is_in_eviction());
@@ -218,8 +240,12 @@ where
             // the cache shard cannot release enough charges for the new inserted entries.
             // In this case, the reinsertion should be given up.
             if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
+                let was_in_eviction = base.is_in_eviction();
                 self.eviction.reinsert(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
+                    if was_in_eviction {
+                        self.metrics.reinsert += 1;
+                    }
                     return None;
                 }
             }
@@ -235,6 +261,8 @@ where
         debug_assert!(!base.is_in_indexer());
         debug_assert!(!base.is_in_eviction());
         debug_assert!(!base.has_refs());
+
+        self.metrics.release += 1;
 
         self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
         let entry = base.take();
@@ -498,7 +526,7 @@ where
                     ptr,
                 });
             }
-            match shard.waiters.entry(key.clone()) {
+            let entry = match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
@@ -528,7 +556,13 @@ where
                     });
                     Entry::Miss(join)
                 }
+            };
+            match entry {
+                Entry::Wait(_) => shard.metrics.queue += 1,
+                Entry::Miss(_) => shard.metrics.fetch += 1,
+                _ => unreachable!(),
             }
+            entry
         }
     }
 }
