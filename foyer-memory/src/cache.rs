@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reinsert_while_all_referenced() {
+    fn test_reinsert_while_all_referenced_lru() {
         let cache = lru(10);
 
         let e1 = insert_lru(&cache, 1, "111");
@@ -853,6 +853,32 @@ mod tests {
             vec![(2, "222".to_string()), (3, "333".to_string()), (4, "444".to_string()),]
         );
         assert_eq!(cache.usage(), 9);
+    }
+
+    #[test]
+    fn test_reinsert_while_all_referenced_fifo() {
+        let cache = fifo(10);
+
+        let e1 = insert_fifo(&cache, 1, "111");
+        let e2 = insert_fifo(&cache, 2, "222");
+        let e3 = insert_fifo(&cache, 3, "333");
+        assert_eq!(cache.usage(), 9);
+
+        // No entry will be released because all of them are referenced externally.
+        let e4 = insert_fifo(&cache, 4, "444");
+        assert_eq!(cache.usage(), 12);
+
+        // `111`, `222` and `333` are evicted from the eviction container to make space for `444`.
+        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+
+        // `e1` cannot be reinserted for the usage has already exceeds the capacity.
+        drop(e1);
+        assert_eq!(cache.usage(), 9);
+
+        // `222` and `333` will be not reinserted because fifo will ignore reinsert operations.
+        drop([e2, e3, e4]);
+        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+        assert_eq!(cache.usage(), 3);
 
         // Note:
         //
