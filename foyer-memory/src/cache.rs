@@ -563,8 +563,16 @@ where
         unsafe { self.ptr.as_ref().base().value() }
     }
 
+    pub fn context(&self) -> &H::Context {
+        unsafe { self.ptr.as_ref().base().context() }
+    }
+
     pub fn charge(&self) -> usize {
         unsafe { self.ptr.as_ref().base().charge() }
+    }
+
+    pub fn refs(&self) -> usize {
+        unsafe { self.ptr.as_ref().base().refs() }
     }
 }
 
@@ -661,7 +669,7 @@ mod tests {
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
-    use crate::eviction::{fifo::FifoConfig, test_utils::TestEviction};
+    use crate::eviction::{fifo::FifoConfig, lru::LruConfig, test_utils::TestEviction};
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
@@ -699,77 +707,156 @@ mod tests {
         assert_eq!(cache.usage(), CAPACITY);
     }
 
-    fn insert(cache: &Arc<FifoCache<u64, String>>, key: u64, value: &str) -> FifoCacheEntry<u64, String> {
-        cache.insert(key, value.to_string(), value.len())
-    }
-
-    #[test]
-    fn test_reference() {
+    fn fifo(capacity: usize) -> Arc<FifoCache<u64, String>> {
         let config = FifoCacheConfig {
-            capacity: 10,
+            capacity,
             shards: 1,
             eviction_config: FifoConfig {},
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
         };
-        let cache = Arc::new(FifoCache::<u64, String>::new(config));
+        Arc::new(FifoCache::<u64, String>::new(config))
+    }
 
-        unsafe {
-            let e1 = insert(&cache, 114, "xx");
-            let ptr = e1.ptr;
-            assert_eq!(cache.usage(), 2);
-            assert_eq!(ptr.as_ref().base().refs(), 1);
+    fn lru(capacity: usize) -> Arc<LruCache<u64, String>> {
+        let config = LruCacheConfig {
+            capacity,
+            shards: 1,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: 1,
+            hash_builder: RandomState::default(),
+        };
+        Arc::new(LruCache::<u64, String>::new(config))
+    }
 
-            let e2 = e1.clone();
-            assert_eq!(ptr.as_ref().base().refs(), 2);
+    fn insert_fifo(cache: &Arc<FifoCache<u64, String>>, key: u64, value: &str) -> FifoCacheEntry<u64, String> {
+        cache.insert(key, value.to_string(), value.len())
+    }
 
-            let e3 = cache.get(&114).unwrap();
-            assert_eq!(ptr.as_ref().base().refs(), 3);
+    fn insert_lru(cache: &Arc<LruCache<u64, String>>, key: u64, value: &str) -> LruCacheEntry<u64, String> {
+        cache.insert(key, value.to_string(), value.len())
+    }
 
-            drop(e2);
-            assert_eq!(ptr.as_ref().base().refs(), 2);
-            drop(e3);
-            assert_eq!(ptr.as_ref().base().refs(), 1);
-            drop(e1);
-            assert_eq!(ptr.as_ref().base().refs(), 0);
+    #[test]
+    fn test_reference_count() {
+        let cache = fifo(100);
 
-            assert_eq!(cache.usage(), 2);
+        let refs = |ptr: NonNull<FifoHandle<u64, String>>| unsafe { ptr.as_ref().base().refs() };
 
-            insert(&cache, 514, "QwQ");
-            assert_eq!(cache.usage(), 5);
+        let e1 = insert_fifo(&cache, 42, "the answer to life, the universe, and everything");
+        let ptr = e1.ptr;
+        assert_eq!(refs(ptr), 1);
 
-            insert(&cache, 114, "(0.0)");
-            assert_eq!(cache.usage(), 8);
+        let e2 = cache.get(&42).unwrap();
+        assert_eq!(refs(ptr), 2);
 
-            assert_eq!(
-                cache.shards[0].lock().eviction.dump(),
-                vec![(514, "QwQ".to_string()), (114, "(0.0)".to_string())],
-            );
+        let e3 = e2.clone();
+        assert_eq!(refs(ptr), 3);
 
-            let e4 = cache.get(&514).unwrap();
-            let e5 = insert(&cache, 514, "bili");
+        drop(e2);
+        assert_eq!(refs(ptr), 2);
 
-            assert_eq!(e4.ptr.as_ref().base().refs(), 1);
-            assert_eq!(e5.ptr.as_ref().base().refs(), 1);
+        drop(e3);
+        assert_eq!(refs(ptr), 1);
 
-            // remains: 514 => QwQ (3), 514 => bili (4)
-            // evicted: 114 => (0.0) (5)
-            assert_eq!(cache.usage(), 7);
+        drop(e1);
+        assert_eq!(refs(ptr), 0);
+    }
 
-            assert!(cache.get(&114).is_none());
-            assert_eq!(cache.get(&514).unwrap().value(), "bili");
-            assert_eq!(e4.value(), "QwQ");
+    #[test]
+    fn test_replace() {
+        let cache = fifo(10);
 
-            cache.remove(&514);
-            assert_eq!(e5.value(), "bili");
+        insert_fifo(&cache, 114, "xx");
+        assert_eq!(cache.usage(), 2);
 
-            drop(e5);
-            assert!(cache.get(&514).is_none());
-            assert_eq!(e4.value(), "QwQ");
+        insert_fifo(&cache, 514, "QwQ");
+        assert_eq!(cache.usage(), 5);
 
-            assert_eq!(cache.usage(), 3);
-            drop(e4);
-            assert_eq!(cache.usage(), 0);
-        }
+        insert_fifo(&cache, 114, "(0.0)");
+        assert_eq!(cache.usage(), 8);
+
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(514, "QwQ".to_string()), (114, "(0.0)".to_string())],
+        );
+    }
+
+    #[test]
+    fn test_replace_with_external_refs() {
+        let cache = fifo(10);
+
+        insert_fifo(&cache, 514, "QwQ");
+        insert_fifo(&cache, 114, "(0.0)");
+
+        let e4 = cache.get(&514).unwrap();
+        let e5 = insert_fifo(&cache, 514, "bili");
+
+        assert_eq!(e4.refs(), 1);
+        assert_eq!(e5.refs(), 1);
+
+        // remains: 514 => QwQ (3), 514 => bili (4)
+        // evicted: 114 => (0.0) (5)
+        assert_eq!(cache.usage(), 7);
+
+        assert!(cache.get(&114).is_none());
+        assert_eq!(cache.get(&514).unwrap().value(), "bili");
+        assert_eq!(e4.value(), "QwQ");
+
+        cache.remove(&514);
+        assert_eq!(e5.value(), "bili");
+
+        drop(e5);
+        assert!(cache.get(&514).is_none());
+        assert_eq!(e4.value(), "QwQ");
+
+        assert_eq!(cache.usage(), 3);
+        drop(e4);
+        assert_eq!(cache.usage(), 0);
+    }
+
+    #[test]
+    fn test_reinsert_while_all_referenced() {
+        let cache = lru(10);
+
+        let e1 = insert_lru(&cache, 1, "111");
+        let e2 = insert_lru(&cache, 2, "222");
+        let e3 = insert_lru(&cache, 3, "333");
+        assert_eq!(cache.usage(), 9);
+
+        // No entry will be released because all of them are referenced externally.
+        let e4 = insert_lru(&cache, 4, "444");
+        assert_eq!(cache.usage(), 12);
+
+        // `111`, `222` and `333` are evicted from the eviction container to make space for `444`.
+        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+
+        // `e1` cannot be reinserted for the usage has already exceeds the capacity.
+        drop(e1);
+        assert_eq!(cache.usage(), 9);
+
+        // `222` and `333` will be reinserted
+        drop(e2);
+        drop(e3);
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(4, "444".to_string()), (2, "222".to_string()), (3, "333".to_string()),]
+        );
+        assert_eq!(cache.usage(), 9);
+
+        // `444` will be reinserted
+        drop(e4);
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(2, "222".to_string()), (3, "333".to_string()), (4, "444".to_string()),]
+        );
+        assert_eq!(cache.usage(), 9);
+
+        // Note:
+        //
+        // For cache policy like FIFO, the entries will not be reinserted while all handles are referenced.
+        // It's okay for this is not a common situation and is not supposed to happen in real workload.
     }
 }
