@@ -4,8 +4,8 @@
 
 ## Checklist
 
-- [ ] I have written necessary rustdoc comments
-- [ ] I have added necessary unit tests and integration tests
-- [ ] I have passed `make check` and `make test` or `make all` in my local envirorment.
+- [ ] I have written the necessary rustdoc comments
+- [ ] I have added the necessary unit tests and integration tests
+- [ ] I have passed `make all` (or `make fast` instead if the old tests are not modified) in my local environment.
 
 ## Related issues or PRs (optional)
