@@ -58,8 +58,8 @@
 //! memory and can be used by queries followed up.
 //!
 //! After the handle is released by all the external owners, the eviction container will update its order or evict it
-//! based on the eviction algorithm. If it doesn't appear in the eviction container, it may be reinserted if it it still
-//! in the indexer and there is enough space. Otherwise, it will be removed from both the indexer and the eviction
+//! based on the eviction algorithm. If it doesn't appear in the eviction container, it may be reinserted if it still in
+//! the indexer and there is enough space. Otherwise, it will be removed from both the indexer and the eviction
 //! container.
 //!
 //! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
