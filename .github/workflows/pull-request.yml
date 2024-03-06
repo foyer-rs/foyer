@@ -12,7 +12,7 @@ on:
 env:
   RUST_TOOLCHAIN: nightly-2023-12-26
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20231227v1
+  CACHE_KEY_SUFFIX: 20240306
 jobs:
   misc-check:
     name: misc check
@@ -118,7 +118,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
       - name: Run foyer-storage-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
@@ -148,7 +148,14 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-asan
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-asan
+      - name: Run Unit Tests With Address Sanitizer
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
+          RUST_LOG: info
+        run: |-
+          cargo test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-storage-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
@@ -158,6 +165,42 @@ jobs:
           cargo build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+  lsan:
+    name: run with leak saniziter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install rust toolchain@v1
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-lsan
+      - name: Run Unit Tests With Leak Sanitizer
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
+          RUST_LOG: info
+        run: |-
+          cargo test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+      - name: Run foyer-storage-bench With Leak Sanitizer
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
+          RUST_LOG: info
+        run: |-
+          cargo build --all --target x86_64-unknown-linux-gnu
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   deterministic-test:
     name: run deterministic test
     runs-on: ubuntu-latest
@@ -178,7 +221,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deterministic-test
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deterministic-test
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
       - name: Run rust clippy check (madsim)
