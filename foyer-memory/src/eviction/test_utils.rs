@@ -12,10 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(trait_alias)]
-#![feature(pattern)]
+use super::Eviction;
+use crate::handle::Handle;
 
-pub use foyer_common as common;
-pub use foyer_intrusive as intrusive;
-pub use foyer_memory as memory;
-pub use foyer_storage as storage;
+#[expect(clippy::type_complexity)]
+pub trait TestEviction: Eviction {
+    fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)>;
+}
