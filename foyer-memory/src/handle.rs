@@ -94,9 +94,14 @@ where
 
     /// Take key and value from the handle and reset it to the uninited state.
     #[inline(always)]
-    pub fn take(&mut self) -> (K, V) {
+    pub fn take(&mut self) -> (K, V, C, usize) {
         debug_assert!(self.entry.is_some());
-        unsafe { self.entry.take().map(|(key, value, _)| (key, value)).unwrap_unchecked() }
+        unsafe {
+            self.entry
+                .take()
+                .map(|(key, value, context)| (key, value, context, self.charge))
+                .unwrap_unchecked()
+        }
     }
 
     /// Return `true` if the handle is inited.
