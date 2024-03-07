@@ -39,8 +39,15 @@ use crate::{
     },
     handle::Handle,
     indexer::{HashTableIndexer, Indexer},
+    metrics::Metrics,
     Key, Value,
 };
+
+struct CacheContext<T> {
+    metrics: Metrics,
+    /// The object pool to avoid frequent handle allocating, shared by all shards.
+    object_pool: ArrayQueue<Box<T>>,
+}
 
 #[expect(clippy::type_complexity)]
 struct CacheShard<K, V, H, E, I, S>
@@ -60,8 +67,7 @@ where
 
     waiters: HashMap<K, Vec<oneshot::Sender<CacheEntry<K, V, H, E, I, S>>>>,
 
-    /// The object pool to avoid frequent handle allocating, shared by all shards.
-    object_pool: Arc<ArrayQueue<Box<H>>>,
+    context: Arc<CacheContext<H>>,
 }
 
 impl<K, V, H, E, I, S> CacheShard<K, V, H, E, I, S>
@@ -73,7 +79,7 @@ where
     I: Indexer<Key = K, Handle = H>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn new(config: &CacheConfig<E, S>, usage: Arc<AtomicUsize>, object_pool: Arc<ArrayQueue<Box<H>>>) -> Self {
+    fn new(config: &CacheConfig<E, S>, usage: Arc<AtomicUsize>, context: Arc<CacheContext<H>>) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(config) };
         let capacity = config.capacity / config.shards;
@@ -84,7 +90,7 @@ where
             capacity,
             usage,
             waiters,
-            object_pool,
+            context,
         }
     }
 
@@ -98,7 +104,7 @@ where
         context: H::Context,
         last_reference_entries: &mut Vec<(K, V)>,
     ) -> NonNull<H> {
-        let mut handle = self.object_pool.pop().unwrap_or_else(|| Box::new(H::new()));
+        let mut handle = self.context.object_pool.pop().unwrap_or_else(|| Box::new(H::new()));
         handle.init(hash, key, value, charge, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
@@ -106,6 +112,8 @@ where
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
+            self.context.metrics.replace.fetch_add(1, Ordering::Relaxed);
+
             debug_assert!(!old.as_ref().base().is_in_indexer());
             if old.as_ref().base().is_in_eviction() {
                 self.eviction.remove(old);
@@ -115,6 +123,8 @@ where
             if let Some(entry) = self.try_release_handle(old, false) {
                 last_reference_entries.push(entry);
             }
+        } else {
+            self.context.metrics.insert.fetch_add(1, Ordering::Relaxed);
         }
         self.eviction.push(ptr);
 
@@ -128,7 +138,16 @@ where
     }
 
     unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
-        let mut ptr = self.indexer.get(hash, key)?;
+        let mut ptr = match self.indexer.get(hash, key) {
+            Some(ptr) => {
+                self.context.metrics.hit.fetch_add(1, Ordering::Relaxed);
+                ptr
+            }
+            None => {
+                self.context.metrics.miss.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+        };
         let base = ptr.as_mut().base_mut();
         debug_assert!(base.is_in_indexer());
 
@@ -143,6 +162,7 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V)> {
         let ptr = self.indexer.remove(hash, key)?;
+        self.context.metrics.remove.fetch_add(1, Ordering::Relaxed);
         if ptr.as_ref().base().is_in_eviction() {
             self.eviction.remove(ptr);
         }
@@ -165,6 +185,8 @@ where
             debug_assert!((&eptrs - &ptrs).is_empty());
         }
 
+        self.context.metrics.remove.fetch_add(ptrs.len(), Ordering::Relaxed);
+
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
         for ptr in ptrs {
@@ -179,6 +201,7 @@ where
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
             && let Some(evicted) = self.eviction.pop()
         {
+            self.context.metrics.evict.fetch_add(1, Ordering::Relaxed);
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
             debug_assert!(!base.is_in_eviction());
@@ -218,8 +241,12 @@ where
             // the cache shard cannot release enough charges for the new inserted entries.
             // In this case, the reinsertion should be given up.
             if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
+                let was_in_eviction = base.is_in_eviction();
                 self.eviction.reinsert(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
+                    if was_in_eviction {
+                        self.context.metrics.reinsert.fetch_add(1, Ordering::Relaxed);
+                    }
                     return None;
                 }
             }
@@ -236,11 +263,13 @@ where
         debug_assert!(!base.is_in_eviction());
         debug_assert!(!base.has_refs());
 
+        self.context.metrics.release.fetch_add(1, Ordering::Relaxed);
+
         self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
         let entry = base.take();
 
         let handle = Box::from_raw(ptr.as_ptr());
-        let _ = self.object_pool.push(handle);
+        let _ = self.context.object_pool.push(handle);
 
         Some(entry)
     }
@@ -344,6 +373,8 @@ where
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
 
+    context: Arc<CacheContext<H>>,
+
     hash_builder: S,
 }
 
@@ -358,10 +389,14 @@ where
 {
     pub fn new(config: CacheConfig<E, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
-        let object_pool = Arc::new(ArrayQueue::new(config.object_pool_capacity));
+        let context = Arc::new(CacheContext {
+            metrics: Metrics::default(),
+            object_pool: ArrayQueue::new(config.object_pool_capacity),
+        });
+
         let shards = usages
             .iter()
-            .map(|usage| CacheShard::new(&config, usage.clone(), object_pool.clone()))
+            .map(|usage| CacheShard::new(&config, usage.clone(), context.clone()))
             .map(Mutex::new)
             .collect_vec();
 
@@ -369,6 +404,7 @@ where
             shards,
             capacity: config.capacity,
             usages,
+            context,
             hash_builder: config.hash_builder,
         }
     }
@@ -459,6 +495,10 @@ where
         self.usages.iter().map(|usage| usage.load(Ordering::Relaxed)).sum()
     }
 
+    pub fn metrics(&self) -> &Metrics {
+        &self.context.metrics
+    }
+
     unsafe fn try_release_external_handle(&self, ptr: NonNull<H>) {
         let entry = {
             let base = ptr.as_ref().base();
@@ -498,7 +538,7 @@ where
                     ptr,
                 });
             }
-            match shard.waiters.entry(key.clone()) {
+            let entry = match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
@@ -528,7 +568,13 @@ where
                     });
                     Entry::Miss(join)
                 }
-            }
+            };
+            match entry {
+                Entry::Wait(_) => shard.context.metrics.queue.fetch_add(1, Ordering::Relaxed),
+                Entry::Miss(_) => shard.context.metrics.fetch.fetch_add(1, Ordering::Relaxed),
+                _ => unreachable!(),
+            };
+            entry
         }
     }
 }

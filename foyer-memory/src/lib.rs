@@ -69,6 +69,7 @@ pub mod cache;
 pub mod eviction;
 pub mod handle;
 pub mod indexer;
+pub mod metrics;
 
 use std::hash::Hash;
 
