@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::BuildHasher, ptr::NonNull};
+use std::{fmt::Debug, ptr::NonNull};
 
 use foyer_intrusive::{
     collections::dlist::{Dlist, DlistLink},
@@ -21,7 +21,6 @@ use foyer_intrusive::{
 };
 
 use crate::{
-    cache::CacheConfig,
     eviction::Eviction,
     handle::{BaseHandle, Handle},
     Key, Value,
@@ -155,20 +154,17 @@ where
     type Handle = LruHandle<K, V>;
     type Config = LruConfig;
 
-    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(config: &CacheConfig<Self, S>) -> Self
+    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
         assert!(
-            config.eviction_config.high_priority_pool_ratio >= 0.0
-                && config.eviction_config.high_priority_pool_ratio <= 1.0,
+            config.high_priority_pool_ratio >= 0.0 && config.high_priority_pool_ratio <= 1.0,
             "high_priority_pool_ratio_percentage must be in [0, 100], given: {}",
-            config.eviction_config.high_priority_pool_ratio
+            config.high_priority_pool_ratio
         );
 
-        let high_priority_charges_capacity =
-            config.capacity as f64 * config.eviction_config.high_priority_pool_ratio / config.shards as f64;
-        let high_priority_charges_capacity = high_priority_charges_capacity as usize;
+        let high_priority_charges_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
 
         Self {
             high_priority_list: Dlist::new(),
@@ -289,7 +285,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use ahash::RandomState;
+
     use foyer_intrusive::core::pointer::Pointer;
     use itertools::Itertools;
 
@@ -353,16 +349,10 @@ pub mod tests {
                 })
                 .collect_vec();
 
-            let config = CacheConfig {
-                capacity: 8,
-                shards: 1,
-                eviction_config: LruConfig {
-                    high_priority_pool_ratio: 0.5,
-                },
-                object_pool_capacity: 0,
-                hash_builder: RandomState::default(),
+            let config = LruConfig {
+                high_priority_pool_ratio: 0.5,
             };
-            let mut lru = TestLru::new(&config);
+            let mut lru = TestLru::new(8, &config);
 
             assert_eq!(lru.high_priority_charges_capacity, 4);
 
