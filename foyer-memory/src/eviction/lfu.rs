@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::BuildHasher, ptr::NonNull};
+use std::{fmt::Debug, ptr::NonNull};
 
 use cmsketch::CMSketchU16;
 use foyer_intrusive::{
@@ -22,7 +22,6 @@ use foyer_intrusive::{
 };
 
 use crate::{
-    cache::CacheConfig,
     eviction::Eviction,
     handle::{BaseHandle, Handle},
     Key, Value,
@@ -200,42 +199,32 @@ where
     type Handle = LfuHandle<K, V>;
     type Config = LfuConfig;
 
-    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(config: &CacheConfig<Self, S>) -> Self
+    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
         assert!(
-            config.eviction_config.window_capacity_ratio > 0.0 && config.eviction_config.window_capacity_ratio < 1.0,
+            config.window_capacity_ratio > 0.0 && config.window_capacity_ratio < 1.0,
             "window_capacity_ratio must be in (0, 1), given: {}",
-            config.eviction_config.window_capacity_ratio
+            config.window_capacity_ratio
         );
 
         assert!(
-            config.eviction_config.protected_capacity_ratio > 0.0
-                && config.eviction_config.protected_capacity_ratio < 1.0,
+            config.protected_capacity_ratio > 0.0 && config.protected_capacity_ratio < 1.0,
             "protected_capacity_ratio must be in (0, 1), given: {}",
-            config.eviction_config.protected_capacity_ratio
+            config.protected_capacity_ratio
         );
 
         assert!(
-            config.eviction_config.window_capacity_ratio + config.eviction_config.protected_capacity_ratio < 1.0,
+            config.window_capacity_ratio + config.protected_capacity_ratio < 1.0,
             "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}",
-            config.eviction_config.window_capacity_ratio + config.eviction_config.protected_capacity_ratio
+            config.window_capacity_ratio + config.protected_capacity_ratio
         );
 
-        let window_charges_capacity =
-            config.capacity as f64 * config.eviction_config.window_capacity_ratio / config.shards as f64;
-        let window_charges_capacity = window_charges_capacity as usize;
-
-        let protected_charges_capacity =
-            config.capacity as f64 * config.eviction_config.protected_capacity_ratio / config.shards as f64;
-        let protected_charges_capacity = protected_charges_capacity as usize;
-
-        let frequencies = CMSketchU16::new_with_size(
-            config.eviction_config.cmsketch_width,
-            config.eviction_config.cmsketch_depth,
-        );
-        let decay = config.eviction_config.cmsketch_decay;
+        let window_charges_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
+        let protected_charges_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
+        let frequencies = CMSketchU16::new_with_size(config.cmsketch_width, config.cmsketch_depth);
+        let decay = config.cmsketch_decay;
 
         Self {
             window: Dlist::new(),
@@ -420,7 +409,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ahash::RandomState;
+
     use itertools::Itertools;
 
     use super::*;
@@ -487,20 +476,14 @@ mod tests {
                 .collect_vec();
 
             // window: 2, probation: 2, protected: 6
-            let config = CacheConfig {
-                capacity: 10,
-                shards: 1,
-                eviction_config: LfuConfig {
-                    window_capacity_ratio: 0.2,
-                    protected_capacity_ratio: 0.6,
-                    cmsketch_width: 10,
-                    cmsketch_depth: 2,
-                    cmsketch_decay: 12,
-                },
-                object_pool_capacity: 0,
-                hash_builder: RandomState::default(),
+            let config = LfuConfig {
+                window_capacity_ratio: 0.2,
+                protected_capacity_ratio: 0.6,
+                cmsketch_width: 10,
+                cmsketch_depth: 2,
+                cmsketch_decay: 12,
             };
-            let mut lfu = TestLfu::new(&config);
+            let mut lfu = TestLfu::new(10, &config);
 
             assert_eq!(lfu.window_charges_capacity, 2);
             assert_eq!(lfu.protected_charges_capacity, 6);
