@@ -12,31 +12,33 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::AtomicUsize;
+
 #[derive(Debug, Default)]
-pub struct MetricsShard {
+pub struct Metrics {
     /// successful inserts without replaces
-    pub insert: usize,
+    pub insert: AtomicUsize,
     /// successful replaces
-    pub replace: usize,
+    pub replace: AtomicUsize,
 
     /// get hits
-    pub hit: usize,
+    pub hit: AtomicUsize,
     /// get misses
-    pub miss: usize,
+    pub miss: AtomicUsize,
 
     /// fetches after cache miss with `entry` interface
-    pub fetch: usize,
+    pub fetch: AtomicUsize,
     /// deduped fetches after cache miss with `entry` interface
-    pub queue: usize,
+    pub queue: AtomicUsize,
 
     /// successful removes
-    pub remove: usize,
+    pub remove: AtomicUsize,
 
     /// evicts from the eviction container
-    pub evict: usize,
+    pub evict: AtomicUsize,
     /// successful reinserts, only counts successful reinserts after evicted
-    pub reinsert: usize,
+    pub reinsert: AtomicUsize,
 
     /// released handles
-    pub release: usize,
+    pub release: AtomicUsize,
 }
