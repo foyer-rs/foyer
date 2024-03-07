@@ -12,274 +12,68 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{hash::Hasher, sync::Arc};
+#![feature(let_chains)]
+#![feature(lint_reasons)]
 
-use foyer_common::code::{Key, Value};
-use foyer_intrusive::{
-    collections::hashmap::{HashMap, HashMapLink},
-    core::adapter::Link,
-    eviction::EvictionPolicy,
-    intrusive_adapter, key_adapter, priority_adapter,
-};
-use parking_lot::Mutex;
-use twox_hash::XxHash64;
+//! This crate provides a concurrent in-memory cache component that supports replaceable eviction algorithm.
+//!
+//! # Motivation
+//!
+//! There are a few goals to achieve with the crate:
+//!
+//! 1. Pluggable eviction algorithm with the same abstraction.
+//! 2. Tracking the real memory usage by the cache. Including both holding by the cache and by the external users.
+//! 3. Reduce the concurrent read-through requests into one.
+//!
+//! To achieve them, the crate needs to combine the advantages of the implementations of RocksDB and CacheLib.
+//!
+//! # Design
+//!
+//! The cache is mainly compused of the following components:
+//! 1. handle             : Carries the cached entry, reference count, pointer links in the eviction container, etc.
+//! 2. indexer            : Indexes cached keys to the handles.
+//! 3. eviction container : Defines the order of eviction. Usually implemented with intrusive data structures.
+//!
+//! Because a handle needs to be referenced and mutated by both the indexer and the eviction container in the same
+//! thread, it is hard to implement in 100% safe Rust without overhead. So, the APIs of the indexer and the eviciton
+//! container are defined with `NonNull` pointers of the handles.
+//!
+//! When some entry is inserted into the cache, the associated handle should be transmuted into pointer without
+//! dropping. When some entry is removed from the cache, the pointer of the associated handle should be transmuted into
+//! an owned data structure.
+//!
+//! # Handle Lifetime
+//!
+//! The handle is created during a new entry is being inserted, and then inserted into both the indexer and the eviction
+//! container.
+//!
+//! The handle is return if the entry is retrieved from the cache. The handle will track the count of the external
+//! owners to decide the time to reclaim.
+//!
+//! When a key is removed or updated, the original handle will be removed from the indexer and the eviction container,
+//! and waits to be released by all the external owners before reclamation.
+//!
+//! When the cache is full and being inserted, a handle will be evicted from the eviction container based on the
+//! eviction algorithm. The evicted handle will NOT be removed from the indexer immediately because it still occupies
+//! memory and can be used by queries followed up.
+//!
+//! After the handle is released by all the external owners, the eviction container will update its order or evict it
+//! based on the eviction algorithm. If it doesn't appear in the eviction container, it may be reinserted if it still in
+//! the indexer and there is enough space. Otherwise, it will be removed from both the indexer and the eviction
+//! container.
+//!
+//! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
+//! destroyed.
 
-pub struct CacheConfig<E>
-where
-    E: EvictionPolicy,
-{
-    capacity: usize,
-    shard_bits: usize,
-    hashmap_bits: usize,
-    eviction_config: E::Config,
-}
+pub mod cache;
+pub mod eviction;
+pub mod handle;
+pub mod indexer;
 
-pub struct Cache<K, V, E, EL>
-where
-    K: Key,
-    V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
-    EL: Link,
-{
-    shards: Vec<Mutex<CacheShard<K, V, E, EL>>>,
-}
+use std::hash::Hash;
 
-struct CacheShard<K, V, E, EL>
-where
-    K: Key,
-    V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
-    EL: Link,
-{
-    container: HashMap<K, V, CacheItemHmAdapter<K, V, EL>>,
-    eviction: E,
+pub trait Key: Send + Sync + 'static + Hash + Eq + Ord {}
+pub trait Value: Send + Sync + 'static {}
 
-    capacity: usize,
-    size: usize,
-}
-
-#[derive(Debug)]
-pub struct CacheItem<K, V, EL>
-where
-    K: Key,
-    V: Value,
-    EL: Link,
-{
-    elink: EL,
-    clink: HashMapLink,
-
-    key: K,
-    value: V,
-
-    priority: usize,
-}
-
-impl<K, V, EL> CacheItem<K, V, EL>
-where
-    K: Key,
-    V: Value,
-    EL: Link,
-{
-    pub fn new(key: K, value: V) -> Self {
-        Self {
-            elink: EL::default(),
-            clink: HashMapLink::default(),
-            key,
-            value,
-
-            priority: 0,
-        }
-    }
-
-    pub fn key(&self) -> &K {
-        &self.key
-    }
-
-    pub fn value(&self) -> &V {
-        &self.value
-    }
-}
-
-intrusive_adapter! { pub CacheItemEpAdapter<K, V, EL> = Arc<CacheItem<K, V, EL>>: CacheItem<K, V, EL> { elink: EL } where K: Key, V: Value, EL: Link }
-key_adapter! { CacheItemEpAdapter<K, V, EL> = CacheItem<K, V, EL> { key: K } where K: Key, V: Value, EL: Link }
-priority_adapter! { CacheItemEpAdapter<K, V, EL> = CacheItem<K, V, EL> { priority: usize } where K: Key, V: Value, EL: Link }
-
-intrusive_adapter! { pub CacheItemHmAdapter<K, V, EL> = Arc<CacheItem<K, V, EL>>: CacheItem<K, V, EL> { clink: HashMapLink } where K: Key, V: Value, EL: Link }
-key_adapter! { CacheItemHmAdapter<K, V, EL> = CacheItem<K, V, EL> { key: K } where K: Key, V: Value, EL: Link }
-
-impl<K, V, E, EL> Cache<K, V, E, EL>
-where
-    K: Key,
-    V: Value,
-    E: EvictionPolicy<Adapter = CacheItemEpAdapter<K, V, EL>>,
-    EL: Link,
-{
-    pub fn new(config: CacheConfig<E>) -> Self {
-        let mut shards = Vec::with_capacity(1 << config.shard_bits);
-
-        let shard_capacity = config.capacity / (1 << config.shard_bits);
-
-        for _ in 0..(1 << config.shard_bits) {
-            let shard = CacheShard {
-                container: HashMap::new(config.hashmap_bits),
-                eviction: E::new(config.eviction_config.clone()),
-                capacity: shard_capacity,
-                size: 0,
-            };
-            shards.push(Mutex::new(shard));
-        }
-
-        Self { shards }
-    }
-
-    pub fn insert(&self, key: K, value: V) -> Vec<Arc<CacheItem<K, V, EL>>> {
-        let hash = self.hash_key(&key);
-        let slot = (self.shards.len() - 1) & hash as usize;
-        let weight = key.weight() + value.weight();
-
-        let item = Arc::new(CacheItem::new(key, value));
-
-        let mut shard = self.shards[slot].lock();
-
-        let to_evict = {
-            let mut to_evict = vec![];
-            let mut to_evict_size = 0;
-            for item in shard.eviction.iter() {
-                if shard.size + weight - to_evict_size <= shard.capacity {
-                    break;
-                }
-                to_evict.push(item.clone());
-                to_evict_size += item.key.weight() + item.value.weight();
-            }
-            to_evict
-        };
-        for item in to_evict.iter() {
-            shard.eviction.remove(item);
-            unsafe { shard.container.remove_in_place(item.clink.raw()) };
-        }
-
-        shard.container.insert(item.clone());
-        shard.eviction.insert(item);
-        shard.size += weight;
-
-        to_evict
-    }
-
-    pub fn remove(&self, key: &K) -> Option<Arc<CacheItem<K, V, EL>>> {
-        let hash = self.hash_key(key);
-        let slot = (self.shards.len() - 1) & hash as usize;
-
-        let mut shard = self.shards[slot].lock();
-
-        let item = shard.container.remove(key);
-        if let Some(item) = &item {
-            shard.eviction.remove(item);
-        }
-        item
-    }
-
-    pub fn lookup(&self, key: &K) -> Option<Arc<CacheItem<K, V, EL>>> {
-        let hash = self.hash_key(key);
-        let slot = (self.shards.len() - 1) & hash as usize;
-
-        let mut shard = self.shards[slot].lock();
-        match shard.container.lookup(key) {
-            Some(item) => {
-                let item = unsafe {
-                    Arc::increment_strong_count(item as *const _);
-                    Arc::from_raw(item as *const _)
-                };
-                shard.eviction.access(&item);
-                Some(item)
-            }
-            None => None,
-        }
-    }
-
-    fn hash_key(&self, key: &K) -> u64 {
-        let mut hasher = XxHash64::default();
-        key.hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use foyer_intrusive::eviction::sfifo::{SegmentedFifo, SegmentedFifoConfig, SegmentedFifoLink};
-
-    use super::*;
-
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    struct K(usize);
-
-    impl Key for K {
-        fn weight(&self) -> usize {
-            0
-        }
-    }
-
-    #[derive(Debug, PartialEq, Eq, Clone)]
-    struct V(usize);
-
-    impl Value for V {
-        fn weight(&self) -> usize {
-            self.0
-        }
-    }
-
-    type FifoCacheConfig = CacheConfig<SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>>;
-    type FifoCache = Cache<K, V, SegmentedFifo<CacheItemEpAdapter<K, V, SegmentedFifoLink>>, SegmentedFifoLink>;
-
-    #[test]
-    fn test_fifo_cache_simple() {
-        let config = FifoCacheConfig {
-            capacity: 10,
-            shard_bits: 0, // 1 shard
-            hashmap_bits: 6,
-            eviction_config: SegmentedFifoConfig {
-                segment_ratios: vec![1],
-            },
-        };
-        let cache = FifoCache::new(config);
-
-        // cache: 1, 2, 3, 4
-        for i in 1..=4 {
-            let evicted = cache.insert(K(i), V(i));
-            assert!(evicted.is_empty());
-        }
-        for i in 1..=4 {
-            let item = cache.lookup(&K(i)).unwrap();
-            assert_eq!(item.key(), &K(i));
-            assert_eq!(item.value(), &V(i));
-        }
-
-        // cache: 4, 5
-        // evicted: 1, 2, 3
-        let evicted = cache.insert(K(5), V(5));
-        assert_eq!(evicted.len(), 3);
-        for (i, item) in evicted.into_iter().enumerate() {
-            assert_eq!(Arc::strong_count(&item), 1);
-            assert_eq!(item.key().0, i + 1);
-            assert_eq!(item.value().0, i + 1);
-        }
-
-        // lookup: 5
-        // cache: 4
-        // removed: 5
-        let res = cache.lookup(&K(5)).unwrap();
-        let item = cache.remove(&K(5)).unwrap();
-        assert_eq!(item.key(), &K(5));
-        assert_eq!(item.value(), &V(5));
-        assert_eq!(Arc::strong_count(&item), 2);
-        drop(res);
-        assert_eq!(Arc::strong_count(&item), 1);
-
-        // cache: 10
-        // evicted: 4
-        let evicted = cache.insert(K(10), V(10));
-        assert_eq!(evicted.len(), 1);
-        assert_eq!(evicted[0].key(), &K(4));
-        assert_eq!(evicted[0].value(), &V(4));
-        assert_eq!(Arc::strong_count(&evicted[0]), 1);
-    }
-}
+impl<T: Send + Sync + 'static + Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static> Value for T {}

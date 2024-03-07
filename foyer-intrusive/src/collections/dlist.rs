@@ -164,6 +164,42 @@ where
         self.len() == 0
     }
 
+    /// Get the prev element of the given `link`.
+    ///
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`Dlist`].
+    pub unsafe fn prev_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_ref())
+    }
+
+    /// Get the mutable prev element of the given `link`.
+    ///
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`Dlist`].
+    pub unsafe fn prev_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_mut())
+    }
+
+    /// Get the next element of the given `link`.
+    ///
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`Dlist`].
+    pub unsafe fn next_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2item(link).as_ref())
+    }
+
+    /// Get the mutable next element of the given `link`.
+    ///
+    /// # Safety
+    ///
+    /// `link` MUST be in this [`Dlist`].
+    pub unsafe fn next_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2item(link).as_mut())
+    }
+
     /// Remove an node that holds the given raw link.
     ///
     /// # Safety
@@ -352,7 +388,8 @@ where
                 return None;
             }
 
-            let mut link = self.link.unwrap();
+            debug_assert!(self.is_valid());
+            let mut link = self.link.unwrap_unchecked();
 
             let item = self.dlist.adapter.link2item(link);
             let ptr = A::Pointer::from_ptr(item.as_ptr());
