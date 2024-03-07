@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::BuildHasher, ptr::NonNull};
+use std::{fmt::Debug, ptr::NonNull};
 
 use foyer_intrusive::{
     collections::dlist::{Dlist, DlistLink},
@@ -20,7 +20,6 @@ use foyer_intrusive::{
 };
 
 use crate::{
-    cache::CacheConfig,
     eviction::Eviction,
     handle::{BaseHandle, Handle},
     Key, Value,
@@ -97,7 +96,7 @@ where
     type Handle = FifoHandle<K, V>;
     type Config = FifoConfig;
 
-    unsafe fn new<S: BuildHasher + Send + Sync + 'static>(_: &CacheConfig<Self, S>) -> Self
+    unsafe fn new(_capacity: usize, _config: &Self::Config) -> Self
     where
         Self: Sized,
     {
@@ -159,7 +158,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use ahash::RandomState;
+
     use itertools::Itertools;
 
     use super::*;
@@ -196,15 +195,7 @@ pub mod tests {
         unsafe {
             let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i, i)).collect_vec();
 
-            let config = CacheConfig {
-                capacity: 0,
-                shards: 1,
-                eviction_config: FifoConfig {},
-                object_pool_capacity: 0,
-                hash_builder: RandomState::default(),
-            };
-
-            let mut fifo = TestFifo::new(&config);
+            let mut fifo = TestFifo::new(100, &FifoConfig {});
 
             // 0, 1, 2, 3
             fifo.push(ptrs[0]);

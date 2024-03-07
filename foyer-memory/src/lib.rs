@@ -66,6 +66,7 @@
 //! destroyed.
 
 pub mod cache;
+pub mod event;
 pub mod eviction;
 pub mod handle;
 pub mod indexer;
