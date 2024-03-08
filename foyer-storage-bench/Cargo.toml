@@ -36,7 +36,7 @@ itertools = "0.12"
 libc = "0.2"
 nix = { version = "0.27", features = ["fs", "mman"] }
 opentelemetry = { version = "0.21", optional = true }
-opentelemetry-otlp = { version = "0.14.0", optional = true }
+opentelemetry-otlp = { version = "0.15.0", optional = true }
 opentelemetry-semantic-conventions = { version = "0.13", optional = true }
 opentelemetry_sdk = { version = "0.21", features = [
     "rt-tokio",
