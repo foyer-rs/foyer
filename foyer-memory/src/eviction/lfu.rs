@@ -42,9 +42,8 @@ pub struct LfuConfig {
     /// Must guarantee `window_capacity_ratio + protected_capacity_ratio < 1`.
     pub protected_capacity_ratio: f64,
 
-    pub cmsketch_width: usize,
-    pub cmsketch_depth: usize,
-    pub cmsketch_decay: usize,
+    pub cmsketch_eps: f64,
+    pub cmsketch_confidence: f64,
 }
 
 pub type LfuContext = ();
@@ -182,11 +181,11 @@ where
     }
 
     fn update_frequencies(&mut self, hash: u64) {
-        self.frequencies.record(hash);
+        self.frequencies.inc(hash);
         self.step += 1;
         if self.step >= self.decay {
-            self.step = 0;
-            self.frequencies.decay(0.5);
+            self.step >>= 1;
+            self.frequencies.halve();
         }
     }
 }
@@ -223,8 +222,8 @@ where
 
         let window_charges_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_charges_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
-        let frequencies = CMSketchU16::new_with_size(config.cmsketch_width, config.cmsketch_depth);
-        let decay = config.cmsketch_decay;
+        let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let decay = frequencies.width();
 
         Self {
             window: Dlist::new(),
@@ -275,7 +274,8 @@ where
             (None, Some(_)) => self.probation.pop_front(),
             (Some(_), None) => self.window.pop_front(),
             (Some(window), Some(probation)) => {
-                if self.frequencies.count(window.base().hash()) < self.frequencies.count(probation.base().hash()) {
+                if self.frequencies.estimate(window.base().hash()) < self.frequencies.estimate(probation.base().hash())
+                {
                     self.window.pop_front()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
@@ -463,7 +463,7 @@ mod tests {
     }
 
     fn assert_min_frequency(lfu: &TestLfu, hash: u64, count: usize) {
-        let freq = lfu.frequencies.count(hash);
+        let freq = lfu.frequencies.estimate(hash);
         assert!(freq >= count as u16, "assert {freq} >= {count} failed for {hash}");
     }
 
@@ -482,9 +482,8 @@ mod tests {
             let config = LfuConfig {
                 window_capacity_ratio: 0.2,
                 protected_capacity_ratio: 0.6,
-                cmsketch_width: 10,
-                cmsketch_depth: 2,
-                cmsketch_decay: 12,
+                cmsketch_eps: 0.01,
+                cmsketch_confidence: 0.95,
             };
             let mut lfu = TestLfu::new(10, &config);
 
