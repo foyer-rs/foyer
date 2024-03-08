@@ -255,7 +255,7 @@ where
         self.increase_queue_charges(handle);
         self.update_frequencies(handle.base().hash());
 
-        // If `window`` charges exceeds the capacity, overflow entry from `window` to `probation`.
+        // If `window` charges exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_charges > self.window_charges_capacity {
             debug_assert!(!self.window.is_empty());
             let mut ptr = self.window.pop_front().unwrap_unchecked();
@@ -277,6 +277,9 @@ where
             (Some(window), Some(probation)) => {
                 if self.frequencies.count(window.base().hash()) < self.frequencies.count(probation.base().hash()) {
                     self.window.pop_front()
+
+                    // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
+                    // too long like CacheLib does?
                 } else {
                     self.probation.pop_front()
                 }
