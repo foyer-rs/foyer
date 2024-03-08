@@ -65,17 +65,19 @@
 //! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
 //! destroyed.
 
+#![feature(trait_alias)]
+
+pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord {}
+pub trait Value: Send + Sync + 'static {}
+pub trait Context: Send + Sync + 'static + Default {}
+
+impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static> Value for T {}
+impl<T: Send + Sync + 'static + Default> Context for T {}
+
 pub mod cache;
 pub mod event;
 pub mod eviction;
 pub mod handle;
 pub mod indexer;
 pub mod metrics;
-
-use std::hash::Hash;
-
-pub trait Key: Send + Sync + 'static + Hash + Eq + Ord {}
-pub trait Value: Send + Sync + 'static {}
-
-impl<T: Send + Sync + 'static + Hash + Eq + Ord> Key for T {}
-impl<T: Send + Sync + 'static> Value for T {}

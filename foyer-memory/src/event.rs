@@ -14,45 +14,46 @@
 
 use std::marker::PhantomData;
 
-use crate::{Key, Value};
+use crate::{Context, Key, Value};
 
-pub trait CacheEventListener: Send + Sync + 'static {
+pub trait CacheEventListener<C>: Send + Sync + 'static
+where
+    C: Context,
+{
     type Key: Key;
     type Value: Value;
-    type Context: Send + Sync + 'static;
 
     /// The function is called when an entry is released by the cache and all external users.
     ///
     /// The arguments includes the key, value and context with ownership.
-    fn on_release(&self, key: Self::Key, value: Self::Value, context: Self::Context, charges: usize);
+    fn on_release(&self, key: Self::Key, value: Self::Value, context: C, charges: usize);
 }
 
 pub struct DefaultCacheEventListener<K, V, C>(PhantomData<(K, V, C)>)
 where
     K: Key,
     V: Value,
-    C: Send + Sync + 'static;
+    C: Context;
 
 impl<K, V, C> Default for DefaultCacheEventListener<K, V, C>
 where
     K: Key,
     V: Value,
-    C: Send + Sync + 'static,
+    C: Context,
 {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<K, V, C> CacheEventListener for DefaultCacheEventListener<K, V, C>
+impl<K, V, C> CacheEventListener<C> for DefaultCacheEventListener<K, V, C>
 where
     K: Key,
     V: Value,
-    C: Send + Sync + 'static,
+    C: Context,
 {
     type Key = K;
     type Value = V;
-    type Context = C;
 
-    fn on_release(&self, _key: Self::Key, _value: Self::Value, _context: Self::Context, _charges: usize) {}
+    fn on_release(&self, _key: Self::Key, _value: Self::Value, _context: C, _charges: usize) {}
 }
