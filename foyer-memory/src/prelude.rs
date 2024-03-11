@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 pub use crate::{
-    cache::{Cache, CacheEntry, Entry},
+    cache::{Cache, CacheEntry, Entry, FifoCacheConfig, LfuCacheConfig, LruCacheConfig},
     context::CacheContext,
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig},
     listener::CacheEventListener,
