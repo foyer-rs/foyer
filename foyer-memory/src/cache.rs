@@ -386,7 +386,7 @@ impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error + From<oneshot::error::RecvError>,
+    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
