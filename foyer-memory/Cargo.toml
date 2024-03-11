@@ -15,6 +15,7 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 ahash = "0.8"
 bitflags = "2"
+cmsketch = "0.2"
 crossbeam = "0.8"
 foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
