@@ -14,7 +14,7 @@
 
 use bitflags::bitflags;
 
-use crate::{Key, Value};
+use crate::{Context, Key, Value};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -27,7 +27,7 @@ bitflags! {
 pub trait Handle: Send + Sync + 'static {
     type Key: Key;
     type Value: Value;
-    type Context: Default;
+    type Context: Context;
 
     fn new() -> Self;
     fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context);

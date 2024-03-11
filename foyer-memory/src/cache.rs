@@ -32,7 +32,6 @@ use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    event::{CacheEventListener, DefaultCacheEventListener},
     eviction::{
         fifo::{Fifo, FifoContext, FifoHandle},
         lfu::{Lfu, LfuContext, LfuHandle},
@@ -41,6 +40,7 @@ use crate::{
     },
     handle::Handle,
     indexer::{HashTableIndexer, Indexer},
+    listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
     Key, Value,
 };
@@ -60,7 +60,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     indexer: I,
@@ -81,7 +81,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn new(
@@ -291,7 +291,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -302,7 +302,7 @@ where
 pub struct CacheConfig<E, L, S = RandomState>
 where
     E: Eviction,
-    L: CacheEventListener,
+    L: CacheEventListener<<E::Handle as Handle>::Key, <E::Handle as Handle>::Value, <E::Handle as Handle>::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub capacity: usize,
@@ -321,7 +321,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
 {
@@ -338,7 +338,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
 {
@@ -354,7 +354,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error + From<oneshot::error::RecvError>,
 {
@@ -381,7 +381,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     shards: Vec<Mutex<CacheShard<K, V, H, E, I, L, S>>>,
@@ -401,7 +401,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn new(config: CacheConfig<E, L, S>) -> Self {
@@ -543,7 +543,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> Entry<K, V, H, E, I, L, S, ER>
@@ -610,7 +610,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     cache: Arc<Cache<K, V, H, E, I, L, S>>,
@@ -624,7 +624,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn key(&self) -> &H::Key {
@@ -655,7 +655,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -681,7 +681,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -696,7 +696,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
@@ -713,7 +713,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
@@ -724,7 +724,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<Key = K, Value = V, Context = H::Context>,
+    L: CacheEventListener<K, V, H::Context>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
@@ -756,8 +756,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        event::DefaultCacheEventListener,
-        eviction::{fifo::FifoConfig, lru::LruConfig, test_utils::TestEviction},
+        eviction::{
+            fifo::{FifoConfig, FifoHandle},
+            lru::LruConfig,
+            test_utils::TestEviction,
+        },
+        listener::DefaultCacheEventListener,
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
