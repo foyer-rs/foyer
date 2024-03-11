@@ -12,6 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#[derive(Debug, Clone, Copy)]
 pub enum CacheContext {
     /// The default context shared by all eviction container implementations.
     Default,
