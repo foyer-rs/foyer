@@ -17,7 +17,6 @@ anyhow = "1.0"
 bitflags = "2.3.1"
 bitmaps = "3.2"
 bytes = "1"
-cmsketch = "0.1"
 foyer-common = { version = "0.3", path = "../foyer-common" }
 foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
@@ -26,7 +25,7 @@ itertools = "0.12"
 libc = "0.2"
 lz4 = "1.24"
 memoffset = "0.9"
-nix = { version = "0.27", features = ["fs", "mman", "uio"] }
+nix = { version = "0.28", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 prometheus = "0.13"
