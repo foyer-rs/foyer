@@ -75,9 +75,12 @@ impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 impl<T: Send + Sync + 'static + Default> Context for T {}
 
-pub mod cache;
-pub mod eviction;
-pub mod handle;
-pub mod indexer;
-pub mod listener;
-pub mod metrics;
+mod cache;
+mod eviction;
+mod handle;
+mod indexer;
+mod listener;
+mod metrics;
+mod prelude;
+
+pub use prelude::*;

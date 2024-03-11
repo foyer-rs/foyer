@@ -32,17 +32,7 @@ use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    eviction::{
-        fifo::{Fifo, FifoContext, FifoHandle},
-        lfu::{Lfu, LfuContext, LfuHandle},
-        lru::{Lru, LruContext, LruHandle},
-        Eviction,
-    },
-    handle::Handle,
-    indexer::{HashTableIndexer, Indexer},
-    listener::{CacheEventListener, DefaultCacheEventListener},
-    metrics::Metrics,
-    Key, Value,
+    eviction::Eviction, handle::Handle, indexer::Indexer, listener::CacheEventListener, metrics::Metrics, Key, Value,
 };
 
 struct CacheContext<T, L> {
@@ -729,27 +719,6 @@ where
 {
 }
 
-pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
-    Cache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
-pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
-    CacheConfig<Fifo<K, V>, L, S>;
-pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
-    CacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
-
-pub type LruCache<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
-    Cache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
-pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
-    CacheConfig<Lru<K, V>, L, S>;
-pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
-    CacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
-
-pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
-    Cache<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
-pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
-    CacheConfig<Lfu<K, V>, L, S>;
-pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
-    CacheEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
-
 #[cfg(test)]
 mod tests {
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
@@ -762,6 +731,7 @@ mod tests {
             test_utils::TestEviction,
         },
         listener::DefaultCacheEventListener,
+        prelude::{FifoCache, FifoCacheConfig, FifoCacheEntry, LruCache, LruCacheConfig, LruCacheEntry},
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
