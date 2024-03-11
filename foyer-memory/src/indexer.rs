@@ -18,7 +18,6 @@ use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
 use crate::{handle::Handle, Key};
 
-#[expect(clippy::missing_safety_doc)]
 pub trait Indexer: Send + Sync + 'static {
     type Key: Key;
     type Handle: Handle<Key = Self::Key>;
