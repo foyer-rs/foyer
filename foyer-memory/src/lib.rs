@@ -76,6 +76,7 @@ impl<T: Send + Sync + 'static> Value for T {}
 mod cache;
 mod context;
 mod eviction;
+mod generic;
 mod handle;
 mod indexer;
 mod listener;

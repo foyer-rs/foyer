@@ -25,7 +25,7 @@ use crate::{
     CacheContext, Key, Value,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct FifoContext;
 
 impl From<CacheContext> for FifoContext {

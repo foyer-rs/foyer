@@ -25,6 +25,6 @@ impl Default for CacheContext {
 }
 
 /// The overhead of `Context` itself and the conversion should be light.
-pub trait Context: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static {}
+pub trait Context: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static + Clone {}
 
-impl<T> Context for T where T: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static {}
+impl<T> Context for T where T: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static + Clone {}

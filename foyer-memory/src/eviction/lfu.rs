@@ -45,8 +45,7 @@ pub struct LfuConfig {
     pub cmsketch_eps: f64,
     pub cmsketch_confidence: f64,
 }
-
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct LfuContext;
 
 impl From<CacheContext> for LfuContext {
