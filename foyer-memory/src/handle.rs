@@ -14,7 +14,7 @@
 
 use bitflags::bitflags;
 
-use crate::{Context, Key, Value};
+use crate::{context::Context, Key, Value};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

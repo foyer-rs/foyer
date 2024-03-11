@@ -24,7 +24,7 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    Key, Value,
+    CacheContext, Key, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,20 @@ pub struct LfuConfig {
     pub cmsketch_confidence: f64,
 }
 
-pub type LfuContext = ();
+#[derive(Debug, Default)]
+pub struct LfuContext;
+
+impl From<CacheContext> for LfuContext {
+    fn from(_: CacheContext) -> Self {
+        Self
+    }
+}
+
+impl From<LfuContext> for CacheContext {
+    fn from(_: LfuContext) -> Self {
+        CacheContext::Default
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Queue {
@@ -473,7 +486,7 @@ mod tests {
             let ptrs = (0..100)
                 .map(|i| {
                     let mut handle = Box::new(TestLfuHandle::new());
-                    handle.init(i, i, i, 1, ());
+                    handle.init(i, i, i, 1, LfuContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();

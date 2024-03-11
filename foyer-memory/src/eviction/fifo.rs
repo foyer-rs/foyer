@@ -22,10 +22,23 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    Key, Value,
+    CacheContext, Key, Value,
 };
 
-pub type FifoContext = ();
+#[derive(Debug, Default)]
+pub struct FifoContext;
+
+impl From<CacheContext> for FifoContext {
+    fn from(_: CacheContext) -> Self {
+        Self
+    }
+}
+
+impl From<FifoContext> for CacheContext {
+    fn from(_: FifoContext) -> Self {
+        CacheContext::Default
+    }
+}
 
 pub struct FifoHandle<K, V>
 where
@@ -182,7 +195,7 @@ pub mod tests {
 
     unsafe fn new_test_fifo_handle_ptr(key: u64, value: u64) -> NonNull<TestFifoHandle> {
         let mut handle = Box::new(TestFifoHandle::new());
-        handle.init(0, key, value, 1, ());
+        handle.init(0, key, value, 1, FifoContext);
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 
