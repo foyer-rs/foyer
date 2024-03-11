@@ -304,7 +304,7 @@ where
     }
 }
 
-pub enum Entry<K, V, ER, L, S>
+pub enum Entry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState>
 where
     K: Key + Clone,
     V: Value,
