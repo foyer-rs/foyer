@@ -25,29 +25,27 @@ use crate::{
     listener::DefaultCacheEventListener,
 };
 
-pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
+pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     Cache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
-pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
-    CacheConfig<Fifo<K, V>, L, S>;
-pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V, FifoContext>, S = RandomState> =
+pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Fifo<K, V>, L, S>;
+pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     CacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
 
-pub type LruCache<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
+pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     Cache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
-pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
-    CacheConfig<Lru<K, V>, L, S>;
-pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V, LruContext>, S = RandomState> =
+pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lru<K, V>, L, S>;
+pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     CacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
 
-pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
+pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     Cache<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
-pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
-    CacheConfig<Lfu<K, V>, L, S>;
-pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V, LfuContext>, S = RandomState> =
+pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lfu<K, V>, L, S>;
+pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     CacheEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
 
 pub use crate::{
     cache::Entry,
+    context::CacheContext,
     eviction::{
         fifo::{FifoConfig, FifoContext},
         lfu::{LfuConfig, LfuContext},

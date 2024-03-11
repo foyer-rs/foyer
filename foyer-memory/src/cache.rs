@@ -32,10 +32,11 @@ use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    eviction::Eviction, handle::Handle, indexer::Indexer, listener::CacheEventListener, metrics::Metrics, Key, Value,
+    eviction::Eviction, handle::Handle, indexer::Indexer, listener::CacheEventListener, metrics::Metrics, CacheContext,
+    Key, Value,
 };
 
-struct CacheContext<T, L> {
+struct CacheSharedState<T, L> {
     metrics: Metrics,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: ArrayQueue<Box<T>>,
@@ -50,7 +51,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     indexer: I,
@@ -61,7 +62,7 @@ where
 
     waiters: HashMap<K, Vec<oneshot::Sender<CacheEntry<K, V, H, E, I, L, S>>>>,
 
-    context: Arc<CacheContext<H, L>>,
+    state: Arc<CacheSharedState<H, L>>,
 }
 
 impl<K, V, H, E, I, L, S> CacheShard<K, V, H, E, I, L, S>
@@ -71,14 +72,14 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn new(
         capacity: usize,
         eviction_config: &E::Config,
         usage: Arc<AtomicUsize>,
-        context: Arc<CacheContext<H, L>>,
+        context: Arc<CacheSharedState<H, L>>,
     ) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(capacity, eviction_config) };
@@ -89,7 +90,7 @@ where
             capacity,
             usage,
             waiters,
-            context,
+            state: context,
         }
     }
 
@@ -103,7 +104,7 @@ where
         context: H::Context,
         last_reference_entries: &mut Vec<(K, V, H::Context, usize)>,
     ) -> NonNull<H> {
-        let mut handle = self.context.object_pool.pop().unwrap_or_else(|| Box::new(H::new()));
+        let mut handle = self.state.object_pool.pop().unwrap_or_else(|| Box::new(H::new()));
         handle.init(hash, key, value, charge, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
@@ -111,7 +112,7 @@ where
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
-            self.context.metrics.replace.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.replace.fetch_add(1, Ordering::Relaxed);
 
             debug_assert!(!old.as_ref().base().is_in_indexer());
             if old.as_ref().base().is_in_eviction() {
@@ -123,7 +124,7 @@ where
                 last_reference_entries.push(entry);
             }
         } else {
-            self.context.metrics.insert.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.insert.fetch_add(1, Ordering::Relaxed);
         }
         self.eviction.push(ptr);
 
@@ -139,11 +140,11 @@ where
     unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
         let mut ptr = match self.indexer.get(hash, key) {
             Some(ptr) => {
-                self.context.metrics.hit.fetch_add(1, Ordering::Relaxed);
+                self.state.metrics.hit.fetch_add(1, Ordering::Relaxed);
                 ptr
             }
             None => {
-                self.context.metrics.miss.fetch_add(1, Ordering::Relaxed);
+                self.state.metrics.miss.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
         };
@@ -161,7 +162,7 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V, H::Context, usize)> {
         let ptr = self.indexer.remove(hash, key)?;
-        self.context.metrics.remove.fetch_add(1, Ordering::Relaxed);
+        self.state.metrics.remove.fetch_add(1, Ordering::Relaxed);
         if ptr.as_ref().base().is_in_eviction() {
             self.eviction.remove(ptr);
         }
@@ -184,7 +185,7 @@ where
             debug_assert!((&eptrs - &ptrs).is_empty());
         }
 
-        self.context.metrics.remove.fetch_add(ptrs.len(), Ordering::Relaxed);
+        self.state.metrics.remove.fetch_add(ptrs.len(), Ordering::Relaxed);
 
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
@@ -200,7 +201,7 @@ where
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity
             && let Some(evicted) = self.eviction.pop()
         {
-            self.context.metrics.evict.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.evict.fetch_add(1, Ordering::Relaxed);
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
             debug_assert!(!base.is_in_eviction());
@@ -244,7 +245,7 @@ where
                 self.eviction.reinsert(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
                     if was_in_eviction {
-                        self.context.metrics.reinsert.fetch_add(1, Ordering::Relaxed);
+                        self.state.metrics.reinsert.fetch_add(1, Ordering::Relaxed);
                     }
                     return None;
                 }
@@ -262,13 +263,13 @@ where
         debug_assert!(!base.is_in_eviction());
         debug_assert!(!base.has_refs());
 
-        self.context.metrics.release.fetch_add(1, Ordering::Relaxed);
+        self.state.metrics.release.fetch_add(1, Ordering::Relaxed);
 
         self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
         let entry = base.take();
 
         let handle = Box::from_raw(ptr.as_ptr());
-        let _ = self.context.object_pool.push(handle);
+        let _ = self.state.object_pool.push(handle);
 
         Some(entry)
     }
@@ -281,7 +282,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -292,7 +293,7 @@ where
 pub struct CacheConfig<E, L, S = RandomState>
 where
     E: Eviction,
-    L: CacheEventListener<<E::Handle as Handle>::Key, <E::Handle as Handle>::Value, <E::Handle as Handle>::Context>,
+    L: CacheEventListener<<E::Handle as Handle>::Key, <E::Handle as Handle>::Value>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub capacity: usize,
@@ -311,7 +312,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
 {
@@ -328,7 +329,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
 {
@@ -344,7 +345,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error + From<oneshot::error::RecvError>,
 {
@@ -371,7 +372,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     shards: Vec<Mutex<CacheShard<K, V, H, E, I, L, S>>>,
@@ -379,7 +380,7 @@ where
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
 
-    context: Arc<CacheContext<H, L>>,
+    context: Arc<CacheSharedState<H, L>>,
 
     hash_builder: S,
 }
@@ -391,12 +392,12 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn new(config: CacheConfig<E, L, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
-        let context = Arc::new(CacheContext {
+        let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
             object_pool: ArrayQueue::new(config.object_pool_capacity),
             listener: config.event_listener,
@@ -420,7 +421,7 @@ where
     }
 
     pub fn insert(self: &Arc<Self>, key: K, value: V, charge: usize) -> CacheEntry<K, V, H, E, I, L, S> {
-        self.insert_with_context(key, value, charge, H::Context::default())
+        self.insert_with_context(key, value, charge, CacheContext::default())
     }
 
     pub fn insert_with_context(
@@ -428,7 +429,7 @@ where
         key: K,
         value: V,
         charge: usize,
-        context: H::Context,
+        context: CacheContext,
     ) -> CacheEntry<K, V, H, E, I, L, S> {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -437,7 +438,7 @@ where
         let (entry, waiters) = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             let waiters = shard.waiters.remove(&key);
-            let mut ptr = shard.insert(hash, key, value, charge, context, &mut to_deallocate);
+            let mut ptr = shard.insert(hash, key, value, charge, context.into(), &mut to_deallocate);
             if let Some(waiters) = waiters.as_ref() {
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
             }
@@ -459,7 +460,7 @@ where
 
         // Do not deallocate data within the lock section.
         for (key, value, context, charges) in to_deallocate {
-            self.context.listener.on_release(key, value, context, charges)
+            self.context.listener.on_release(key, value, context.into(), charges)
         }
 
         entry
@@ -475,7 +476,7 @@ where
 
         // Do not deallocate data within the lock section.
         if let Some((key, value, context, charges)) = entry {
-            self.context.listener.on_release(key, value, context, charges);
+            self.context.listener.on_release(key, value, context.into(), charges);
         }
     }
 
@@ -520,7 +521,7 @@ where
 
         // Do not deallocate data within the lock section.
         if let Some((key, value, context, charges)) = entry {
-            self.context.listener.on_release(key, value, context, charges);
+            self.context.listener.on_release(key, value, context.into(), charges);
         }
     }
 }
@@ -533,7 +534,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> Entry<K, V, H, E, I, L, S, ER>
@@ -573,7 +574,7 @@ where
                         };
 
                         let entry = if let Some(context) = context {
-                            cache.insert_with_context(key, value, charge, context)
+                            cache.insert_with_context(key, value, charge, context.into())
                         } else {
                             cache.insert(key, value, charge)
                         };
@@ -584,8 +585,8 @@ where
                 }
             };
             match entry {
-                Entry::Wait(_) => shard.context.metrics.queue.fetch_add(1, Ordering::Relaxed),
-                Entry::Miss(_) => shard.context.metrics.fetch.fetch_add(1, Ordering::Relaxed),
+                Entry::Wait(_) => shard.state.metrics.queue.fetch_add(1, Ordering::Relaxed),
+                Entry::Miss(_) => shard.state.metrics.fetch.fetch_add(1, Ordering::Relaxed),
                 _ => unreachable!(),
             };
             entry
@@ -600,7 +601,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     cache: Arc<Cache<K, V, H, E, I, L, S>>,
@@ -614,7 +615,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn key(&self) -> &H::Key {
@@ -645,7 +646,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -671,7 +672,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -686,7 +687,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
@@ -703,7 +704,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
@@ -714,7 +715,7 @@ where
     H: Handle<Key = K, Value = V>,
     E: Eviction<Handle = H>,
     I: Indexer<Key = K, Handle = H>,
-    L: CacheEventListener<K, V, H::Context>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
