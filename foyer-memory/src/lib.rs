@@ -76,8 +76,8 @@ impl<T: Send + Sync + 'static> Value for T {}
 impl<T: Send + Sync + 'static + Default> Context for T {}
 
 pub mod cache;
-pub mod event;
 pub mod eviction;
 pub mod handle;
 pub mod indexer;
+pub mod listener;
 pub mod metrics;
