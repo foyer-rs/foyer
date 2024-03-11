@@ -23,8 +23,5 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "fs",
 ] }
 
-[patch.crates-io]
-# cmsketch = { path = "../cmsketch-rs" }
-
 [profile.release]
 debug = "full"
