@@ -375,6 +375,13 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryState {
+    Hit,
+    Wait,
+    Miss,
+}
+
 impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
@@ -383,25 +390,19 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn is_hit(&self) -> bool {
-        matches!(
-            self,
-            Entry::Fifo(FifoEntry::Hit(_)) | Entry::Lru(LruEntry::Hit(_)) | Entry::Lfu(LfuEntry::Hit(_))
-        )
-    }
-
-    pub fn is_wait(&self) -> bool {
-        matches!(
-            self,
-            Entry::Fifo(FifoEntry::Wait(_)) | Entry::Lru(LruEntry::Wait(_)) | Entry::Lfu(LfuEntry::Wait(_))
-        )
-    }
-
-    pub fn is_miss(&self) -> bool {
-        matches!(
-            self,
-            Entry::Fifo(FifoEntry::Miss(_)) | Entry::Lru(LruEntry::Miss(_)) | Entry::Lfu(LfuEntry::Miss(_))
-        )
+    pub fn state(&self) -> EntryState {
+        match self {
+            Entry::Fifo(FifoEntry::Hit(_)) | Entry::Lru(LruEntry::Hit(_)) | Entry::Lfu(LfuEntry::Hit(_)) => {
+                EntryState::Hit
+            }
+            Entry::Fifo(FifoEntry::Wait(_)) | Entry::Lru(LruEntry::Wait(_)) | Entry::Lfu(LfuEntry::Wait(_)) => {
+                EntryState::Wait
+            }
+            Entry::Fifo(FifoEntry::Miss(_)) | Entry::Lru(LruEntry::Miss(_)) | Entry::Lfu(LfuEntry::Miss(_)) => {
+                EntryState::Miss
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
