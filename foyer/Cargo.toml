@@ -1,6 +1,6 @@
 [package]
 name = "foyer"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "Hybrid cache for Rust"
@@ -13,8 +13,8 @@ homepage = "https://github.com/mrcroxx/foyer"
 normal = ["foyer-workspace-hack"]
 
 [dependencies]
-foyer-common = { version = "0.3", path = "../foyer-common" }
-foyer-intrusive = { version = "0.2", path = "../foyer-intrusive" }
+foyer-common = { version = "0.4", path = "../foyer-common" }
+foyer-intrusive = { version = "0.3", path = "../foyer-intrusive" }
 foyer-memory = { version = "0.1", path = "../foyer-memory" }
-foyer-storage = { version = "0.4", path = "../foyer-storage" }
-foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
+foyer-storage = { version = "0.5", path = "../foyer-storage" }
+foyer-workspace-hack = { version = "0.3", path = "../foyer-workspace-hack" }

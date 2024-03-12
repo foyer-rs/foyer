@@ -1,3 +1,24 @@
+## 2024-03-12
+
+| crate | version |
+| - | - |
+| foyer | 0.6.0 |
+| foyer-common | 0.4.0 |
+| foyer-intrusive | 0.3.0 |
+| foyer-memory | 0.1.0 |
+| foyer-storage | 0.5.0 |
+| foyer-storage-bench | 0.5.0 |
+| foyer-workspace-hack | 0.3.0 |
+
+<details>
+
+### Changes
+
+- Release foyer in-memory cache as crate `foyer-memory`.
+- Bump other components with changes.
+
+</details>
+
 ## 2023-12-28
 
 | crate | version |
