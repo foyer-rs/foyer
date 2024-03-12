@@ -12,6 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheContext {
     /// The default context shared by all eviction container implementations.
     Default,
@@ -25,6 +26,6 @@ impl Default for CacheContext {
 }
 
 /// The overhead of `Context` itself and the conversion should be light.
-pub trait Context: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static {}
+pub trait Context: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static + Clone {}
 
-impl<T> Context for T where T: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static {}
+impl<T> Context for T where T: From<CacheContext> + Into<CacheContext> + Send + Sync + 'static + Clone {}
