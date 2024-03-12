@@ -16,7 +16,7 @@ normal = ["foyer-workspace-hack"]
 anyhow = "1.0"
 bytes = "1"
 crossbeam = { version = "0.8", features = ["std", "crossbeam-channel"] }
-foyer-workspace-hack = { version = "0.2", path = "../foyer-workspace-hack" }
+foyer-workspace-hack = { version = "0.3", path = "../foyer-workspace-hack" }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 prometheus = "0.13"
@@ -27,7 +27,7 @@ tracing = "0.1"
 [dev-dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
-foyer-common = { version = "0.3", path = "../foyer-common" }
+foyer-common = { version = "0.4", path = "../foyer-common" }
 hdrhistogram = "7"
 itertools = "0.12"
 rand = "0.8.5"
