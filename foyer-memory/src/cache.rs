@@ -186,7 +186,7 @@ where
     }
 }
 
-pub enum Cache<K, V, L, S = RandomState>
+pub enum Cache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState>
 where
     K: Key,
     V: Value,
@@ -424,5 +424,139 @@ where
             Cache::Lru(cache) => Entry::from(cache.entry(key, f)),
             Cache::Lfu(cache) => Entry::from(cache.entry(key, f)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ops::Range, time::Duration};
+
+    use futures::future::join_all;
+    use itertools::Itertools;
+    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+
+    use super::*;
+    use crate::{FifoConfig, LfuConfig, LruConfig};
+
+    const CAPACITY: usize = 100;
+    const SHARDS: usize = 4;
+    const OBJECT_POOL_CAPACITY: usize = 64;
+    const RANGE: Range<u64> = 0..1000;
+    const OPS: usize = 10000;
+    const CONCURRENCY: usize = 8;
+
+    fn fifo() -> Cache<u64, u64> {
+        Cache::fifo(FifoCacheConfig {
+            capacity: CAPACITY,
+            shards: SHARDS,
+            eviction_config: FifoConfig {},
+            object_pool_capacity: OBJECT_POOL_CAPACITY,
+            hash_builder: RandomState::default(),
+            event_listener: DefaultCacheEventListener::default(),
+        })
+    }
+
+    fn lru() -> Cache<u64, u64> {
+        Cache::lru(LruCacheConfig {
+            capacity: CAPACITY,
+            shards: SHARDS,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: 0.1,
+            },
+            object_pool_capacity: OBJECT_POOL_CAPACITY,
+            hash_builder: RandomState::default(),
+            event_listener: DefaultCacheEventListener::default(),
+        })
+    }
+
+    fn lfu() -> Cache<u64, u64> {
+        Cache::lfu(LfuCacheConfig {
+            capacity: CAPACITY,
+            shards: SHARDS,
+            eviction_config: LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            },
+            object_pool_capacity: OBJECT_POOL_CAPACITY,
+            hash_builder: RandomState::default(),
+            event_listener: DefaultCacheEventListener::default(),
+        })
+    }
+
+    fn init_cache(cache: &Cache<u64, u64>, rng: &mut StdRng) {
+        let mut v = RANGE.collect_vec();
+        v.shuffle(rng);
+        for i in v {
+            cache.insert(i, i, 1);
+        }
+    }
+
+    async fn operate(cache: &Cache<u64, u64>, rng: &mut StdRng) {
+        let i = rng.gen_range(RANGE);
+        match rng.gen_range(0..=3) {
+            0 => {
+                let entry = cache.insert(i, i, 1);
+                assert_eq!(*entry.key(), i);
+                assert_eq!(entry.key(), entry.value());
+            }
+            1 => {
+                if let Some(entry) = cache.get(&i) {
+                    assert_eq!(*entry.key(), i);
+                    assert_eq!(entry.key(), entry.value());
+                }
+            }
+            2 => {
+                cache.remove(&i);
+            }
+            3 => {
+                let entry = cache
+                    .entry(i, || async move {
+                        tokio::time::sleep(Duration::from_micros(10)).await;
+                        Ok::<_, tokio::sync::oneshot::error::RecvError>((i, 1, CacheContext::Default))
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(*entry.key(), i);
+                assert_eq!(entry.key(), entry.value());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn case(cache: Cache<u64, u64>) {
+        let mut rng = StdRng::seed_from_u64(42);
+
+        init_cache(&cache, &mut rng);
+
+        let handles = (0..CONCURRENCY)
+            .map(|_| {
+                let cache = cache.clone();
+                let mut rng = rng.clone();
+                tokio::spawn(async move {
+                    for _ in 0..OPS {
+                        operate(&cache, &mut rng).await;
+                    }
+                })
+            })
+            .collect_vec();
+
+        join_all(handles).await;
+    }
+
+    #[tokio::test]
+    async fn test_fifo_cache() {
+        case(fifo()).await
+    }
+
+    #[tokio::test]
+    async fn test_lru_cache() {
+        case(lru()).await
+    }
+
+    #[tokio::test]
+    async fn test_lfu_cache() {
+        case(lfu()).await
     }
 }
