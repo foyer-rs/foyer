@@ -35,7 +35,7 @@ pub fn init_logger() {
 #[cfg(feature = "trace")]
 pub fn init_logger() {
     use opentelemetry_sdk::{
-        trace::{BatchConfig, Config},
+        trace::{BatchConfigBuilder, Config},
         Resource,
     };
     use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -46,10 +46,11 @@ pub fn init_logger() {
         SERVICE_NAME,
         "foyer-storage-bench",
     )]));
-    let batch_config = BatchConfig::default()
+    let batch_config = BatchConfigBuilder::default()
         .with_max_queue_size(1048576)
         .with_max_export_batch_size(4096)
-        .with_max_concurrent_exports(4);
+        .with_max_concurrent_exports(4)
+        .build();
 
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
