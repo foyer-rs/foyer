@@ -421,8 +421,8 @@ where
     {
         match self {
             Cache::Fifo(cache) => Entry::from(cache.entry(key, f)),
-            Cache::Lru(_) => todo!(),
-            Cache::Lfu(_) => todo!(),
+            Cache::Lru(cache) => Entry::from(cache.entry(key, f)),
+            Cache::Lfu(cache) => Entry::from(cache.entry(key, f)),
         }
     }
 }
