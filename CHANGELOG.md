@@ -1,3 +1,17 @@
+## 2024-03-13
+
+| crate | version |
+| - | - |
+| foyer-storage-bench | 0.5.1 |
+
+<details>
+
+### Changes
+
+- Fix `foyer-storage-bench` build with `trace` feature.
+
+</details>
+
 ## 2024-03-12
 
 | crate | version |
