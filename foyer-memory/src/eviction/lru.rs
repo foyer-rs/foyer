@@ -26,7 +26,7 @@ use crate::{
     CacheContext, Key, Value,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LruConfig {
     /// The ratio of the high priority pool occupied.
     ///
