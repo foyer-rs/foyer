@@ -1,3 +1,17 @@
+## 2024-03-14
+
+| crate | version |
+| - | - |
+| foyer-memory | 0.1.1 |
+
+<details>
+
+### Changes
+
+- Make eviction config clonable.
+
+</details>
+
 ## 2024-03-13
 
 | crate | version |
