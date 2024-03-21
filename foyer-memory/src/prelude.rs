@@ -16,6 +16,6 @@ pub use crate::{
     cache::{Cache, CacheEntry, Entry, EntryState, FifoCacheConfig, LfuCacheConfig, LruCacheConfig},
     context::CacheContext,
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig},
-    listener::CacheEventListener,
+    listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
 };
