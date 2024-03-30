@@ -74,13 +74,13 @@ pub trait Value: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
-pub mod cache;
-pub mod context;
-pub mod eviction;
-pub mod generic;
+mod cache;
+mod context;
+mod eviction;
+mod generic;
 mod handle;
-pub mod indexer;
-pub mod listener;
+mod indexer;
+mod listener;
 mod metrics;
 mod prelude;
 

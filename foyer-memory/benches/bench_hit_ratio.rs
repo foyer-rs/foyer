@@ -1,12 +1,22 @@
-use std::{hash::BuildHasher, sync::Arc};
+//  Copyright 2024 MrCroxx
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//  http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
+use std::sync::Arc;
 
 use ahash::RandomState;
 use foyer_memory::{
-    cache::{LfuCache, LruCache},
-    eviction::Eviction,
-    indexer::Indexer,
-    CacheEventListener, DefaultCacheEventListener, FifoCache, FifoCacheConfig, FifoConfig, GenericCache, Handle,
-    LfuCacheConfig, LfuConfig, LruCacheConfig, LruConfig,
+    Cache, DefaultCacheEventListener, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig, LruCacheConfig, LruConfig,
 };
 use rand::{distributions::Distribution, thread_rng};
 
@@ -49,17 +59,7 @@ zif_exp, cache_size             fifo            lru             lfu             
 1.50,  0.1                      96.65%          97.51%          98.06%          98.15%
 1.50, 0.25                      98.35%          98.81%          99.04%          99.09%
 */
-fn cache_hit<H, E, I, L, S>(
-    cache: Arc<GenericCache<CacheKey, CacheValue, H, E, I, L, S>>,
-    keys: Arc<Vec<CacheKey>>,
-) -> f64
-where
-    H: Handle<Key = CacheKey, Value = CacheValue>,
-    E: Eviction<Handle = H>,
-    I: Indexer<Key = CacheKey, Handle = H>,
-    L: CacheEventListener<CacheKey, CacheValue>,
-    S: BuildHasher + Send + Sync + 'static,
-{
+fn cache_hit(cache: Arc<Cache<CacheKey, CacheValue>>, keys: Arc<Vec<CacheKey>>) -> f64 {
     let mut hit = 0;
     for key in keys.iter() {
         let value = cache.get(key);
@@ -85,7 +85,7 @@ fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &Vec<St
     hit as f64 / ITERATIONS as f64
 }
 
-fn new_fifo_cache(capacity: usize) -> Arc<FifoCache<CacheKey, CacheValue>> {
+fn new_fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
     let config = FifoCacheConfig {
         capacity,
         shards: SHARDS,
@@ -95,10 +95,10 @@ fn new_fifo_cache(capacity: usize) -> Arc<FifoCache<CacheKey, CacheValue>> {
         event_listener: DefaultCacheEventListener::default(),
     };
 
-    Arc::new(FifoCache::<CacheKey, CacheValue>::new(config))
+    Arc::new(Cache::fifo(config))
 }
 
-fn new_lru_cache(capacity: usize) -> Arc<LruCache<CacheKey, CacheValue>> {
+fn new_lru_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
     let config = LruCacheConfig {
         capacity,
         shards: SHARDS,
@@ -110,10 +110,10 @@ fn new_lru_cache(capacity: usize) -> Arc<LruCache<CacheKey, CacheValue>> {
         event_listener: DefaultCacheEventListener::default(),
     };
 
-    Arc::new(LruCache::<CacheKey, CacheValue>::new(config))
+    Arc::new(Cache::lru(config))
 }
 
-fn new_lfu_cache(capacity: usize) -> Arc<LfuCache<CacheKey, CacheValue>> {
+fn new_lfu_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
     let config = LfuCacheConfig {
         capacity,
         shards: SHARDS,
@@ -128,7 +128,7 @@ fn new_lfu_cache(capacity: usize) -> Arc<LfuCache<CacheKey, CacheValue>> {
         event_listener: DefaultCacheEventListener::default(),
     };
 
-    Arc::new(LfuCache::<CacheKey, CacheValue>::new(config))
+    Arc::new(Cache::lfu(config))
 }
 
 fn bench_one(zif_exp: f64, cache_size_percent: f64) {

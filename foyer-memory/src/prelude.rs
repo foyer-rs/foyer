@@ -13,11 +13,9 @@
 //  limitations under the License.
 
 pub use crate::{
-    cache::{Cache, CacheEntry, Entry, EntryState, FifoCache, FifoCacheConfig, LfuCacheConfig, LruCacheConfig},
+    cache::{Cache, CacheEntry, Entry, EntryState, FifoCacheConfig, LfuCacheConfig, LruCacheConfig},
     context::CacheContext,
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig},
-    generic::GenericCache,
-    handle::Handle,
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
 };

@@ -25,8 +25,6 @@ itertools = "0.12"
 libc = "0.2"
 parking_lot = "0.12"
 tokio = { workspace = true }
-
-
 [dev-dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
