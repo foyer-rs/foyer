@@ -14,6 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(lint_reasons)]
+#![feature(offset_of)]
 
 //! This crate provides a concurrent in-memory cache component that supports replaceable eviction algorithm.
 //!
