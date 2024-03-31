@@ -72,7 +72,7 @@ fn cache_hit(cache: Arc<Cache<CacheKey, CacheValue>>, keys: Arc<Vec<CacheKey>>) 
     hit as f64 / ITERATIONS as f64
 }
 
-fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &Vec<String>) -> f64 {
+fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &[String]) -> f64 {
     let mut hit = 0;
     for key in keys.iter() {
         let value = cache.get(key);
@@ -184,7 +184,7 @@ fn bench_one(zif_exp: f64, cache_size_percent: f64) {
     print!("{:.2}%\t\t", fifo_hit_ratio * 100.0);
     print!("{:.2}%\t\t", lru_hit_ratio * 100.0);
     print!("{:.2}%\t\t", lfu_hit_ratio * 100.0);
-    print!("{:.2}%\n", moka_hit_ratio * 100.0);
+    println!("{:.2}%", moka_hit_ratio * 100.0);
 }
 
 fn bench_zipf_hit() {
