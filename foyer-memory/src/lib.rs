@@ -66,6 +66,7 @@
 //! destroyed.
 
 #![feature(trait_alias)]
+#![feature(offset_of)]
 
 pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord {}
 pub trait Value: Send + Sync + 'static {}

@@ -19,6 +19,7 @@ publish = true
 [dependencies]
 ahash = { version = "0.8" }
 crossbeam-channel = { version = "0.5" }
+crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1", default-features = false, features = ["use_std"] }
 futures-channel = { version = "0.3", features = ["sink"] }
