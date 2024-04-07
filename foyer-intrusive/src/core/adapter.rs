@@ -117,6 +117,8 @@ pub unsafe trait PriorityAdapter: Adapter {
 /// # Examples
 ///
 /// ```
+/// #![feature(offset_of)]
+///
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
 /// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::Pointer;
@@ -213,6 +215,8 @@ macro_rules! intrusive_adapter {
 /// # Examples
 ///
 /// ```
+/// #![feature(offset_of)]
+///
 /// use foyer_intrusive::{intrusive_adapter, key_adapter};
 /// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
 /// use foyer_intrusive::core::pointer::Pointer;
@@ -282,6 +286,8 @@ macro_rules! key_adapter {
 /// # Examples
 ///
 /// ```
+/// #![feature(offset_of)]
+///
 /// use foyer_intrusive::{intrusive_adapter, priority_adapter};
 /// use foyer_intrusive::core::adapter::{Adapter, PriorityAdapter, Link};
 /// use foyer_intrusive::core::pointer::Pointer;

@@ -68,10 +68,10 @@
 #![feature(trait_alias)]
 #![feature(offset_of)]
 
-pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord {}
+pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord + Clone {}
 pub trait Value: Send + Sync + 'static {}
 
-impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord + Clone> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
 mod cache;

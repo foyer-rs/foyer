@@ -468,7 +468,7 @@ where
                     link
                 }
                 (Some(link_main), Some(link_tiny)) => {
-                    // Eviction from tiny or main depending on whether the tiny handle woould be
+                    // Eviction from tiny or main depending on whether the tiny handle would be
                     // admitted to main cachce. If it would be, evict from main cache, otherwise
                     // from tiny cache.
                     if self.lfu.admit_to_main(link_main.raw(), link_tiny.raw()) {

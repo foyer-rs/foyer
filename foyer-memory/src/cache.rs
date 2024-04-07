@@ -24,6 +24,7 @@ use crate::{
         fifo::{Fifo, FifoHandle},
         lfu::{Lfu, LfuHandle},
         lru::{Lru, LruHandle},
+        s3fifo::{S3Fifo, S3FifoHandle},
     },
     generic::{CacheConfig, GenericCache, GenericCacheEntry, GenericEntry},
     indexer::HashTableIndexer,
@@ -56,6 +57,15 @@ pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomStat
 pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S, ER>;
 
+pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
+    GenericCache<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
+pub type S3FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
+    CacheConfig<S3Fifo<K, V>, L, S>;
+pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
+    GenericCacheEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
+pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
+    GenericEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S, ER>;
+
 pub enum CacheEntry<K, V, L, S = RandomState>
 where
     K: Key,
@@ -66,6 +76,7 @@ where
     Fifo(FifoCacheEntry<K, V, L, S>),
     Lru(LruCacheEntry<K, V, L, S>),
     Lfu(LfuCacheEntry<K, V, L, S>),
+    S3Fifo(S3FifoCacheEntry<K, V, L, S>),
 }
 
 impl<K, V, L, S> Clone for CacheEntry<K, V, L, S>
@@ -80,6 +91,7 @@ where
             Self::Fifo(entry) => Self::Fifo(entry.clone()),
             Self::Lru(entry) => Self::Lru(entry.clone()),
             Self::Lfu(entry) => Self::Lfu(entry.clone()),
+            Self::S3Fifo(entry) => Self::S3Fifo(entry.clone()),
         }
     }
 }
@@ -98,6 +110,7 @@ where
             CacheEntry::Fifo(entry) => entry.deref(),
             CacheEntry::Lru(entry) => entry.deref(),
             CacheEntry::Lfu(entry) => entry.deref(),
+            CacheEntry::S3Fifo(entry) => entry.deref(),
         }
     }
 }
@@ -138,6 +151,18 @@ where
     }
 }
 
+impl<K, V, L, S> From<S3FifoCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+where
+    K: Key,
+    V: Value,
+    L: CacheEventListener<K, V>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn from(entry: S3FifoCacheEntry<K, V, L, S>) -> Self {
+        Self::S3Fifo(entry)
+    }
+}
+
 impl<K, V, L, S> CacheEntry<K, V, L, S>
 where
     K: Key,
@@ -150,6 +175,7 @@ where
             CacheEntry::Fifo(entry) => entry.key(),
             CacheEntry::Lru(entry) => entry.key(),
             CacheEntry::Lfu(entry) => entry.key(),
+            CacheEntry::S3Fifo(entry) => entry.key(),
         }
     }
 
@@ -158,6 +184,7 @@ where
             CacheEntry::Fifo(entry) => entry.value(),
             CacheEntry::Lru(entry) => entry.value(),
             CacheEntry::Lfu(entry) => entry.value(),
+            CacheEntry::S3Fifo(entry) => entry.value(),
         }
     }
 
@@ -166,6 +193,7 @@ where
             CacheEntry::Fifo(entry) => entry.context().clone().into(),
             CacheEntry::Lru(entry) => entry.context().clone().into(),
             CacheEntry::Lfu(entry) => entry.context().clone().into(),
+            CacheEntry::S3Fifo(entry) => entry.context().clone().into(),
         }
     }
 
@@ -174,6 +202,7 @@ where
             CacheEntry::Fifo(entry) => entry.charge(),
             CacheEntry::Lru(entry) => entry.charge(),
             CacheEntry::Lfu(entry) => entry.charge(),
+            CacheEntry::S3Fifo(entry) => entry.charge(),
         }
     }
 
@@ -182,6 +211,7 @@ where
             CacheEntry::Fifo(entry) => entry.refs(),
             CacheEntry::Lru(entry) => entry.refs(),
             CacheEntry::Lfu(entry) => entry.refs(),
+            CacheEntry::S3Fifo(entry) => entry.refs(),
         }
     }
 }
@@ -196,6 +226,7 @@ where
     Fifo(Arc<FifoCache<K, V, L, S>>),
     Lru(Arc<LruCache<K, V, L, S>>),
     Lfu(Arc<LfuCache<K, V, L, S>>),
+    S3Fifo(Arc<S3FifoCache<K, V, L, S>>),
 }
 
 impl<K, V, L, S> Clone for Cache<K, V, L, S>
@@ -210,6 +241,7 @@ where
             Self::Fifo(cache) => Self::Fifo(cache.clone()),
             Self::Lru(cache) => Self::Lru(cache.clone()),
             Self::Lfu(cache) => Self::Lfu(cache.clone()),
+            Self::S3Fifo(cache) => Self::S3Fifo(cache.clone()),
         }
     }
 }
@@ -233,11 +265,16 @@ where
         Self::Lfu(Arc::new(GenericCache::new(config)))
     }
 
+    pub fn s3fifo(config: S3FifoCacheConfig<K, V, L, S>) -> Self {
+        Self::S3Fifo(Arc::new(GenericCache::new(config)))
+    }
+
     pub fn insert(&self, key: K, value: V, charge: usize) -> CacheEntry<K, V, L, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value, charge).into(),
             Cache::Lru(cache) => cache.insert(key, value, charge).into(),
             Cache::Lfu(cache) => cache.insert(key, value, charge).into(),
+            Cache::S3Fifo(cache) => cache.insert(key, value, charge).into(),
         }
     }
 
@@ -252,6 +289,7 @@ where
             Cache::Fifo(cache) => cache.insert_with_context(key, value, charge, context).into(),
             Cache::Lru(cache) => cache.insert_with_context(key, value, charge, context).into(),
             Cache::Lfu(cache) => cache.insert_with_context(key, value, charge, context).into(),
+            Cache::S3Fifo(cache) => cache.insert_with_context(key, value, charge, context).into(),
         }
     }
 
@@ -260,6 +298,7 @@ where
             Cache::Fifo(cache) => cache.remove(key),
             Cache::Lru(cache) => cache.remove(key),
             Cache::Lfu(cache) => cache.remove(key),
+            Cache::S3Fifo(cache) => cache.remove(key),
         }
     }
 
@@ -268,6 +307,7 @@ where
             Cache::Fifo(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.get(key).map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.get(key).map(CacheEntry::from),
         }
     }
 
@@ -276,6 +316,7 @@ where
             Cache::Fifo(cache) => cache.clear(),
             Cache::Lru(cache) => cache.clear(),
             Cache::Lfu(cache) => cache.clear(),
+            Cache::S3Fifo(cache) => cache.clear(),
         }
     }
 
@@ -284,6 +325,7 @@ where
             Cache::Fifo(cache) => cache.capacity(),
             Cache::Lru(cache) => cache.capacity(),
             Cache::Lfu(cache) => cache.capacity(),
+            Cache::S3Fifo(cache) => cache.capacity(),
         }
     }
 
@@ -292,6 +334,7 @@ where
             Cache::Fifo(cache) => cache.usage(),
             Cache::Lru(cache) => cache.usage(),
             Cache::Lfu(cache) => cache.usage(),
+            Cache::S3Fifo(cache) => cache.usage(),
         }
     }
 
@@ -300,6 +343,7 @@ where
             Cache::Fifo(cache) => cache.metrics(),
             Cache::Lru(cache) => cache.metrics(),
             Cache::Lfu(cache) => cache.metrics(),
+            Cache::S3Fifo(cache) => cache.metrics(),
         }
     }
 }
@@ -315,6 +359,7 @@ where
     Fifo(FifoEntry<K, V, ER, L, S>),
     Lru(LruEntry<K, V, ER, L, S>),
     Lfu(LfuEntry<K, V, ER, L, S>),
+    S3Fifo(S3FifoEntry<K, V, ER, L, S>),
 }
 
 impl<K, V, ER, L, S> From<FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
@@ -356,6 +401,19 @@ where
     }
 }
 
+impl<K, V, ER, L, S> From<S3FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+where
+    K: Key + Clone,
+    V: Value,
+    ER: std::error::Error,
+    L: CacheEventListener<K, V>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn from(entry: S3FifoEntry<K, V, ER, L, S>) -> Self {
+        Self::S3Fifo(entry)
+    }
+}
+
 impl<K, V, ER, L, S> Future for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
@@ -371,6 +429,7 @@ where
             Entry::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
             Entry::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
             Entry::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
+            Entry::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
         }
     }
 }
@@ -423,6 +482,7 @@ where
             Cache::Fifo(cache) => Entry::from(cache.entry(key, f)),
             Cache::Lru(cache) => Entry::from(cache.entry(key, f)),
             Cache::Lfu(cache) => Entry::from(cache.entry(key, f)),
+            Cache::S3Fifo(cache) => Entry::from(cache.entry(key, f)),
         }
     }
 }
@@ -436,7 +496,7 @@ mod tests {
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     use super::*;
-    use crate::{FifoConfig, LfuConfig, LruConfig};
+    use crate::{eviction::s3fifo::S3FifoConfig, FifoConfig, LfuConfig, LruConfig};
 
     const CAPACITY: usize = 100;
     const SHARDS: usize = 4;
@@ -478,6 +538,19 @@ mod tests {
                 protected_capacity_ratio: 0.8,
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
+            },
+            object_pool_capacity: OBJECT_POOL_CAPACITY,
+            hash_builder: RandomState::default(),
+            event_listener: DefaultCacheEventListener::default(),
+        })
+    }
+
+    fn s3fifo() -> Cache<u64, u64> {
+        Cache::s3fifo(S3FifoCacheConfig {
+            capacity: CAPACITY,
+            shards: SHARDS,
+            eviction_config: S3FifoConfig {
+                small_queue_capacity_ratio: 0.1,
             },
             object_pool_capacity: OBJECT_POOL_CAPACITY,
             hash_builder: RandomState::default(),
@@ -558,5 +631,10 @@ mod tests {
     #[tokio::test]
     async fn test_lfu_cache() {
         case(lfu()).await
+    }
+
+    #[tokio::test]
+    async fn test_s3fifo_cache() {
+        case(s3fifo()).await
     }
 }
