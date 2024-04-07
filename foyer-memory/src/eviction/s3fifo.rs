@@ -1,15 +1,15 @@
-use crate::CacheContext;
-use crate::Key;
-use crate::Value;
-use crate::handle::BaseHandle;
-use crate::handle::Handle;
-use crate::eviction::Eviction;
-use foyer_intrusive::collections::dlist::DlistLink;
-use foyer_intrusive::collections::dlist::Dlist;
-use std::ptr::NonNull;
-use std::fmt::Debug;
-use foyer_intrusive::intrusive_adapter;
+use std::{fmt::Debug, ptr::NonNull};
 
+use foyer_intrusive::{
+    collections::dlist::{Dlist, DlistLink},
+    intrusive_adapter,
+};
+
+use crate::{
+    eviction::Eviction,
+    handle::{BaseHandle, Handle},
+    CacheContext, Key, Value,
+};
 
 #[derive(Debug, Clone)]
 pub struct S3FifoContext;
@@ -26,14 +26,21 @@ impl From<S3FifoContext> for CacheContext {
     }
 }
 
+enum Queue {
+    None,
+    Main,
+    Small,
+}
+
 pub struct S3FifoHandle<K, V>
 where
     K: Key,
     V: Value,
 {
     link: DlistLink,
-    count: i32,
     base: BaseHandle<K, V, S3FifoContext>,
+    count: u8,
+    queue: Queue,
 }
 
 impl<K, V> Debug for S3FifoHandle<K, V>
@@ -53,18 +60,12 @@ where
     K: Key,
     V: Value,
 {
-    pub fn inc (&mut self) {
-        if self.count >= 3 {
-            return;
-        }
-        self.count += 1;
+    pub fn inc(&mut self) {
+        self.count = std::cmp::min(self.count + 1, 3);
     }
 
-    pub fn dec (&mut self) {
-        if self.count <= 0 {
-            return;
-        }
-        self.count -= 1;
+    pub fn dec(&mut self) {
+        self.count = self.count.saturating_sub(1);
     }
 }
 
@@ -82,6 +83,7 @@ where
             link: DlistLink::default(),
             count: 0,
             base: BaseHandle::new(),
+            queue: Queue::None,
         }
     }
 
@@ -99,7 +101,9 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct S3FifoConfig {}
+pub struct S3FifoConfig {
+    small_queue_capacity_ratio: f64,
+}
 
 pub struct S3Fifo<K, V>
 where
@@ -108,61 +112,59 @@ where
 {
     small_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
     main_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
-    capacity: usize,
+
+    _capacity: usize,
+    small_capacity: usize,
+
     small_used: usize,
     main_used: usize,
 }
 
-impl<K,V> S3Fifo<K,V>
+impl<K, V> S3Fifo<K, V>
 where
     K: Key,
     V: Value,
 {
     unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
-        if self.small_used > (0.1 * self.capacity as f64) as usize {
-            match self.evict_small() {
-                Some(ptr) => return Some(ptr),
-                None => return self.evict_main(),
-            }
+        if self.small_used > self.small_capacity
+            && let Some(ptr) = self.evict_small()
+        {
+            Some(ptr)
         } else {
-            return self.evict_main();
+            self.evict_main()
         }
     }
 
-    unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>>{
-        loop {
-            let ptr = self.small_queue.pop_front();
-            if ptr.is_none() {
-                return None;
-            }
-            let mut ptr = ptr.unwrap();
-            if ptr.as_mut().count > 1 {
+    unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+        while let Some(mut ptr) = self.small_queue.pop_front() {
+            let handle = ptr.as_mut();
+            if handle.count > 1 {
                 self.main_queue.push_back(ptr);
+                handle.queue = Queue::Main;
                 self.small_used -= 1;
                 self.main_used += 1;
             } else {
+                handle.queue = Queue::None;
                 self.small_used -= 1;
                 return Some(ptr);
             }
         }
+        None
     }
 
-    unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>>{
-       loop {
-            let ptr = self.main_queue.pop_front();
-            if ptr.is_none() {
-                return None;
-            }
-            let mut ptr = ptr.unwrap();
-            if ptr.as_mut().count > 0 {
+    unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+        while let Some(mut ptr) = self.main_queue.pop_front() {
+            let handle = ptr.as_mut();
+            if handle.count > 0 {
                 self.main_queue.push_back(ptr);
-                ptr.as_mut().dec();
+                handle.dec();
             } else {
-                // evict
+                handle.queue = Queue::None;
                 self.main_used -= 1;
                 return Some(ptr);
             }
-       }
+        }
+        None
     }
 }
 
@@ -174,31 +176,43 @@ where
     type Handle = S3FifoHandle<K, V>;
     type Config = S3FifoConfig;
 
-    unsafe fn new(capacity: usize, _config: &Self::Config) -> Self
+    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
+        let small_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
         Self {
             small_queue: Dlist::new(),
             main_queue: Dlist::new(),
-            capacity,
+            _capacity: capacity,
+            small_capacity,
             small_used: 0,
             main_used: 0,
         }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+        let handle = ptr.as_mut();
+
         self.small_queue.push_back(ptr);
+        handle.queue = Queue::Small;
         self.small_used += 1;
-        ptr.as_mut().base_mut().set_in_eviction(true);
+
+        handle.base_mut().set_in_eviction(true);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        self.evict()
+        if let Some(mut ptr) = self.evict() {
+            let handle = ptr.as_mut();
+            // `handle.queue` has already been set with `evict()`
+            handle.base_mut().set_in_eviction(false);
+            Some(ptr)
+        } else {
+            None
+        }
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {
-    }
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
         let mut ptr = ptr;
@@ -206,30 +220,51 @@ where
     }
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let p = self.small_queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove();
-        if p.is_some() {
-            self.small_used -= 1;
-            assert_eq!(p.unwrap(), ptr);
-            ptr.as_mut().base_mut().set_in_eviction(false);
-            return;
-        }
-        let p = self.main_queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove();
-        if p.is_some() {
-            self.main_used -= 1;
-            assert_eq!(p.unwrap(), ptr);
-            ptr.as_mut().base_mut().set_in_eviction(false);
-            return;
+        let handle = ptr.as_mut();
+
+        match handle.queue {
+            Queue::None => unreachable!(),
+            Queue::Main => {
+                let p = self
+                    .main_queue
+                    .iter_mut_from_raw(ptr.as_mut().link.raw())
+                    .remove()
+                    .unwrap_unchecked();
+                debug_assert_eq!(p, ptr);
+
+                handle.queue = Queue::None;
+                handle.base_mut().set_in_eviction(false);
+
+                self.main_used -= 1;
+            }
+            Queue::Small => {
+                let p = self
+                    .small_queue
+                    .iter_mut_from_raw(ptr.as_mut().link.raw())
+                    .remove()
+                    .unwrap_unchecked();
+                debug_assert_eq!(p, ptr);
+
+                handle.queue = Queue::None;
+                handle.base_mut().set_in_eviction(false);
+
+                self.small_used -= 1;
+            }
         }
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.small_queue.pop_front() {
-            ptr.as_mut().base_mut().set_in_eviction(false);
+            let handle = ptr.as_mut();
+            handle.base_mut().set_in_eviction(false);
+            handle.queue = Queue::None;
             res.push(ptr);
         }
         while let Some(mut ptr) = self.main_queue.pop_front() {
-            ptr.as_mut().base_mut().set_in_eviction(false);
+            let handle = ptr.as_mut();
+            handle.base_mut().set_in_eviction(false);
+            handle.queue = Queue::None;
             res.push(ptr);
         }
         res
@@ -256,3 +291,6 @@ where
     V: Value,
 {
 }
+
+#[cfg(test)]
+mod tests {}
