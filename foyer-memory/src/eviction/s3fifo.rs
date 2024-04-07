@@ -116,7 +116,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct S3FifoConfig {
-    small_queue_capacity_ratio: f64,
+    pub small_queue_capacity_ratio: f64,
 }
 
 pub struct S3Fifo<K, V>
