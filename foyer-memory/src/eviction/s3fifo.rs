@@ -119,6 +119,67 @@ pub struct S3FifoConfig {
     pub small_queue_capacity_ratio: f64,
 }
 
+use std::{collections::HashMap, hash::Hash};
+
+#[derive(Clone, Debug)]
+struct GhostEntry<T> {
+    fingerprint: u32,
+    insertion_time: usize,
+    key: T,
+}
+
+struct GhostQueue<T> {
+    hashtable: HashMap<u32, GhostEntry<T>>,
+    current_time: usize,
+    max_size: usize,
+}
+
+impl<T: Hash + Eq + Clone> GhostQueue<T> {
+    fn new(max_size: usize) -> GhostQueue<T> {
+        GhostQueue {
+            hashtable: HashMap::new(),
+            current_time: 0,
+            max_size,
+        }
+    }
+
+    fn hash_key(&self, key: &T) -> u32 {
+        use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish() as u32
+    }
+
+    fn insert(&mut self, key: T) {
+        let fingerprint = self.hash_key(&key);
+        let entry = GhostEntry {
+            fingerprint,
+            insertion_time: self.current_time,
+            key: key.clone(),
+        };
+
+        self.hashtable.insert(fingerprint, entry);
+        self.current_time += 1;
+        self.evict_old_entries();
+    }
+
+    fn evict_old_entries(&mut self) {
+        let min_time = if self.current_time > self.max_size {
+            self.current_time - self.max_size
+        } else {
+            0
+        };
+
+        self.hashtable.retain(|_, entry| entry.insertion_time >= min_time);
+    }
+
+    fn retrieve(&mut self, key: &T) -> Option<&GhostEntry<T>> {
+        let fingerprint = self.hash_key(key);
+        self.hashtable.get(&fingerprint)
+    }
+}
+
 pub struct S3Fifo<K, V>
 where
     K: Key,
@@ -132,6 +193,8 @@ where
 
     small_used: usize,
     main_used: usize,
+
+    ghost_queue: GhostQueue<K>,
 }
 
 impl<K, V> S3Fifo<K, V>
@@ -160,6 +223,8 @@ where
             } else {
                 handle.queue = Queue::None;
                 self.small_used -= 1;
+                let key = handle.base().key().clone();
+                self.ghost_queue.insert(key);
                 return Some(ptr);
             }
         }
@@ -202,15 +267,24 @@ where
             small_capacity,
             small_used: 0,
             main_used: 0,
+            ghost_queue: GhostQueue::new(small_capacity * 1),
         }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        self.small_queue.push_back(ptr);
-        handle.queue = Queue::Small;
-        self.small_used += 1;
+        let key = handle.base().key().clone();
+
+        if self.ghost_queue.retrieve(&key).is_some() {
+            handle.queue = Queue::Main;
+            self.main_queue.push_back(ptr);
+            self.main_used += 1;
+        } else {
+            self.small_queue.push_back(ptr);
+            handle.queue = Queue::Small;
+            self.small_used += 1;
+        }
 
         handle.base_mut().set_in_eviction(true);
     }
@@ -285,6 +359,13 @@ where
     }
 
     unsafe fn len(&self) -> usize {
+        // if self.small_used >= self.small_capacity {
+        //     return self._capacity;
+        // }
+
+        // if self.main_used >= self._capacity - self.small_capacity {
+        //     return self._capacity;
+        // }
         self.small_queue.len() + self.main_queue.len()
     }
 
