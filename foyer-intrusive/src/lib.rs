@@ -27,6 +27,8 @@ pub use memoffset::offset_of;
 /// # Examples
 ///
 /// ```
+/// #![feature(offset_of)]
+///
 /// use foyer_intrusive::container_of;
 ///
 /// struct S { x: u32, y: u32 };
