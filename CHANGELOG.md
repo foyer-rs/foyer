@@ -1,3 +1,29 @@
+## 2024-04-08
+
+| crate | version |
+| - | - |
+| foyer-memory | 0.1.3 |
+
+<details>
+
+### Changes
+
+- feat: Introduce s3fifo to `foyer-memory`.
+
+## 2024-03-21
+
+| crate | version |
+| - | - |
+| foyer-memory | 0.1.2 |
+
+<details>
+
+### Changes
+
+- fix: `foyer-memory` export `DefaultCacheEventListener`.
+
+</details>
+
 ## 2024-03-14
 
 | crate | version |
