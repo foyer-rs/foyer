@@ -2,6 +2,7 @@
 
 | crate | version |
 | - | - |
+| foyer-intrusive | 0.3.1 |
 | foyer-memory | 0.1.3 |
 
 <details>
@@ -9,6 +10,7 @@
 ### Changes
 
 - feat: Introduce s3fifo to `foyer-memory`.
+- fix: Fix doctest for `foyer-intrusive`.
 
 ## 2024-03-21
 
