@@ -53,7 +53,7 @@ where
 {
     link: DlistLink,
     base: BaseHandle<K, V, S3FifoContext>,
-    count: u8,
+    freq: u8,
     queue: Queue,
 }
 
@@ -74,12 +74,19 @@ where
     K: Key,
     V: Value,
 {
+    #[inline(always)]
     pub fn inc(&mut self) {
-        self.count = std::cmp::min(self.count + 1, 3);
+        self.freq = std::cmp::min(self.freq + 1, 3);
     }
 
+    #[inline(always)]
     pub fn dec(&mut self) {
-        self.count = self.count.saturating_sub(1);
+        self.freq = self.freq.saturating_sub(1);
+    }
+
+    #[inline(always)]
+    pub fn reset(&mut self) {
+        self.freq = 0;
     }
 }
 
@@ -95,7 +102,7 @@ where
     fn new() -> Self {
         Self {
             link: DlistLink::default(),
-            count: 0,
+            freq: 0,
             base: BaseHandle::new(),
             queue: Queue::None,
         }
@@ -127,11 +134,10 @@ where
     small_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
     main_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
 
-    _capacity: usize,
     small_capacity: usize,
 
-    small_used: usize,
-    main_used: usize,
+    small_charges: usize,
+    main_charges: usize,
 }
 
 impl<K, V> S3Fifo<K, V>
@@ -140,7 +146,7 @@ where
     V: Value,
 {
     unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
-        if self.small_used > self.small_capacity
+        if self.small_charges > self.small_capacity
             && let Some(ptr) = self.evict_small()
         {
             Some(ptr)
@@ -152,14 +158,15 @@ where
     unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
-            if handle.count > 1 {
+            if handle.freq > 1 {
                 self.main_queue.push_back(ptr);
                 handle.queue = Queue::Main;
-                self.small_used -= 1;
-                self.main_used += 1;
+                self.small_charges -= handle.base().charge();
+                self.main_charges += handle.base().charge();
             } else {
                 handle.queue = Queue::None;
-                self.small_used -= 1;
+                handle.reset();
+                self.small_charges -= handle.base().charge();
                 return Some(ptr);
             }
         }
@@ -169,12 +176,12 @@ where
     unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
         while let Some(mut ptr) = self.main_queue.pop_front() {
             let handle = ptr.as_mut();
-            if handle.count > 0 {
+            if handle.freq > 0 {
                 self.main_queue.push_back(ptr);
                 handle.dec();
             } else {
                 handle.queue = Queue::None;
-                self.main_used -= 1;
+                self.main_charges -= handle.base.charge();
                 return Some(ptr);
             }
         }
@@ -198,10 +205,9 @@ where
         Self {
             small_queue: Dlist::new(),
             main_queue: Dlist::new(),
-            _capacity: capacity,
             small_capacity,
-            small_used: 0,
-            main_used: 0,
+            small_charges: 0,
+            main_charges: 0,
         }
     }
 
@@ -210,7 +216,7 @@ where
 
         self.small_queue.push_back(ptr);
         handle.queue = Queue::Small;
-        self.small_used += 1;
+        self.small_charges += handle.base().charge();
 
         handle.base_mut().set_in_eviction(true);
     }
@@ -222,6 +228,7 @@ where
             handle.base_mut().set_in_eviction(false);
             Some(ptr)
         } else {
+            debug_assert!(self.is_empty());
             None
         }
     }
@@ -249,7 +256,7 @@ where
                 handle.queue = Queue::None;
                 handle.base_mut().set_in_eviction(false);
 
-                self.main_used -= 1;
+                self.main_charges -= handle.base().charge();
             }
             Queue::Small => {
                 let p = self
@@ -262,7 +269,7 @@ where
                 handle.queue = Queue::None;
                 handle.base_mut().set_in_eviction(false);
 
-                self.small_used -= 1;
+                self.small_charges -= handle.base().charge();
             }
         }
     }
@@ -307,4 +314,107 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use std::ops::Range;
+
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::eviction::test_utils::TestEviction;
+
+    impl<K, V> TestEviction for S3Fifo<K, V>
+    where
+        K: Key + Clone,
+        V: Value + Clone,
+    {
+        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+            self.small_queue
+                .iter()
+                .chain(self.main_queue.iter())
+                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .collect_vec()
+        }
+    }
+
+    type TestS3Fifo = S3Fifo<u64, u64>;
+    type TestS3FifoHandle = S3FifoHandle<u64, u64>;
+
+    fn assert_test_s3fifo(s3fifo: &TestS3Fifo, small: Vec<u64>, main: Vec<u64>) {
+        let mut s = s3fifo
+            .dump()
+            .into_iter()
+            .map(|(k, v)| {
+                assert_eq!(k, v);
+                k
+            })
+            .collect_vec();
+        assert_eq!(s.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
+        let m = s.split_off(s3fifo.small_queue.len());
+        assert_eq!((&s, &m), (&small, &main));
+        assert_eq!(s3fifo.small_charges, s.len());
+    }
+
+    fn assert_count(ptrs: &[NonNull<TestS3FifoHandle>], range: Range<usize>, count: u8) {
+        unsafe {
+            ptrs[range].iter().for_each(|ptr| assert_eq!(ptr.as_ref().freq, count));
+        }
+    }
+
+    #[test]
+    fn test_lfu() {
+        unsafe {
+            let ptrs = (0..100)
+                .map(|i| {
+                    let mut handle = Box::new(TestS3FifoHandle::new());
+                    handle.init(i, i, i, 1, S3FifoContext);
+                    NonNull::new_unchecked(Box::into_raw(handle))
+                })
+                .collect_vec();
+
+            // window: 2, probation: 2, protected: 6
+            let config = S3FifoConfig {
+                small_queue_capacity_ratio: 0.25,
+            };
+            let mut s3fifo = TestS3Fifo::new(8, &config);
+
+            assert_eq!(s3fifo.small_capacity, 2);
+
+            s3fifo.push(ptrs[0]);
+            s3fifo.push(ptrs[1]);
+            assert_test_s3fifo(&s3fifo, vec![0, 1], vec![]);
+
+            s3fifo.push(ptrs[2]);
+            s3fifo.push(ptrs[3]);
+            assert_test_s3fifo(&s3fifo, vec![0, 1, 2, 3], vec![]);
+
+            assert_count(&ptrs, 0..4, 0);
+
+            (0..4).for_each(|i| s3fifo.access(ptrs[i]));
+            s3fifo.access(ptrs[1]);
+            s3fifo.access(ptrs[2]);
+            assert_count(&ptrs, 0..1, 1);
+            assert_count(&ptrs, 1..3, 2);
+            assert_count(&ptrs, 3..4, 1);
+
+            let p0 = s3fifo.pop().unwrap();
+            let p3 = s3fifo.pop().unwrap();
+            assert_eq!(p0, ptrs[0]);
+            assert_eq!(p3, ptrs[3]);
+            assert_test_s3fifo(&s3fifo, vec![], vec![1, 2]);
+            assert_count(&ptrs, 0..1, 0);
+            assert_count(&ptrs, 1..3, 2);
+            assert_count(&ptrs, 3..4, 0);
+
+            let p1 = s3fifo.pop().unwrap();
+            assert_eq!(p1, ptrs[1]);
+            assert_test_s3fifo(&s3fifo, vec![], vec![2]);
+            assert_count(&ptrs, 0..4, 0);
+
+            assert_eq!(s3fifo.clear(), [2].into_iter().map(|i| ptrs[i]).collect_vec());
+
+            for ptr in ptrs {
+                let _ = Box::from_raw(ptr.as_ptr());
+            }
+        }
+    }
+}
