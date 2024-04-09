@@ -13,10 +13,8 @@
 //  limitations under the License.
 
 #![feature(associated_type_bounds)]
-#![feature(ptr_metadata)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![expect(clippy::new_without_default)]
 
 pub use memoffset::offset_of;
 

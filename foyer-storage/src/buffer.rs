@@ -349,7 +349,7 @@ mod tests {
 
             let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
+                Err(BufferError::NeedRotate(entry)) => *entry,
                 _ => panic!("should be not enough error"),
             };
 
@@ -396,7 +396,7 @@ mod tests {
 
             let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
+                Err(BufferError::NeedRotate(entry)) => *entry,
                 _ => panic!("should be not enough error"),
             };
 

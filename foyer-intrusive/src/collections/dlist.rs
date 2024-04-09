@@ -76,6 +76,15 @@ where
     }
 }
 
+impl<A> Default for Dlist<A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<A> Dlist<A>
 where
     A: Adapter<Link = DlistLink>,

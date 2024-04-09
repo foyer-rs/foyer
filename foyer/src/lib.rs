@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(trait_alias)]
-#![feature(pattern)]
-
 pub use foyer_common as common;
 pub use foyer_intrusive as intrusive;
 pub use foyer_memory as memory;

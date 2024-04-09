@@ -13,16 +13,12 @@
 //  limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(strict_provenance)]
 #![feature(trait_alias)]
-#![feature(get_mut_unchecked)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
 #![feature(associated_type_defaults)]
-#![feature(box_into_inner)]
-#![feature(try_trait_v2)]
 
 pub mod admission;
 pub mod buffer;
