@@ -3,11 +3,13 @@
 | crate | version |
 | - | - |
 | foyer-storage | 0.5.1 |
+| foyer-memory | 0.1.4 |
 
 <details>
 
 ### Changes
 
+- fix: Fix panics on `state()` for s3fifo entry.
 - fix: Enable `offset_of` feature for `foyer-storage`.
 
 ## 2024-04-08
