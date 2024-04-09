@@ -71,7 +71,6 @@ impl Notified {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::Arc,
         thread::{sleep, spawn},
         time::Duration,
     };

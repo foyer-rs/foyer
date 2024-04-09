@@ -240,7 +240,8 @@ unsafe impl<T: ?Sized + Debug> DowngradablePointerOps for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{boxed::Box, fmt::Debug, mem, pin::Pin, rc::Rc, sync::Arc};
+
+    use std::mem::transmute;
 
     use super::*;
 
@@ -319,14 +320,14 @@ mod tests {
         unsafe {
             let p = Box::new(1) as Box<dyn Debug>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Box<dyn Debug> = <Box<_> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 
@@ -335,14 +336,14 @@ mod tests {
         unsafe {
             let p = Rc::new(1) as Rc<dyn Debug>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Rc<dyn Debug> = <Rc<_> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 
@@ -351,14 +352,14 @@ mod tests {
         unsafe {
             let p = Arc::new(1) as Arc<dyn Debug>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Arc<dyn Debug> = <Arc<_> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 
@@ -426,14 +427,14 @@ mod tests {
         unsafe {
             let p = Pin::new(Box::new(1)) as Pin<Box<dyn Debug>>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Pin<Box<dyn Debug>> = <Pin<Box<_>> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 
@@ -442,14 +443,14 @@ mod tests {
         unsafe {
             let p = Pin::new(Rc::new(1)) as Pin<Rc<dyn Debug>>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Pin<Rc<dyn Debug>> = <Pin<Rc<_>> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 
@@ -458,14 +459,14 @@ mod tests {
         unsafe {
             let p = Pin::new(Arc::new(1)) as Pin<Arc<dyn Debug>>;
             let a: *const dyn Debug = &*p;
-            let b: (usize, usize) = mem::transmute(a);
+            let b: (usize, usize) = transmute(a);
             let r = p.into_ptr();
             assert_eq!(a, r);
-            assert_eq!(b, mem::transmute(r));
+            assert_eq!(b, transmute(r));
             let p2: Pin<Arc<dyn Debug>> = <Pin<Arc<_>> as Pointer>::from_ptr(r);
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
-            assert_eq!(b, mem::transmute(a2));
+            assert_eq!(b, transmute(a2));
         }
     }
 

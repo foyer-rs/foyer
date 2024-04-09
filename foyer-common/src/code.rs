@@ -20,7 +20,7 @@ use paste::paste;
 pub type CodingError = anyhow::Error;
 pub type CodingResult<T> = Result<T, CodingError>;
 
-trait BufExt: Buf {
+pub trait BufExt: Buf {
     cfg_match! {
         cfg(target_pointer_width = "16") => {
             fn get_usize(&mut self) -> usize {
@@ -54,7 +54,7 @@ trait BufExt: Buf {
 
 impl<T: Buf> BufExt for T {}
 
-trait BufMutExt: BufMut {
+pub trait BufMutExt: BufMut {
     cfg_match! {
         cfg(target_pointer_width = "16") => {
             fn put_usize(&mut self, v: usize) {

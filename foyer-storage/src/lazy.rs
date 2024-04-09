@@ -230,11 +230,7 @@ mod tests {
     use foyer_intrusive::eviction::fifo::FifoConfig;
 
     use super::*;
-    use crate::{
-        device::fs::FsDeviceConfig,
-        storage::StorageExt,
-        store::{FifoFsStoreConfig, Store},
-    };
+    use crate::{device::fs::FsDeviceConfig, storage::StorageExt, store::FifoFsStoreConfig};
 
     const KB: usize = 1024;
     const MB: usize = 1024 * 1024;

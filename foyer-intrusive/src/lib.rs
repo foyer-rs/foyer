@@ -16,7 +16,6 @@
 #![feature(ptr_metadata)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![feature(offset_of)]
 #![expect(clippy::new_without_default)]
 
 pub use memoffset::offset_of;
@@ -27,8 +26,6 @@ pub use memoffset::offset_of;
 /// # Examples
 ///
 /// ```
-/// #![feature(offset_of)]
-///
 /// use foyer_intrusive::container_of;
 ///
 /// struct S { x: u32, y: u32 };

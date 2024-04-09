@@ -14,7 +14,6 @@
 
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![feature(bound_map)]
 #![feature(associated_type_defaults)]
 #![feature(cfg_match)]
 #![feature(let_chains)]

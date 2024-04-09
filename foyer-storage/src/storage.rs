@@ -314,7 +314,6 @@ impl<S> ForceStorageExt for S where S: Storage {}
 
 #[cfg(test)]
 mod tests {
-    //! storage interface test
 
     use std::{path::Path, sync::Arc, time::Duration};
 
