@@ -1,3 +1,15 @@
+## 2024-04-09
+
+| crate | version |
+| - | - |
+| foyer-storage | 0.5.1 |
+
+<details>
+
+### Changes
+
+- fix: Enable `offset_of` feature for `foyer-storage`.
+
 ## 2024-04-08
 
 | crate | version |
