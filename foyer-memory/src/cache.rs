@@ -451,16 +451,22 @@ where
 {
     pub fn state(&self) -> EntryState {
         match self {
-            Entry::Fifo(FifoEntry::Hit(_)) | Entry::Lru(LruEntry::Hit(_)) | Entry::Lfu(LfuEntry::Hit(_)) => {
-                EntryState::Hit
-            }
-            Entry::Fifo(FifoEntry::Wait(_)) | Entry::Lru(LruEntry::Wait(_)) | Entry::Lfu(LfuEntry::Wait(_)) => {
-                EntryState::Wait
-            }
-            Entry::Fifo(FifoEntry::Miss(_)) | Entry::Lru(LruEntry::Miss(_)) | Entry::Lfu(LfuEntry::Miss(_)) => {
-                EntryState::Miss
-            }
-            _ => unreachable!(),
+            Entry::Fifo(FifoEntry::Hit(_))
+            | Entry::Lru(LruEntry::Hit(_))
+            | Entry::Lfu(LfuEntry::Hit(_))
+            | Entry::S3Fifo(S3FifoEntry::Hit(_)) => EntryState::Hit,
+            Entry::Fifo(FifoEntry::Wait(_))
+            | Entry::Lru(LruEntry::Wait(_))
+            | Entry::Lfu(LfuEntry::Wait(_))
+            | Entry::S3Fifo(S3FifoEntry::Wait(_)) => EntryState::Wait,
+            Entry::Fifo(FifoEntry::Miss(_))
+            | Entry::Lru(LruEntry::Miss(_))
+            | Entry::Lfu(LfuEntry::Miss(_))
+            | Entry::S3Fifo(S3FifoEntry::Miss(_)) => EntryState::Miss,
+            Entry::Fifo(FifoEntry::Invalid)
+            | Entry::Lru(LruEntry::Invalid)
+            | Entry::Lfu(LfuEntry::Invalid)
+            | Entry::S3Fifo(S3FifoEntry::Invalid) => unreachable!(),
         }
     }
 }
