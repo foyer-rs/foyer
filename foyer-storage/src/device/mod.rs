@@ -24,10 +24,21 @@ use futures::Future;
 
 use crate::region::RegionId;
 
-pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
-pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
-pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
-pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug;
+// TODO(MrCroxx): Use `trait_alias` after stable.
+
+// pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
+// pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
+// pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
+// pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug;
+
+pub trait BufferAllocator: Allocator + Clone + Send + Sync + 'static + Debug {}
+impl<T: Allocator + Clone + Send + Sync + 'static + Debug> BufferAllocator for T {}
+pub trait IoBuf: AsRef<[u8]> + Send + Sync + 'static + Debug {}
+impl<T: AsRef<[u8]> + Send + Sync + 'static + Debug> IoBuf for T {}
+pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug {}
+impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug> IoBufMut for T {}
+pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug {}
+impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug> IoRange for T {}
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;

@@ -22,6 +22,7 @@ foyer-intrusive = { version = "0.3", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.3", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.12"
+lazy_static = "1"
 libc = "0.2"
 lz4 = "1.24"
 memoffset = "0.9"

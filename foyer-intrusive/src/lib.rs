@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(ptr_metadata)]
-#![feature(trait_alias)]
 #![feature(offset_of)]
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #![allow(clippy::new_without_default)]

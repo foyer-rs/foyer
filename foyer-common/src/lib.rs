@@ -12,10 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(trait_alias)]
 #![feature(bound_map)]
-#![feature(associated_type_defaults)]
-#![feature(cfg_match)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod async_queue;

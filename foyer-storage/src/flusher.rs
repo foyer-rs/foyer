@@ -144,7 +144,7 @@ where
         let old_region = self.buffer.region();
 
         let entry = match self.buffer.write(entry).await {
-            Err(BufferError::NeedRotate(entry)) => Box::into_inner(entry),
+            Err(BufferError::NeedRotate(entry)) => *entry,
             Ok(entries) => return self.update_catalog(entries).await,
             Err(e) => return Err(e.into()),
         };

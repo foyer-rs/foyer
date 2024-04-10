@@ -19,7 +19,11 @@ use futures::Future;
 
 use crate::{compress::Compression, error::Result};
 
-pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
+// TODO(MrCroxx): Use `trait_alias` after stable.
+// pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
+
+pub trait FetchValueFuture<V>: Future<Output = anyhow::Result<V>> + Send + 'static {}
+impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture<V> for T {}
 
 pub trait StorageWriter: Send + Sync + Debug {
     type Key: Key;
