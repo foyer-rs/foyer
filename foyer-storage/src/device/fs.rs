@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 
+use allocator_api2::vec::Vec as VecA;
 use foyer_common::range::RangeBoundsExt;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -172,9 +173,9 @@ impl Device for FsDevice {
         &self.inner.io_buffer_allocator
     }
 
-    fn io_buffer(&self, len: usize, capacity: usize) -> Vec<u8, Self::IoBufferAllocator> {
+    fn io_buffer(&self, len: usize, capacity: usize) -> VecA<u8, Self::IoBufferAllocator> {
         assert!(len <= capacity);
-        let mut buf = Vec::with_capacity_in(capacity, self.inner.io_buffer_allocator);
+        let mut buf = VecA::with_capacity_in(capacity, self.inner.io_buffer_allocator);
         unsafe { buf.set_len(len) };
         buf
     }

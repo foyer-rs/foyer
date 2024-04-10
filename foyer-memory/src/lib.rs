@@ -62,8 +62,6 @@
 //! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
 //! destroyed.
 
-#![feature(offset_of)]
-
 pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord {}
 pub trait Value: Send + Sync + 'static {}
 

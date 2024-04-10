@@ -13,6 +13,7 @@ homepage = "https://github.com/mrcroxx/foyer"
 normal = ["foyer-workspace-hack"]
 
 [dependencies]
+allocator-api2 = "0.2" # TODO(MrCroxx): Remove this after `allocator_api` is stable.
 anyhow = "1.0"
 bitflags = "2.3.1"
 bitmaps = "3.2"
