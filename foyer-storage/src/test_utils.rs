@@ -17,7 +17,10 @@ use std::{collections::HashSet, marker::PhantomData};
 use foyer_common::code::{Key, Value};
 use parking_lot::Mutex;
 
-use crate::{admission::AdmissionPolicy, reinsertion::ReinsertionPolicy};
+use crate::{
+    admission::{AdmissionContext, AdmissionPolicy},
+    reinsertion::{ReinsertionContext, ReinsertionPolicy},
+};
 
 #[derive(Debug, Clone)]
 pub enum Record<K: Key> {
@@ -83,6 +86,8 @@ where
 
     type Value = V;
 
+    fn init(&self, _: AdmissionContext<Self::Key, Self::Value>) {}
+
     fn judge(&self, key: &K, _weight: usize) -> bool {
         self.records.lock().push(Record::Admit(key.clone()));
         true
@@ -101,6 +106,8 @@ where
     type Key = K;
 
     type Value = V;
+
+    fn init(&self, _: ReinsertionContext<Self::Key, Self::Value>) {}
 
     fn judge(&self, key: &K, _weight: usize) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));

@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 #![feature(cfg_match)]
-#![feature(lint_reasons)]
 #![feature(error_generic_member_access)]
 #![feature(lazy_cell)]
 

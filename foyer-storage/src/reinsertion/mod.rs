@@ -41,12 +41,11 @@ where
     }
 }
 
-#[expect(unused_variables)]
 pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
     type Key: Key;
     type Value: Value;
 
-    fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>) {}
+    fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>);
 
     fn judge(&self, key: &Self::Key, weight: usize) -> bool;
 

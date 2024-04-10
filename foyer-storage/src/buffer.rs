@@ -179,7 +179,8 @@ where
     /// # Format
     ///
     /// | header | value (compressed) | key | <padding> |
-    #[expect(clippy::uninit_vec)]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::uninit_vec)]
     pub async fn write(
         &mut self,
         Entry {

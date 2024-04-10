@@ -130,12 +130,13 @@ where
             item.inserted = Some(Instant::now());
             guard.insert(key.clone(), item)
         };
-        if let Some(old) = old
-            && let Index::Inflight { .. } = old.index()
-        {
-            self.metrics
-                .inner_op_duration_entry_flush
-                .observe(old.inserted.unwrap().elapsed().as_secs_f64());
+        // TODO(MrCroxx): Use `let_chains` here after it is stable.
+        if let Some(old) = old {
+            if let Index::Inflight { .. } = old.index() {
+                self.metrics
+                    .inner_op_duration_entry_flush
+                    .observe(old.inserted.unwrap().elapsed().as_secs_f64());
+            }
         }
     }
 
@@ -147,10 +148,11 @@ where
     pub fn remove(&self, key: &K) -> Option<Item<K, V>> {
         let shard = self.shard(key);
         let info: Option<Item<K, V>> = self.items[shard].write().remove(key);
-        if let Some(info) = &info
-            && let Index::Region { view } = &info.index
-        {
-            self.regions[*view.id() as usize].lock().remove(key);
+        // TODO(MrCroxx): Use `let_chains` here after it is stable.
+        if let Some(info) = &info {
+            if let Index::Region { view } = &info.index {
+                self.regions[*view.id() as usize].lock().remove(key);
+            }
         }
         info
     }

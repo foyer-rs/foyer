@@ -95,7 +95,8 @@ pub trait Cursor<T>: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
 /// [`Key`] is required to implement [`Clone`].
 ///
 /// If cloning a [`Key`] is expensive, wrap it with [`Arc`].
-#[expect(unused_variables)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(unused_variables)]
 pub trait Key:
     Sized + Send + Sync + 'static + std::hash::Hash + Eq + PartialEq + Ord + PartialOrd + std::fmt::Debug + Clone
 {
@@ -122,7 +123,8 @@ pub trait Key:
 /// [`Value`] is required to implement [`Clone`].
 ///
 /// If cloning a [`Value`] is expensive, wrap it with [`Arc`].
-#[expect(unused_variables)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
     type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
 
