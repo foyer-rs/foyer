@@ -48,10 +48,14 @@ mod private {
 
 use private::ZeroOne;
 
-pub trait Idx =
-    PartialOrd<Self> + Add<Output = Self> + Sub<Output = Self> + Clone + Copy + Send + Sync + 'static + ZeroOne;
+// TODO(MrCroxx): Use `trait_alias` after stable.
+// pub trait Idx =
+//     PartialOrd<Self> + Add<Output = Self> + Sub<Output = Self> + Clone + Copy + Send + Sync + 'static + ZeroOne;
 
-pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
+pub trait RangeBoundsExt<
+    T: PartialOrd<T> + Add<Output = T> + Sub<Output = T> + Clone + Copy + Send + Sync + 'static + ZeroOne,
+>: RangeBounds<T>
+{
     fn start(&self) -> Option<T> {
         match self.start_bound() {
             Bound::Included(v) => Some(*v),
@@ -107,4 +111,9 @@ pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
     }
 }
 
-impl<T: Idx, RB: RangeBounds<T>> RangeBoundsExt<T> for RB {}
+impl<
+        T: PartialOrd<T> + Add<Output = T> + Sub<Output = T> + Clone + Copy + Send + Sync + 'static + ZeroOne,
+        RB: RangeBounds<T>,
+    > RangeBoundsExt<T> for RB
+{
+}

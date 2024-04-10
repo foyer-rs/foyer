@@ -52,14 +52,14 @@ mod tests {
         let allocator = AlignedAllocator::new(ALIGN);
 
         let mut buf: Vec<u8, _> = Vec::with_capacity_in(ALIGN * 8, &allocator);
-        bits::assert_aligned(ALIGN, buf.as_ptr().addr());
+        bits::assert_aligned(ALIGN, buf.as_ptr() as _);
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        bits::assert_aligned(ALIGN, buf.as_ptr().addr());
+        bits::assert_aligned(ALIGN, buf.as_ptr() as _);
         assert_eq!(buf, [b'x'; ALIGN * 8]);
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        bits::assert_aligned(ALIGN, buf.as_ptr().addr());
+        bits::assert_aligned(ALIGN, buf.as_ptr() as _);
         assert_eq!(buf, [b'x'; ALIGN * 16])
     }
 }

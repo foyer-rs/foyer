@@ -16,11 +16,9 @@ use std::fmt::Debug;
 
 use crate::core::adapter::Adapter;
 
-pub trait Config = Send + Sync + 'static + Debug + Clone;
-
 pub trait EvictionPolicy: Send + Sync + Debug + 'static {
     type Adapter: Adapter;
-    type Config: Config;
+    type Config: Send + Sync + 'static + Debug + Clone;
 
     fn new(config: Self::Config) -> Self;
 

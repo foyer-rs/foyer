@@ -31,7 +31,21 @@ use std::{
     ops::{Add, BitAnd, Not, Sub},
 };
 
-pub trait UnsignedTrait = Add<Output = Self>
+// TODO(MrCroxx): Use `trait_alias` after stable.
+// pub trait UnsignedTrait = Add<Output = Self>
+//     + Sub<Output = Self>
+//     + BitAnd<Output = Self>
+//     + Not<Output = Self>
+//     + Sized
+//     + From<u8>
+//     + Eq
+//     + Debug
+//     + Display
+//     + Clone
+//     + Copy;
+
+pub trait Unsigned:
+    Add<Output = Self>
     + Sub<Output = Self>
     + BitAnd<Output = Self>
     + Not<Output = Self>
@@ -41,11 +55,25 @@ pub trait UnsignedTrait = Add<Output = Self>
     + Debug
     + Display
     + Clone
-    + Copy;
+    + Copy
+{
+}
 
-pub trait Unsigned: UnsignedTrait {}
-
-impl<U: UnsignedTrait> Unsigned for U {}
+impl<
+        U: Add<Output = Self>
+            + Sub<Output = Self>
+            + BitAnd<Output = Self>
+            + Not<Output = Self>
+            + Sized
+            + From<u8>
+            + Eq
+            + Debug
+            + Display
+            + Clone
+            + Copy,
+    > Unsigned for U
+{
+}
 
 #[inline(always)]
 pub fn is_pow2<U: Unsigned>(v: U) -> bool {
