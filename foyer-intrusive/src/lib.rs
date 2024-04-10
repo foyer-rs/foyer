@@ -14,9 +14,9 @@
 
 #![feature(ptr_metadata)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
 #![feature(offset_of)]
-#![expect(clippy::new_without_default)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#![allow(clippy::new_without_default)]
 
 pub use memoffset::offset_of;
 
