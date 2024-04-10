@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
 use prometheus::{
     core::{AtomicU64, GenericGauge, GenericGaugeVec},
@@ -54,8 +54,13 @@ pub fn get_metrics_registry() -> &'static Registry {
     REGISTRY.get_or_init(|| prometheus::default_registry().clone())
 }
 
-/// Multiple foyer instance will share the same global metrics with different label `foyer` name.
-pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::default);
+// TODO(MrCroxx): Use `LazyLock` after `lazy_cell` is stable.
+// /// Multiple foyer instance will share the same global metrics with different label `foyer` name.
+// pub static METRICS: LazyLock<GlobalMetrics> = LazyLock::new(GlobalMetrics::default);
+
+lazy_static::lazy_static! {
+    pub static ref METRICS: GlobalMetrics = GlobalMetrics::default();
+}
 
 #[derive(Debug)]
 pub struct GlobalMetrics {

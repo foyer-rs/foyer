@@ -12,11 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(cfg_match)]
-#![feature(error_generic_member_access)]
-#![feature(lazy_cell)]
-
-pub mod buf;
 pub mod error;
 pub mod metrics;
 pub mod notify;

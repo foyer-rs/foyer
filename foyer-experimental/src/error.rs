@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::backtrace::Backtrace;
-
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
 pub struct Error(Box<ErrorInner>);
@@ -23,7 +21,8 @@ pub struct Error(Box<ErrorInner>);
 struct ErrorInner {
     #[from]
     source: ErrorKind,
-    backtrace: Backtrace,
+    // TODO(MrCroxx): Restore this after `error_generic_member_access` is stable.
+    // backtrace: Backtrace,
 }
 
 #[derive(thiserror::Error, Debug)]

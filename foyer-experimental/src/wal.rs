@@ -25,15 +25,11 @@ use std::{
 
 use bytes::{Buf, BufMut};
 use crossbeam::channel;
+use foyer_common::code::{BufExt, BufMutExt};
 use parking_lot::{Condvar, Mutex};
 use tokio::sync::oneshot;
 
-use crate::{
-    asyncify,
-    buf::{BufExt, BufMutExt},
-    error::Result,
-    metrics::Metrics,
-};
+use crate::{asyncify, error::Result, metrics::Metrics};
 
 pub trait HashValue: Send + Sync + 'static + Eq + std::fmt::Debug {
     fn size() -> usize;
