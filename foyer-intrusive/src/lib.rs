@@ -12,7 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(offset_of)]
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #![allow(clippy::new_without_default)]
 
@@ -24,8 +23,6 @@ pub use memoffset::offset_of;
 /// # Examples
 ///
 /// ```
-/// #![feature(offset_of)]
-///
 /// use foyer_intrusive::container_of;
 ///
 /// struct S { x: u32, y: u32 };

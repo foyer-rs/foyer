@@ -12,9 +12,47 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::alloc::{Allocator, Global};
-
+use allocator_api2::{
+    alloc::{AllocError, Allocator, Global},
+    vec::Vec as VecA,
+};
 use foyer_common::bits;
+
+pub struct WritableVecA<'a, T, A: Allocator>(pub &'a mut VecA<T, A>);
+
+impl<'a, A: Allocator> std::io::Write for WritableVecA<'a, u8, A> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    #[inline]
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let len = bufs.iter().map(|b| b.len()).sum();
+        self.0.reserve(len);
+        for buf in bufs {
+            self.0.extend_from_slice(buf);
+        }
+        Ok(len)
+    }
+
+    // #[inline]
+    // fn is_write_vectored(&self) -> bool {
+    //     true
+    // }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.0.extend_from_slice(buf);
+        Ok(())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AlignedAllocator {
@@ -29,7 +67,7 @@ impl AlignedAllocator {
 }
 
 unsafe impl Allocator for AlignedAllocator {
-    fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
+    fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, AllocError> {
         let layout =
             std::alloc::Layout::from_size_align(layout.size(), bits::align_up(self.align, layout.align())).unwrap();
         Global.allocate(layout)
@@ -51,7 +89,7 @@ mod tests {
         const ALIGN: usize = 512;
         let allocator = AlignedAllocator::new(ALIGN);
 
-        let mut buf: Vec<u8, _> = Vec::with_capacity_in(ALIGN * 8, &allocator);
+        let mut buf: VecA<u8, _> = VecA::with_capacity_in(ALIGN * 8, &allocator);
         bits::assert_aligned(ALIGN, buf.as_ptr() as _);
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);

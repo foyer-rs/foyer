@@ -22,6 +22,7 @@ use std::{
     },
 };
 
+use allocator_api2::vec::Vec as VecA;
 use bytes::{Buf, BufMut};
 use foyer_common::range::RangeBoundsExt;
 use parking_lot::Mutex;
@@ -107,7 +108,7 @@ where
 {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<Vec<u8, A>>>>>>,
+    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<VecA<u8, A>>>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,7 +157,7 @@ where
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip(self, view))]
-    pub async fn load(&self, view: RegionView) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
+    pub async fn load(&self, view: RegionView) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
         let res = self
             .load_range(view.offset as usize..view.offset as usize + view.len as usize)
             .await;
@@ -172,7 +173,7 @@ where
     pub async fn load_range(
         &self,
         range: impl RangeBounds<usize>,
-    ) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
+    ) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
         let range = range.bounds(0..self.device.region_size());
 
         let rx = {

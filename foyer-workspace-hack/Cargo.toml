@@ -18,6 +18,7 @@ publish = true
 ### BEGIN HAKARI SECTION
 [dependencies]
 ahash = { version = "0.8" }
+allocator-api2 = { version = "0.2" }
 crossbeam-channel = { version = "0.5" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }

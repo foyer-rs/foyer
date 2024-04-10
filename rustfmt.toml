@@ -1,6 +1,8 @@
-imports_granularity = "Crate"
-group_imports = "StdExternalCrate"
+# TODO(MrCroxx): Restore comments after the features are stable.
+
+# imports_granularity = "Crate"
+# group_imports = "StdExternalCrate"
 tab_spaces = 4
-wrap_comments = true
+# wrap_comments = true
 max_width = 120
-comment_width = 120
+# comment_width = 120

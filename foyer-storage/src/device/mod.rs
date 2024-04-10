@@ -16,8 +16,9 @@ pub mod allocator;
 pub mod error;
 pub mod fs;
 
-use std::{alloc::Allocator, fmt::Debug};
+use std::fmt::Debug;
 
+use allocator_api2::{alloc::Allocator, vec::Vec as VecA};
 use error::DeviceResult;
 use foyer_common::range::RangeBoundsExt;
 use futures::Future;
@@ -84,7 +85,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
 
     fn io_buffer_allocator(&self) -> &Self::IoBufferAllocator;
 
-    fn io_buffer(&self, len: usize, capacity: usize) -> Vec<u8, Self::IoBufferAllocator>;
+    fn io_buffer(&self, len: usize, capacity: usize) -> VecA<u8, Self::IoBufferAllocator>;
 
     fn region_size(&self) -> usize {
         debug_assert!(self.capacity() % self.regions() == 0);
@@ -98,7 +99,7 @@ pub trait DeviceExt: Device {
         &self,
         region: RegionId,
         range: impl IoRange,
-    ) -> impl Future<Output = DeviceResult<Vec<u8, Self::IoBufferAllocator>>> + Send {
+    ) -> impl Future<Output = DeviceResult<VecA<u8, Self::IoBufferAllocator>>> + Send {
         async move {
             let range = range.bounds(0..self.region_size());
             let size = range.size().unwrap();
@@ -218,8 +219,8 @@ pub mod tests {
             &self.0
         }
 
-        fn io_buffer(&self, len: usize, capacity: usize) -> Vec<u8, Self::IoBufferAllocator> {
-            let mut buf = Vec::with_capacity_in(capacity, self.0);
+        fn io_buffer(&self, len: usize, capacity: usize) -> VecA<u8, Self::IoBufferAllocator> {
+            let mut buf = VecA::with_capacity_in(capacity, self.0);
             unsafe { buf.set_len(len) };
             buf
         }
