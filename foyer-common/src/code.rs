@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use bytes::{Buf, BufMut};
 use paste::paste;
@@ -88,20 +88,18 @@ trait BufMutExt: BufMut {
 
 impl<T: BufMut> BufMutExt for T {}
 
-pub trait Cursor: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
-    type T: Send + Sync + 'static;
-
-    fn into_inner(self) -> Self::T;
+pub trait Cursor<T>: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
+    fn into_inner(self) -> T;
 }
 
 /// [`Key`] is required to implement [`Clone`].
 ///
-/// If cloning a [`Key`] is expensive, wrap it with [`std::sync::Arc`].
+/// If cloning a [`Key`] is expensive, wrap it with [`Arc`].
 #[expect(unused_variables)]
 pub trait Key:
     Sized + Send + Sync + 'static + std::hash::Hash + Eq + PartialEq + Ord + PartialOrd + std::fmt::Debug + Clone
 {
-    type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
+    type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
 
     /// memory weight
     fn weight(&self) -> usize {
@@ -123,10 +121,10 @@ pub trait Key:
 
 /// [`Value`] is required to implement [`Clone`].
 ///
-/// If cloning a [`Value`] is expensive, wrap it with [`std::sync::Arc`].
+/// If cloning a [`Value`] is expensive, wrap it with [`Arc`].
 #[expect(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
-    type Cursor: Cursor<T = Self> = UnimplementedCursor<Self>;
+    type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
 
     /// memory weight
     fn weight(&self) -> usize {
@@ -192,10 +190,8 @@ macro_rules! def_cursor {
                     }
                 }
 
-                impl Cursor for [<PrimitiveCursor $id>] {
-                    type T = $type;
-
-                    fn into_inner(self) -> Self::T {
+                impl Cursor<$type> for [<PrimitiveCursor $id>] {
+                    fn into_inner(self) -> $type {
                         self.inner
                     }
                 }
@@ -296,15 +292,13 @@ impl Value for Vec<u8> {
     }
 }
 
-impl Cursor for std::io::Cursor<Vec<u8>> {
-    type T = Vec<u8>;
-
-    fn into_inner(self) -> Self::T {
+impl Cursor<Vec<u8>> for std::io::Cursor<Vec<u8>> {
+    fn into_inner(self) -> Vec<u8> {
         self.into_inner()
     }
 }
 
-impl Key for std::sync::Arc<Vec<u8>> {
+impl Key for Arc<Vec<u8>> {
     type Cursor = ArcVecU8Cursor;
 
     fn weight(&self) -> usize {
@@ -316,7 +310,7 @@ impl Key for std::sync::Arc<Vec<u8>> {
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
-        Ok(std::sync::Arc::new(buf.to_vec()))
+        Ok(Arc::new(buf.to_vec()))
     }
 
     fn into_cursor(self) -> Self::Cursor {
@@ -324,7 +318,7 @@ impl Key for std::sync::Arc<Vec<u8>> {
     }
 }
 
-impl Value for std::sync::Arc<Vec<u8>> {
+impl Value for Arc<Vec<u8>> {
     type Cursor = ArcVecU8Cursor;
 
     fn weight(&self) -> usize {
@@ -336,7 +330,7 @@ impl Value for std::sync::Arc<Vec<u8>> {
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
-        Ok(std::sync::Arc::new(buf.to_vec()))
+        Ok(Arc::new(buf.to_vec()))
     }
 
     fn into_cursor(self) -> Self::Cursor {
@@ -346,12 +340,12 @@ impl Value for std::sync::Arc<Vec<u8>> {
 
 #[derive(Debug)]
 pub struct ArcVecU8Cursor {
-    inner: std::sync::Arc<Vec<u8>>,
+    inner: Arc<Vec<u8>>,
     pos: usize,
 }
 
 impl ArcVecU8Cursor {
-    pub fn new(inner: std::sync::Arc<Vec<u8>>) -> Self {
+    pub fn new(inner: Arc<Vec<u8>>) -> Self {
         Self { inner, pos: 0 }
     }
 }
@@ -366,10 +360,8 @@ impl std::io::Read for ArcVecU8Cursor {
     }
 }
 
-impl Cursor for ArcVecU8Cursor {
-    type T = std::sync::Arc<Vec<u8>>;
-
-    fn into_inner(self) -> Self::T {
+impl Cursor<Arc<Vec<u8>>> for ArcVecU8Cursor {
+    fn into_inner(self) -> Arc<Vec<u8>> {
         self.inner
     }
 }
@@ -383,10 +375,8 @@ impl std::io::Read for PrimitiveCursorVoid {
     }
 }
 
-impl Cursor for PrimitiveCursorVoid {
-    type T = ();
-
-    fn into_inner(self) -> Self::T {}
+impl Cursor<()> for PrimitiveCursorVoid {
+    fn into_inner(self) {}
 }
 
 impl Key for () {
@@ -438,10 +428,8 @@ impl<T: Send + Sync + 'static + std::fmt::Debug> std::io::Read for Unimplemented
     }
 }
 
-impl<T: Send + Sync + 'static + std::fmt::Debug> Cursor for UnimplementedCursor<T> {
-    type T = T;
-
-    fn into_inner(self) -> Self::T {
+impl<T: Send + Sync + 'static + std::fmt::Debug> Cursor<T> for UnimplementedCursor<T> {
+    fn into_inner(self) -> T {
         unimplemented!()
     }
 }
