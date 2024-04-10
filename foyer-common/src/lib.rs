@@ -17,7 +17,6 @@
 #![feature(bound_map)]
 #![feature(associated_type_defaults)]
 #![feature(cfg_match)]
-#![feature(let_chains)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod async_queue;
