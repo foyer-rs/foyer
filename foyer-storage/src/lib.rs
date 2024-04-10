@@ -20,7 +20,6 @@
 #![feature(error_generic_member_access)]
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
-#![feature(associated_type_defaults)]
 #![feature(box_into_inner)]
 #![feature(try_trait_v2)]
 #![feature(offset_of)]
