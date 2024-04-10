@@ -105,7 +105,8 @@ pub struct RegionInner<A>
 where
     A: BufferAllocator,
 {
-    #[expect(clippy::type_complexity)]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<Vec<u8, A>>>>>>,
 }
 
@@ -152,7 +153,8 @@ where
     }
 
     /// Load region data by view from device.
-    #[expect(clippy::type_complexity)]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip(self, view))]
     pub async fn load(&self, view: RegionView) -> Result<Option<Arc<Vec<u8, D::IoBufferAllocator>>>> {
         let res = self
@@ -164,7 +166,8 @@ where
     }
 
     /// Load region data with given `range` from device.
-    #[expect(clippy::type_complexity)]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip(self, range), fields(start, end))]
     pub async fn load_range(
         &self,

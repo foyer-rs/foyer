@@ -146,13 +146,13 @@ where
     V: Value,
 {
     unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
-        if self.small_charges > self.small_capacity
-            && let Some(ptr) = self.evict_small()
-        {
-            Some(ptr)
-        } else {
-            self.evict_main()
+        // TODO(MrCroxx): Use `let_chains` here after it is stable.
+        if self.small_charges > self.small_capacity {
+            if let Some(ptr) = self.evict_small() {
+                return Some(ptr);
+            }
         }
+        self.evict_main()
     }
 
     unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {

@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(let_chains)]
-#![feature(lint_reasons)]
-
 mod analyze;
 mod export;
 mod rate;
@@ -754,13 +751,14 @@ async fn write(
         }
 
         let idx = id + step * c;
-        // TODO(MrCroxx): Use random content?
         let entry_size = OsRng.gen_range(context.entry_size_range.clone());
         let data = Arc::new(text(idx as usize, entry_size));
-        if let Some(limiter) = &mut limiter
-            && let Some(wait) = limiter.consume(entry_size as f64)
-        {
-            tokio::time::sleep(wait).await;
+
+        // TODO(MrCroxx): Use `let_chains` here after it is stable.
+        if let Some(limiter) = &mut limiter {
+            if let Some(wait) = limiter.consume(entry_size as f64) {
+                tokio::time::sleep(wait).await;
+            }
         }
 
         let time = Instant::now();
@@ -849,10 +847,11 @@ async fn read(
             }
             context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
 
-            if let Some(limiter) = &mut limiter
-                && let Some(wait) = limiter.consume(entry_size as f64)
-            {
-                tokio::time::sleep(wait).await;
+            // TODO(MrCroxx): Use `let_chains` here after it is stable.
+            if let Some(limiter) = &mut limiter {
+                if let Some(wait) = limiter.consume(entry_size as f64) {
+                    tokio::time::sleep(wait).await;
+                }
             }
         } else {
             if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {

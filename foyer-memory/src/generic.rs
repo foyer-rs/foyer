@@ -43,7 +43,8 @@ struct CacheSharedState<T, L> {
     listener: L,
 }
 
-#[expect(clippy::type_complexity)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(clippy::type_complexity)]
 struct CacheShard<K, V, H, E, I, L, S>
 where
     K: Key,
@@ -198,9 +199,12 @@ where
     }
 
     unsafe fn evict(&mut self, charge: usize, last_reference_entries: &mut Vec<(K, V, H::Context, usize)>) {
-        while self.usage.load(Ordering::Relaxed) + charge > self.capacity
-            && let Some(evicted) = self.eviction.pop()
-        {
+        // TODO(MrCroxx): Use `let_chains` here after it is stable.
+        while self.usage.load(Ordering::Relaxed) + charge > self.capacity {
+            let evicted = match self.eviction.pop() {
+                Some(evicted) => evicted,
+                None => break,
+            };
             self.state.metrics.evict.fetch_add(1, Ordering::Relaxed);
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
@@ -304,7 +308,8 @@ where
     pub event_listener: L,
 }
 
-#[expect(clippy::type_complexity)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(clippy::type_complexity)]
 pub enum GenericEntry<K, V, H, E, I, L, S, ER>
 where
     K: Key,
@@ -364,7 +369,8 @@ where
     }
 }
 
-#[expect(clippy::type_complexity)]
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(clippy::type_complexity)]
 pub struct GenericCache<K, V, H, E, I, L, S = RandomState>
 where
     K: Key,

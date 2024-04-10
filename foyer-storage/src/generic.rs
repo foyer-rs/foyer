@@ -236,7 +236,8 @@ where
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
         let flusher_stop_rxs = (0..config.flushers).map(|_| flushers_stop_tx.subscribe()).collect_vec();
-        #[expect(clippy::type_complexity)]
+        // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+        #[allow(clippy::type_complexity)]
         let (flusher_entry_txs, flusher_entry_rxs): (
             Vec<mpsc::UnboundedSender<Entry<K, V>>>,
             Vec<mpsc::UnboundedReceiver<Entry<K, V>>>,
@@ -1081,7 +1082,8 @@ mod tests {
     type TestStoreConfig = GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
 
     #[tokio::test]
-    #[expect(clippy::identity_op)]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::identity_op)]
     async fn test_recovery() {
         const KB: usize = 1024;
         const MB: usize = 1024 * 1024;

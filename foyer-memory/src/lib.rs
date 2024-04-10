@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(let_chains)]
-#![feature(lint_reasons)]
-
 //! This crate provides a concurrent in-memory cache component that supports replaceable eviction algorithm.
 //!
 //! # Motivation
