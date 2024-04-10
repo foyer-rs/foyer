@@ -10,9 +10,10 @@ on:
   pull_request:
     branches: [main]
 env:
-  RUST_TOOLCHAIN: nightly-2023-12-26
+  RUST_TOOLCHAIN: stable
+  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-03-17
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20240306
+  CACHE_KEY_SUFFIX: 20240410-2
 jobs:
   misc-check:
     name: misc check
@@ -138,7 +139,7 @@ jobs:
       - name: Install rust toolchain@v1
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
       - name: Cache Cargo home
         uses: actions/cache@v2
         id: cache
@@ -155,14 +156,14 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
-          cargo test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-storage-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
-          cargo build --all --target x86_64-unknown-linux-gnu
+          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   lsan:
@@ -174,7 +175,7 @@ jobs:
       - name: Install rust toolchain@v1
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
       - name: Cache Cargo home
         uses: actions/cache@v2
         id: cache
@@ -191,14 +192,14 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
-          cargo test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-storage-bench With Leak Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
           RUST_LOG: info
         run: |-
-          cargo build --all --target x86_64-unknown-linux-gnu
+          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   deterministic-test:

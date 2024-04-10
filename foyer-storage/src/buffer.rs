@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 
+use allocator_api2::vec::Vec as VecA;
 use foyer_common::{
     bits::{align_up, is_aligned},
     code::{Cursor, Key, Value},
@@ -21,7 +22,7 @@ use foyer_common::{
 
 use crate::{
     compress::Compression,
-    device::{error::DeviceError, Device},
+    device::{allocator::WritableVecA, error::DeviceError, Device},
     flusher::Entry,
     generic::{checksum, EntryHeader},
     region::{RegionHeader, RegionId, Version, REGION_MAGIC},
@@ -63,7 +64,7 @@ where
 {
     // TODO(MrCroxx): optimize buffer allocation
     /// io buffer
-    buffer: Vec<u8, D::IoBufferAllocator>,
+    buffer: VecA<u8, D::IoBufferAllocator>,
 
     /// current writing region
     region: Option<RegionId>,
@@ -227,15 +228,17 @@ where
         let mut vcursor = value.into_cursor();
         match compression {
             Compression::None => {
-                std::io::copy(&mut vcursor, &mut self.buffer).map_err(DeviceError::from)?;
+                std::io::copy(&mut vcursor, &mut WritableVecA(&mut self.buffer)).map_err(DeviceError::from)?;
             }
             Compression::Zstd => {
-                zstd::stream::copy_encode(&mut vcursor, &mut self.buffer, 0).map_err(DeviceError::from)?;
+                zstd::stream::copy_encode(&mut vcursor, &mut WritableVecA(&mut self.buffer), 0)
+                    .map_err(DeviceError::from)?;
             }
             Compression::Lz4 => {
+                let buf = &mut WritableVecA(&mut self.buffer);
                 let mut encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
-                    .build(&mut self.buffer)
+                    .build(buf)
                     .map_err(DeviceError::from)?;
                 std::io::copy(&mut vcursor, &mut encoder).map_err(DeviceError::from)?;
                 let (_w, res) = encoder.finish();
@@ -247,7 +250,7 @@ where
 
         // write key
         let mut kcursor = key.into_cursor();
-        std::io::copy(&mut kcursor, &mut self.buffer).map_err(DeviceError::from)?;
+        std::io::copy(&mut kcursor, &mut WritableVecA(&mut self.buffer)).map_err(DeviceError::from)?;
         let encoded_key_len = self.buffer.len() - cursor;
         cursor = self.buffer.len();
 

@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![feature(allocator_api)]
-#![feature(offset_of)]
-
 pub mod admission;
 pub mod buffer;
 pub mod catalog;

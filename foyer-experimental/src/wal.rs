@@ -143,7 +143,12 @@ impl<H: HashValue> TombstoneLog<H> {
 
         path.push(format!("tombstone-{:08X}", config.id));
 
-        let file = OpenOptions::new().write(true).read(true).create(true).open(path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
 
         let inner = Arc::new(TombstoneLogInner {
             inflights: Mutex::new(vec![]),

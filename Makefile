@@ -14,7 +14,8 @@ check:
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets
-	cargo udeps --workspace --exclude foyer-workspace-hack
+	# TODO(MrCroxx): Restore udeps check after it doesn't requires nightly anymore.
+	# cargo udeps --workspace --exclude foyer-workspace-hack
 
 check-all:
 	shellcheck ./scripts/*
@@ -28,7 +29,8 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets
-	cargo udeps --workspace --exclude foyer-workspace-hack
+	# TODO(MrCroxx): Restore udeps check after it doesn't requires nightly anymore.
+	# cargo udeps --workspace --exclude foyer-workspace-hack
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all
