@@ -62,7 +62,8 @@ impl FsDeviceConfig {
 struct FsDeviceInner {
     config: FsDeviceConfig,
 
-    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     dir: File,
 
     files: Vec<File>,
