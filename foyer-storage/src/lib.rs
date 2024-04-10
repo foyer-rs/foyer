@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(error_generic_member_access)]
 #![feature(offset_of)]
 
 pub mod admission;

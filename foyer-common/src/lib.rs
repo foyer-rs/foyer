@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 #![feature(bound_map)]
-#![feature(associated_type_defaults)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod async_queue;

@@ -154,7 +154,9 @@ pub trait Cursor<T>: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
 pub trait Key:
     Sized + Send + Sync + 'static + std::hash::Hash + Eq + PartialEq + Ord + PartialOrd + std::fmt::Debug + Clone
 {
-    type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
+    // TODO(MrCroxx): Restore this after `associated_type_defaults` is stable.
+    // type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
+    type Cursor: Cursor<Self>;
 
     /// memory weight
     fn weight(&self) -> usize {
@@ -180,7 +182,9 @@ pub trait Key:
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(unused_variables)]
 pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
-    type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
+    // TODO(MrCroxx): Restore this after `associated_type_defaults` is stable.
+    // type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
+    type Cursor: Cursor<Self>;
 
     /// memory weight
     fn weight(&self) -> usize {
