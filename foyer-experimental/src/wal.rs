@@ -143,12 +143,9 @@ impl<H: HashValue> TombstoneLog<H> {
 
         path.push(format!("tombstone-{:08X}", config.id));
 
-        let file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .create(true)
-            .truncate(true)
-            .open(path)?;
+        // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+        #[allow(clippy::suspicious_open_options)]
+        let file = OpenOptions::new().write(true).read(true).create(true).open(path)?;
 
         let inner = Arc::new(TombstoneLogInner {
             inflights: Mutex::new(vec![]),
