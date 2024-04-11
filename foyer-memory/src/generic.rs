@@ -164,6 +164,14 @@ where
         Some(ptr)
     }
 
+    unsafe fn contains<Q>(&mut self, hash: u64, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.indexer.get(hash, key).is_some()
+    }
+
     /// Remove a key from the cache.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
@@ -513,6 +521,19 @@ where
                 cache: self.clone(),
                 ptr,
             })
+        }
+    }
+
+    pub fn contains<Q>(self: &Arc<Self>, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let hash = self.hash_builder.hash_one(key);
+
+        unsafe {
+            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            shard.contains(hash, key)
         }
     }
 

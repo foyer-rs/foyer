@@ -324,6 +324,19 @@ where
         }
     }
 
+    pub fn contains<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.contains(key),
+            Cache::Lru(cache) => cache.contains(key),
+            Cache::Lfu(cache) => cache.contains(key),
+            Cache::S3Fifo(cache) => cache.contains(key),
+        }
+    }
+
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),
