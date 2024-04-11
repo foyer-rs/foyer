@@ -12,7 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{hash::BuildHasher, ops::Deref, sync::Arc};
+use std::{
+    borrow::Borrow,
+    hash::{BuildHasher, Hash},
+    ops::Deref,
+    sync::Arc,
+};
 
 use ahash::RandomState;
 use futures::{Future, FutureExt};
@@ -293,7 +298,11 @@ where
         }
     }
 
-    pub fn remove(&self, key: &K) {
+    pub fn remove<Q>(&self, key: &Q)
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self {
             Cache::Fifo(cache) => cache.remove(key),
             Cache::Lru(cache) => cache.remove(key),
@@ -302,7 +311,11 @@ where
         }
     }
 
-    pub fn get(&self, key: &K) -> Option<CacheEntry<K, V, L, S>> {
+    pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, L, S>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self {
             Cache::Fifo(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.get(key).map(CacheEntry::from),

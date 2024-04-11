@@ -29,7 +29,7 @@ fn main() {
     });
 
     let entry = cache.insert("hello".to_string(), "world".to_string(), 1);
-    let e = cache.get(&"hello".to_string()).unwrap();
+    let e = cache.get("hello").unwrap();
 
     assert_eq!(entry.value(), e.value());
 }
