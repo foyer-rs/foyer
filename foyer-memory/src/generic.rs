@@ -13,8 +13,10 @@
 //  limitations under the License.
 
 use std::{
+    borrow::Borrow,
     future::Future,
     hash::BuildHasher,
+    hash::Hash,
     ops::Deref,
     ptr::NonNull,
     sync::{
@@ -138,7 +140,11 @@ where
         ptr
     }
 
-    unsafe fn get(&mut self, hash: u64, key: &K) -> Option<NonNull<H>> {
+    unsafe fn get<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<H>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let mut ptr = match self.indexer.get(hash, key) {
             Some(ptr) => {
                 self.state.metrics.hit.fetch_add(1, Ordering::Relaxed);
@@ -161,7 +167,11 @@ where
     /// Remove a key from the cache.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
-    unsafe fn remove(&mut self, hash: u64, key: &K) -> Option<(K, V, H::Context, usize)> {
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<(K, V, H::Context, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let ptr = self.indexer.remove(hash, key)?;
         self.state.metrics.remove.fetch_add(1, Ordering::Relaxed);
         if ptr.as_ref().base().is_in_eviction() {
@@ -472,7 +482,11 @@ where
         entry
     }
 
-    pub fn remove(&self, key: &K) {
+    pub fn remove<Q>(&self, key: &Q)
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let hash = self.hash_builder.hash_one(key);
 
         let entry = unsafe {
@@ -486,7 +500,11 @@ where
         }
     }
 
-    pub fn get(self: &Arc<Self>, key: &K) -> Option<GenericCacheEntry<K, V, H, E, I, L, S>> {
+    pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, H, E, I, L, S>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let hash = self.hash_builder.hash_one(key);
 
         unsafe {
