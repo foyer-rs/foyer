@@ -1,3 +1,23 @@
+## 2024-04-11
+
+| crate | version |
+| - | - |
+| foyer | 0.7.0 |
+| foyer-common | 0.5.0 |
+| foyer-intrusive | 0.4.0 |
+| foyer-memory | 0.2.0 |
+| foyer-storage | 0.6.0 |
+| foyer-storage-bench | 0.6.0 |
+| foyer-workspace-hack | 0.4.0 |
+
+<details>
+
+### Changes
+
+- Make `foyer` compatible with rust stable toolchain (MSRV = 1.77.2). 🎉
+
+</details>
+
 ## 2024-04-09
 
 | crate | version |
@@ -12,6 +32,8 @@
 - fix: Fix panics on `state()` for s3fifo entry.
 - fix: Enable `offset_of` feature for `foyer-storage`.
 
+</details>
+
 ## 2024-04-08
 
 | crate | version |
@@ -25,6 +47,8 @@
 
 - feat: Introduce s3fifo to `foyer-memory`.
 - fix: Fix doctest for `foyer-intrusive`.
+
+</details>
 
 ## 2024-03-21
 
