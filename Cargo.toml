@@ -1,9 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    # internal
-    "examples"
-,
+    "examples",
     "foyer",
     "foyer-common",
     "foyer-experimental",
@@ -12,7 +10,8 @@ members = [
     "foyer-memory",
     "foyer-storage",
     "foyer-storage-bench",
-    "foyer-workspace-hack"]
+    "foyer-workspace-hack",
+]
 
 [workspace.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
