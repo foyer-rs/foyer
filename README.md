@@ -6,16 +6,37 @@
 
 *foyer* is inspired by [Facebook/CacheLib](https://github.com/facebook/cachelib), which is an excellent hybrid cache lib in C++. *foyer* is not only a 'rewrite in Rust project', but provide some features that *CacheLib* doesn't have for now.
 
+## Supported Rust Versions
+
+*foyer* is built against the latest stable release. The minimum supported version is 1.77.2. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+
 ## Development state
 
 Currently, *foyer* only finished few features, and is still under heavy development.
 
+## Features
+
+- [x] in-memory cache
+  - [x] FIFO
+  - [x] LRU with priority pool
+  - [x] 3-qeue w-TinyLFU (imspired by [caffeine](https://github.com/ben-manes/caffeine))
+  - [x] S3FIFO without Ghost Queue
+- [x] disk cache
+- [ ] TTL (time to live)
+
+## Examples
+
+The examples can be found [here](https://github.com/MrCroxx/foyer/tree/main/examples).
+
 ## Roadmap
 
-- [ ] Better intrusive index collectios for memory cache.
-- [ ] Hybrid memory and disk cache.
-- [ ] Raw device and single file device support.
-- [ ] More detailed metrics or statistics.
+- [ ] More user-friendly API.
+- [ ] User-friendly Documents and examples.
+- [ ] Support TTL.
+- [ ] Simplify `foyer-storage`.
+- [ ] Refactor `foyer-storage` region reclaiming policy.
+- [ ] Support on Windows.
+- [ ] Unify in-memory cache and disk cache configuration.
 
 ## Contributing
 
