@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
@@ -24,8 +24,14 @@ pub trait Indexer: Send + Sync + 'static {
 
     fn new() -> Self;
     unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
-    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
-    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>>;
+    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
     unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
 }
 
@@ -90,15 +96,26 @@ where
         }
     }
 
-    unsafe fn get(&self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        self.table.find(hash, |p| p.as_ref().base().key() == key).copied()
+    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.table
+            .find(hash, |p| p.as_ref().base().key().borrow() == key)
+            .copied()
     }
 
-    unsafe fn remove(&mut self, hash: u64, key: &Self::Key) -> Option<NonNull<Self::Handle>> {
-        match self
-            .table
-            .entry(hash, |p| p.as_ref().base().key() == key, |p| p.as_ref().base().hash())
-        {
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        match self.table.entry(
+            hash,
+            |p| p.as_ref().base().key().borrow() == key,
+            |p| p.as_ref().base().hash(),
+        ) {
             HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();
                 let b = p.as_mut().base_mut();
