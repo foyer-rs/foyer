@@ -24,6 +24,7 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
+workspace-members = ["examples"]
 third-party = [
     { name = "miniz_oxide" },
 ]

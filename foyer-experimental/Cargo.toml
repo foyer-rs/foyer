@@ -7,6 +7,7 @@ description = "experimental components for foyer - the hybrid cache for Rust"
 license = "Apache-2.0"
 repository = "https://github.com/mrcroxx/foyer"
 homepage = "https://github.com/mrcroxx/foyer"
+readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-udeps.ignore]
