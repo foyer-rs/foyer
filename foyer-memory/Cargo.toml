@@ -43,3 +43,7 @@ deadlock = ["parking_lot/deadlock_detection"]
 [[bench]]
 name = "bench_hit_ratio"
 harness = false
+
+[[bench]]
+name = "bench_dynamic_dispatch"
+harness = false
