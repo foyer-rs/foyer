@@ -14,7 +14,7 @@
 
 use std::hash::RandomState;
 
-use foyer::memory::{Cache, DefaultCacheEventListener, LruCacheConfig, LruConfig};
+use foyer::memory::{Cache, LruCacheConfig, LruConfig};
 
 fn main() {
     let cache = Cache::lru(LruCacheConfig {
@@ -25,7 +25,7 @@ fn main() {
         },
         object_pool_capacity: 1024,
         hash_builder: RandomState::default(),
-        event_listener: DefaultCacheEventListener::default(),
+        event_listener: None,
     });
 
     let entry = cache.insert("hello".to_string(), "world".to_string(), 1);

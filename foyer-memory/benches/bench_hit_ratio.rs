@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use ahash::RandomState;
 use foyer_memory::{
-    Cache, DefaultCacheEventListener, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig, LruCacheConfig,
-    LruConfig, S3FifoCacheConfig, S3FifoConfig,
+    Cache, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig, LruCacheConfig, LruConfig, S3FifoCacheConfig,
+    S3FifoConfig,
 };
 use rand::{distributions::Distribution, thread_rng};
 
@@ -93,7 +93,7 @@ fn new_fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
         eviction_config: FifoConfig {},
         object_pool_capacity: OBJECT_POOL_CAPACITY,
         hash_builder: RandomState::default(),
-        event_listener: DefaultCacheEventListener::default(),
+        event_listener: None,
     };
 
     Arc::new(Cache::fifo(config))
@@ -108,7 +108,7 @@ fn new_lru_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
         },
         object_pool_capacity: OBJECT_POOL_CAPACITY,
         hash_builder: RandomState::default(),
-        event_listener: DefaultCacheEventListener::default(),
+        event_listener: None,
     };
 
     Arc::new(Cache::lru(config))
@@ -126,7 +126,7 @@ fn new_lfu_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
         },
         object_pool_capacity: OBJECT_POOL_CAPACITY,
         hash_builder: RandomState::default(),
-        event_listener: DefaultCacheEventListener::default(),
+        event_listener: None,
     };
 
     Arc::new(Cache::lfu(config))
@@ -141,7 +141,7 @@ fn new_s3fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
         },
         object_pool_capacity: OBJECT_POOL_CAPACITY,
         hash_builder: RandomState::default(),
-        event_listener: DefaultCacheEventListener::default(),
+        event_listener: None,
     };
 
     Arc::new(Cache::s3fifo(config))

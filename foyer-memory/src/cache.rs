@@ -33,62 +33,58 @@ use crate::{
     },
     generic::{CacheConfig, GenericCache, GenericCacheEntry, GenericEntry},
     indexer::HashTableIndexer,
-    listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
     Key, Value,
 };
 
-pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
-pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Fifo<K, V>, L, S>;
-pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
-pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S, ER>;
+pub type FifoCache<K, V, S = RandomState> =
+    GenericCache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, S>;
+pub type FifoCacheConfig<K, V, S = RandomState> = CacheConfig<Fifo<K, V>, S>;
+pub type FifoCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, S>;
+pub type FifoEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, S, ER>;
 
-pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
-pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lru<K, V>, L, S>;
-pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
-pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S, ER>;
+pub type LruCache<K, V, S = RandomState> =
+    GenericCache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, S>;
+pub type LruCacheConfig<K, V, S = RandomState> = CacheConfig<Lru<K, V>, S>;
+pub type LruCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, S>;
+pub type LruEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, S, ER>;
 
-pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
-pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lfu<K, V>, L, S>;
-pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
-pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S, ER>;
+pub type LfuCache<K, V, S = RandomState> =
+    GenericCache<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, S>;
+pub type LfuCacheConfig<K, V, S = RandomState> = CacheConfig<Lfu<K, V>, S>;
+pub type LfuCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, S>;
+pub type LfuEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, S, ER>;
 
-pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
-pub type S3FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    CacheConfig<S3Fifo<K, V>, L, S>;
-pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
-pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S, ER>;
+pub type S3FifoCache<K, V, S = RandomState> =
+    GenericCache<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, S>;
+pub type S3FifoCacheConfig<K, V, S = RandomState> = CacheConfig<S3Fifo<K, V>, S>;
+pub type S3FifoCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, S>;
+pub type S3FifoEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, S, ER>;
 
-pub enum CacheEntry<K, V, L, S = RandomState>
+pub enum CacheEntry<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(FifoCacheEntry<K, V, L, S>),
-    Lru(LruCacheEntry<K, V, L, S>),
-    Lfu(LfuCacheEntry<K, V, L, S>),
-    S3Fifo(S3FifoCacheEntry<K, V, L, S>),
+    Fifo(FifoCacheEntry<K, V, S>),
+    Lru(LruCacheEntry<K, V, S>),
+    Lfu(LfuCacheEntry<K, V, S>),
+    S3Fifo(S3FifoCacheEntry<K, V, S>),
 }
 
-impl<K, V, L, S> Clone for CacheEntry<K, V, L, S>
+impl<K, V, S> Clone for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -101,11 +97,10 @@ where
     }
 }
 
-impl<K, V, L, S> Deref for CacheEntry<K, V, L, S>
+impl<K, V, S> Deref for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
@@ -120,59 +115,54 @@ where
     }
 }
 
-impl<K, V, L, S> From<FifoCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: FifoCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: FifoCacheEntry<K, V, S>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, L, S> From<LruCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<LruCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LruCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: LruCacheEntry<K, V, S>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, L, S> From<LfuCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<LfuCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LfuCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: LfuCacheEntry<K, V, S>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, L, S> From<S3FifoCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<S3FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: S3FifoCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: S3FifoCacheEntry<K, V, S>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, L, S> CacheEntry<K, V, L, S>
+impl<K, V, S> CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn key(&self) -> &K {
@@ -221,24 +211,22 @@ where
     }
 }
 
-pub enum Cache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState>
+pub enum Cache<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(Arc<FifoCache<K, V, L, S>>),
-    Lru(Arc<LruCache<K, V, L, S>>),
-    Lfu(Arc<LfuCache<K, V, L, S>>),
-    S3Fifo(Arc<S3FifoCache<K, V, L, S>>),
+    Fifo(Arc<FifoCache<K, V, S>>),
+    Lru(Arc<LruCache<K, V, S>>),
+    Lfu(Arc<LfuCache<K, V, S>>),
+    S3Fifo(Arc<S3FifoCache<K, V, S>>),
 }
 
-impl<K, V, L, S> Clone for Cache<K, V, L, S>
+impl<K, V, S> Clone for Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -251,30 +239,29 @@ where
     }
 }
 
-impl<K, V, L, S> Cache<K, V, L, S>
+impl<K, V, S> Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn fifo(config: FifoCacheConfig<K, V, L, S>) -> Self {
+    pub fn fifo(config: FifoCacheConfig<K, V, S>) -> Self {
         Self::Fifo(Arc::new(GenericCache::new(config)))
     }
 
-    pub fn lru(config: LruCacheConfig<K, V, L, S>) -> Self {
+    pub fn lru(config: LruCacheConfig<K, V, S>) -> Self {
         Self::Lru(Arc::new(GenericCache::new(config)))
     }
 
-    pub fn lfu(config: LfuCacheConfig<K, V, L, S>) -> Self {
+    pub fn lfu(config: LfuCacheConfig<K, V, S>) -> Self {
         Self::Lfu(Arc::new(GenericCache::new(config)))
     }
 
-    pub fn s3fifo(config: S3FifoCacheConfig<K, V, L, S>) -> Self {
+    pub fn s3fifo(config: S3FifoCacheConfig<K, V, S>) -> Self {
         Self::S3Fifo(Arc::new(GenericCache::new(config)))
     }
 
-    pub fn insert(&self, key: K, value: V, charge: usize) -> CacheEntry<K, V, L, S> {
+    pub fn insert(&self, key: K, value: V, charge: usize) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value, charge).into(),
             Cache::Lru(cache) => cache.insert(key, value, charge).into(),
@@ -283,13 +270,7 @@ where
         }
     }
 
-    pub fn insert_with_context(
-        &self,
-        key: K,
-        value: V,
-        charge: usize,
-        context: CacheContext,
-    ) -> CacheEntry<K, V, L, S> {
+    pub fn insert_with_context(&self, key: K, value: V, charge: usize, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, charge, context).into(),
             Cache::Lru(cache) => cache.insert_with_context(key, value, charge, context).into(),
@@ -311,7 +292,7 @@ where
         }
     }
 
-    pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, L, S>>
+    pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -374,81 +355,75 @@ where
     }
 }
 
-pub enum Entry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState>
+pub enum Entry<K, V, ER, S = RandomState>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(FifoEntry<K, V, ER, L, S>),
-    Lru(LruEntry<K, V, ER, L, S>),
-    Lfu(LfuEntry<K, V, ER, L, S>),
-    S3Fifo(S3FifoEntry<K, V, ER, L, S>),
+    Fifo(FifoEntry<K, V, ER, S>),
+    Lru(LruEntry<K, V, ER, S>),
+    Lfu(LfuEntry<K, V, ER, S>),
+    S3Fifo(S3FifoEntry<K, V, ER, S>),
 }
 
-impl<K, V, ER, L, S> From<FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: FifoEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: FifoEntry<K, V, ER, S>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<LruEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<LruEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LruEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: LruEntry<K, V, ER, S>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<LfuEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<LfuEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LfuEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: LfuEntry<K, V, ER, S>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<S3FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<S3FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: S3FifoEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: S3FifoEntry<K, V, ER, S>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, ER, L, S> Future for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> Future for Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error + From<oneshot::error::RecvError>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    type Output = std::result::Result<CacheEntry<K, V, L, S>, ER>;
+    type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
@@ -467,12 +442,11 @@ pub enum EntryState {
     Miss,
 }
 
-impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
+impl<K, V, ER, S> Entry<K, V, ER, S>
 where
     K: Key + Clone,
     V: Value,
     ER: std::error::Error,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn state(&self) -> EntryState {
@@ -497,14 +471,13 @@ where
     }
 }
 
-impl<K, V, L, S> Cache<K, V, L, S>
+impl<K, V, S> Cache<K, V, S>
 where
     K: Key + Clone,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, L, S>
+    pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(V, usize, CacheContext), ER>> + Send + 'static,
@@ -544,7 +517,7 @@ mod tests {
             eviction_config: FifoConfig {},
             object_pool_capacity: OBJECT_POOL_CAPACITY,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
+            event_listener: None,
         })
     }
 
@@ -557,7 +530,7 @@ mod tests {
             },
             object_pool_capacity: OBJECT_POOL_CAPACITY,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
+            event_listener: None,
         })
     }
 
@@ -573,7 +546,7 @@ mod tests {
             },
             object_pool_capacity: OBJECT_POOL_CAPACITY,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
+            event_listener: None,
         })
     }
 
@@ -586,7 +559,7 @@ mod tests {
             },
             object_pool_capacity: OBJECT_POOL_CAPACITY,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
+            event_listener: None,
         })
     }
 
