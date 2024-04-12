@@ -39,37 +39,37 @@ use crate::{
 };
 
 pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
+    GenericCache<K, V, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
 pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Fifo<K, V>, L, S>;
 pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
+    GenericCacheEntry<K, V, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S>;
 pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, FifoHandle<K, V>, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S, ER>;
+    GenericEntry<K, V, Fifo<K, V>, HashTableIndexer<K, FifoHandle<K, V>>, L, S, ER>;
 
 pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
+    GenericCache<K, V, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
 pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lru<K, V>, L, S>;
 pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
+    GenericCacheEntry<K, V, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S>;
 pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, LruHandle<K, V>, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S, ER>;
+    GenericEntry<K, V, Lru<K, V>, HashTableIndexer<K, LruHandle<K, V>>, L, S, ER>;
 
 pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
+    GenericCache<K, V, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
 pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> = CacheConfig<Lfu<K, V>, L, S>;
 pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
+    GenericCacheEntry<K, V, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S>;
 pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, LfuHandle<K, V>, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S, ER>;
+    GenericEntry<K, V, Lfu<K, V>, HashTableIndexer<K, LfuHandle<K, V>>, L, S, ER>;
 
 pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
+    GenericCache<K, V, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
 pub type S3FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     CacheConfig<S3Fifo<K, V>, L, S>;
 pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
+    GenericCacheEntry<K, V, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S>;
 pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, S3FifoHandle<K, V>, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S, ER>;
+    GenericEntry<K, V, S3Fifo<K, V>, HashTableIndexer<K, S3FifoHandle<K, V>>, L, S, ER>;
 
 pub enum CacheEntry<K, V, L, S = RandomState>
 where
