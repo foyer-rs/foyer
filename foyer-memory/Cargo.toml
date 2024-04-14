@@ -47,3 +47,7 @@ harness = false
 [[bench]]
 name = "bench_dynamic_dispatch"
 harness = false
+
+[[bench]]
+name = "bench_perf"
+harness = false
