@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use ahash::RandomState;
+use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 
 use foyer_memory::{
@@ -76,41 +77,55 @@ fn new_s3fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
     Arc::new(Cache::s3fifo(config))
 }
 
-fn create_cache(op: u8) -> Arc<Cache<CacheKey, CacheValue>> {
-    match op % 4 {
-        0 => new_fifo_cache(20),
-        1 => new_lru_cache(20),
-        2 => new_lfu_cache(20),
-        3 => new_s3fifo_cache(20),
-        _ => unreachable!(),
+#[derive(Debug, Arbitrary)]
+enum Op {
+    Insert(CacheKey, CacheValue, usize),
+    Get(CacheKey),
+    Remove(CacheKey),
+    Clear,
+}
+
+#[derive(Debug, Arbitrary)]
+enum CacheType {
+    Fifo,
+    Lru,
+    Lfu,
+    S3Fifo,
+}
+
+#[derive(Debug, Arbitrary)]
+struct Input {
+    capacity: usize,
+    cache_type: CacheType,
+    operations: Vec<Op>,
+}
+
+fn create_cache(cache_type: CacheType, capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
+    match cache_type {
+        CacheType::Fifo => new_fifo_cache(capacity),
+        CacheType::Lru => new_lru_cache(capacity),
+        CacheType::Lfu => new_lfu_cache(capacity),
+        CacheType::S3Fifo => new_s3fifo_cache(capacity),
     }
 }
 
-fuzz_target!(|data: &[u8]| {
-    if data.is_empty() {
-        return;
-    }
-    let cache = create_cache(data[0]);
-    let mut it = data.iter();
-    for &op in it.by_ref() {
-        match op % 4 {
-            0 => {
-                cache.insert(op, op, 1);
+fuzz_target!(|data: Input| {
+    let cache = create_cache(data.cache_type, data.capacity);
+
+    for op in data.operations {
+        match op {
+            Op::Insert(k, v, size) => {
+                cache.insert(k, v, size as usize);
             }
-            1 => match cache.get(&op) {
-                Some(v) => assert_eq!(*v, op),
-                None => {}
-            },
-            2 => {
-                cache.remove(&op);
+            Op::Get(k) => {
+                let _ = cache.get(&k);
             }
-            3 => {
-                // Low probability to clear the cache
-                if op % 10 == 1 {
-                    cache.clear();
-                }
+            Op::Remove(k) => {
+                cache.remove(&k);
             }
-            _ => unreachable!(),
+            Op::Clear => {
+                cache.clear();
+            }
         }
     }
 });
