@@ -174,13 +174,13 @@ jobs:
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
-          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.tgz --transform 's#.*/##'
+          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.asan.tgz --transform 's#.*/##'
       - name: Upload Artifacts on Failure
         uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
-          name: artifacts.tgz
-          path: artifacts.tgz
+          name: artifacts.asan.tgz
+          path: artifacts.asan.tgz
   lsan:
     name: run with leak saniziter
     runs-on: ubuntu-latest
@@ -220,13 +220,13 @@ jobs:
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
-          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.tgz --transform 's#.*/##'
+          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.lsan.tgz --transform 's#.*/##'
       - name: Upload Artifacts on Failure
         uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
-          name: artifacts.tgz
-          path: artifacts.tgz
+          name: artifacts.lsan.tgz
+          path: artifacts.lsan.tgz
   deterministic-test:
     name: run deterministic test
     runs-on: ubuntu-latest
