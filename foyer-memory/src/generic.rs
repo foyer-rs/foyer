@@ -34,8 +34,12 @@ use parking_lot::Mutex;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    eviction::Eviction, handle::Handle, indexer::Indexer, listener::CacheEventListener, metrics::Metrics, CacheContext,
-    Key, Value,
+    eviction::Eviction,
+    handle::{Handle, KeyedHandle},
+    indexer::Indexer,
+    listener::CacheEventListener,
+    metrics::Metrics,
+    CacheContext, Key, Value,
 };
 
 struct CacheSharedState<T, L> {
@@ -52,8 +56,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -65,7 +69,7 @@ where
 
     waiters: HashMap<K, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
 
-    state: Arc<CacheSharedState<E::Handle, L>>,
+    state: Arc<CacheSharedState<E::Item, L>>,
 }
 
 impl<K, V, E, I, L, S> CacheShard<K, V, E, I, L, S>
@@ -73,8 +77,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -82,7 +86,7 @@ where
         capacity: usize,
         eviction_config: &E::Config,
         usage: Arc<AtomicUsize>,
-        context: Arc<CacheSharedState<E::Handle, L>>,
+        context: Arc<CacheSharedState<E::Item, L>>,
     ) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(capacity, eviction_config) };
@@ -104,15 +108,11 @@ where
         key: K,
         value: V,
         charge: usize,
-        context: <E::Handle as Handle>::Context,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
-    ) -> NonNull<E::Handle> {
-        let mut handle = self
-            .state
-            .object_pool
-            .pop()
-            .unwrap_or_else(|| Box::new(E::Handle::new()));
-        handle.init(hash, key, value, charge, context);
+        context: <E::Item as Handle>::Context,
+        last_reference_entries: &mut Vec<(K, V, <E::Item as Handle>::Context, usize)>,
+    ) -> NonNull<E::Item> {
+        let mut handle = self.state.object_pool.pop().unwrap_or_else(|| Box::new(E::Item::new()));
+        handle.init(hash, (key, value), charge, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
         self.evict(charge, last_reference_entries);
@@ -144,7 +144,7 @@ where
         ptr
     }
 
-    unsafe fn get<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<E::Handle>>
+    unsafe fn get<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<E::Item>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -179,7 +179,7 @@ where
     /// Remove a key from the cache.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<(K, V, <E::Handle as Handle>::Context, usize)>
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<(K, V, <E::Item as Handle>::Context, usize)>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -195,7 +195,7 @@ where
     }
 
     /// Clear all cache entries.
-    unsafe fn clear(&mut self, last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
+    unsafe fn clear(&mut self, last_reference_entries: &mut Vec<(K, V, <E::Item as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Avoid collecting here?
         let ptrs = self.indexer.drain().collect_vec();
         let eptrs = self.eviction.clear();
@@ -223,7 +223,7 @@ where
     unsafe fn evict(
         &mut self,
         charge: usize,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
+        last_reference_entries: &mut Vec<(K, V, <E::Item as Handle>::Context, usize)>,
     ) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         while self.usage.load(Ordering::Relaxed) + charge > self.capacity {
@@ -246,8 +246,8 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn try_release_external_handle(
         &mut self,
-        mut ptr: NonNull<E::Handle>,
-    ) -> Option<(K, V, <E::Handle as Handle>::Context, usize)> {
+        mut ptr: NonNull<E::Item>,
+    ) -> Option<(K, V, <E::Item as Handle>::Context, usize)> {
         ptr.as_mut().base_mut().dec_refs();
         self.try_release_handle(ptr, true)
     }
@@ -259,26 +259,26 @@ where
     /// Recycle it if possible.
     unsafe fn try_release_handle(
         &mut self,
-        mut ptr: NonNull<E::Handle>,
+        mut ptr: NonNull<E::Item>,
         reinsert: bool,
-    ) -> Option<(K, V, <E::Handle as Handle>::Context, usize)> {
-        let base = ptr.as_mut().base_mut();
+    ) -> Option<(K, V, <E::Item as Handle>::Context, usize)> {
+        let handle = ptr.as_mut();
 
-        if base.has_refs() {
+        if handle.base().has_refs() {
             return None;
         }
 
-        debug_assert!(base.is_inited());
-        debug_assert!(!base.has_refs());
+        debug_assert!(handle.base().is_inited());
+        debug_assert!(!handle.base().has_refs());
 
         // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and
         // the eviction container.
-        if base.is_in_indexer() {
+        if handle.base().is_in_indexer() {
             // The usage is higher than the capacity means most handles are held externally,
             // the cache shard cannot release enough charges for the new inserted entries.
             // In this case, the reinsertion should be given up.
             if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
-                let was_in_eviction = base.is_in_eviction();
+                let was_in_eviction = handle.base().is_in_eviction();
                 self.eviction.reinsert(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
                     if was_in_eviction {
@@ -289,26 +289,26 @@ where
             }
 
             // If the entry has not been reinserted, remove it from the indexer and the eviction container (if needed).
-            self.indexer.remove(base.hash(), base.key());
+            self.indexer.remove(handle.base().hash(), handle.key());
             if ptr.as_ref().base().is_in_eviction() {
                 self.eviction.remove(ptr);
             }
         }
 
         // Here the handle is neither in the indexer nor in the eviction container.
-        debug_assert!(!base.is_in_indexer());
-        debug_assert!(!base.is_in_eviction());
-        debug_assert!(!base.has_refs());
+        debug_assert!(!handle.base().is_in_indexer());
+        debug_assert!(!handle.base().is_in_eviction());
+        debug_assert!(!handle.base().has_refs());
 
         self.state.metrics.release.fetch_add(1, Ordering::Relaxed);
 
-        self.usage.fetch_sub(base.charge(), Ordering::Relaxed);
-        let entry = base.take();
+        self.usage.fetch_sub(handle.base().charge(), Ordering::Relaxed);
+        let ((key, value), context, charge) = handle.base_mut().take();
 
         let handle = Box::from_raw(ptr.as_ptr());
         let _ = self.state.object_pool.push(handle);
 
-        Some(entry)
+        Some((key, value, context, charge))
     }
 }
 
@@ -317,8 +317,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -327,10 +327,13 @@ where
     }
 }
 
-pub struct CacheConfig<E, L, S = RandomState>
+pub struct CacheConfig<K, V, E, L, S = RandomState>
 where
+    K: Key,
+    V: Value,
     E: Eviction,
-    L: CacheEventListener<<E::Handle as Handle>::Key, <E::Handle as Handle>::Value>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub capacity: usize,
@@ -348,8 +351,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
@@ -365,8 +368,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error,
@@ -381,8 +384,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: std::error::Error + From<oneshot::error::RecvError>,
@@ -409,8 +412,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -419,7 +422,7 @@ where
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
 
-    context: Arc<CacheSharedState<E::Handle, L>>,
+    context: Arc<CacheSharedState<E::Item, L>>,
 
     hash_builder: S,
 }
@@ -429,12 +432,12 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn new(config: CacheConfig<E, L, S>) -> Self {
+    pub fn new(config: CacheConfig<K, V, E, L, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
@@ -572,7 +575,7 @@ where
         &self.context.metrics
     }
 
-    unsafe fn try_release_external_handle(&self, ptr: NonNull<E::Handle>) {
+    unsafe fn try_release_external_handle(&self, ptr: NonNull<E::Item>) {
         let entry = {
             let base = ptr.as_ref().base();
             let mut shard = self.shards[base.hash() as usize % self.shards.len()].lock();
@@ -592,8 +595,8 @@ where
     K: Key + Clone,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -653,13 +656,13 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     cache: Arc<GenericCache<K, V, E, I, L, S>>,
-    ptr: NonNull<E::Handle>,
+    ptr: NonNull<E::Item>,
 }
 
 impl<K, V, E, I, L, S> GenericCacheEntry<K, V, E, I, L, S>
@@ -667,20 +670,20 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn key(&self) -> &<E::Handle as Handle>::Key {
-        unsafe { self.ptr.as_ref().base().key() }
+    pub fn key(&self) -> &K {
+        unsafe { &self.ptr.as_ref().base().data_unwrap_unchecked().0 }
     }
 
-    pub fn value(&self) -> &<E::Handle as Handle>::Value {
-        unsafe { self.ptr.as_ref().base().value() }
+    pub fn value(&self) -> &V {
+        unsafe { &self.ptr.as_ref().base().data_unwrap_unchecked().1 }
     }
 
-    pub fn context(&self) -> &<E::Handle as Handle>::Context {
+    pub fn context(&self) -> &<E::Item as Handle>::Context {
         unsafe { self.ptr.as_ref().base().context() }
     }
 
@@ -698,8 +701,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -724,8 +727,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -739,8 +742,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -756,8 +759,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -767,8 +770,8 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: Handle<Key = K, Value = V>,
-    I: Indexer<Key = K, Handle = E::Handle>,
+    E::Item: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Item>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -864,7 +867,7 @@ mod tests {
     fn test_reference_count() {
         let cache = fifo(100);
 
-        let refs = |ptr: NonNull<FifoHandle<u64, String>>| unsafe { ptr.as_ref().base().refs() };
+        let refs = |ptr: NonNull<FifoHandle<(u64, String)>>| unsafe { ptr.as_ref().base().refs() };
 
         let e1 = insert_fifo(&cache, 42, "the answer to life, the universe, and everything");
         let ptr = e1.ptr;
