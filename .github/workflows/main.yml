@@ -171,6 +171,16 @@ jobs:
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+      - name: Prepare Artifacts on Failure
+        if: ${{ failure() }}
+        run: |-
+          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.asan.tgz --transform 's#.*/##'
+      - name: Upload Artifacts on Failure
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: artifacts.asan.tgz
+          path: artifacts.asan.tgz
   lsan:
     name: run with leak saniziter
     runs-on: ubuntu-latest
@@ -207,6 +217,16 @@ jobs:
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+      - name: Prepare Artifacts on Failure
+        if: ${{ failure() }}
+        run: |-
+          find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.lsan.tgz --transform 's#.*/##'
+      - name: Upload Artifacts on Failure
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: artifacts.lsan.tgz
+          path: artifacts.lsan.tgz
   deterministic-test:
     name: run deterministic test
     runs-on: ubuntu-latest
