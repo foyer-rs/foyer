@@ -22,7 +22,7 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    CacheContext, Key, Value,
+    CacheContext,
 };
 
 #[derive(Debug, Clone)]
@@ -40,34 +40,30 @@ impl From<FifoContext> for CacheContext {
     }
 }
 
-pub struct FifoHandle<K, V>
+pub struct FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     link: DlistLink,
-    base: BaseHandle<K, V, FifoContext>,
+    base: BaseHandle<T, FifoContext>,
 }
 
-impl<K, V> Debug for FifoHandle<K, V>
+impl<T> Debug for FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FifoHandle").finish()
     }
 }
 
-intrusive_adapter! { FifoHandleDlistAdapter<K, V> = NonNull<FifoHandle<K, V>>: FifoHandle<K, V> { link: DlistLink } where K: Key, V: Value }
+intrusive_adapter! { FifoHandleDlistAdapter<T> = NonNull<FifoHandle<T>>: FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<K, V> Handle for FifoHandle<K, V>
+impl<T> Handle for FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Key = K;
-    type Value = V;
+    type Data = T;
     type Context = FifoContext;
 
     fn new() -> Self {
@@ -77,15 +73,15 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
-        self.base.init(hash, key, value, charge, context);
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
+        self.base.init(hash, data, charge, context);
     }
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
         &mut self.base
     }
 }
@@ -93,20 +89,18 @@ where
 #[derive(Debug, Clone)]
 pub struct FifoConfig {}
 
-pub struct Fifo<K, V>
+pub struct Fifo<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    queue: Dlist<FifoHandleDlistAdapter<K, V>>,
+    queue: Dlist<FifoHandleDlistAdapter<T>>,
 }
 
-impl<K, V> Eviction for Fifo<K, V>
+impl<T> Eviction for Fifo<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Item = FifoHandle<K, V>;
+    type Item = FifoHandle<T>;
     type Config = FifoConfig;
 
     unsafe fn new(_capacity: usize, _config: &Self::Config) -> Self
@@ -156,18 +150,8 @@ where
     }
 }
 
-unsafe impl<K, V> Send for Fifo<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for Fifo<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for Fifo<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for Fifo<T> where T: Send + Sync + 'static {}
 
 #[cfg(test)]
 pub mod tests {
@@ -177,25 +161,24 @@ pub mod tests {
     use super::*;
     use crate::eviction::test_utils::TestEviction;
 
-    impl<K, V> TestEviction for Fifo<K, V>
+    impl<T> TestEviction for Fifo<T>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        T: Send + Sync + 'static + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
+        fn dump(&self) -> Vec<T> {
             self.queue
                 .iter()
-                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .map(|handle| handle.base().data_unwrap_unchecked().clone())
                 .collect_vec()
         }
     }
 
-    type TestFifoHandle = FifoHandle<u64, u64>;
-    type TestFifo = Fifo<u64, u64>;
+    type TestFifoHandle = FifoHandle<u64>;
+    type TestFifo = Fifo<u64>;
 
-    unsafe fn new_test_fifo_handle_ptr(key: u64, value: u64) -> NonNull<TestFifoHandle> {
+    unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<TestFifoHandle> {
         let mut handle = Box::new(TestFifoHandle::new());
-        handle.init(0, key, value, 1, FifoContext);
+        handle.init(0, data, 1, FifoContext);
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 
@@ -206,7 +189,7 @@ pub mod tests {
     #[test]
     fn test_fifo() {
         unsafe {
-            let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i, i)).collect_vec();
+            let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i)).collect_vec();
 
             let mut fifo = TestFifo::new(100, &FifoConfig {});
 

@@ -23,7 +23,7 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    CacheContext, Key, Value,
+    CacheContext,
 };
 
 #[derive(Debug, Clone)]
@@ -63,35 +63,31 @@ impl From<LruContext> for CacheContext {
     }
 }
 
-pub struct LruHandle<K, V>
+pub struct LruHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     link: DlistLink,
-    base: BaseHandle<K, V, LruContext>,
+    base: BaseHandle<T, LruContext>,
     in_high_priority_pool: bool,
 }
 
-impl<K, V> Debug for LruHandle<K, V>
+impl<T> Debug for LruHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LruHandle").finish()
     }
 }
 
-intrusive_adapter! { LruHandleDlistAdapter<K, V> = NonNull<LruHandle<K, V>>: LruHandle<K, V> { link: DlistLink } where K: Key, V: Value }
+intrusive_adapter! { LruHandleDlistAdapter<T> = NonNull<LruHandle<T>>: LruHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<K, V> Handle for LruHandle<K, V>
+impl<T> Handle for LruHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Key = K;
-    type Value = V;
+    type Data = T;
     type Context = LruContext;
 
     fn new() -> Self {
@@ -102,48 +98,36 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
-        self.base.init(hash, key, value, charge, context)
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
+        self.base.init(hash, data, charge, context)
     }
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
         &mut self.base
     }
 }
 
-unsafe impl<K, V> Send for LruHandle<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for LruHandle<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for LruHandle<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for LruHandle<T> where T: Send + Sync + 'static {}
 
-pub struct Lru<K, V>
+pub struct Lru<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    high_priority_list: Dlist<LruHandleDlistAdapter<K, V>>,
-    list: Dlist<LruHandleDlistAdapter<K, V>>,
+    high_priority_list: Dlist<LruHandleDlistAdapter<T>>,
+    list: Dlist<LruHandleDlistAdapter<T>>,
 
     high_priority_charges: usize,
     high_priority_charges_capacity: usize,
 }
 
-impl<K, V> Lru<K, V>
+impl<T> Lru<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     unsafe fn may_overflow_high_priority_pool(&mut self) {
         while self.high_priority_charges > self.high_priority_charges_capacity {
@@ -158,12 +142,11 @@ where
     }
 }
 
-impl<K, V> Eviction for Lru<K, V>
+impl<T> Eviction for Lru<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Item = LruHandle<K, V>;
+    type Item = LruHandle<T>;
     type Config = LruConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -282,18 +265,8 @@ where
     }
 }
 
-unsafe impl<K, V> Send for Lru<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for Lru<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for Lru<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for Lru<T> where T: Send + Sync + 'static {}
 
 #[cfg(test)]
 pub mod tests {
@@ -304,26 +277,25 @@ pub mod tests {
     use super::*;
     use crate::eviction::test_utils::TestEviction;
 
-    impl<K, V> TestEviction for Lru<K, V>
+    impl<T> TestEviction for Lru<T>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        T: Send + Sync + 'static + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
+        fn dump(&self) -> Vec<T> {
             self.list
                 .iter()
                 .chain(self.high_priority_list.iter())
-                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .map(|handle| handle.base().data_unwrap_unchecked().clone())
                 .collect_vec()
         }
     }
 
-    type TestLruHandle = LruHandle<u64, u64>;
-    type TestLru = Lru<u64, u64>;
+    type TestLruHandle = LruHandle<u64>;
+    type TestLru = Lru<u64>;
 
-    unsafe fn new_test_lru_handle_ptr(key: u64, value: u64, context: LruContext) -> NonNull<TestLruHandle> {
+    unsafe fn new_test_lru_handle_ptr(data: u64, context: LruContext) -> NonNull<TestLruHandle> {
         let mut handle = Box::new(TestLruHandle::new());
-        handle.init(0, key, value, 1, context);
+        handle.init(0, data, 1, context);
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 
@@ -350,7 +322,6 @@ pub mod tests {
             let ptrs = (0..20)
                 .map(|i| {
                     new_test_lru_handle_ptr(
-                        i,
                         i,
                         if i < 10 {
                             LruContext::HighPriority

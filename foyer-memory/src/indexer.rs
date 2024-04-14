@@ -16,30 +16,11 @@ use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
-use crate::{handle::Handle, Key};
-
-pub trait IndexerV2<K, T>: Send + Sync + 'static {
-    fn key(item: &T) -> &K;
-    fn key_mut(item: &mut T) -> &mut K;
-
-    fn new() -> Self;
-    unsafe fn insert(&mut self, item: T) -> Option<T>;
-    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<&T>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<T>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn drain(&mut self) -> impl Iterator<Item = T>;
-}
-
-// impl<K, T> IndexerV2<K, T> for HashTable<> {}
+use crate::{handle::KeyedHandle, Key};
 
 pub trait Indexer: Send + Sync + 'static {
     type Key: Key;
-    type Handle: Handle<Key = Self::Key>;
+    type Handle: KeyedHandle<Key = Self::Key>;
 
     fn new() -> Self;
     unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
@@ -57,7 +38,7 @@ pub trait Indexer: Send + Sync + 'static {
 pub struct HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<Key = K>,
+    H: KeyedHandle<Key = K>,
 {
     table: HashTable<NonNull<H>>,
 }
@@ -65,21 +46,21 @@ where
 unsafe impl<K, H> Send for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<Key = K>,
+    H: KeyedHandle<Key = K>,
 {
 }
 
 unsafe impl<K, H> Sync for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<Key = K>,
+    H: KeyedHandle<Key = K>,
 {
 }
 
 impl<K, H> Indexer for HashTableIndexer<K, H>
 where
     K: Key,
-    H: Handle<Key = K>,
+    H: KeyedHandle<Key = K>,
 {
     type Key = K;
     type Handle = H;
@@ -91,14 +72,14 @@ where
     }
 
     unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
-        let base = ptr.as_mut().base_mut();
+        let handle = ptr.as_mut();
 
-        debug_assert!(!base.is_in_indexer());
-        base.set_in_indexer(true);
+        debug_assert!(!handle.base().is_in_indexer());
+        handle.base_mut().set_in_indexer(true);
 
         match self.table.entry(
-            base.hash(),
-            |p| p.as_ref().base().key() == base.key(),
+            handle.base().hash(),
+            |p| p.as_ref().key() == handle.key(),
             |p| p.as_ref().base().hash(),
         ) {
             HashTableEntry::Occupied(mut o) => {
@@ -120,9 +101,7 @@ where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.table
-            .find(hash, |p| p.as_ref().base().key().borrow() == key)
-            .copied()
+        self.table.find(hash, |p| p.as_ref().key().borrow() == key).copied()
     }
 
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
@@ -130,11 +109,10 @@ where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self.table.entry(
-            hash,
-            |p| p.as_ref().base().key().borrow() == key,
-            |p| p.as_ref().base().hash(),
-        ) {
+        match self
+            .table
+            .entry(hash, |p| p.as_ref().key().borrow() == key, |p| p.as_ref().base().hash())
+        {
             HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();
                 let b = p.as_mut().base_mut();

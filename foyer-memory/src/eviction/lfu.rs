@@ -24,7 +24,7 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    CacheContext, Key, Value,
+    CacheContext,
 };
 
 #[derive(Debug, Clone)]
@@ -68,35 +68,31 @@ enum Queue {
     Protected,
 }
 
-pub struct LfuHandle<K, V>
+pub struct LfuHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     link: DlistLink,
-    base: BaseHandle<K, V, LfuContext>,
+    base: BaseHandle<T, LfuContext>,
     queue: Queue,
 }
 
-impl<K, V> Debug for LfuHandle<K, V>
+impl<T> Debug for LfuHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LfuHandle").finish()
     }
 }
 
-intrusive_adapter! { LfuHandleDlistAdapter<K, V> = NonNull<LfuHandle<K, V>>: LfuHandle<K, V> { link: DlistLink } where K: Key, V: Value }
+intrusive_adapter! { LfuHandleDlistAdapter<T> = NonNull<LfuHandle<T>>: LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<K, V> Handle for LfuHandle<K, V>
+impl<T> Handle for LfuHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Key = K;
-    type Value = V;
+    type Data = T;
     type Context = LfuContext;
 
     fn new() -> Self {
@@ -107,31 +103,21 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
-        self.base.init(hash, key, value, charge, context)
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
+        self.base.init(hash, data, charge, context)
     }
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
         &mut self.base
     }
 }
 
-unsafe impl<K, V> Send for LfuHandle<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for LfuHandle<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for LfuHandle<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for LfuHandle<T> where T: Send + Sync + 'static {}
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
@@ -145,14 +131,13 @@ where
 ///
 /// When evicting, the entry with a lower frequency from `window` or `probtion` will be evicted first, then from
 /// `protected`.
-pub struct Lfu<K, V>
+pub struct Lfu<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    window: Dlist<LfuHandleDlistAdapter<K, V>>,
-    probation: Dlist<LfuHandleDlistAdapter<K, V>>,
-    protected: Dlist<LfuHandleDlistAdapter<K, V>>,
+    window: Dlist<LfuHandleDlistAdapter<T>>,
+    probation: Dlist<LfuHandleDlistAdapter<T>>,
+    protected: Dlist<LfuHandleDlistAdapter<T>>,
 
     window_charges: usize,
     probation_charges: usize,
@@ -167,12 +152,11 @@ where
     decay: usize,
 }
 
-impl<K, V> Lfu<K, V>
+impl<T> Lfu<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    fn increase_queue_charges(&mut self, handle: &LfuHandle<K, V>) {
+    fn increase_queue_charges(&mut self, handle: &LfuHandle<T>) {
         let charges = handle.base().charge();
         match handle.queue {
             Queue::None => unreachable!(),
@@ -182,7 +166,7 @@ where
         }
     }
 
-    fn decrease_queue_charges(&mut self, handle: &LfuHandle<K, V>) {
+    fn decrease_queue_charges(&mut self, handle: &LfuHandle<T>) {
         let charges = handle.base().charge();
         match handle.queue {
             Queue::None => unreachable!(),
@@ -202,12 +186,11 @@ where
     }
 }
 
-impl<K, V> Eviction for Lfu<K, V>
+impl<T> Eviction for Lfu<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Item = LfuHandle<K, V>;
+    type Item = LfuHandle<T>;
     type Config = LfuConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -409,18 +392,8 @@ where
     }
 }
 
-unsafe impl<K, V> Send for Lfu<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for Lfu<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for Lfu<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for Lfu<T> where T: Send + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
@@ -430,23 +403,22 @@ mod tests {
     use super::*;
     use crate::eviction::test_utils::TestEviction;
 
-    impl<K, V> TestEviction for Lfu<K, V>
+    impl<T> TestEviction for Lfu<T>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        T: Send + Sync + 'static + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
+        fn dump(&self) -> Vec<T> {
             self.window
                 .iter()
                 .chain(self.probation.iter())
                 .chain(self.protected.iter())
-                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .map(|handle| handle.base().data_unwrap_unchecked().clone())
                 .collect_vec()
         }
     }
 
-    type TestLfu = Lfu<u64, u64>;
-    type TestLfuHandle = LfuHandle<u64, u64>;
+    type TestLfu = Lfu<u64>;
+    type TestLfuHandle = LfuHandle<u64>;
 
     unsafe fn assert_test_lfu(
         lfu: &TestLfu,
@@ -463,14 +435,7 @@ mod tests {
         assert_eq!(lfu.window_charges, window);
         assert_eq!(lfu.probation_charges, probation);
         assert_eq!(lfu.protected_charges, protected);
-        let es = lfu
-            .dump()
-            .into_iter()
-            .map(|(k, v)| {
-                assert_eq!(k, v);
-                k
-            })
-            .collect_vec();
+        let es = lfu.dump().into_iter().collect_vec();
         assert_eq!(es, entries);
     }
 
@@ -485,7 +450,7 @@ mod tests {
             let ptrs = (0..100)
                 .map(|i| {
                     let mut handle = Box::new(TestLfuHandle::new());
-                    handle.init(i, i, i, 1, LfuContext);
+                    handle.init(i, i, 1, LfuContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();

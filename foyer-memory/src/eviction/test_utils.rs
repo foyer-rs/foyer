@@ -21,5 +21,5 @@ pub trait TestEviction: Eviction
 where
     Self::Item: Handle,
 {
-    fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)>;
+    fn dump(&self) -> Vec<<Self::Item as Handle>::Data>;
 }
