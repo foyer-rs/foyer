@@ -2,6 +2,9 @@
 
 /target
 
+foyer-memory/fuzz/artifacts/cache_fuzz/
+foyer-memory/fuzz/corpus/cache_fuzz
+
 Cargo.lock
 lcov.info
 

@@ -8,6 +8,7 @@ members = [
     "foyer-experimental-bench",
     "foyer-intrusive",
     "foyer-memory",
+    "foyer-memory/fuzz",
     "foyer-storage",
     "foyer-storage-bench",
     "foyer-workspace-hack",
