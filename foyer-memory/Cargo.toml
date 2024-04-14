@@ -30,6 +30,7 @@ tokio = { workspace = true }
 [dev-dependencies]
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
+criterion = "0.5.1"
 hdrhistogram = "7"
 moka = { version = "0", features = ["sync"] }
 rand = "0.8"

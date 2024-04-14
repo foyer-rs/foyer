@@ -21,6 +21,7 @@ publish = true
 ahash = { version = "0.8" }
 allocator-api2 = { version = "0.2" }
 crossbeam-channel = { version = "0.5" }
+crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1", default-features = false, features = ["use_std"] }
@@ -30,11 +31,14 @@ futures-executor = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await-macro", "channel", "io", "sink"] }
 hashbrown = { version = "0.14", features = ["raw"] }
-itertools = { version = "0.12" }
 libc = { version = "0.2", features = ["extra_traits"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }
+regex = { version = "1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+regex-automata = { version = "0.4", default-features = false, features = ["meta", "std", "unicode-case", "unicode-perl", "unicode-word-boundary"] }
+regex-syntax = { version = "0.8", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+serde = { version = "1", features = ["alloc", "derive"] }
 smallvec = { version = "1", default-features = false, features = ["const_new"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 tracing-core = { version = "0.1" }
@@ -42,7 +46,6 @@ tracing-core = { version = "0.1" }
 [build-dependencies]
 cc = { version = "1", default-features = false, features = ["parallel"] }
 either = { version = "1", default-features = false, features = ["use_std"] }
-itertools = { version = "0.12" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 syn = { version = "2", features = ["extra-traits", "full", "visit-mut"] }
