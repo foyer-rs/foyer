@@ -6,10 +6,10 @@ edition = "2021"
 
 [dependencies]
 ahash = "0.8"
+arbitrary = { version = "1", features = ["derive"] }
 foyer-memory = { path = ".." }
 foyer-workspace-hack = { version = "0.4", path = "../../foyer-workspace-hack" }
 libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = ["derive"] }
 
 [package.metadata]
 cargo-fuzz = true
