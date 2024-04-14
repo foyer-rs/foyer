@@ -18,6 +18,25 @@ use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
 use crate::{handle::Handle, Key};
 
+pub trait IndexerV2<K, T>: Send + Sync + 'static {
+    fn key(item: &T) -> &K;
+    fn key_mut(item: &mut T) -> &mut K;
+
+    fn new() -> Self;
+    unsafe fn insert(&mut self, item: T) -> Option<T>;
+    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<&T>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<T>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
+    unsafe fn drain(&mut self) -> impl Iterator<Item = T>;
+}
+
+// impl<K, T> IndexerV2<K, T> for HashTable<> {}
+
 pub trait Indexer: Send + Sync + 'static {
     type Key: Key;
     type Handle: Handle<Key = Self::Key>;

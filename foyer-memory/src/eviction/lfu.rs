@@ -207,7 +207,7 @@ where
     K: Key,
     V: Value,
 {
-    type Handle = LfuHandle<K, V>;
+    type Item = LfuHandle<K, V>;
     type Config = LfuConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -252,7 +252,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         debug_assert!(!handle.link.is_linked());
@@ -278,7 +278,7 @@ where
         }
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
         // If both `window` and `probation` are empty, try evict from `protected`.
         let mut ptr = match (self.window.front(), self.probation.front()) {
@@ -312,7 +312,7 @@ where
         Some(ptr)
     }
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -361,11 +361,11 @@ where
         }
     }
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn access(&mut self, ptr: NonNull<Self::Item>) {
         self.update_frequencies(ptr.as_ref().base().hash());
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         debug_assert!(handle.link.is_linked());
@@ -386,7 +386,7 @@ where
         handle.base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
         let mut res = Vec::with_capacity(self.len());
 
         while !self.is_empty() {
@@ -435,7 +435,7 @@ mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
             self.window
                 .iter()
                 .chain(self.probation.iter())

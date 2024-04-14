@@ -106,7 +106,7 @@ where
     K: Key,
     V: Value,
 {
-    type Handle = FifoHandle<K, V>;
+    type Item = FifoHandle<K, V>;
     type Config = FifoConfig;
 
     unsafe fn new(_capacity: usize, _config: &Self::Config) -> Self
@@ -116,29 +116,29 @@ where
         Self { queue: Dlist::new() }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
         self.queue.push_back(ptr);
         ptr.as_mut().base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
         self.queue.pop_front().map(|mut ptr| {
             ptr.as_mut().base_mut().set_in_eviction(false);
             ptr
         })
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Item>) {}
 
-    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn access(&mut self, _: NonNull<Self::Item>) {}
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
         let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
         assert_eq!(p, ptr);
         ptr.as_mut().base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.queue.pop_front() {
             ptr.as_mut().base_mut().set_in_eviction(false);
@@ -182,7 +182,7 @@ pub mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
             self.queue
                 .iter()
                 .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))

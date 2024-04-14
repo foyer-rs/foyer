@@ -163,7 +163,7 @@ where
     K: Key,
     V: Value,
 {
-    type Handle = LruHandle<K, V>;
+    type Item = LruHandle<K, V>;
     type Config = LruConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -186,7 +186,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         debug_assert!(!handle.link.is_linked());
@@ -208,7 +208,7 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
         let mut ptr = self.list.pop_front().or_else(|| self.high_priority_list.pop_front())?;
 
         let handle = ptr.as_mut();
@@ -223,9 +223,9 @@ where
         Some(ptr)
     }
 
-    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn access(&mut self, _: NonNull<Self::Item>) {}
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         if handle.base().is_in_eviction() {
@@ -238,7 +238,7 @@ where
         }
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
         debug_assert!(handle.link.is_linked());
 
@@ -252,7 +252,7 @@ where
         handle.base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
         let mut res = Vec::with_capacity(self.len());
 
         while !self.list.is_empty() {
@@ -309,7 +309,7 @@ pub mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
             self.list
                 .iter()
                 .chain(self.high_priority_list.iter())

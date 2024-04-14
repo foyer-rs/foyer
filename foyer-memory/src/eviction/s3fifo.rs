@@ -145,7 +145,7 @@ where
     K: Key,
     V: Value,
 {
-    unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Item>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if self.small_charges > self.small_capacity {
             if let Some(ptr) = self.evict_small() {
@@ -155,7 +155,7 @@ where
         self.evict_main()
     }
 
-    unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Item>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
             if handle.freq > 1 {
@@ -173,7 +173,7 @@ where
         None
     }
 
-    unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Item>> {
         while let Some(mut ptr) = self.main_queue.pop_front() {
             let handle = ptr.as_mut();
             if handle.freq > 0 {
@@ -194,7 +194,7 @@ where
     K: Key,
     V: Value,
 {
-    type Handle = S3FifoHandle<K, V>;
+    type Item = S3FifoHandle<K, V>;
     type Config = S3FifoConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -211,7 +211,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         self.small_queue.push_back(ptr);
@@ -221,7 +221,7 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
         if let Some(mut ptr) = self.evict() {
             let handle = ptr.as_mut();
             // `handle.queue` has already been set with `evict()`
@@ -233,14 +233,14 @@ where
         }
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Item>) {}
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn access(&mut self, ptr: NonNull<Self::Item>) {
         let mut ptr = ptr;
         ptr.as_mut().inc();
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -274,7 +274,7 @@ where
         }
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
@@ -327,7 +327,7 @@ mod tests {
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+        fn dump(&self) -> Vec<(<Self::Item as Handle>::Key, <Self::Item as Handle>::Value)> {
             self.small_queue
                 .iter()
                 .chain(self.main_queue.iter())
