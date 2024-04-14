@@ -17,6 +17,9 @@ use crate::handle::Handle;
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-pub trait TestEviction: Eviction {
-    fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)>;
+pub trait TestEviction: Eviction
+where
+    Self::Item: Handle,
+{
+    fn dump(&self) -> Vec<<Self::Item as Handle>::Data>;
 }

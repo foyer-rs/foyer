@@ -22,7 +22,7 @@ use foyer_intrusive::{
 use crate::{
     eviction::Eviction,
     handle::{BaseHandle, Handle},
-    CacheContext, Key, Value,
+    CacheContext,
 };
 
 #[derive(Debug, Clone)]
@@ -46,33 +46,30 @@ enum Queue {
     Small,
 }
 
-pub struct S3FifoHandle<K, V>
+pub struct S3FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     link: DlistLink,
-    base: BaseHandle<K, V, S3FifoContext>,
+    base: BaseHandle<T, S3FifoContext>,
     freq: u8,
     queue: Queue,
 }
 
-impl<K, V> Debug for S3FifoHandle<K, V>
+impl<T> Debug for S3FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("S3FifoHandle").finish()
     }
 }
 
-intrusive_adapter! { S3FifoHandleDlistAdapter<K, V> = NonNull<S3FifoHandle<K, V>>: S3FifoHandle<K, V> { link: DlistLink } where K: Key, V: Value }
+intrusive_adapter! { S3FifoHandleDlistAdapter<T> = NonNull<S3FifoHandle<T>>: S3FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<K, V> S3FifoHandle<K, V>
+impl<T> S3FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
     #[inline(always)]
     pub fn inc(&mut self) {
@@ -90,13 +87,11 @@ where
     }
 }
 
-impl<K, V> Handle for S3FifoHandle<K, V>
+impl<T> Handle for S3FifoHandle<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Key = K;
-    type Value = V;
+    type Data = T;
     type Context = S3FifoContext;
 
     fn new() -> Self {
@@ -108,15 +103,15 @@ where
         }
     }
 
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context) {
-        self.base.init(hash, key, value, charge, context);
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
+        self.base.init(hash, data, charge, context);
     }
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context> {
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
         &mut self.base
     }
 }
@@ -126,13 +121,12 @@ pub struct S3FifoConfig {
     pub small_queue_capacity_ratio: f64,
 }
 
-pub struct S3Fifo<K, V>
+pub struct S3Fifo<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    small_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
-    main_queue: Dlist<S3FifoHandleDlistAdapter<K, V>>,
+    small_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
+    main_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
 
     small_capacity: usize,
 
@@ -140,12 +134,11 @@ where
     main_charges: usize,
 }
 
-impl<K, V> S3Fifo<K, V>
+impl<T> S3Fifo<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    unsafe fn evict(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if self.small_charges > self.small_capacity {
             if let Some(ptr) = self.evict_small() {
@@ -155,7 +148,7 @@ where
         self.evict_main()
     }
 
-    unsafe fn evict_small(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict_small(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
             if handle.freq > 1 {
@@ -173,7 +166,7 @@ where
         None
     }
 
-    unsafe fn evict_main(&mut self) -> Option<NonNull<<S3Fifo<K, V> as Eviction>::Handle>> {
+    unsafe fn evict_main(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         while let Some(mut ptr) = self.main_queue.pop_front() {
             let handle = ptr.as_mut();
             if handle.freq > 0 {
@@ -189,12 +182,11 @@ where
     }
 }
 
-impl<K, V> Eviction for S3Fifo<K, V>
+impl<T> Eviction for S3Fifo<T>
 where
-    K: Key,
-    V: Value,
+    T: Send + Sync + 'static,
 {
-    type Handle = S3FifoHandle<K, V>;
+    type Item = S3FifoHandle<T>;
     type Config = S3FifoConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -211,7 +203,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         self.small_queue.push_back(ptr);
@@ -221,7 +213,7 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
         if let Some(mut ptr) = self.evict() {
             let handle = ptr.as_mut();
             // `handle.queue` has already been set with `evict()`
@@ -233,14 +225,14 @@ where
         }
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Item>) {}
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn access(&mut self, ptr: NonNull<Self::Item>) {
         let mut ptr = ptr;
         ptr.as_mut().inc();
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -274,7 +266,7 @@ where
         }
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
@@ -300,18 +292,8 @@ where
     }
 }
 
-unsafe impl<K, V> Send for S3Fifo<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
-unsafe impl<K, V> Sync for S3Fifo<K, V>
-where
-    K: Key,
-    V: Value,
-{
-}
+unsafe impl<T> Send for S3Fifo<T> where T: Send + Sync + 'static {}
+unsafe impl<T> Sync for S3Fifo<T> where T: Send + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
@@ -322,32 +304,24 @@ mod tests {
     use super::*;
     use crate::eviction::test_utils::TestEviction;
 
-    impl<K, V> TestEviction for S3Fifo<K, V>
+    impl<T> TestEviction for S3Fifo<T>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        T: Send + Sync + 'static + Clone,
     {
-        fn dump(&self) -> Vec<(<Self::Handle as Handle>::Key, <Self::Handle as Handle>::Value)> {
+        fn dump(&self) -> Vec<T> {
             self.small_queue
                 .iter()
                 .chain(self.main_queue.iter())
-                .map(|handle| (handle.base().key().clone(), handle.base().value().clone()))
+                .map(|handle| handle.base().data_unwrap_unchecked().clone())
                 .collect_vec()
         }
     }
 
-    type TestS3Fifo = S3Fifo<u64, u64>;
-    type TestS3FifoHandle = S3FifoHandle<u64, u64>;
+    type TestS3Fifo = S3Fifo<u64>;
+    type TestS3FifoHandle = S3FifoHandle<u64>;
 
     fn assert_test_s3fifo(s3fifo: &TestS3Fifo, small: Vec<u64>, main: Vec<u64>) {
-        let mut s = s3fifo
-            .dump()
-            .into_iter()
-            .map(|(k, v)| {
-                assert_eq!(k, v);
-                k
-            })
-            .collect_vec();
+        let mut s = s3fifo.dump().into_iter().collect_vec();
         assert_eq!(s.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
         let m = s.split_off(s3fifo.small_queue.len());
         assert_eq!((&s, &m), (&small, &main));
@@ -366,7 +340,7 @@ mod tests {
             let ptrs = (0..100)
                 .map(|i| {
                     let mut handle = Box::new(TestS3FifoHandle::new());
-                    handle.init(i, i, i, 1, S3FifoContext);
+                    handle.init(i, i, 1, S3FifoContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();

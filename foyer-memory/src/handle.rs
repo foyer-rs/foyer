@@ -25,25 +25,39 @@ bitflags! {
 }
 
 pub trait Handle: Send + Sync + 'static {
-    type Key: Key;
-    type Value: Value;
+    type Data;
     type Context: Context;
 
     fn new() -> Self;
-    fn init(&mut self, hash: u64, key: Self::Key, value: Self::Value, charge: usize, context: Self::Context);
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context);
 
-    fn base(&self) -> &BaseHandle<Self::Key, Self::Value, Self::Context>;
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Key, Self::Value, Self::Context>;
+    fn base(&self) -> &BaseHandle<Self::Data, Self::Context>;
+    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context>;
 }
 
-#[derive(Debug)]
-pub struct BaseHandle<K, V, C>
+pub trait KeyedHandle: Handle {
+    type Key;
+
+    fn key(&self) -> &Self::Key;
+}
+
+impl<K, V, T> KeyedHandle for T
 where
     K: Key,
     V: Value,
+    T: Handle<Data = (K, V)>,
 {
+    type Key = K;
+
+    fn key(&self) -> &Self::Key {
+        &self.base().data_unwrap_unchecked().0
+    }
+}
+
+#[derive(Debug)]
+pub struct BaseHandle<T, C> {
     /// key, value, context
-    entry: Option<(K, V, C)>,
+    entry: Option<(T, C)>,
     /// key hash
     hash: u64,
     /// entry charge
@@ -54,21 +68,13 @@ where
     flags: BaseHandleFlags,
 }
 
-impl<K, V, C> Default for BaseHandle<K, V, C>
-where
-    K: Key,
-    V: Value,
-{
+impl<T, C> Default for BaseHandle<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V, C> BaseHandle<K, V, C>
-where
-    K: Key,
-    V: Value,
-{
+impl<T, C> BaseHandle<T, C> {
     /// Create a uninited handle.
     #[inline(always)]
     pub fn new() -> Self {
@@ -83,10 +89,10 @@ where
 
     /// Init handle with args.
     #[inline(always)]
-    pub fn init(&mut self, hash: u64, key: K, value: V, charge: usize, context: C) {
+    pub fn init(&mut self, hash: u64, data: T, charge: usize, context: C) {
         debug_assert!(self.entry.is_none());
         self.hash = hash;
-        self.entry = Some((key, value, context));
+        self.entry = Some((data, context));
         self.charge = charge;
         self.refs = 0;
         self.flags = BaseHandleFlags::empty();
@@ -94,12 +100,12 @@ where
 
     /// Take key and value from the handle and reset it to the uninited state.
     #[inline(always)]
-    pub fn take(&mut self) -> (K, V, C, usize) {
+    pub fn take(&mut self) -> (T, C, usize) {
         debug_assert!(self.entry.is_some());
         unsafe {
             self.entry
                 .take()
-                .map(|(key, value, context)| (key, value, context, self.charge))
+                .map(|(data, context)| (data, context, self.charge))
                 .unwrap_unchecked()
         }
     }
@@ -120,26 +126,15 @@ where
         self.hash
     }
 
-    /// Get key reference.
-    ///  
+    /// Get data reference.
+    ///
     /// # Panics
     ///
     /// Panics if the handle is uninited.
     #[inline(always)]
-    pub fn key(&self) -> &K {
+    pub fn data_unwrap_unchecked(&self) -> &T {
         debug_assert!(self.entry.is_some());
         unsafe { self.entry.as_ref().map(|entry| &entry.0).unwrap_unchecked() }
-    }
-
-    /// Get value reference.
-    ///  
-    /// # Panics
-    ///
-    /// Panics if the handle is uninited.
-    #[inline(always)]
-    pub fn value(&self) -> &V {
-        debug_assert!(self.entry.is_some());
-        unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
     }
 
     /// Get context reference.
@@ -150,7 +145,7 @@ where
     #[inline(always)]
     pub fn context(&self) -> &C {
         debug_assert!(self.entry.is_some());
-        unsafe { self.entry.as_ref().map(|entry| &entry.2).unwrap_unchecked() }
+        unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
     }
 
     /// Get the charge of the handle.
@@ -226,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_base_handle_basic() {
-        let mut h = BaseHandle::<(), (), ()>::new();
+        let mut h = BaseHandle::<(), ()>::new();
         assert!(!h.is_in_indexer());
         assert!(!h.is_in_eviction());
 
