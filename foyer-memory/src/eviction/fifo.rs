@@ -100,7 +100,7 @@ impl<T> Eviction for Fifo<T>
 where
     T: Send + Sync + 'static,
 {
-    type Item = FifoHandle<T>;
+    type Handle = FifoHandle<T>;
     type Config = FifoConfig;
 
     unsafe fn new(_capacity: usize, _config: &Self::Config) -> Self
@@ -110,29 +110,29 @@ where
         Self { queue: Dlist::new() }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         self.queue.push_back(ptr);
         ptr.as_mut().base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         self.queue.pop_front().map(|mut ptr| {
             ptr.as_mut().base_mut().set_in_eviction(false);
             ptr
         })
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Item>) {}
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn access(&mut self, _: NonNull<Self::Item>) {}
+    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
         assert_eq!(p, ptr);
         ptr.as_mut().base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.queue.pop_front() {
             ptr.as_mut().base_mut().set_in_eviction(false);
@@ -141,11 +141,11 @@ where
         res
     }
 
-    unsafe fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.queue.len()
     }
 
-    unsafe fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }

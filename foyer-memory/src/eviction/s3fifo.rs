@@ -186,7 +186,7 @@ impl<T> Eviction for S3Fifo<T>
 where
     T: Send + Sync + 'static,
 {
-    type Item = S3FifoHandle<T>;
+    type Handle = S3FifoHandle<T>;
     type Config = S3FifoConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -203,7 +203,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         self.small_queue.push_back(ptr);
@@ -213,7 +213,7 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         if let Some(mut ptr) = self.evict() {
             let handle = ptr.as_mut();
             // `handle.queue` has already been set with `evict()`
@@ -225,14 +225,14 @@ where
         }
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Item>) {}
+    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Item>) {
+    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
         let mut ptr = ptr;
         ptr.as_mut().inc();
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -266,7 +266,7 @@ where
         }
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
@@ -283,11 +283,11 @@ where
         res
     }
 
-    unsafe fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.small_queue.len() + self.main_queue.len()
     }
 
-    unsafe fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.small_queue.is_empty() && self.main_queue.is_empty()
     }
 }
