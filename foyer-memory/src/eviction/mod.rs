@@ -18,7 +18,7 @@ use std::ptr::NonNull;
 ///
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
-    type Item;
+    type Handle;
     type Config;
 
     /// Create a new empty eviction container.
@@ -37,7 +37,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// The `ptr` must be kept holding until `pop` or `remove`.
     ///
     /// The base handle associated to the `ptr` must be set in cache.
-    unsafe fn push(&mut self, ptr: NonNull<Self::Item>);
+    unsafe fn push(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Pop a handle `ptr` from the eviction container.
     ///
@@ -47,7 +47,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// Or it may become dangling and cause UB.
     ///
     /// The base handle associated to the `ptr` must be set NOT in cache.
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>>;
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
 
     /// Try to reinsert a handle `ptr` into the eviction container after access.
     ///
@@ -58,7 +58,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// The given `ptr` may be either IN or NOT IN the eviction container.
     /// If the `ptr` is reinserted, the base handle associated to it must be set in cache.
     /// If the `ptr` is NOT reinserted, the base handle associated to it must be set NOT in cache.
-    unsafe fn reinsert(&mut self, ptr: NonNull<Self::Item>);
+    unsafe fn reinsert(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Notify the eviciton container that the `ptr` is accessed.
     /// The eviction container can update its statistics.
@@ -66,7 +66,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// # Safety
     ///
     /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
-    unsafe fn access(&mut self, ptr: NonNull<Self::Item>);
+    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove the given `ptr` from the eviction container.
     ///
@@ -77,7 +77,7 @@ pub trait Eviction: Send + Sync + 'static {
     /// The `ptr` must be taken from the eviction container, otherwise it may become dangling and cause UB.
     ///
     /// The base handle associated to the `ptr` must be set NOT in cache.
-    unsafe fn remove(&mut self, ptr: NonNull<Self::Item>);
+    unsafe fn remove(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove all `ptr`s from the eviction container and reset.
     ///
@@ -86,23 +86,21 @@ pub trait Eviction: Send + Sync + 'static {
     /// All `ptr` must be taken from the eviction container, otherwise it may become dangling and cause UB.
     ///
     /// All base handles associated to the `ptr`s must be set NOT in cache.
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>>;
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>>;
 
     /// Return the count of the `ptr`s that in the eviction container.
-    ///
-    /// # Safety
-    unsafe fn len(&self) -> usize;
+    fn len(&self) -> usize;
 
     /// Return `true` if the eviction container is empty.
-    ///
-    /// # Safety
-    unsafe fn is_empty(&self) -> bool;
+    fn is_empty(&self) -> bool;
 }
 
 pub mod fifo;
 pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
+
+pub mod queue;
 
 #[cfg(test)]
 pub mod test_utils;

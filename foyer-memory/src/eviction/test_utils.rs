@@ -19,7 +19,7 @@ use crate::handle::Handle;
 #[allow(clippy::type_complexity)]
 pub trait TestEviction: Eviction
 where
-    Self::Item: Handle,
+    Self::Handle: Handle,
 {
-    fn dump(&self) -> Vec<<Self::Item as Handle>::Data>;
+    fn dump(&self) -> Vec<<Self::Handle as Handle>::Data>;
 }

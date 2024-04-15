@@ -190,7 +190,7 @@ impl<T> Eviction for Lfu<T>
 where
     T: Send + Sync + 'static,
 {
-    type Item = LfuHandle<T>;
+    type Handle = LfuHandle<T>;
     type Config = LfuConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -235,7 +235,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         debug_assert!(!handle.link.is_linked());
@@ -261,7 +261,7 @@ where
         }
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
         // If both `window` and `probation` are empty, try evict from `protected`.
         let mut ptr = match (self.window.front(), self.probation.front()) {
@@ -295,7 +295,7 @@ where
         Some(ptr)
     }
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -344,11 +344,11 @@ where
         }
     }
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Item>) {
+    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
         self.update_frequencies(ptr.as_ref().base().hash());
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         debug_assert!(handle.link.is_linked());
@@ -369,7 +369,7 @@ where
         handle.base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
 
         while !self.is_empty() {
@@ -383,11 +383,11 @@ where
         res
     }
 
-    unsafe fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.window.len() + self.probation.len() + self.protected.len()
     }
 
-    unsafe fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
