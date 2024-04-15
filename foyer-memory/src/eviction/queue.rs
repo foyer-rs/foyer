@@ -57,8 +57,9 @@ where
     #[allow(clippy::type_complexity)]
     pub fn pop_with_context(&mut self) -> Option<(<E::Handle as Handle>::Data, <E::Handle as Handle>::Context)> {
         unsafe {
-            let mut ptr = self.eviction.pop()?;
-            let (data, context, _) = ptr.as_mut().base_mut().take();
+            let ptr = self.eviction.pop()?;
+            let mut handle = Box::from_raw(ptr.as_ptr());
+            let (data, context, _) = handle.base_mut().take();
             Some((data, context))
         }
     }
@@ -78,7 +79,11 @@ where
     E::Handle: Handle<Data = T>,
 {
     fn drop(&mut self) {
-        unsafe { self.eviction.clear() };
+        unsafe {
+            self.eviction.clear().into_iter().for_each(|ptr| {
+                let _ = Box::from_raw(ptr.as_ptr());
+            });
+        }
     }
 }
 
@@ -94,9 +99,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_eviction_queue() {
+    fn test_eviction_queue_simple() {
         let mut fifo = FifoQueue::new(100, &FifoConfig {});
         (0..100).for_each(|i| fifo.push(i));
         (0..100).for_each(|i| assert_eq!(fifo.pop(), Some(i)));
+    }
+
+    #[test]
+    fn test_eviction_queue_drop_clear() {
+        let mut fifo = FifoQueue::new(100, &FifoConfig {});
+        (0..100).for_each(|i| fifo.push(i));
     }
 }
