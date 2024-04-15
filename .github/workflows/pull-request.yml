@@ -100,8 +100,10 @@ jobs:
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v3
+      - uses: codecov/codecov-action@v4
         if: matrix.os == 'ubuntu-latest'
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           verbose: true
   deadlock:
