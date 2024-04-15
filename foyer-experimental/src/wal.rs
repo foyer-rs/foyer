@@ -25,7 +25,7 @@ use std::{
 
 use bytes::{Buf, BufMut};
 use crossbeam::channel;
-use foyer_common::code::{BufExt, BufMutExt};
+use foyer_common::buf::{BufExt, BufMutExt};
 use parking_lot::{Condvar, Mutex};
 use tokio::sync::oneshot;
 

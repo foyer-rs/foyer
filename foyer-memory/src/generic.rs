@@ -27,6 +27,7 @@ use std::{
 
 use ahash::RandomState;
 use crossbeam::queue::ArrayQueue;
+use foyer_common::code::{Key, Value};
 use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
@@ -39,7 +40,7 @@ use crate::{
     indexer::Indexer,
     listener::CacheEventListener,
     metrics::Metrics,
-    CacheContext, Key, Value,
+    CacheContext,
 };
 
 struct CacheSharedState<T, L> {

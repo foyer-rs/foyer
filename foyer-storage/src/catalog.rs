@@ -19,7 +19,7 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use twox_hash::XxHash64;
@@ -34,8 +34,8 @@ pub type Sequence = u64;
 #[derive(Debug, Clone)]
 pub enum Index<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     Inflight { key: K, value: V },
     Region { view: RegionView },
@@ -44,8 +44,8 @@ where
 #[derive(Debug, Clone)]
 pub struct Item<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     sequence: Sequence,
     index: Index<K, V>,
@@ -55,8 +55,8 @@ where
 
 impl<K, V> Item<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub fn new(sequence: Sequence, index: Index<K, V>) -> Self {
         Self {
@@ -82,8 +82,8 @@ where
 #[derive(Debug)]
 pub struct Catalog<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     /// `items` sharding bits.
     bits: usize,
@@ -99,8 +99,8 @@ where
 
 impl<K, V> Catalog<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub fn new(regions: usize, bits: usize, metrics: Arc<Metrics>) -> Self {
         let infos = (0..1 << bits).map(|_| RwLock::new(BTreeMap::new())).collect_vec();

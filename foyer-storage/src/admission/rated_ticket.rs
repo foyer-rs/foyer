@@ -21,7 +21,7 @@ use std::{
 };
 
 use foyer_common::{
-    code::{Key, Value},
+    code::{StorageKey, StorageValue},
     rated_ticket::RatedTicket,
 };
 
@@ -30,8 +30,8 @@ use super::{AdmissionContext, AdmissionPolicy};
 #[derive(Debug)]
 pub struct RatedTicketAdmissionPolicy<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     inner: RatedTicket,
 
@@ -42,8 +42,8 @@ where
 
 impl<K, V> RatedTicketAdmissionPolicy<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub fn new(rate: usize) -> Self {
         Self {
@@ -56,8 +56,8 @@ where
 
 impl<K, V> AdmissionPolicy for RatedTicketAdmissionPolicy<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
 

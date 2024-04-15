@@ -16,7 +16,9 @@ use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
-use crate::{handle::KeyedHandle, Key};
+use foyer_common::code::Key;
+
+use crate::handle::KeyedHandle;
 
 pub trait Indexer: Send + Sync + 'static {
     type Key: Key;

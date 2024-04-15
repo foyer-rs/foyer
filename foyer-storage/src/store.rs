@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use foyer_intrusive::eviction::{
     fifo::{Fifo, FifoLink},
     lfu::{Lfu, LfuLink},
@@ -49,13 +49,13 @@ pub type FifoFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Fifo<Regio
 pub type FifoFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
 
 #[derive(Debug)]
-pub struct NoneStoreWriter<K: Key, V: Value> {
+pub struct NoneStoreWriter<K: StorageKey, V: StorageValue> {
     key: K,
     weight: usize,
     _marker: PhantomData<V>,
 }
 
-impl<K: Key, V: Value> NoneStoreWriter<K, V> {
+impl<K: StorageKey, V: StorageValue> NoneStoreWriter<K, V> {
     pub fn new(key: K, weight: usize) -> Self {
         Self {
             key,
@@ -65,7 +65,7 @@ impl<K: Key, V: Value> NoneStoreWriter<K, V> {
     }
 }
 
-impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
+impl<K: StorageKey, V: StorageValue> StorageWriter for NoneStoreWriter<K, V> {
     type Key = K;
     type Value = V;
 
@@ -95,21 +95,21 @@ impl<K: Key, V: Value> StorageWriter for NoneStoreWriter<K, V> {
 }
 
 #[derive(Debug)]
-pub struct NoneStore<K: Key, V: Value>(PhantomData<(K, V)>);
+pub struct NoneStore<K: StorageKey, V: StorageValue>(PhantomData<(K, V)>);
 
-impl<K: Key, V: Value> Default for NoneStore<K, V> {
+impl<K: StorageKey, V: StorageValue> Default for NoneStore<K, V> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<K: Key, V: Value> Clone for NoneStore<K, V> {
+impl<K: StorageKey, V: StorageValue> Clone for NoneStore<K, V> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<K: Key, V: Value> Storage for NoneStore<K, V> {
+impl<K: StorageKey, V: StorageValue> Storage for NoneStore<K, V> {
     type Key = K;
     type Value = V;
     type Config = ();
@@ -151,8 +151,8 @@ impl<K: Key, V: Value> Storage for NoneStore<K, V> {
 #[derive(Debug)]
 pub enum StoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     LruFsStoreConfig { config: LruFsStoreConfig<K, V> },
     LfuFsStoreConfig { config: LfuFsStoreConfig<K, V> },
@@ -162,8 +162,8 @@ where
 
 impl<K, V> Clone for StoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn clone(&self) -> Self {
         match self {
@@ -177,8 +177,8 @@ where
 
 impl<K, V> From<LruFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(config: LruFsStoreConfig<K, V>) -> Self {
         StoreConfig::LruFsStoreConfig { config }
@@ -187,8 +187,8 @@ where
 
 impl<K, V> From<LfuFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(config: LfuFsStoreConfig<K, V>) -> Self {
         StoreConfig::LfuFsStoreConfig { config }
@@ -197,8 +197,8 @@ where
 
 impl<K, V> From<FifoFsStoreConfig<K, V>> for StoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(config: FifoFsStoreConfig<K, V>) -> Self {
         StoreConfig::FifoFsStoreConfig { config }
@@ -208,8 +208,8 @@ where
 #[derive(Debug)]
 pub enum StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     LruFsStorWriter { writer: LruFsStoreWriter<K, V> },
     LfuFsStorWriter { writer: LfuFsStoreWriter<K, V> },
@@ -219,8 +219,8 @@ where
 
 impl<K, V> From<LruFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: LruFsStoreWriter<K, V>) -> Self {
         StoreWriter::LruFsStorWriter { writer }
@@ -229,8 +229,8 @@ where
 
 impl<K, V> From<LfuFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: LfuFsStoreWriter<K, V>) -> Self {
         StoreWriter::LfuFsStorWriter { writer }
@@ -239,8 +239,8 @@ where
 
 impl<K, V> From<FifoFsStoreWriter<K, V>> for StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: FifoFsStoreWriter<K, V>) -> Self {
         StoreWriter::FifoFsStoreWriter { writer }
@@ -249,8 +249,8 @@ where
 
 impl<K, V> From<NoneStoreWriter<K, V>> for StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: NoneStoreWriter<K, V>) -> Self {
         StoreWriter::NoneStoreWriter { writer }
@@ -260,8 +260,8 @@ where
 #[derive(Debug)]
 pub enum Store<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     LruFsStore { store: LruFsStore<K, V> },
     LfuFsStore { store: LfuFsStore<K, V> },
@@ -271,8 +271,8 @@ where
 
 impl<K, V> Clone for Store<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn clone(&self) -> Self {
         match self {
@@ -286,8 +286,8 @@ where
 
 impl<K, V> StorageWriter for StoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
     type Value = V;
@@ -358,8 +358,8 @@ where
 
 impl<K, V> Storage for Store<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
     type Value = V;

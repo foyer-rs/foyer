@@ -14,7 +14,7 @@
 
 use std::{collections::HashSet, marker::PhantomData};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use parking_lot::Mutex;
 
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub enum Record<K: Key> {
+pub enum Record<K: StorageKey> {
     Admit(K),
     Evict(K),
 }
@@ -31,8 +31,8 @@ pub enum Record<K: Key> {
 #[derive(Debug)]
 pub struct JudgeRecorder<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     records: Mutex<Vec<Record<K>>>,
     _marker: PhantomData<V>,
@@ -40,8 +40,8 @@ where
 
 impl<K, V> JudgeRecorder<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub fn dump(&self) -> Vec<Record<K>> {
         self.records.lock().clone()
@@ -66,8 +66,8 @@ where
 
 impl<K, V> Default for JudgeRecorder<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn default() -> Self {
         Self {
@@ -79,8 +79,8 @@ where
 
 impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
 
@@ -100,8 +100,8 @@ where
 
 impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
 

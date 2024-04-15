@@ -14,7 +14,9 @@
 
 use bitflags::bitflags;
 
-use crate::{context::Context, Key, Value};
+use foyer_common::code::{Key, Value};
+
+use crate::context::Context;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -17,6 +17,7 @@
 pub mod async_queue;
 pub mod batch;
 pub mod bits;
+pub mod buf;
 pub mod code;
 pub mod continuum;
 pub mod erwlock;

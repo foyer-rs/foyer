@@ -18,7 +18,7 @@ use allocator_api2::vec::Vec as VecA;
 use either::Either;
 use foyer_common::{
     bits::{align_up, is_aligned},
-    code::{Cursor, Key, Value},
+    code::{Cursor, StorageKey, StorageValue},
 };
 
 use crate::{
@@ -42,8 +42,8 @@ pub type BufferResult<T> = core::result::Result<T, BufferError>;
 #[derive(Debug)]
 pub struct PositionedEntry<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub entry: Entry<K, V>,
     pub region: RegionId,
@@ -54,8 +54,8 @@ where
 #[derive(Debug)]
 pub struct FlushBuffer<K, V, D>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
 {
     // TODO(MrCroxx): optimize buffer allocation
@@ -79,8 +79,8 @@ where
 
 impl<K, V, D> FlushBuffer<K, V, D>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
 {
     pub fn new(device: D) -> Self {

@@ -12,148 +12,31 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
+use crate::buf::BufExt;
 use bytes::{Buf, BufMut};
 use paste::paste;
+
+pub trait Key: Send + Sync + 'static + Hash + Eq + PartialEq + Ord + PartialOrd {}
+pub trait Value: Send + Sync + 'static {}
+
+impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static> Value for T {}
 
 pub type CodingError = anyhow::Error;
 pub type CodingResult<T> = Result<T, CodingError>;
 
-pub trait BufExt: Buf {
-    // TODO(MrCroxx): Use `cfg_match` after stable.
-    // cfg_match! {
-    //     cfg(target_pointer_width = "16") => {
-    //         fn get_usize(&mut self) -> usize {
-    //             self.get_u16() as usize
-    //         }
-
-    //         fn get_isize(&mut self) -> isize {
-    //             self.get_i16() as isize
-    //         }
-    //     }
-    //     cfg(target_pointer_width = "32") => {
-    //         fn get_usize(&mut self) -> usize {
-    //             self.get_u32() as usize
-    //         }
-
-    //         fn get_isize(&mut self) -> isize {
-    //             self.get_i32() as isize
-    //         }
-    //     }
-    //     cfg(target_pointer_width = "64") => {
-    //         fn get_usize(&mut self) -> usize {
-    //             self.get_u64() as usize
-    //         }
-
-    //         fn get_isize(&mut self) -> isize {
-    //             self.get_i64() as isize
-    //         }
-    //     }
-    // }
-    cfg_if::cfg_if! {
-        if #[cfg(target_pointer_width = "16")] {
-            fn get_usize(&mut self) -> usize {
-                self.get_u16() as usize
-            }
-            fn get_isize(&mut self) -> isize {
-                self.get_i16() as isize
-            }
-        }
-        else if #[cfg(target_pointer_width = "32")] {
-            fn get_usize(&mut self) -> usize {
-                self.get_u32() as usize
-            }
-            fn get_isize(&mut self) -> isize {
-                self.get_i32() as isize
-            }
-        }
-        else if #[cfg(target_pointer_width = "64")] {
-            fn get_usize(&mut self) -> usize {
-                self.get_u64() as usize
-            }
-            fn get_isize(&mut self) -> isize {
-                self.get_i64() as isize
-            }
-        }
-    }
-}
-
-impl<T: Buf> BufExt for T {}
-
-pub trait BufMutExt: BufMut {
-    // TODO(MrCroxx): Use `cfg_match` after stable.
-    // cfg_match! {
-    //     cfg(target_pointer_width = "16") => {
-    //         fn put_usize(&mut self, v: usize) {
-    //             self.put_u16(v as u16);
-    //         }
-
-    //         fn put_isize(&mut self, v: isize) {
-    //             self.put_i16(v as i16);
-    //         }
-    //     }
-    //     cfg(target_pointer_width = "32") => {
-    //         fn put_usize(&mut self, v: usize) {
-    //             self.put_u32(v as u32);
-    //         }
-
-    //         fn put_isize(&mut self, v: isize) {
-    //             self.put_i32(v as i32);
-    //         }
-    //     }
-    //     cfg(target_pointer_width = "64") => {
-    //         fn put_usize(&mut self, v: usize) {
-    //             self.put_u64(v as u64);
-    //         }
-
-    //         fn put_isize(&mut self, v: isize) {
-    //             self.put_i64(v as i64);
-    //         }
-    //     }
-    // }
-    cfg_if::cfg_if! {
-        if #[cfg(target_pointer_width = "16")] {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u16(v as u16);
-            }
-            fn put_isize(&mut self, v: isize) {
-                self.put_i16(v as i16);
-            }
-        }
-        else if #[cfg(target_pointer_width = "32")] {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u32(v as u32);
-            }
-            fn put_isize(&mut self, v: isize) {
-                self.put_i32(v as i32);
-            }
-        }
-        else if #[cfg(target_pointer_width = "64")] {
-            fn put_usize(&mut self, v: usize) {
-                self.put_u64(v as u64);
-            }
-            fn put_isize(&mut self, v: isize) {
-                self.put_i64(v as i64);
-            }
-        }
-    }
-}
-
-impl<T: BufMut> BufMutExt for T {}
-
-pub trait Cursor<T>: Send + Sync + 'static + std::io::Read + std::fmt::Debug {
+pub trait Cursor<T>: Send + Sync + 'static + std::io::Read + Debug {
     fn into_inner(self) -> T;
 }
 
-/// [`Key`] is required to implement [`Clone`].
+/// [`StorageKey`] is required to implement [`Clone`].
 ///
-/// If cloning a [`Key`] is expensive, wrap it with [`Arc`].
+/// If cloning a [`StorageKey`] is expensive, wrap it with [`Arc`].
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(unused_variables)]
-pub trait Key:
-    Sized + Send + Sync + 'static + std::hash::Hash + Eq + PartialEq + Ord + PartialOrd + std::fmt::Debug + Clone
-{
+pub trait StorageKey: Key + Debug + Clone {
     // TODO(MrCroxx): Restore this after `associated_type_defaults` is stable.
     // type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
     type Cursor: Cursor<Self>;
@@ -176,12 +59,12 @@ pub trait Key:
     }
 }
 
-/// [`Value`] is required to implement [`Clone`].
+/// [`StorageValue`] is required to implement [`Clone`].
 ///
-/// If cloning a [`Value`] is expensive, wrap it with [`Arc`].
+/// If cloning a [`StorageValue`] is expensive, wrap it with [`Arc`].
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(unused_variables)]
-pub trait Value: Sized + Send + Sync + 'static + std::fmt::Debug + Clone {
+pub trait StorageValue: Value + 'static + Debug + Clone {
     // TODO(MrCroxx): Restore this after `associated_type_defaults` is stable.
     // type Cursor: Cursor<Self> = UnimplementedCursor<Self>;
     type Cursor: Cursor<Self>;
@@ -264,7 +147,7 @@ macro_rules! impl_key {
     ($( { $type:ty, $id:ident }, )*) => {
         paste! {
             $(
-                impl Key for $type {
+                impl StorageKey for $type {
                     type Cursor = [<PrimitiveCursor $id>];
 
                     fn serialized_len(&self) -> usize {
@@ -288,7 +171,7 @@ macro_rules! impl_value {
     ($( { $type:ty, $id:ident }, )*) => {
         paste! {
             $(
-                impl Value for $type {
+                impl StorageValue for $type {
                     type Cursor = [<PrimitiveCursor $id>];
 
                     fn serialized_len(&self) -> usize {
@@ -312,7 +195,7 @@ for_all_primitives! { def_cursor }
 for_all_primitives! { impl_key }
 for_all_primitives! { impl_value }
 
-impl Key for Vec<u8> {
+impl StorageKey for Vec<u8> {
     type Cursor = std::io::Cursor<Vec<u8>>;
 
     fn weight(&self) -> usize {
@@ -332,7 +215,7 @@ impl Key for Vec<u8> {
     }
 }
 
-impl Value for Vec<u8> {
+impl StorageValue for Vec<u8> {
     type Cursor = std::io::Cursor<Vec<u8>>;
 
     fn weight(&self) -> usize {
@@ -358,7 +241,7 @@ impl Cursor<Vec<u8>> for std::io::Cursor<Vec<u8>> {
     }
 }
 
-impl Key for Arc<Vec<u8>> {
+impl StorageKey for Arc<Vec<u8>> {
     type Cursor = ArcVecU8Cursor;
 
     fn weight(&self) -> usize {
@@ -378,7 +261,7 @@ impl Key for Arc<Vec<u8>> {
     }
 }
 
-impl Value for Arc<Vec<u8>> {
+impl StorageValue for Arc<Vec<u8>> {
     type Cursor = ArcVecU8Cursor;
 
     fn weight(&self) -> usize {
@@ -439,7 +322,7 @@ impl Cursor<()> for PrimitiveCursorVoid {
     fn into_inner(self) {}
 }
 
-impl Key for () {
+impl StorageKey for () {
     type Cursor = PrimitiveCursorVoid;
 
     fn weight(&self) -> usize {
@@ -459,7 +342,7 @@ impl Key for () {
     }
 }
 
-impl Value for () {
+impl StorageValue for () {
     type Cursor = PrimitiveCursorVoid;
 
     fn weight(&self) -> usize {
