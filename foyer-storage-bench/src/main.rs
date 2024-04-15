@@ -33,7 +33,7 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 use export::MetricsExporter;
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use foyer_intrusive::eviction::lfu::LfuConfig;
 use foyer_storage::{
     admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
@@ -173,8 +173,8 @@ pub struct Args {
 #[derive(Debug)]
 pub enum BenchStoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     StoreConfig { config: StoreConfig<K, V> },
     RuntimeStoreConfig { config: RuntimeStoreConfig<K, V> },
@@ -182,8 +182,8 @@ where
 
 impl<K, V> Clone for BenchStoreConfig<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn clone(&self) -> Self {
         match self {
@@ -196,8 +196,8 @@ where
 #[derive(Debug)]
 pub enum BenchStoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     StoreWriter { writer: StoreWriter<K, V> },
     RuntimeStoreWriter { writer: RuntimeStoreWriter<K, V> },
@@ -205,8 +205,8 @@ where
 
 impl<K, V> From<StoreWriter<K, V>> for BenchStoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: StoreWriter<K, V>) -> Self {
         Self::StoreWriter { writer }
@@ -215,8 +215,8 @@ where
 
 impl<K, V> From<RuntimeStoreWriter<K, V>> for BenchStoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn from(writer: RuntimeStoreWriter<K, V>) -> Self {
         Self::RuntimeStoreWriter { writer }
@@ -225,8 +225,8 @@ where
 
 impl<K, V> StorageWriter for BenchStoreWriter<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
     type Value = V;
@@ -284,8 +284,8 @@ where
 #[derive(Debug)]
 pub enum BenchStore<K = u64, V = Arc<Vec<u8>>>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     Store { store: Store<K, V> },
     RuntimeStore { store: RuntimeStore<K, V> },
@@ -293,8 +293,8 @@ where
 
 impl<K, V> Clone for BenchStore<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn clone(&self) -> Self {
         match self {
@@ -306,8 +306,8 @@ where
 
 impl<K, V> Storage for BenchStore<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
     type Value = V;

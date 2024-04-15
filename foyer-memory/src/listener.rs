@@ -14,7 +14,9 @@
 
 use std::marker::PhantomData;
 
-use crate::{CacheContext, Key, Value};
+use foyer_common::code::{Key, Value};
+
+use crate::CacheContext;
 
 pub trait CacheEventListener<K, V>: Send + Sync + 'static
 where

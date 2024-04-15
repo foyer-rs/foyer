@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use futures::Future;
 
 use crate::{compress::Compression, error::Result};
@@ -26,8 +26,8 @@ pub trait FetchValueFuture<V>: Future<Output = anyhow::Result<V>> + Send + 'stat
 impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture<V> for T {}
 
 pub trait StorageWriter: Send + Sync + Debug {
-    type Key: Key;
-    type Value: Value;
+    type Key: StorageKey;
+    type Value: StorageValue;
 
     fn key(&self) -> &Self::Key;
 
@@ -45,8 +45,8 @@ pub trait StorageWriter: Send + Sync + Debug {
 }
 
 pub trait Storage: Send + Sync + Debug + Clone + 'static {
-    type Key: Key;
-    type Value: Value;
+    type Key: StorageKey;
+    type Value: StorageValue;
     type Config: Send + Clone + Debug;
     type Writer: StorageWriter<Key = Self::Key, Value = Self::Value>;
 

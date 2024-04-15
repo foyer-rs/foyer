@@ -28,7 +28,7 @@ use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{CodingError, Key, Value},
+    code::{CodingError, StorageKey, StorageValue},
 };
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use futures::future::try_join_all;
@@ -60,8 +60,8 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub struct GenericStoreConfig<K, V, D, EP>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy,
 {
@@ -105,8 +105,8 @@ where
 
 impl<K, V, D, EP> Debug for GenericStoreConfig<K, V, D, EP>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy,
 {
@@ -128,8 +128,8 @@ where
 
 impl<K, V, D, EP> Clone for GenericStoreConfig<K, V, D, EP>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy,
 {
@@ -153,8 +153,8 @@ where
 #[derive(Debug)]
 pub struct GenericStore<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -164,8 +164,8 @@ where
 
 impl<K, V, D, EP, EL> Clone for GenericStore<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -180,8 +180,8 @@ where
 #[derive(Debug)]
 pub struct GenericStoreInner<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -212,8 +212,8 @@ where
 
 impl<K, V, D, EP, EL> GenericStore<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -597,8 +597,8 @@ where
 
 pub struct GenericStoreWriter<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -623,8 +623,8 @@ where
 
 impl<K, V, D, EP, EL> GenericStoreWriter<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -689,8 +689,8 @@ where
 
 impl<K, V, D, EP, EL> Debug for GenericStoreWriter<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -709,8 +709,8 @@ where
 
 impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -802,8 +802,8 @@ impl EntryHeader {
 /// `buf.len()` must exactly fit entry size
 fn read_entry<K, V>(buf: &[u8]) -> Result<(K, V)>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     // read entry header
     let header = EntryHeader::read(buf)?;
@@ -849,8 +849,8 @@ pub fn checksum(buf: &[u8]) -> u64 {
 
 pub struct RegionEntryIter<K, V, D>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
 {
     region: Region<D>,
@@ -862,8 +862,8 @@ where
 
 impl<K, V, D> RegionEntryIter<K, V, D>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
 {
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
@@ -980,8 +980,8 @@ where
 
 impl<K, V, D, EP, EL> StorageWriter for GenericStoreWriter<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -1020,8 +1020,8 @@ where
 
 impl<K, V, D, EP, EL> Storage for GenericStore<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,

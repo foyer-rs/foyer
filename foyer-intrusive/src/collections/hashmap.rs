@@ -14,7 +14,7 @@
 
 use std::{hash::Hasher, marker::PhantomData, ptr::NonNull};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use twox_hash::XxHash64;
 
 use super::dlist::{Dlist, DlistIter, DlistIterMut, DlistLink};
@@ -50,8 +50,8 @@ impl Link for HashMapLink {
 
 pub struct HashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     slots: Vec<Dlist<HashMapLinkAdapter>>,
@@ -65,8 +65,8 @@ where
 
 impl<K, V, A> Drop for HashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     fn drop(&mut self) {
@@ -86,8 +86,8 @@ where
 
 impl<K, V, A> HashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     pub fn new(bits: usize) -> Self {
@@ -240,8 +240,8 @@ where
 
 pub struct HashMapIter<'a, K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     slot: usize,
@@ -253,8 +253,8 @@ where
 
 impl<'a, K, V, A> HashMapIter<'a, K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = HashMapLink>,
 {
     pub fn new(hashmap: &'a HashMap<K, V, A>) -> Self {
