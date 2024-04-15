@@ -18,7 +18,7 @@ use std::{
 };
 
 use bytes::BufMut;
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::broadcast;
 
@@ -35,8 +35,8 @@ use crate::{
 #[derive(Debug)]
 pub struct Reclaimer<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -54,8 +54,8 @@ where
 
 impl<K, V, D, EP, EL> Reclaimer<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,

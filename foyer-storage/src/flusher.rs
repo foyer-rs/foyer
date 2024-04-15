@@ -15,7 +15,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use either::Either;
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::{broadcast, mpsc};
 use tracing::Instrument;
@@ -32,8 +32,8 @@ use crate::{
 
 pub struct Entry<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub key: K,
     pub value: V,
@@ -43,8 +43,8 @@ where
 
 impl<K, V> Debug for Entry<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
@@ -56,8 +56,8 @@ where
 
 impl<K, V> Clone for Entry<K, V>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
 {
     fn clone(&self) -> Self {
         Self {
@@ -72,8 +72,8 @@ where
 #[derive(Debug)]
 pub struct Flusher<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,
@@ -93,8 +93,8 @@ where
 
 impl<K, V, D, EP, EL> Flusher<K, V, D, EP, EL>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     D: Device,
     EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
     EL: Link,

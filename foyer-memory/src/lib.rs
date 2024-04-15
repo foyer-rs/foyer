@@ -62,12 +62,6 @@
 //! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
 //! destroyed.
 
-pub trait Key: Send + Sync + 'static + std::hash::Hash + Eq + Ord {}
-pub trait Value: Send + Sync + 'static {}
-
-impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
-impl<T: Send + Sync + 'static> Value for T {}
-
 mod cache;
 mod context;
 mod eviction;

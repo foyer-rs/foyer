@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use foyer_common::{
-    code::{Key, Value},
+    code::{StorageKey, StorageValue},
     runtime::BackgroundShutdownRuntime,
 };
 
@@ -36,8 +36,8 @@ pub struct RuntimeConfig {
 #[derive(Debug)]
 pub struct RuntimeStorageConfig<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     pub store: S::Config,
@@ -46,8 +46,8 @@ where
 
 impl<K, V, S> Clone for RuntimeStorageConfig<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     fn clone(&self) -> Self {
@@ -61,8 +61,8 @@ where
 #[derive(Debug)]
 pub struct RuntimeStorageWriter<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     runtime: Arc<BackgroundShutdownRuntime>,
@@ -71,8 +71,8 @@ where
 
 impl<K, V, S> StorageWriter for RuntimeStorageWriter<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     type Key = K;
@@ -113,8 +113,8 @@ where
 #[derive(Debug)]
 pub struct RuntimeStorage<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     runtime: Arc<BackgroundShutdownRuntime>,
@@ -123,8 +123,8 @@ where
 
 impl<K, V, S> Clone for RuntimeStorage<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     fn clone(&self) -> Self {
@@ -137,8 +137,8 @@ where
 
 impl<K, V, S> Storage for RuntimeStorage<K, V, S>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     S: Storage<Key = K, Value = V>,
 {
     type Key = K;

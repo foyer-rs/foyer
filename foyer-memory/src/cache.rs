@@ -23,6 +23,8 @@ use ahash::RandomState;
 use futures::{Future, FutureExt};
 use tokio::sync::oneshot;
 
+use foyer_common::code::{Key, Value};
+
 use crate::{
     context::CacheContext,
     eviction::{
@@ -35,7 +37,6 @@ use crate::{
     indexer::HashTableIndexer,
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
-    Key, Value,
 };
 
 pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =

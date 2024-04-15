@@ -14,7 +14,7 @@
 
 use std::{fmt::Debug, hash::Hasher, marker::PhantomData, ptr::NonNull};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{StorageKey, StorageValue};
 use twox_hash::XxHash64;
 
 use super::dlist::{Dlist, DlistIter, DlistIterMut, DlistLink};
@@ -71,8 +71,8 @@ impl Link for DuplicatedHashMapLink {
 
 pub struct DuplicatedHashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = DuplicatedHashMapLink>,
 {
     slots: Vec<Dlist<DuplicatedHashMapLinkSlotAdapter>>,
@@ -86,8 +86,8 @@ where
 
 impl<K, V, A> Drop for DuplicatedHashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = DuplicatedHashMapLink>,
 {
     fn drop(&mut self) {
@@ -112,8 +112,8 @@ where
 
 impl<K, V, A> DuplicatedHashMap<K, V, A>
 where
-    K: Key,
-    V: Value,
+    K: StorageKey,
+    V: StorageValue,
     A: KeyAdapter<Key = K, Link = DuplicatedHashMapLink>,
 {
     pub fn new(bits: usize) -> Self {
