@@ -72,6 +72,16 @@ where
     }
 }
 
+impl<T, E> Drop for EvictionQueue<T, E>
+where
+    E: Eviction,
+    E::Handle: Handle<Data = T>,
+{
+    fn drop(&mut self) {
+        unsafe { self.eviction.clear() };
+    }
+}
+
 pub type FifoQueue<T> = EvictionQueue<T, Fifo<T>>;
 pub type LruQueue<T> = EvictionQueue<T, Lru<T>>;
 pub type LfuQueue<T> = EvictionQueue<T, Lfu<T>>;
