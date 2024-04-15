@@ -23,7 +23,7 @@ allocator-api2 = { version = "0.2" }
 crossbeam-channel = { version = "0.5" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-either = { version = "1", default-features = false, features = ["use_std"] }
+either = { version = "1" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
 futures-executor = { version = "0.3" }
@@ -41,7 +41,7 @@ tracing-core = { version = "0.1" }
 
 [build-dependencies]
 cc = { version = "1", default-features = false, features = ["parallel"] }
-either = { version = "1", default-features = false, features = ["use_std"] }
+either = { version = "1" }
 itertools = { version = "0.12" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }

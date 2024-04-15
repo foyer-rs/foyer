@@ -13,13 +13,11 @@
 //  limitations under the License.
 
 pub mod allocator;
-pub mod error;
 pub mod fs;
 
 use std::fmt::Debug;
 
 use allocator_api2::{alloc::Allocator, vec::Vec as VecA};
-use error::DeviceResult;
 use foyer_common::range::RangeBoundsExt;
 use futures::Future;
 
@@ -40,6 +38,18 @@ pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug {}
 impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug> IoBufMut for T {}
 pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug {}
 impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug> IoRange for T {}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DeviceError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("nix error: {0}")]
+    Nix(#[from] nix::errno::Errno),
+    #[error("other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+pub type DeviceResult<T> = std::result::Result<T, DeviceError>;
 
 pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
     type IoBufferAllocator: BufferAllocator;

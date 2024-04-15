@@ -14,13 +14,14 @@
 
 use std::{fmt::Debug, sync::Arc};
 
+use either::Either;
 use foyer_common::code::{Key, Value};
 use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::{broadcast, mpsc};
 use tracing::Instrument;
 
 use crate::{
-    buffer::{BufferError, FlushBuffer, PositionedEntry},
+    buffer::{FlushBuffer, PositionedEntry},
     catalog::{Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
@@ -143,10 +144,9 @@ where
 
         let old_region = self.buffer.region();
 
-        let entry = match self.buffer.write(entry).await {
-            Err(BufferError::NeedRotate(entry)) => *entry,
-            Ok(entries) => return self.update_catalog(entries).await,
-            Err(e) => return Err(e.into()),
+        let entry = match self.buffer.write(entry).await? {
+            Either::Left(entries) => return self.update_catalog(entries).await,
+            Either::Right(entry) => entry,
         };
 
         // current region is full, rotate flush buffer region and retry
@@ -173,10 +173,7 @@ where
             .add(self.region_manager.region(&new_region).device().region_size() as u64);
 
         // 3. retry write
-        let entries = match self.buffer.write(entry).await {
-            Err(BufferError::NeedRotate(_)) => unreachable!(),
-            result => result?,
-        };
+        let entries = self.buffer.write(entry).await?.unwrap_left();
 
         self.update_catalog(entries).await?;
 

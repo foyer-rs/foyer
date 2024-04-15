@@ -24,12 +24,7 @@ use foyer_common::range::RangeBoundsExt;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
-use super::{
-    allocator::AlignedAllocator,
-    asyncify,
-    error::{DeviceError, DeviceResult},
-    Device, IoBuf, IoBufMut, IoRange,
-};
+use super::{allocator::AlignedAllocator, asyncify, Device, DeviceError, DeviceResult, IoBuf, IoBufMut, IoRange};
 use crate::region::RegionId;
 
 #[derive(Debug, Clone)]
