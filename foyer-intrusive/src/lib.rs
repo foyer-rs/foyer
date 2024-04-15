@@ -43,6 +43,5 @@ macro_rules! container_of {
     };
 }
 
-pub mod collections;
 pub mod core;
-pub mod eviction;
+pub mod dlist;

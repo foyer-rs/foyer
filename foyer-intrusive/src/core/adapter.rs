@@ -117,10 +117,9 @@ pub unsafe trait PriorityAdapter: Adapter {
 /// # Examples
 ///
 /// ```
-/// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
+/// use foyer_intrusive::{intrusive_adapter};
+/// use foyer_intrusive::core::adapter::{Adapter, Link};
 /// use foyer_intrusive::core::pointer::Pointer;
-/// use foyer_intrusive::eviction::EvictionPolicy;
 /// use std::sync::Arc;
 ///
 /// #[derive(Debug)]
@@ -132,8 +131,7 @@ pub unsafe trait PriorityAdapter: Adapter {
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
-/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
+/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
@@ -194,150 +192,12 @@ macro_rules! intrusive_adapter {
     };
 }
 
-/// Macro to generate an implementation of [`KeyAdapter`] for instrusive container and items.
-/// ///
-/// The basic syntax to create an adapter is:
-///
-/// ```rust,ignore
-/// key_adapter! { Adapter = Item { key_field: KeyType } }
-/// ```
-///
-/// # Generics
-///
-/// This macro supports generic arguments:
-///
-/// Note that due to macro parsing limitations, `T: Trait` bounds are not
-/// supported in the generic argument list. You must list any trait bounds in
-/// a separate `where` clause at the end of the macro.
-///
-/// # Examples
-///
-/// ```
-/// use foyer_intrusive::{intrusive_adapter, key_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, KeyAdapter, Link};
-/// use foyer_intrusive::core::pointer::Pointer;
-/// use foyer_intrusive::eviction::EvictionPolicy;
-/// use std::sync::Arc;
-///
-/// #[derive(Debug)]
-/// pub struct Item<L>
-/// where
-///     L: Link
-/// {
-///     link: L,
-///     key: u64,
-/// }
-///
-/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
-/// key_adapter! { ItemAdapter<L> = Item<L> { key: u64 } where L: Link }
-/// ```
-#[macro_export]
-macro_rules! key_adapter {
-    (@impl
-        $adapter:ident ($($args:tt),*) = $item:ty { $field:ident: $key:ty } $($where_:tt)*
-    ) => {
-        unsafe impl<$($args),*> $crate::core::adapter::KeyAdapter for $adapter<$($args),*> $($where_)*{
-            type Key = $key;
-
-            unsafe fn item2key(
-                &self,
-                item: std::ptr::NonNull<<Self::Pointer as $crate::core::pointer::Pointer>::Item>,
-            ) -> std::ptr::NonNull<Self::Key> {
-                std::ptr::NonNull::new_unchecked((item.as_ptr() as *const u8).add($crate::offset_of!($item, $field)) as *mut _)
-            }
-        }
-    };
-    (
-        $name:ident = $($rest:tt)*
-    ) => {
-        key_adapter! {@impl
-            $name () = $($rest)*
-        }
-    };
-    (
-        $name:ident<$($args:tt),*> = $($rest:tt)*
-    ) => {
-        key_adapter! {@impl
-            $name ($($args),*) = $($rest)*
-        }
-    };
-}
-
-/// Macro to generate an implementation of [`PriorityAdapter`] for instrusive container and items.
-/// ///
-/// The basic syntax to create an adapter is:
-///
-/// ```rust,ignore
-/// priority_adapter! { Adapter = Item { priority_field: PriorityType } }
-/// ```
-///
-/// # Generics
-///
-/// This macro supports generic arguments:
-///
-/// Note that due to macro parsing limitations, `T: Trait` bounds are not
-/// supported in the generic argument list. You must list any trait bounds in
-/// a separate `where` clause at the end of the macro.
-///
-/// # Examples
-///
-/// ```
-/// use foyer_intrusive::{intrusive_adapter, priority_adapter};
-/// use foyer_intrusive::core::adapter::{Adapter, PriorityAdapter, Link};
-/// use foyer_intrusive::core::pointer::Pointer;
-/// use foyer_intrusive::eviction::EvictionPolicy;
-/// use std::sync::Arc;
-///
-/// #[derive(Debug)]
-/// pub struct Item<L>
-/// where
-///     L: Link
-/// {
-///     link: L,
-///     priority: usize,
-/// }
-///
-/// intrusive_adapter! { ItemAdapter<L> = Arc<Item<L>>: Item<L> { link: L} where L: Link }
-/// priority_adapter! { ItemAdapter<L> = Item<L> { priority: usize } where L: Link }
-/// ```
-#[macro_export]
-macro_rules! priority_adapter {
-    (@impl
-        $adapter:ident ($($args:tt),*) = $item:ty { $field:ident: $priority:ty } $($where_:tt)*
-    ) => {
-        unsafe impl<$($args),*> $crate::core::adapter::PriorityAdapter for $adapter<$($args),*> $($where_)*{
-            type Priority = $priority;
-
-            unsafe fn item2priority(
-                &self,
-                item: std::ptr::NonNull< <Self::Pointer as $crate::core::pointer::Pointer>::Item>,
-            ) -> std::ptr::NonNull<Self::Priority>{
-                std::ptr::NonNull::new_unchecked((item.as_ptr() as *const u8).add($crate::offset_of!($item, $field)) as *mut _)
-            }
-        }
-    };
-    (
-        $name:ident = $($rest:tt)*
-    ) => {
-        priority_adapter! {@impl
-            $name () = $($rest)*
-        }
-    };
-    (
-        $name:ident<$($args:tt),*> = $($rest:tt)*
-    ) => {
-        priority_adapter! {@impl
-            $name ($($args),*) = $($rest)*
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{collections::dlist::*, intrusive_adapter};
+    use crate::{dlist::*, intrusive_adapter};
 
     #[derive(Debug)]
     struct DlistItem {
@@ -355,7 +215,6 @@ mod tests {
     }
 
     intrusive_adapter! { DlistItemAdapter = Box<DlistItem>: DlistItem { link: DlistLink }}
-    key_adapter! { DlistItemAdapter = DlistItem { val: u64 } }
 
     #[test]
     fn test_adapter_macro() {
