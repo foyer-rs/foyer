@@ -352,7 +352,7 @@ where
     }
 }
 
-pub struct CacheConfig<K, V, E, L, S = RandomState>
+pub struct GenericCacheConfig<K, V, E, L, S = RandomState>
 where
     K: Key,
     V: Value,
@@ -462,7 +462,7 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn new(config: CacheConfig<K, V, E, L, S>) -> Self {
+    pub fn new(config: GenericCacheConfig<K, V, E, L, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),

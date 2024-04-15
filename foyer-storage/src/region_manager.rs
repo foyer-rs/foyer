@@ -12,79 +12,92 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
-
 use foyer_common::async_queue::AsyncQueue;
-use foyer_intrusive::{
-    core::adapter::Link,
-    eviction::{EvictionPolicy, EvictionPolicyExt},
-    intrusive_adapter, key_adapter,
+use foyer_memory::{
+    Cache, CacheConfig, DefaultCacheEventListener, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig,
+    LruCacheConfig, LruConfig, S3FifoCacheConfig, S3FifoConfig,
 };
-use parking_lot::RwLock;
+
+use itertools::Itertools;
 
 use crate::{
     device::Device,
     region::{Region, RegionId},
 };
 
-#[derive(Debug)]
-pub struct RegionEpItem<L>
-where
-    L: Link,
-{
-    link: L,
-    id: RegionId,
+#[derive(Debug, Clone)]
+pub enum EvictionConfg {
+    Fifo(FifoConfig),
+    Lru(LruConfig),
+    Lfu(LfuConfig),
+    S3Fifo(S3FifoConfig),
 }
 
-intrusive_adapter! { pub RegionEpItemAdapter<L> = Arc<RegionEpItem<L>>: RegionEpItem<L> { link: L } where L: Link }
-key_adapter! { RegionEpItemAdapter<L> = RegionEpItem<L> { id: RegionId } where L: Link }
-
 #[derive(Debug)]
-pub struct RegionManager<D, EP, EL>
+pub struct RegionManager<D>
 where
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     /// Empty regions.
     clean_regions: AsyncQueue<RegionId>,
 
     regions: Vec<Region<D>>,
-    items: Vec<Arc<RegionEpItem<EL>>>,
 
-    /// Eviction policy.
-    eviction: RwLock<EP>,
+    eviction: Cache<RegionId, ()>,
 }
 
-impl<D, EP, EL> RegionManager<D, EP, EL>
+impl<D> RegionManager<D>
 where
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    pub fn new(region_count: usize, eviction_config: EP::Config, device: D) -> Self {
-        let eviction = EP::new(eviction_config);
+    pub fn new(region_count: usize, eviction_config: EvictionConfg, device: D) -> Self {
         let clean_regions = AsyncQueue::new();
 
-        let mut regions = Vec::with_capacity(region_count);
-        let mut items = Vec::with_capacity(region_count);
+        // TODO(MrCroxx): REFINE ME!!!
+        let cache_config = match eviction_config {
+            EvictionConfg::Fifo(eviction_config) => CacheConfig::Fifo(FifoCacheConfig {
+                capacity: region_count,
+                shards: 1,
+                eviction_config,
+                object_pool_capacity: region_count,
+                hash_builder: ahash::RandomState::default(),
+                event_listener: DefaultCacheEventListener::default(),
+            }),
+            EvictionConfg::Lru(eviction_config) => CacheConfig::Lru(LruCacheConfig {
+                capacity: region_count,
+                shards: 1,
+                eviction_config,
+                object_pool_capacity: region_count,
+                hash_builder: ahash::RandomState::default(),
+                event_listener: DefaultCacheEventListener::default(),
+            }),
+            EvictionConfg::Lfu(eviction_config) => CacheConfig::Lfu(LfuCacheConfig {
+                capacity: region_count,
+                shards: 1,
+                eviction_config,
+                object_pool_capacity: region_count,
+                hash_builder: ahash::RandomState::default(),
+                event_listener: DefaultCacheEventListener::default(),
+            }),
+            EvictionConfg::S3Fifo(eviction_config) => CacheConfig::S3Fifo(S3FifoCacheConfig {
+                capacity: region_count,
+                shards: 1,
+                eviction_config,
+                object_pool_capacity: region_count,
+                hash_builder: ahash::RandomState::default(),
+                event_listener: DefaultCacheEventListener::default(),
+            }),
+        };
+        let eviction = Cache::new(cache_config);
 
-        for id in 0..region_count as RegionId {
-            let region = Region::new(id, device.clone());
-            let item = Arc::new(RegionEpItem {
-                link: EL::default(),
-                id,
-            });
-
-            regions.push(region);
-            items.push(item);
-        }
+        let regions = (0..region_count as RegionId)
+            .map(|id| Region::new(id, device.clone()))
+            .collect_vec();
 
         Self {
             clean_regions,
             regions,
-            items,
-            eviction: RwLock::new(eviction),
+            eviction,
         }
     }
 
@@ -94,11 +107,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub fn record_access(&self, id: &RegionId) {
-        let mut eviction = self.eviction.write();
-        let item = &self.items[*id as usize];
-        if item.link.is_linked() {
-            eviction.access(&self.items[*id as usize]);
-        }
+        let _ = self.eviction.get(id);
     }
 
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {
@@ -106,10 +115,10 @@ where
     }
 
     pub fn eviction_push(&self, region_id: RegionId) {
-        self.eviction.write().push(self.items[region_id as usize].clone());
+        self.eviction.insert(region_id, (), 1);
     }
 
     pub fn eviction_pop(&self) -> Option<RegionId> {
-        self.eviction.write().pop().map(|item| item.id)
+        self.eviction.pop().map(|entry| *entry.key())
     }
 }
