@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 
 use allocator_api2::vec::Vec as VecA;
+use either::Either;
 use foyer_common::{
     bits::{align_up, is_aligned},
     code::{Cursor, Key, Value},
@@ -22,26 +23,21 @@ use foyer_common::{
 
 use crate::{
     compress::Compression,
-    device::{allocator::WritableVecA, error::DeviceError, Device},
+    device::{allocator::WritableVecA, Device, DeviceError},
     flusher::Entry,
     generic::{checksum, EntryHeader},
     region::{RegionHeader, RegionId, Version, REGION_MAGIC},
 };
 
 #[derive(thiserror::Error, Debug)]
-pub enum BufferError<R>
-where
-    R: Send + Sync + 'static + Debug,
-{
-    #[error("need rotate and retry {0}")]
-    NeedRotate(Box<R>),
+pub enum BufferError {
     #[error("device error: {0}")]
     Device(#[from] DeviceError),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
 
-pub type BufferResult<T, R> = core::result::Result<T, BufferError<R>>;
+pub type BufferResult<T> = core::result::Result<T, BufferError>;
 
 #[derive(Debug)]
 pub struct PositionedEntry<K, V>
@@ -117,7 +113,7 @@ where
     /// Flush io buffer if necessary, and reset io buffer to a new region.
     ///
     /// Returns fully flushed entries.
-    pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
+    pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry<K, V>>> {
         let entries = self.flush().await?;
         debug_assert!(self.buffer.is_empty());
         self.region = Some(region);
@@ -140,7 +136,7 @@ where
     /// The io buffer will be cleared after flush.
     ///
     /// Returns fully flushed entries.
-    pub async fn flush(&mut self) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
+    pub async fn flush(&mut self) -> BufferResult<Vec<PositionedEntry<K, V>>> {
         let Some(region) = self.region else {
             debug_assert!(self.entries.is_empty());
             return Ok(vec![]);
@@ -190,7 +186,7 @@ where
             sequence,
             compression,
         }: Entry<K, V>,
-    ) -> BufferResult<Vec<PositionedEntry<K, V>>, Entry<K, V>> {
+    ) -> BufferResult<Either<Vec<PositionedEntry<K, V>>, Entry<K, V>>> {
         // Notify caller to rotate buffer if there is not enough space for the entry.
         //
         // NOTICE:
@@ -201,12 +197,12 @@ where
         //
         // P.S. About rollback, see (*).
         if self.region.is_none() {
-            return Err(BufferError::NeedRotate(Box::new(Entry {
+            return Ok(Either::Right(Entry {
                 key,
                 value,
                 sequence,
                 compression,
-            })));
+            }));
         }
 
         let old = self.buffer.len();
@@ -274,12 +270,12 @@ where
             unsafe { self.buffer.set_len(old) };
             let key = kcursor.into_inner();
             let value = vcursor.into_inner();
-            return Err(BufferError::NeedRotate(Box::new(Entry {
+            return Ok(Either::Right(Entry {
                 key,
                 value,
                 sequence,
                 compression,
-            })));
+            }));
         }
 
         // 3. align buffer size
@@ -309,7 +305,7 @@ where
             vec![]
         };
 
-        Ok(entries)
+        Ok(Either::Left(entries))
     }
 }
 
@@ -353,24 +349,24 @@ mod tests {
 
             let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NeedRotate(entry)) => *entry,
-                _ => panic!("should be not enough error"),
+                Ok(Either::Right(entry)) => entry,
+                _ => panic!("got: {:?}", res),
             };
 
             let entries = buffer.rotate(0).await.unwrap();
             assert!(entries.is_empty());
 
             // 4 ~ 12 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap().unwrap_left();
             assert!(entries.is_empty());
             // 12 ~ 20 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap().unwrap_left();
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
             assert_eq!(entries[1].offset, 12 * 1024);
 
             // 20 ~ 28 KiB
-            let entries = buffer.write(entry.clone()).await.unwrap();
+            let entries = buffer.write(entry.clone()).await.unwrap().unwrap_left();
             assert!(entries.is_empty());
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
@@ -400,22 +396,22 @@ mod tests {
 
             let res = buffer.write(entry).await;
             let entry = match res {
-                Err(BufferError::NeedRotate(entry)) => *entry,
-                _ => panic!("should be not enough error"),
+                Ok(Either::Right(entry)) => entry,
+                _ => panic!("got: {:?}", res),
             };
 
             let entries = buffer.rotate(1).await.unwrap();
             assert!(entries.is_empty());
 
             // 4 ~ 60 KiB
-            let entries = buffer.write(entry).await.unwrap();
+            let entries = buffer.write(entry).await.unwrap().unwrap_left();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
 
             let entry = ent(3 * 1024 - 128); // ~ 3 KiB
 
             // 60 ~ 64 KiB
-            let entries = buffer.write(entry).await.unwrap();
+            let entries = buffer.write(entry).await.unwrap().unwrap_left();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 60 * 1024);
 

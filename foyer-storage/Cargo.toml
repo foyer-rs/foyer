@@ -19,6 +19,7 @@ anyhow = "1.0"
 bitflags = "2.3.1"
 bitmaps = "3.2"
 bytes = "1"
+either = "1"
 foyer-common = { version = "0.5", path = "../foyer-common" }
 foyer-intrusive = { version = "0.4", path = "../foyer-intrusive" }
 foyer-workspace-hack = { version = "0.4", path = "../foyer-workspace-hack" }

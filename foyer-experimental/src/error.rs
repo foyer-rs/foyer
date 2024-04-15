@@ -13,52 +13,11 @@
 //  limitations under the License.
 
 #[derive(thiserror::Error, Debug)]
-#[error("{0}")]
-pub struct Error(Box<ErrorInner>);
-
-#[derive(thiserror::Error, Debug)]
-#[error("{source:?}")]
-struct ErrorInner {
-    #[from]
-    source: ErrorKind,
-    // TODO(MrCroxx): Restore this after `error_generic_member_access` is stable.
-    // backtrace: Backtrace,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum ErrorKind {
+pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
 
-impl From<ErrorKind> for Error {
-    fn from(value: ErrorKind) -> Self {
-        value.into()
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        value.into()
-    }
-}
-
-impl From<anyhow::Error> for Error {
-    fn from(value: anyhow::Error) -> Self {
-        value.into()
-    }
-}
-
 pub type Result<T> = core::result::Result<T, Error>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_size() {
-        assert_eq!(std::mem::size_of::<Error>(), std::mem::size_of::<usize>());
-    }
-}
