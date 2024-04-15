@@ -302,16 +302,34 @@ where
         }
     }
 
-    pub fn remove<Q>(&self, key: &Q)
+    pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, L, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self {
-            Cache::Fifo(cache) => cache.remove(key),
-            Cache::Lru(cache) => cache.remove(key),
-            Cache::Lfu(cache) => cache.remove(key),
-            Cache::S3Fifo(cache) => cache.remove(key),
+            Cache::Fifo(cache) => cache.remove(key).map(CacheEntry::from),
+            Cache::Lru(cache) => cache.remove(key).map(CacheEntry::from),
+            Cache::Lfu(cache) => cache.remove(key).map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.remove(key).map(CacheEntry::from),
+        }
+    }
+
+    pub fn pop(&self) -> Option<CacheEntry<K, V, L, S>> {
+        match self {
+            Cache::Fifo(cache) => cache.pop().map(CacheEntry::from),
+            Cache::Lru(cache) => cache.pop().map(CacheEntry::from),
+            Cache::Lfu(cache) => cache.pop().map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.pop().map(CacheEntry::from),
+        }
+    }
+
+    pub fn pop_corase(&self) -> Option<CacheEntry<K, V, L, S>> {
+        match self {
+            Cache::Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
+            Cache::Lru(cache) => cache.pop_corase().map(CacheEntry::from),
+            Cache::Lfu(cache) => cache.pop_corase().map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
         }
     }
 
