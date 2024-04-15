@@ -146,7 +146,7 @@ impl<T> Eviction for Lru<T>
 where
     T: Send + Sync + 'static,
 {
-    type Item = LruHandle<T>;
+    type Handle = LruHandle<T>;
     type Config = LruConfig;
 
     unsafe fn new(capacity: usize, config: &Self::Config) -> Self
@@ -169,7 +169,7 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         debug_assert!(!handle.link.is_linked());
@@ -191,7 +191,7 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Item>> {
+    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         let mut ptr = self.list.pop_front().or_else(|| self.high_priority_list.pop_front())?;
 
         let handle = ptr.as_mut();
@@ -206,9 +206,9 @@ where
         Some(ptr)
     }
 
-    unsafe fn access(&mut self, _: NonNull<Self::Item>) {}
+    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         if handle.base().is_in_eviction() {
@@ -221,7 +221,7 @@ where
         }
     }
 
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Item>) {
+    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
         debug_assert!(handle.link.is_linked());
 
@@ -235,7 +235,7 @@ where
         handle.base_mut().set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Item>> {
+    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
 
         while !self.list.is_empty() {
@@ -256,11 +256,11 @@ where
         res
     }
 
-    unsafe fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.high_priority_list.len() + self.list.len()
     }
 
-    unsafe fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
