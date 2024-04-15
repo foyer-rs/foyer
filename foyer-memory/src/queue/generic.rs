@@ -14,11 +14,9 @@
 
 use std::ptr::NonNull;
 
-use crate::{handle::Handle, CacheContext};
+use crate::{eviction::Eviction, handle::Handle, CacheContext};
 
-use super::{fifo::Fifo, lfu::Lfu, lru::Lru, s3fifo::S3Fifo, Eviction};
-
-pub struct EvictionQueue<T, E>
+pub struct GenericEvictionQueue<T, E>
 where
     E: Eviction,
     E::Handle: Handle<Data = T>,
@@ -26,7 +24,7 @@ where
     eviction: E,
 }
 
-impl<T, E> EvictionQueue<T, E>
+impl<T, E> GenericEvictionQueue<T, E>
 where
     E: Eviction,
     E::Handle: Handle<Data = T>,
@@ -73,7 +71,7 @@ where
     }
 }
 
-impl<T, E> Drop for EvictionQueue<T, E>
+impl<T, E> Drop for GenericEvictionQueue<T, E>
 where
     E: Eviction,
     E::Handle: Handle<Data = T>,
@@ -87,27 +85,22 @@ where
     }
 }
 
-pub type FifoQueue<T> = EvictionQueue<T, Fifo<T>>;
-pub type LruQueue<T> = EvictionQueue<T, Lru<T>>;
-pub type LfuQueue<T> = EvictionQueue<T, Lfu<T>>;
-pub type S3FifoQueue<T> = EvictionQueue<T, S3Fifo<T>>;
-
 #[cfg(test)]
 mod tests {
-    use crate::FifoConfig;
+    use crate::{eviction::fifo::Fifo, FifoConfig};
 
     use super::*;
 
     #[test]
     fn test_eviction_queue_simple() {
-        let mut fifo = FifoQueue::new(100, &FifoConfig {});
+        let mut fifo: GenericEvictionQueue<_, Fifo<_>> = GenericEvictionQueue::new(100, &FifoConfig {});
         (0..100).for_each(|i| fifo.push(i));
         (0..100).for_each(|i| assert_eq!(fifo.pop(), Some(i)));
     }
 
     #[test]
     fn test_eviction_queue_drop_clear() {
-        let mut fifo = FifoQueue::new(100, &FifoConfig {});
+        let mut fifo: GenericEvictionQueue<_, Fifo<_>> = GenericEvictionQueue::new(100, &FifoConfig {});
         (0..100).for_each(|i| fifo.push(i));
     }
 }
