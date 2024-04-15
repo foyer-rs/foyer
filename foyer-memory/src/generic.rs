@@ -184,19 +184,39 @@ where
     /// Remove a key from the cache.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<(K, V, <E::Handle as Handle>::Context, usize)>
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<E::Handle>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let ptr = self.indexer.remove(hash, key)?;
+        let mut ptr = self.indexer.remove(hash, key)?;
+        let handle = ptr.as_mut();
+
         self.state.metrics.remove.fetch_add(1, Ordering::Relaxed);
-        if ptr.as_ref().base().is_in_eviction() {
+
+        if handle.base().is_in_eviction() {
             self.eviction.remove(ptr);
         }
-        debug_assert!(!ptr.as_ref().base().is_in_indexer());
-        debug_assert!(!ptr.as_ref().base().is_in_eviction());
-        self.try_release_handle(ptr, false)
+
+        debug_assert!(!handle.base().is_in_indexer());
+        debug_assert!(!handle.base().is_in_eviction());
+
+        handle.base_mut().inc_refs();
+
+        Some(ptr)
+    }
+
+    /// Remove a key based on the eviction algorithm if exists.s
+    unsafe fn pop(&mut self) -> Option<NonNull<E::Handle>> {
+        let ptr = self.eviction.pop()?;
+
+        let handle = ptr.as_ref();
+
+        // If the `ptr` is in the eviction container, it must be the latest version of the key and in the indexer.
+        let p = self.remove(handle.base().hash(), handle.key()).unwrap();
+        debug_assert_eq!(ptr, p);
+
+        Some(ptr)
     }
 
     /// Clear all cache entries.
@@ -513,21 +533,68 @@ where
         entry
     }
 
-    pub fn remove<Q>(&self, key: &Q)
+    pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, L, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let hash = self.hash_builder.hash_one(key);
 
-        let entry = unsafe {
+        unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
-            shard.remove(hash, key)
-        };
+            shard.remove(hash, key).map(|ptr| GenericCacheEntry {
+                cache: self.clone(),
+                ptr,
+            })
+        }
+    }
 
-        // Do not deallocate data within the lock section.
-        if let Some((key, value, context, charges)) = entry {
-            self.context.listener.on_release(key, value, context.into(), charges);
+    pub fn pop(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, L, S>> {
+        let mut shards = self.shards.iter().map(|shard| shard.lock()).collect_vec();
+
+        let shard = self
+            .usages
+            .iter()
+            .enumerate()
+            .fold((None, 0), |(largest_shard, largest_shard_usage), (shard, usage)| {
+                let usage = usage.load(Ordering::Acquire);
+                if usage > largest_shard_usage {
+                    (Some(shard), usage)
+                } else {
+                    (largest_shard, largest_shard_usage)
+                }
+            })
+            .0?;
+
+        unsafe {
+            shards[shard].pop().map(|ptr| GenericCacheEntry {
+                cache: self.clone(),
+                ptr,
+            })
+        }
+    }
+
+    pub fn pop_corase(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, L, S>> {
+        let shard = self
+            .usages
+            .iter()
+            .enumerate()
+            .fold((None, 0), |(largest_shard, largest_shard_usage), (shard, usage)| {
+                let usage = usage.load(Ordering::Relaxed);
+                if usage > largest_shard_usage {
+                    (Some(shard), usage)
+                } else {
+                    (largest_shard, largest_shard_usage)
+                }
+            })
+            .0?;
+
+        unsafe {
+            let mut shard = self.shards[shard].lock();
+            shard.pop().map(|ptr| GenericCacheEntry {
+                cache: self.clone(),
+                ptr,
+            })
         }
     }
 
@@ -934,8 +1001,9 @@ mod tests {
         assert_eq!(cache.get(&514).unwrap().value(), "bili");
         assert_eq!(e4.value(), "QwQ");
 
-        cache.remove(&514);
-        assert_eq!(e5.value(), "bili");
+        let e6 = cache.remove(&514).unwrap();
+        assert_eq!(e6.value(), "bili");
+        drop(e6);
 
         drop(e5);
         assert!(cache.get(&514).is_none());
