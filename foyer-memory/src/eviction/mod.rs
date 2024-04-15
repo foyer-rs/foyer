@@ -100,7 +100,5 @@ pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
 
-pub mod queue;
-
 #[cfg(test)]
 pub mod test_utils;
