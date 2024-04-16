@@ -89,11 +89,13 @@ jobs:
       - name: Run rust test with coverage (igored tests)
         env:
           RUST_BACKTRACE: 1
+          CI: true
         run: |
           cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace
       - name: Run rust test with coverage
         env:
           RUST_BACKTRACE: 1
+          CI: true
         run: |
           cargo llvm-cov --no-report nextest
       - name: Generate codecov report
@@ -131,6 +133,7 @@ jobs:
           RUSTFLAGS: "--cfg tokio_unstable"
           RUST_LOG: info
           TOKIO_WORKER_THREADS: 1
+          CI: true
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
@@ -160,6 +163,7 @@ jobs:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
+          CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-storage-bench With Address Sanitizer
@@ -167,6 +171,7 @@ jobs:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
+          CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
@@ -206,6 +211,7 @@ jobs:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
           RUST_LOG: info
+          CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-storage-bench With Leak Sanitizer
@@ -213,6 +219,7 @@ jobs:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
           RUST_LOG: info
+          CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
@@ -256,6 +263,7 @@ jobs:
           RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
           RUST_LOG: info
           TOKIO_WORKER_THREADS: 1
+          CI: true
         run: |-
           cargo clippy --all-targets
       - name: Run nextest (madsim)

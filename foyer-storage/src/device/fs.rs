@@ -15,17 +15,90 @@
 use std::{
     fs::{create_dir_all, File, OpenOptions},
     os::fd::{AsRawFd, BorrowedFd, RawFd},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 use allocator_api2::vec::Vec as VecA;
-use foyer_common::range::RangeBoundsExt;
+use foyer_common::{fs::freespace, range::RangeBoundsExt};
 use futures::future::try_join_all;
 use itertools::Itertools;
 
 use super::{allocator::AlignedAllocator, asyncify, Device, DeviceError, DeviceResult, IoBuf, IoBufMut, IoRange};
 use crate::region::RegionId;
+
+#[derive(Debug)]
+pub struct FsDeviceConfigBuilder {
+    pub dir: PathBuf,
+    pub capacity: Option<usize>,
+    pub file_size: Option<usize>,
+    pub align: Option<usize>,
+    pub io_size: Option<usize>,
+}
+
+impl FsDeviceConfigBuilder {
+    const DEFAULT_ALIGN: usize = 4096;
+    const DEFAULT_IO_SIZE: usize = 16 * 1024;
+    const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
+
+    pub fn new(dir: impl AsRef<Path>) -> Self {
+        let dir = dir.as_ref().into();
+        Self {
+            dir,
+            capacity: None,
+            file_size: None,
+            align: None,
+            io_size: None,
+        }
+    }
+
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = Some(capacity);
+        self
+    }
+
+    pub fn with_file_size(mut self, file_size: usize) -> Self {
+        self.file_size = Some(file_size);
+        self
+    }
+
+    pub fn with_align(mut self, align: usize) -> Self {
+        self.align = Some(align);
+        self
+    }
+
+    pub fn with_io_size(mut self, io_size: usize) -> Self {
+        self.io_size = Some(io_size);
+        self
+    }
+
+    pub fn build(self) -> FsDeviceConfig {
+        let align_v = |value: usize, align: usize| value - value % align;
+
+        let dir = self.dir;
+
+        let align = self.align.unwrap_or(Self::DEFAULT_ALIGN);
+
+        let capacity = self.capacity.unwrap_or(freespace(&dir).unwrap() / 10 * 8);
+        let capacity = align_v(capacity, align);
+
+        let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).clamp(align, capacity);
+        let file_size = align_v(file_size, align);
+
+        let capacity = align_v(capacity, file_size);
+
+        let io_size = self.io_size.unwrap_or(Self::DEFAULT_IO_SIZE).max(align);
+        let io_size = align_v(io_size, align);
+
+        FsDeviceConfig {
+            dir,
+            capacity,
+            file_size,
+            align,
+            io_size,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct FsDeviceConfig {
@@ -36,7 +109,7 @@ pub struct FsDeviceConfig {
     pub capacity: usize,
 
     /// must be multipliers of `align`
-    pub file_capacity: usize,
+    pub file_size: usize,
 
     /// io block alignment, must be pow of 2
     pub align: usize,
@@ -46,10 +119,10 @@ pub struct FsDeviceConfig {
 }
 
 impl FsDeviceConfig {
-    pub fn verify(&self) {
+    pub fn assert(&self) {
         assert!(self.align.is_power_of_two());
-        assert_eq!(self.file_capacity % self.align, 0);
-        assert_eq!(self.capacity % self.file_capacity, 0);
+        assert_eq!(self.file_size % self.align, 0);
+        assert_eq!(self.capacity % self.file_size, 0);
     }
 }
 
@@ -83,7 +156,7 @@ impl Device for FsDevice {
     where
         B: IoBuf,
     {
-        let file_capacity = self.inner.config.file_capacity;
+        let file_capacity = self.inner.config.file_size;
 
         let range = range.bounds(0..buf.as_ref().len());
         let len = RangeBoundsExt::size(&range).unwrap();
@@ -113,7 +186,7 @@ impl Device for FsDevice {
     where
         B: IoBufMut,
     {
-        let file_capacity = self.inner.config.file_capacity;
+        let file_capacity = self.inner.config.file_size;
 
         let range = range.bounds(0..buf.as_ref().len());
         let len = RangeBoundsExt::size(&range).unwrap();
@@ -179,11 +252,11 @@ impl Device for FsDevice {
 
 impl FsDevice {
     pub async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
-        config.verify();
+        config.assert();
 
         // TODO(MrCroxx): write and read config to a manifest file for pinning
 
-        let regions = config.capacity / config.file_capacity;
+        let regions = config.capacity / config.file_size;
 
         let path = config.dir.clone();
         let dir = asyncify(move || {
@@ -238,6 +311,8 @@ impl FsDevice {
 #[cfg(test)]
 mod tests {
 
+    use std::env::current_dir;
+
     use bytes::BufMut;
 
     use super::*;
@@ -253,7 +328,7 @@ mod tests {
         let config = FsDeviceConfig {
             dir: PathBuf::from(dir.path()),
             capacity: CAPACITY,
-            file_capacity: FILE_CAPACITY,
+            file_size: FILE_CAPACITY,
             align: ALIGN,
             io_size: ALIGN,
         };
@@ -273,5 +348,15 @@ mod tests {
 
         drop(wbuffer);
         drop(rbuffer);
+    }
+
+    #[test]
+    fn test_config_builder() {
+        let dir = current_dir().unwrap();
+        let config = FsDeviceConfigBuilder::new(dir).build();
+
+        println!("{config:?}");
+
+        config.assert();
     }
 }

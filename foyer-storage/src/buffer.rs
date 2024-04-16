@@ -331,10 +331,10 @@ mod tests {
 
         let device = FsDevice::open(FsDeviceConfig {
             dir: tempdir.path().into(),
-            capacity: 256 * 1024,     // 256 KiB
-            file_capacity: 64 * 1024, // 64 KiB
-            align: 4 * 1024,          // 4 KiB
-            io_size: 16 * 1024,       // 16 KiB
+            capacity: 256 * 1024, // 256 KiB
+            file_size: 64 * 1024, // 64 KiB
+            align: 4 * 1024,      // 4 KiB
+            io_size: 16 * 1024,   // 16 KiB
         })
         .await
         .unwrap();
