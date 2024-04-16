@@ -14,11 +14,7 @@
 
 use std::sync::Arc;
 
-use ahash::RandomState;
-use foyer_memory::{
-    Cache, DefaultCacheEventListener, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig, LruCacheConfig,
-    LruConfig, S3FifoCacheConfig, S3FifoConfig,
-};
+use foyer_memory::{Cache, CacheBuilder, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 use rand::{distributions::Distribution, thread_rng};
 
 type CacheKey = String;
@@ -60,7 +56,7 @@ zif_exp, cache_size             fifo            lru             lfu             
 1.50,  0.1                      96.65%          97.50%          98.06%          98.14%          98.15%
 1.50, 0.25                      98.36%          98.81%          99.04%          99.06%          99.09%
 */
-fn cache_hit(cache: Arc<Cache<CacheKey, CacheValue>>, keys: Arc<Vec<CacheKey>>) -> f64 {
+fn cache_hit(cache: Cache<CacheKey, CacheValue>, keys: Arc<Vec<CacheKey>>) -> f64 {
     let mut hit = 0;
     for key in keys.iter() {
         let value = cache.get(key);
@@ -86,69 +82,54 @@ fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &[Strin
     hit as f64 / ITERATIONS as f64
 }
 
-fn new_fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
-    Arc::new(Cache::new(
-        FifoCacheConfig {
-            capacity,
-            shards: SHARDS,
-            eviction_config: FifoConfig {},
-            object_pool_capacity: OBJECT_POOL_CAPACITY,
-            hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
-        }
-        .into(),
-    ))
+fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
+    CacheBuilder::new(capacity)
+        .with_shards(SHARDS)
+        .with_eviction_config(FifoConfig {}.into())
+        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+        .build()
 }
 
-fn new_lru_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
-    Arc::new(Cache::new(
-        LruCacheConfig {
-            capacity,
-            shards: SHARDS,
-            eviction_config: LruConfig {
+fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
+    CacheBuilder::new(capacity)
+        .with_shards(SHARDS)
+        .with_eviction_config(
+            LruConfig {
                 high_priority_pool_ratio: 0.1,
-            },
-            object_pool_capacity: OBJECT_POOL_CAPACITY,
-            hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
-        }
-        .into(),
-    ))
+            }
+            .into(),
+        )
+        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+        .build()
 }
 
-fn new_lfu_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
-    Arc::new(Cache::new(
-        LfuCacheConfig {
-            capacity,
-            shards: SHARDS,
-            eviction_config: LfuConfig {
+fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
+    CacheBuilder::new(capacity)
+        .with_shards(SHARDS)
+        .with_eviction_config(
+            LfuConfig {
                 window_capacity_ratio: 0.1,
                 protected_capacity_ratio: 0.8,
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
-            },
-            object_pool_capacity: OBJECT_POOL_CAPACITY,
-            hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
-        }
-        .into(),
-    ))
+            }
+            .into(),
+        )
+        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+        .build()
 }
 
-fn new_s3fifo_cache(capacity: usize) -> Arc<Cache<CacheKey, CacheValue>> {
-    Arc::new(Cache::new(
-        S3FifoCacheConfig {
-            capacity,
-            shards: SHARDS,
-            eviction_config: S3FifoConfig {
+fn new_s3fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
+    CacheBuilder::new(capacity)
+        .with_shards(SHARDS)
+        .with_eviction_config(
+            S3FifoConfig {
                 small_queue_capacity_ratio: 0.1,
-            },
-            object_pool_capacity: OBJECT_POOL_CAPACITY,
-            hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
-        }
-        .into(),
-    ))
+            }
+            .into(),
+        )
+        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+        .build()
 }
 
 fn bench_one(zif_exp: f64, cache_size_percent: f64) {

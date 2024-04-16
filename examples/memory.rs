@@ -12,24 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::hash::RandomState;
-
-use foyer::memory::{Cache, DefaultCacheEventListener, LruCacheConfig, LruConfig};
+use foyer::memory::{CacheBuilder, LruConfig};
 
 fn main() {
-    let cache = Cache::new(
-        LruCacheConfig {
-            capacity: 16,
-            shards: 4,
-            eviction_config: LruConfig {
+    let cache = CacheBuilder::new(16)
+        .with_shards(4)
+        .with_eviction_config(
+            LruConfig {
                 high_priority_pool_ratio: 0.1,
-            },
-            object_pool_capacity: 1024,
-            hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
-        }
-        .into(),
-    );
+            }
+            .into(),
+        )
+        .build();
 
     let entry = cache.insert("hello".to_string(), "world".to_string(), 1);
     let e = cache.get("hello").unwrap();

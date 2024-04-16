@@ -34,13 +34,12 @@ use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 use export::MetricsExporter;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::LfuConfig;
+use foyer_memory::{EvictionConfig, LfuConfig};
 use foyer_storage::{
     admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
     compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
-    region_manager::EvictionConfg,
     reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionPolicy},
     runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{AsyncStorageExt, Storage, StorageExt, StorageWriter},
@@ -538,7 +537,7 @@ async fn main() {
     let metrics_dump_start = metrics.dump();
     let time = Instant::now();
 
-    let eviction_config = EvictionConfg::Lfu(LfuConfig {
+    let eviction_config = EvictionConfig::Lfu(LfuConfig {
         window_capacity_ratio: 0.1,
         protected_capacity_ratio: 0.8,
         cmsketch_eps: 0.001,
