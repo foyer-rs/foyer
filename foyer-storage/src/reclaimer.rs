@@ -19,7 +19,7 @@ use std::{
 
 use bytes::BufMut;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+
 use tokio::sync::broadcast;
 
 use crate::{
@@ -28,42 +28,38 @@ use crate::{
     generic::{GenericStore, RegionEntryIter},
     judge::Judges,
     metrics::Metrics,
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::RegionManager,
     storage::Storage,
 };
 
 #[derive(Debug)]
-pub struct Reclaimer<K, V, D, EP, EL>
+pub struct Reclaimer<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     threshold: usize,
 
-    store: GenericStore<K, V, D, EP, EL>,
+    store: GenericStore<K, V, D>,
 
-    region_manager: Arc<RegionManager<D, EP, EL>>,
+    region_manager: Arc<RegionManager<D>>,
 
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
 }
 
-impl<K, V, D, EP, EL> Reclaimer<K, V, D, EP, EL>
+impl<K, V, D> Reclaimer<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     pub fn new(
         threshold: usize,
-        store: GenericStore<K, V, D, EP, EL>,
-        region_manager: Arc<RegionManager<D, EP, EL>>,
+        store: GenericStore<K, V, D>,
+        region_manager: Arc<RegionManager<D>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {

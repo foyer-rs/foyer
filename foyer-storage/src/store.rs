@@ -15,38 +15,18 @@
 use std::marker::PhantomData;
 
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_intrusive::eviction::{
-    fifo::{Fifo, FifoLink},
-    lfu::{Lfu, LfuLink},
-    lru::{Lru, LruLink},
-};
 
 use crate::{
     compress::Compression,
     device::fs::FsDevice,
     error::Result,
     generic::{GenericStore, GenericStoreConfig, GenericStoreWriter},
-    region_manager::RegionEpItemAdapter,
     storage::{Storage, StorageWriter},
 };
 
-pub type LruFsStore<K, V> = GenericStore<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
-
-pub type LruFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>>;
-
-pub type LruFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Lru<RegionEpItemAdapter<LruLink>>, LruLink>;
-
-pub type LfuFsStore<K, V> = GenericStore<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
-
-pub type LfuFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>>;
-
-pub type LfuFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Lfu<RegionEpItemAdapter<LfuLink>>, LfuLink>;
-
-pub type FifoFsStore<K, V> = GenericStore<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
-
-pub type FifoFsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
-
-pub type FifoFsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
+pub type FsStore<K, V> = GenericStore<K, V, FsDevice>;
+pub type FsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice>;
+pub type FsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice>;
 
 #[derive(Debug)]
 pub struct NoneStoreWriter<K: StorageKey, V: StorageValue> {
@@ -154,9 +134,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    LruFsStoreConfig { config: LruFsStoreConfig<K, V> },
-    LfuFsStoreConfig { config: LfuFsStoreConfig<K, V> },
-    FifoFsStoreConfig { config: FifoFsStoreConfig<K, V> },
+    FsStoreConfig(Box<FsStoreConfig<K, V>>),
     NoneStoreConfig,
 }
 
@@ -167,41 +145,19 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::LruFsStoreConfig { config } => Self::LruFsStoreConfig { config: config.clone() },
-            Self::LfuFsStoreConfig { config } => Self::LfuFsStoreConfig { config: config.clone() },
-            Self::FifoFsStoreConfig { config } => Self::FifoFsStoreConfig { config: config.clone() },
+            Self::FsStoreConfig(config) => Self::FsStoreConfig(config.clone()),
             Self::NoneStoreConfig => Self::NoneStoreConfig,
         }
     }
 }
 
-impl<K, V> From<LruFsStoreConfig<K, V>> for StoreConfig<K, V>
+impl<K, V> From<FsStoreConfig<K, V>> for StoreConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    fn from(config: LruFsStoreConfig<K, V>) -> Self {
-        StoreConfig::LruFsStoreConfig { config }
-    }
-}
-
-impl<K, V> From<LfuFsStoreConfig<K, V>> for StoreConfig<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(config: LfuFsStoreConfig<K, V>) -> Self {
-        StoreConfig::LfuFsStoreConfig { config }
-    }
-}
-
-impl<K, V> From<FifoFsStoreConfig<K, V>> for StoreConfig<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(config: FifoFsStoreConfig<K, V>) -> Self {
-        StoreConfig::FifoFsStoreConfig { config }
+    fn from(config: FsStoreConfig<K, V>) -> Self {
+        StoreConfig::FsStoreConfig(Box::new(config))
     }
 }
 
@@ -211,39 +167,17 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    LruFsStorWriter { writer: LruFsStoreWriter<K, V> },
-    LfuFsStorWriter { writer: LfuFsStoreWriter<K, V> },
-    FifoFsStoreWriter { writer: FifoFsStoreWriter<K, V> },
+    FsStoreWriter { writer: FsStoreWriter<K, V> },
     NoneStoreWriter { writer: NoneStoreWriter<K, V> },
 }
 
-impl<K, V> From<LruFsStoreWriter<K, V>> for StoreWriter<K, V>
+impl<K, V> From<FsStoreWriter<K, V>> for StoreWriter<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    fn from(writer: LruFsStoreWriter<K, V>) -> Self {
-        StoreWriter::LruFsStorWriter { writer }
-    }
-}
-
-impl<K, V> From<LfuFsStoreWriter<K, V>> for StoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(writer: LfuFsStoreWriter<K, V>) -> Self {
-        StoreWriter::LfuFsStorWriter { writer }
-    }
-}
-
-impl<K, V> From<FifoFsStoreWriter<K, V>> for StoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(writer: FifoFsStoreWriter<K, V>) -> Self {
-        StoreWriter::FifoFsStoreWriter { writer }
+    fn from(writer: FsStoreWriter<K, V>) -> Self {
+        StoreWriter::FsStoreWriter { writer }
     }
 }
 
@@ -263,9 +197,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    LruFsStore { store: LruFsStore<K, V> },
-    LfuFsStore { store: LfuFsStore<K, V> },
-    FifoFsStore { store: FifoFsStore<K, V> },
+    FsStore { store: FsStore<K, V> },
     NoneStore { store: NoneStore<K, V> },
 }
 
@@ -276,9 +208,7 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::LruFsStore { store } => Self::LruFsStore { store: store.clone() },
-            Self::LfuFsStore { store } => Self::LfuFsStore { store: store.clone() },
-            Self::FifoFsStore { store } => Self::FifoFsStore { store: store.clone() },
+            Self::FsStore { store } => Self::FsStore { store: store.clone() },
             Self::NoneStore { store } => Self::NoneStore { store: store.clone() },
         }
     }
@@ -294,63 +224,49 @@ where
 
     fn key(&self) -> &Self::Key {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.key(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.key(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.key(),
+            StoreWriter::FsStoreWriter { writer } => writer.key(),
             StoreWriter::NoneStoreWriter { writer } => writer.key(),
         }
     }
 
     fn weight(&self) -> usize {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.weight(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.weight(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.weight(),
+            StoreWriter::FsStoreWriter { writer } => writer.weight(),
             StoreWriter::NoneStoreWriter { writer } => writer.weight(),
         }
     }
 
     fn judge(&mut self) -> bool {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.judge(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.judge(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.judge(),
+            StoreWriter::FsStoreWriter { writer } => writer.judge(),
             StoreWriter::NoneStoreWriter { writer } => writer.judge(),
         }
     }
 
     fn force(&mut self) {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.force(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.force(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.force(),
+            StoreWriter::FsStoreWriter { writer } => writer.force(),
             StoreWriter::NoneStoreWriter { writer } => writer.force(),
         }
     }
 
     async fn finish(self, value: Self::Value) -> Result<bool> {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.finish(value).await,
-            StoreWriter::LfuFsStorWriter { writer } => writer.finish(value).await,
-            StoreWriter::FifoFsStoreWriter { writer } => writer.finish(value).await,
+            StoreWriter::FsStoreWriter { writer } => writer.finish(value).await,
             StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
         }
     }
 
     fn compression(&self) -> Compression {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.compression(),
-            StoreWriter::LfuFsStorWriter { writer } => writer.compression(),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.compression(),
+            StoreWriter::FsStoreWriter { writer } => writer.compression(),
             StoreWriter::NoneStoreWriter { writer } => writer.compression(),
         }
     }
 
     fn set_compression(&mut self, compression: Compression) {
         match self {
-            StoreWriter::LruFsStorWriter { writer } => writer.set_compression(compression),
-            StoreWriter::LfuFsStorWriter { writer } => writer.set_compression(compression),
-            StoreWriter::FifoFsStoreWriter { writer } => writer.set_compression(compression),
+            StoreWriter::FsStoreWriter { writer } => writer.set_compression(compression),
             StoreWriter::NoneStoreWriter { writer } => writer.set_compression(compression),
         }
     }
@@ -368,17 +284,9 @@ where
 
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
-            StoreConfig::LruFsStoreConfig { config } => {
-                let store = LruFsStore::open(config).await?;
-                Ok(Self::LruFsStore { store })
-            }
-            StoreConfig::LfuFsStoreConfig { config } => {
-                let store = LfuFsStore::open(config).await?;
-                Ok(Self::LfuFsStore { store })
-            }
-            StoreConfig::FifoFsStoreConfig { config } => {
-                let store = FifoFsStore::open(config).await?;
-                Ok(Self::FifoFsStore { store })
+            StoreConfig::FsStoreConfig(config) => {
+                let store = FsStore::open(*config).await?;
+                Ok(Self::FsStore { store })
             }
             StoreConfig::NoneStoreConfig => {
                 let store = NoneStore::open(()).await?;
@@ -389,63 +297,49 @@ where
 
     fn is_ready(&self) -> bool {
         match self {
-            Store::LruFsStore { store } => store.is_ready(),
-            Store::LfuFsStore { store } => store.is_ready(),
-            Store::FifoFsStore { store } => store.is_ready(),
+            Store::FsStore { store } => store.is_ready(),
             Store::NoneStore { store } => store.is_ready(),
         }
     }
 
     async fn close(&self) -> Result<()> {
         match self {
-            Store::LruFsStore { store } => store.close().await,
-            Store::LfuFsStore { store } => store.close().await,
-            Store::FifoFsStore { store } => store.close().await,
+            Store::FsStore { store } => store.close().await,
             Store::NoneStore { store } => store.close().await,
         }
     }
 
     fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
         match self {
-            Store::LruFsStore { store } => store.writer(key, weight).into(),
-            Store::LfuFsStore { store } => store.writer(key, weight).into(),
-            Store::FifoFsStore { store } => store.writer(key, weight).into(),
+            Store::FsStore { store } => store.writer(key, weight).into(),
             Store::NoneStore { store } => store.writer(key, weight).into(),
         }
     }
 
     fn exists(&self, key: &Self::Key) -> Result<bool> {
         match self {
-            Store::LruFsStore { store } => store.exists(key),
-            Store::LfuFsStore { store } => store.exists(key),
-            Store::FifoFsStore { store } => store.exists(key),
+            Store::FsStore { store } => store.exists(key),
             Store::NoneStore { store } => store.exists(key),
         }
     }
 
     async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
         match self {
-            Store::LruFsStore { store } => store.lookup(key).await,
-            Store::LfuFsStore { store } => store.lookup(key).await,
-            Store::FifoFsStore { store } => store.lookup(key).await,
+            Store::FsStore { store } => store.lookup(key).await,
             Store::NoneStore { store } => store.lookup(key).await,
         }
     }
 
     fn remove(&self, key: &Self::Key) -> Result<bool> {
         match self {
-            Store::LruFsStore { store } => store.remove(key),
-            Store::LfuFsStore { store } => store.remove(key),
-            Store::FifoFsStore { store } => store.remove(key),
+            Store::FsStore { store } => store.remove(key),
             Store::NoneStore { store } => store.remove(key),
         }
     }
 
     fn clear(&self) -> Result<()> {
         match self {
-            Store::LruFsStore { store } => store.clear(),
-            Store::LfuFsStore { store } => store.clear(),
-            Store::FifoFsStore { store } => store.clear(),
+            Store::FsStore { store } => store.clear(),
             Store::NoneStore { store } => store.clear(),
         }
     }

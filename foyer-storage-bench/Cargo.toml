@@ -19,7 +19,7 @@ bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
 foyer-common = { version = "0.5", path = "../foyer-common" }
-foyer-intrusive = { version = "0.4", path = "../foyer-intrusive" }
+foyer-memory = { version = "0.2", path = "../foyer-memory" }
 foyer-storage = { version = "0.6", path = "../foyer-storage" }
 foyer-workspace-hack = { version = "0.4", path = "../foyer-workspace-hack" }
 futures = "0.3"

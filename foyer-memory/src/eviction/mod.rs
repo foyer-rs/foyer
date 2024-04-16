@@ -49,24 +49,19 @@ pub trait Eviction: Send + Sync + 'static {
     /// The base handle associated to the `ptr` must be set NOT in cache.
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
 
-    /// Try to reinsert a handle `ptr` into the eviction container after access.
-    ///
-    /// The eviction container can decide if to insert based on the algorithm.
-    ///
-    /// # Safety
-    ///
-    /// The given `ptr` may be either IN or NOT IN the eviction container.
-    /// If the `ptr` is reinserted, the base handle associated to it must be set in cache.
-    /// If the `ptr` is NOT reinserted, the base handle associated to it must be set NOT in cache.
-    unsafe fn reinsert(&mut self, ptr: NonNull<Self::Handle>);
-
-    /// Notify the eviciton container that the `ptr` is accessed.
-    /// The eviction container can update its statistics.
+    /// Notify the eviciton container that the `ptr` is acquired by **AN** external user.
     ///
     /// # Safety
     ///
     /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>);
+    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>);
+
+    /// Notify the eviciton container that the `ptr` is released by **ALL** external users.
+    ///
+    /// # Safety
+    ///
+    /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
+    unsafe fn release(&mut self, ptr: NonNull<Self::Handle>);
 
     /// Remove the given `ptr` from the eviction container.
     ///

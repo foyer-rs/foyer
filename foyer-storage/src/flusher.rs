@@ -16,7 +16,6 @@ use std::{fmt::Debug, sync::Arc};
 
 use either::Either;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
 use tokio::sync::{broadcast, mpsc};
 use tracing::Instrument;
 
@@ -27,7 +26,7 @@ use crate::{
     device::Device,
     error::Result,
     metrics::Metrics,
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::RegionManager,
 };
 
 pub struct Entry<K, V>
@@ -70,15 +69,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct Flusher<K, V, D, EP, EL>
+pub struct Flusher<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    region_manager: Arc<RegionManager<D, EP, EL>>,
+    region_manager: Arc<RegionManager<D>>,
 
     catalog: Arc<Catalog<K, V>>,
 
@@ -91,16 +88,14 @@ where
     stop_rx: broadcast::Receiver<()>,
 }
 
-impl<K, V, D, EP, EL> Flusher<K, V, D, EP, EL>
+impl<K, V, D> Flusher<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     pub fn new(
-        region_manager: Arc<RegionManager<D, EP, EL>>,
+        region_manager: Arc<RegionManager<D>>,
         catalog: Arc<Catalog<K, V>>,
         device: D,
         entry_rx: mpsc::UnboundedReceiver<Entry<K, V>>,

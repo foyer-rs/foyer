@@ -30,7 +30,7 @@ use foyer_common::{
     bits,
     code::{CodingError, StorageKey, StorageValue},
 };
-use foyer_intrusive::{core::adapter::Link, eviction::EvictionPolicy};
+
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -51,19 +51,18 @@ use crate::{
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId},
-    region_manager::{RegionEpItemAdapter, RegionManager},
+    region_manager::{EvictionConfg, RegionManager},
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
     storage::{Storage, StorageWriter},
 };
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
-pub struct GenericStoreConfig<K, V, D, EP>
+pub struct GenericStoreConfig<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy,
 {
     /// For distinguish different foyer metrics.
     ///
@@ -71,7 +70,7 @@ where
     pub name: String,
 
     /// Evictino policy configurations.
-    pub eviction_config: EP::Config,
+    pub eviction_config: EvictionConfg,
 
     /// Device configurations.
     pub device_config: D::Config,
@@ -103,12 +102,11 @@ where
     pub compression: Compression,
 }
 
-impl<K, V, D, EP> Debug for GenericStoreConfig<K, V, D, EP>
+impl<K, V, D> Debug for GenericStoreConfig<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreConfig")
@@ -126,12 +124,11 @@ where
     }
 }
 
-impl<K, V, D, EP> Clone for GenericStoreConfig<K, V, D, EP>
+impl<K, V, D> Clone for GenericStoreConfig<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy,
 {
     fn clone(&self) -> Self {
         Self {
@@ -151,24 +148,20 @@ where
 }
 
 #[derive(Debug)]
-pub struct GenericStore<K, V, D, EP, EL>
+pub struct GenericStore<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    inner: Arc<GenericStoreInner<K, V, D, EP, EL>>,
+    inner: Arc<GenericStoreInner<K, V, D>>,
 }
 
-impl<K, V, D, EP, EL> Clone for GenericStore<K, V, D, EP, EL>
+impl<K, V, D> Clone for GenericStore<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     fn clone(&self) -> Self {
         Self {
@@ -178,18 +171,16 @@ where
 }
 
 #[derive(Debug)]
-pub struct GenericStoreInner<K, V, D, EP, EL>
+pub struct GenericStoreInner<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     sequence: AtomicU64,
     catalog: Arc<Catalog<K, V>>,
 
-    region_manager: Arc<RegionManager<D, EP, EL>>,
+    region_manager: Arc<RegionManager<D>>,
 
     device: D,
 
@@ -210,15 +201,13 @@ where
     _marker: PhantomData<V>,
 }
 
-impl<K, V, D, EP, EL> GenericStore<K, V, D, EP, EL>
+impl<K, V, D> GenericStore<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    async fn open(config: GenericStoreConfig<K, V, D, EP>) -> Result<Self> {
+    async fn open(config: GenericStoreConfig<K, V, D>) -> Result<Self> {
         tracing::info!("open store with config:\n{:#?}", config);
 
         let metrics = Arc::new(METRICS.foyer(&config.name));
@@ -352,7 +341,7 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<K, V, D, EP, EL> {
+    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<K, V, D> {
         GenericStoreWriter::new(self.clone(), key, weight)
     }
 
@@ -505,7 +494,7 @@ where
     /// Return `Some(max sequence)` if region is valid, otherwise `None`
     async fn recover_region(
         region_id: RegionId,
-        region_manager: Arc<RegionManager<D, EP, EL>>,
+        region_manager: Arc<RegionManager<D>>,
         catalog: Arc<Catalog<K, V>>,
     ) -> Result<Option<Sequence>> {
         let region = region_manager.region(&region_id).clone();
@@ -524,7 +513,7 @@ where
         Ok(res)
     }
 
-    fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D, EP, EL>) {
+    fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D>) {
         for (index, admission) in self.inner.admissions.iter().enumerate() {
             let judge = admission.judge(writer.key.as_ref().unwrap(), writer.weight);
             writer.judges.set(index, judge);
@@ -533,7 +522,7 @@ where
     }
 
     #[tracing::instrument(skip(self, value))]
-    async fn apply_writer(&self, mut writer: GenericStoreWriter<K, V, D, EP, EL>, value: V) -> Result<bool> {
+    async fn apply_writer(&self, mut writer: GenericStoreWriter<K, V, D>, value: V) -> Result<bool> {
         debug_assert!(!writer.is_inserted);
 
         if !writer.judge() {
@@ -595,15 +584,13 @@ where
     }
 }
 
-pub struct GenericStoreWriter<K, V, D, EP, EL>
+pub struct GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    store: GenericStore<K, V, D, EP, EL>,
+    store: GenericStore<K, V, D>,
     /// `key` is always `Some` before `apply_writer`.
     key: Option<K>,
     weight: usize,
@@ -621,15 +608,13 @@ where
     compression: Compression,
 }
 
-impl<K, V, D, EP, EL> GenericStoreWriter<K, V, D, EP, EL>
+impl<K, V, D> GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
-    fn new(store: GenericStore<K, V, D, EP, EL>, key: K, weight: usize) -> Self {
+    fn new(store: GenericStore<K, V, D>, key: K, weight: usize) -> Self {
         let judges = Judges::new(store.inner.admissions.len());
         let compression = store.inner.compression;
         Self {
@@ -687,13 +672,11 @@ where
     }
 }
 
-impl<K, V, D, EP, EL> Debug for GenericStoreWriter<K, V, D, EP, EL>
+impl<K, V, D> Debug for GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreWriter")
@@ -707,13 +690,11 @@ where
     }
 }
 
-impl<K, V, D, EP, EL> Drop for GenericStoreWriter<K, V, D, EP, EL>
+impl<K, V, D> Drop for GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     fn drop(&mut self) {
         if !self.is_inserted {
@@ -978,13 +959,11 @@ where
     }
 }
 
-impl<K, V, D, EP, EL> StorageWriter for GenericStoreWriter<K, V, D, EP, EL>
+impl<K, V, D> StorageWriter for GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     type Key = K;
     type Value = V;
@@ -1018,18 +997,16 @@ where
     }
 }
 
-impl<K, V, D, EP, EL> Storage for GenericStore<K, V, D, EP, EL>
+impl<K, V, D> Storage for GenericStore<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
-    EP: EvictionPolicy<Adapter = RegionEpItemAdapter<EL>>,
-    EL: Link,
 {
     type Key = K;
     type Value = V;
-    type Config = GenericStoreConfig<K, V, D, EP>;
-    type Writer = GenericStoreWriter<K, V, D, EP, EL>;
+    type Config = GenericStoreConfig<K, V, D>;
+    type Writer = GenericStoreWriter<K, V, D>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -1068,7 +1045,7 @@ where
 mod tests {
     use std::path::PathBuf;
 
-    use foyer_intrusive::eviction::fifo::{Fifo, FifoConfig, FifoLink};
+    use foyer_memory::FifoConfig;
 
     use super::*;
     use crate::{
@@ -1077,9 +1054,8 @@ mod tests {
         test_utils::JudgeRecorder,
     };
 
-    type TestStore = GenericStore<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>, FifoLink>;
-
-    type TestStoreConfig = GenericStoreConfig<u64, Vec<u8>, FsDevice, Fifo<RegionEpItemAdapter<FifoLink>>>;
+    type TestStore = GenericStore<u64, Vec<u8>, FsDevice>;
+    type TestStoreConfig = GenericStoreConfig<u64, Vec<u8>, FsDevice>;
 
     #[tokio::test]
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -1096,7 +1072,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1142,7 +1118,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
