@@ -225,9 +225,9 @@ where
         }
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn release(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>) {
         let mut ptr = ptr;
         ptr.as_mut().inc();
     }
@@ -363,9 +363,9 @@ mod tests {
 
             assert_count(&ptrs, 0..4, 0);
 
-            (0..4).for_each(|i| s3fifo.access(ptrs[i]));
-            s3fifo.access(ptrs[1]);
-            s3fifo.access(ptrs[2]);
+            (0..4).for_each(|i| s3fifo.acquire(ptrs[i]));
+            s3fifo.acquire(ptrs[1]);
+            s3fifo.acquire(ptrs[2]);
             assert_count(&ptrs, 0..1, 1);
             assert_count(&ptrs, 1..3, 2);
             assert_count(&ptrs, 3..4, 1);

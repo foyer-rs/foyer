@@ -227,13 +227,14 @@ pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 mod tests {
     use std::path::PathBuf;
 
-    use foyer_intrusive::eviction::fifo::FifoConfig;
+    use foyer_memory::FifoConfig;
 
     use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
+        region_manager::EvictionConfg,
         storage::StorageExt,
-        store::{FifoFsStoreConfig, Store},
+        store::{FsStore, FsStoreConfig},
     };
 
     const KB: usize = 1024;
@@ -243,9 +244,9 @@ mod tests {
     async fn test_lazy_store() {
         let tempdir = tempfile::tempdir().unwrap();
 
-        let config = FifoFsStoreConfig {
+        let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -263,7 +264,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
+        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -275,9 +276,9 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let config = FifoFsStoreConfig {
+        let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -295,7 +296,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, Store<_, _>>::with_handle(config.into());
+        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 

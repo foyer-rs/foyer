@@ -17,14 +17,15 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use foyer_intrusive::eviction::fifo::FifoConfig;
+use foyer_memory::FifoConfig;
 use foyer_storage::{
     compress::Compression,
     device::fs::FsDeviceConfig,
     lazy::LazyStore,
+    region_manager::EvictionConfg,
     runtime::{RuntimeConfig, RuntimeLazyStore, RuntimeStorageConfig, RuntimeStore},
     storage::{Storage, StorageExt},
-    store::{FifoFsStoreConfig, Store},
+    store::{FsStore, FsStoreConfig},
     test_utils::JudgeRecorder,
 };
 
@@ -105,9 +106,9 @@ where
 async fn test_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FifoFsStoreConfig {
+    let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: FifoConfig,
+        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -125,16 +126,16 @@ async fn test_store() {
         compression: Compression::None,
     };
 
-    test_storage::<Store<_, _>>(config.into(), recorder).await;
+    test_storage::<FsStore<_, _>>(config, recorder).await;
 }
 
 #[tokio::test]
 async fn test_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FifoFsStoreConfig {
+    let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: FifoConfig,
+        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -152,16 +153,16 @@ async fn test_store_zstd() {
         compression: Compression::Zstd,
     };
 
-    test_storage::<Store<_, _>>(config.into(), recorder).await;
+    test_storage::<FsStore<_, _>>(config, recorder).await;
 }
 
 #[tokio::test]
 async fn test_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FifoFsStoreConfig {
+    let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: FifoConfig,
+        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -179,16 +180,16 @@ async fn test_store_lz4() {
         compression: Compression::Lz4,
     };
 
-    test_storage::<Store<_, _>>(config.into(), recorder).await;
+    test_storage::<FsStore<_, _>>(config, recorder).await;
 }
 
 #[tokio::test]
 async fn test_lazy_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FifoFsStoreConfig {
+    let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: FifoConfig,
+        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -214,9 +215,9 @@ async fn test_runtime_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
     let config = RuntimeStorageConfig {
-        store: FifoFsStoreConfig {
+        store: FsStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,
@@ -248,9 +249,9 @@ async fn test_runtime_lazy_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
     let config = RuntimeStorageConfig {
-        store: FifoFsStoreConfig {
+        store: FsStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,

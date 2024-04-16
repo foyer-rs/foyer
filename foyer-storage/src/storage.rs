@@ -322,22 +322,23 @@ mod tests {
 
     use std::{path::Path, sync::Arc, time::Duration};
 
-    use foyer_intrusive::eviction::fifo::FifoConfig;
+    use foyer_memory::FifoConfig;
     use tokio::sync::Barrier;
 
     use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
-        store::{FifoFsStore, FifoFsStoreConfig},
+        region_manager::EvictionConfg,
+        store::{FsStore, FsStoreConfig},
     };
 
     const KB: usize = 1024;
     const MB: usize = 1024 * 1024;
 
-    fn config_for_test(dir: impl AsRef<Path>) -> FifoFsStoreConfig<u64, Vec<u8>> {
-        FifoFsStoreConfig {
+    fn config_for_test(dir: impl AsRef<Path>) -> FsStoreConfig<u64, Vec<u8>> {
+        FsStoreConfig {
             name: "".to_string(),
-            eviction_config: FifoConfig,
+            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: dir.as_ref().into(),
                 capacity: 4 * MB,
@@ -361,7 +362,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = config_for_test(tempdir.path());
 
-        let storage = FifoFsStore::open(config).await.unwrap();
+        let storage = FsStore::open(config).await.unwrap();
         assert!(storage.is_ready());
 
         assert!(!storage.exists(&1).unwrap());
@@ -392,7 +393,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = config_for_test(tempdir.path());
 
-        let storage = FifoFsStore::open(config).await.unwrap();
+        let storage = FsStore::open(config).await.unwrap();
 
         assert!(storage.insert(1, vec![b'x'; KB]).await.unwrap());
         assert!(storage.exists(&1).unwrap());
@@ -447,7 +448,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = config_for_test(tempdir.path());
 
-        let storage = FifoFsStore::open(config).await.unwrap();
+        let storage = FsStore::open(config).await.unwrap();
 
         storage.insert_async(1, vec![b'x'; KB]);
         assert!(exists_with_retry(&storage, &1).await);

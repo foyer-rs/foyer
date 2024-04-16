@@ -14,14 +14,16 @@ readme = "../README.md"
 normal = ["foyer-workspace-hack"]
 
 [dependencies]
-allocator-api2 = "0.2" # TODO(MrCroxx): Remove this after `allocator_api` is stable.
+ahash = "0.8"
+# TODO(MrCroxx): Remove this after `allocator_api` is stable.
+allocator-api2 = "0.2"                                       
 anyhow = "1.0"
 bitflags = "2.3.1"
 bitmaps = "3.2"
 bytes = "1"
 either = "1"
 foyer-common = { version = "0.5", path = "../foyer-common" }
-foyer-intrusive = { version = "0.4", path = "../foyer-intrusive" }
+foyer-memory = { version = "0.2", path = "../foyer-memory" }
 foyer-workspace-hack = { version = "0.4", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.12"

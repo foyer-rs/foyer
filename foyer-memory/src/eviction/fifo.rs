@@ -122,9 +122,9 @@ where
         })
     }
 
-    unsafe fn reinsert(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn release(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn acquire(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
