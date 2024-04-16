@@ -14,10 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::{
-    code::{StorageKey, StorageValue},
-    runtime::BackgroundShutdownRuntime,
-};
+use foyer_common::runtime::BackgroundShutdownRuntime;
 
 use crate::{
     compress::Compression,
@@ -33,50 +30,21 @@ pub struct RuntimeConfig {
     pub thread_name: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct RuntimeStorageConfig<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+#[derive(Debug, Clone)]
+pub struct RuntimeStorageConfig<S: Storage> {
     pub store: S::Config,
     pub runtime: RuntimeConfig,
 }
 
-impl<K, V, S> Clone for RuntimeStorageConfig<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
-    fn clone(&self) -> Self {
-        Self {
-            store: self.store.clone(),
-            runtime: self.runtime.clone(),
-        }
-    }
-}
-
 #[derive(Debug)]
-pub struct RuntimeStorageWriter<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+pub struct RuntimeStorageWriter<S: Storage> {
     runtime: Arc<BackgroundShutdownRuntime>,
     writer: S::Writer,
 }
 
-impl<K, V, S> StorageWriter for RuntimeStorageWriter<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
-    type Key = K;
-    type Value = V;
+impl<S: Storage> StorageWriter for RuntimeStorageWriter<S> {
+    type Key = S::Key;
+    type Value = S::Value;
 
     fn key(&self) -> &Self::Key {
         self.writer.key()
@@ -111,22 +79,12 @@ where
 }
 
 #[derive(Debug)]
-pub struct RuntimeStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+pub struct RuntimeStorage<S: Storage> {
     runtime: Arc<BackgroundShutdownRuntime>,
     store: S,
 }
 
-impl<K, V, S> Clone for RuntimeStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+impl<S: Storage> Clone for RuntimeStorage<S> {
     fn clone(&self) -> Self {
         Self {
             runtime: Arc::clone(&self.runtime),
@@ -135,16 +93,11 @@ where
     }
 }
 
-impl<K, V, S> Storage for RuntimeStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
-    type Key = K;
-    type Value = V;
-    type Config = RuntimeStorageConfig<K, V, S>;
-    type Writer = RuntimeStorageWriter<K, V, S>;
+impl<S: Storage> Storage for RuntimeStorage<S> {
+    type Key = S::Key;
+    type Value = S::Value;
+    type Config = RuntimeStorageConfig<S>;
+    type Writer = RuntimeStorageWriter<S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -203,10 +156,10 @@ where
     }
 }
 
-pub type RuntimeStore<K, V> = RuntimeStorage<K, V, Store<K, V>>;
-pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<K, V, Store<K, V>>;
-pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<K, V, Store<K, V>>;
+pub type RuntimeStore<K, V> = RuntimeStorage<Store<K, V>>;
+pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<Store<K, V>>;
+pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<Store<K, V>>;
 
-pub type RuntimeLazyStore<K, V> = RuntimeStorage<K, V, LazyStore<K, V>>;
-pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<K, V, LazyStore<K, V>>;
-pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<K, V, LazyStore<K, V>>;
+pub type RuntimeLazyStore<K, V> = RuntimeStorage<LazyStore<K, V>>;
+pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<LazyStore<K, V>>;
+pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<LazyStore<K, V>>;
