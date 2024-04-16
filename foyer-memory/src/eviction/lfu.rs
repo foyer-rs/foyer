@@ -295,7 +295,7 @@ where
         Some(ptr)
     }
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn release(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         match handle.queue {
@@ -344,7 +344,7 @@ where
         }
     }
 
-    unsafe fn access(&mut self, ptr: NonNull<Self::Handle>) {
+    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>) {
         self.update_frequencies(ptr.as_ref().base().hash());
     }
 
@@ -485,23 +485,23 @@ mod tests {
             assert_eq!(p0, ptrs[0]);
 
             // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.reinsert(p0);
+            lfu.release(p0);
             assert_test_lfu(&lfu, 10, 2, 8, 0, vec![9, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
             // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.reinsert(ptrs[9]);
+            lfu.release(ptrs[9]);
             assert_test_lfu(&lfu, 10, 2, 8, 0, vec![0, 9, 1, 2, 3, 4, 5, 6, 7, 8]);
 
             // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
-            (3..7).for_each(|i| lfu.reinsert(ptrs[i]));
+            (3..7).for_each(|i| lfu.release(ptrs[i]));
             assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 3, 4, 5, 6]);
 
             // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
-            (3..5).for_each(|i| lfu.reinsert(ptrs[i]));
+            (3..5).for_each(|i| lfu.release(ptrs[i]));
             assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 5, 6, 3, 4]);
 
             // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
-            [1, 2, 7, 8].into_iter().for_each(|i| lfu.reinsert(ptrs[i]));
+            [1, 2, 7, 8].into_iter().for_each(|i| lfu.release(ptrs[i]));
             assert_test_lfu(&lfu, 10, 2, 2, 6, vec![0, 9, 5, 6, 3, 4, 1, 2, 7, 8]);
 
             // [0, 9] [6] [3, 4, 1, 2, 7, 8]
@@ -514,7 +514,7 @@ mod tests {
             // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
             assert_test_lfu(&lfu, 12, 2, 4, 6, vec![11, 12, 6, 0, 9, 10, 3, 4, 1, 2, 7, 8]);
             (1..13).for_each(|i| assert_min_frequency(&lfu, i, 0));
-            lfu.access(ptrs[0]);
+            lfu.acquire(ptrs[0]);
             assert_min_frequency(&lfu, 0, 2);
 
             // evict 11 because freq(11) < freq(0)

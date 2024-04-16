@@ -206,9 +206,9 @@ where
         Some(ptr)
     }
 
-    unsafe fn access(&mut self, _: NonNull<Self::Handle>) {}
+    unsafe fn acquire(&mut self, _: NonNull<Self::Handle>) {}
 
-    unsafe fn reinsert(&mut self, mut ptr: NonNull<Self::Handle>) {
+    unsafe fn release(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
         if handle.base().is_in_eviction() {

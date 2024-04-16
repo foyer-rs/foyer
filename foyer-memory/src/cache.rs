@@ -431,6 +431,19 @@ where
         }
     }
 
+    pub fn touch<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.touch(key),
+            Cache::Lru(cache) => cache.touch(key),
+            Cache::Lfu(cache) => cache.touch(key),
+            Cache::S3Fifo(cache) => cache.touch(key),
+        }
+    }
+
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),

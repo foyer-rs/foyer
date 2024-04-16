@@ -168,7 +168,7 @@ where
         debug_assert!(base.is_in_indexer());
 
         base.inc_refs();
-        self.eviction.access(ptr);
+        self.eviction.acquire(ptr);
 
         Some(ptr)
     }
@@ -179,6 +179,18 @@ where
         Q: Hash + Eq + ?Sized,
     {
         self.indexer.get(hash, key).is_some()
+    }
+
+    unsafe fn touch<Q>(&mut self, hash: u64, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let res = self.indexer.get(hash, key);
+        if let Some(ptr) = res {
+            self.eviction.acquire(ptr);
+        }
+        res.is_some()
     }
 
     /// Remove a key from the cache.
@@ -304,7 +316,7 @@ where
             // In this case, the reinsertion should be given up.
             if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
                 let was_in_eviction = handle.base().is_in_eviction();
-                self.eviction.reinsert(ptr);
+                self.eviction.release(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
                     if was_in_eviction {
                         self.state.metrics.reinsert.fetch_add(1, Ordering::Relaxed);
@@ -624,6 +636,19 @@ where
         unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             shard.contains(hash, key)
+        }
+    }
+
+    pub fn touch<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let hash = self.hash_builder.hash_one(key);
+
+        unsafe {
+            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            shard.touch(hash, key)
         }
     }
 

@@ -107,7 +107,7 @@ where
 
     #[tracing::instrument(skip(self))]
     pub fn record_access(&self, id: &RegionId) {
-        let _ = self.eviction.get(id);
+        self.eviction.touch(id);
     }
 
     pub fn clean_regions(&self) -> &AsyncQueue<RegionId> {

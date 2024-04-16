@@ -23,3 +23,4 @@ pub use crate::{
     metrics::Metrics,
     queue::{EvictionQueue, EvictionQueueConfig},
 };
+pub use ahash::RandomState;
