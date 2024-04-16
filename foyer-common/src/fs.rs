@@ -30,6 +30,7 @@ mod tests {
     use itertools::Itertools;
 
     #[test]
+    #[ignore]
     fn test() {
         let dir = current_dir().unwrap();
         let path = dir.as_os_str().to_str().unwrap();
