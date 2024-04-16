@@ -218,7 +218,7 @@ mod tests {
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
-                file_capacity: 4 * MB,
+                file_size: 4 * MB,
                 align: 4096,
                 io_size: 4096 * KB,
             },
@@ -250,7 +250,7 @@ mod tests {
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
-                file_capacity: 4 * MB,
+                file_size: 4 * MB,
                 align: 4096,
                 io_size: 4096 * KB,
             },

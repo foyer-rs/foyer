@@ -25,3 +25,6 @@ pub mod range;
 pub mod rate;
 pub mod rated_ticket;
 pub mod runtime;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod fs;

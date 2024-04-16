@@ -19,6 +19,7 @@ bytes = "1"
 cfg-if = "1"
 foyer-workspace-hack = { version = "0.4", path = "../foyer-workspace-hack" }
 itertools = "0.12"
+nix = { version = "0.28", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 tokio = { workspace = true }
