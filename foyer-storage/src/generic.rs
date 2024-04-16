@@ -31,6 +31,7 @@ use foyer_common::{
     code::{CodingError, StorageKey, StorageValue},
 };
 
+use foyer_memory::EvictionConfig;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -51,7 +52,7 @@ use crate::{
     metrics::{Metrics, METRICS},
     reclaimer::Reclaimer,
     region::{Region, RegionHeader, RegionId},
-    region_manager::{EvictionConfg, RegionManager},
+    region_manager::RegionManager,
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
     storage::{Storage, StorageWriter},
 };
@@ -70,7 +71,7 @@ where
     pub name: String,
 
     /// Evictino policy configurations.
-    pub eviction_config: EvictionConfg,
+    pub eviction_config: EvictionConfig,
 
     /// Device configurations.
     pub device_config: D::Config,
@@ -1072,7 +1073,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1118,7 +1119,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,

@@ -880,7 +880,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        cache::{FifoCache, FifoCacheConfig, FifoCacheEntry, LruCache, LruCacheConfig, LruCacheEntry},
+        cache::{FifoCache, FifoCacheEntry, LruCache, LruCacheEntry},
         eviction::{
             fifo::{FifoConfig, FifoHandle},
             lru::LruConfig,
@@ -894,16 +894,14 @@ mod tests {
     #[test]
     fn test_send_sync_static() {
         is_send_sync_static::<FifoCache<(), ()>>();
-        is_send_sync_static::<FifoCacheConfig<(), ()>>();
         is_send_sync_static::<LruCache<(), ()>>();
-        is_send_sync_static::<LruCacheConfig<(), ()>>();
     }
 
     #[test]
     fn test_cache_fuzzy() {
         const CAPACITY: usize = 256;
 
-        let config = FifoCacheConfig {
+        let config = GenericCacheConfig {
             capacity: CAPACITY,
             shards: 4,
             eviction_config: FifoConfig {},
@@ -927,7 +925,7 @@ mod tests {
     }
 
     fn fifo(capacity: usize) -> Arc<FifoCache<u64, String>> {
-        let config = FifoCacheConfig {
+        let config = GenericCacheConfig {
             capacity,
             shards: 1,
             eviction_config: FifoConfig {},
@@ -939,7 +937,7 @@ mod tests {
     }
 
     fn lru(capacity: usize) -> Arc<LruCache<u64, String>> {
-        let config = LruCacheConfig {
+        let config = GenericCacheConfig {
             capacity,
             shards: 1,
             eviction_config: LruConfig {

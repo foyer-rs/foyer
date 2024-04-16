@@ -17,12 +17,11 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use foyer_memory::FifoConfig;
+use foyer_memory::{EvictionConfig, FifoConfig};
 use foyer_storage::{
     compress::Compression,
     device::fs::FsDeviceConfig,
     lazy::LazyStore,
-    region_manager::EvictionConfg,
     runtime::{RuntimeConfig, RuntimeLazyStore, RuntimeStorageConfig, RuntimeStore},
     storage::{Storage, StorageExt},
     store::{FsStore, FsStoreConfig},
@@ -108,7 +107,7 @@ async fn test_store() {
     let recorder = Arc::new(JudgeRecorder::default());
     let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+        eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -135,7 +134,7 @@ async fn test_store_zstd() {
     let recorder = Arc::new(JudgeRecorder::default());
     let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+        eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -162,7 +161,7 @@ async fn test_store_lz4() {
     let recorder = Arc::new(JudgeRecorder::default());
     let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+        eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -189,7 +188,7 @@ async fn test_lazy_store() {
     let recorder = Arc::new(JudgeRecorder::default());
     let config = FsStoreConfig {
         name: "".to_string(),
-        eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+        eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
@@ -217,7 +216,7 @@ async fn test_runtime_store() {
     let config = RuntimeStorageConfig {
         store: FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,
@@ -251,7 +250,7 @@ async fn test_runtime_lazy_store() {
     let config = RuntimeStorageConfig {
         store: FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,
