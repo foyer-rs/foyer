@@ -92,9 +92,13 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
+        env:
+          RUST_BACKTRACE: 1
         run: |
           cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace
       - name: Run rust test with coverage
+        env:
+          RUST_BACKTRACE: 1
         run: |
           cargo llvm-cov --no-report nextest
       - name: Generate codecov report
@@ -259,7 +263,7 @@ jobs:
           TOKIO_WORKER_THREADS: 1
         run: |-
           cargo clippy --all-targets
-      - name: Run nexmark test (madsim)
+      - name: Run nextest (madsim)
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
