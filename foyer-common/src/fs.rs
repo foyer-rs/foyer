@@ -16,17 +16,9 @@ use std::path::Path;
 
 use nix::{errno::Errno, sys::statvfs::statvfs};
 
-#[cfg(target_os = "linux")]
 pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
     let stat = statvfs(path.as_ref())?;
-    let res = stat.blocks_available() as usize * stat.block_size() as usize;
-    Ok(res)
-}
-
-#[cfg(target_os = "macos")]
-pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
-    let stat = statvfs(path.as_ref())?;
-    let res = stat.blocks_available() as usize;
+    let res = stat.blocks_available() as usize * stat.fragment_size() as usize;
     Ok(res)
 }
 
