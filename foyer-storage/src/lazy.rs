@@ -14,7 +14,6 @@
 
 use std::sync::{Arc, OnceLock};
 
-use foyer_common::code::{StorageKey, StorageValue};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -25,24 +24,14 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum LazyStorageWriter<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+pub enum LazyStorageWriter<S: Storage> {
     Store { writer: S::Writer },
-    None { writer: NoneStoreWriter<K, V> },
+    None { writer: NoneStoreWriter<S::Key, S::Value> },
 }
 
-impl<K, V, S> StorageWriter for LazyStorageWriter<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
-    type Key = K;
-    type Value = V;
+impl<S: Storage> StorageWriter for LazyStorageWriter<S> {
+    type Key = S::Key;
+    type Value = S::Value;
 
     fn key(&self) -> &Self::Key {
         match self {
@@ -95,22 +84,12 @@ where
 }
 
 #[derive(Debug)]
-pub struct LazyStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+pub struct LazyStorage<S: Storage> {
     once: Arc<OnceLock<S>>,
-    none: NoneStore<K, V>,
+    none: NoneStore<S::Key, S::Value>,
 }
 
-impl<K, V, S> Clone for LazyStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+impl<S: Storage> Clone for LazyStorage<S> {
     fn clone(&self) -> Self {
         Self {
             once: Arc::clone(&self.once),
@@ -119,12 +98,7 @@ where
     }
 }
 
-impl<K, V, S> LazyStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
+impl<S: Storage> LazyStorage<S> {
     fn with_handle(config: S::Config) -> (Self, JoinHandle<Result<S>>) {
         let once = Arc::new(OnceLock::new());
 
@@ -152,16 +126,11 @@ where
     }
 }
 
-impl<K, V, S> Storage for LazyStorage<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: Storage<Key = K, Value = V>,
-{
-    type Key = K;
-    type Value = V;
+impl<S: Storage> Storage for LazyStorage<S> {
+    type Key = S::Key;
+    type Value = S::Value;
     type Config = S::Config;
-    type Writer = LazyStorageWriter<K, V, S>;
+    type Writer = LazyStorageWriter<S>;
 
     async fn open(config: S::Config) -> Result<Self> {
         let (store, task) = Self::with_handle(config);
@@ -220,8 +189,8 @@ where
     }
 }
 
-pub type LazyStore<K, V> = LazyStorage<K, V, Store<K, V>>;
-pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
+pub type LazyStore<K, V> = LazyStorage<Store<K, V>>;
+pub type LazyStoreWriter<K, V> = LazyStorageWriter<Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
