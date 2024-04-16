@@ -18,8 +18,8 @@ use nix::{errno::Errno, sys::statvfs::statvfs};
 
 pub fn free_space(path: impl AsRef<Path>) -> Result<usize, Errno> {
     let stat = statvfs(path.as_ref())?;
-    let res = stat.blocks_available() * stat.block_size();
-    Ok(res as usize)
+    let res = stat.blocks_available() as usize * stat.block_size() as usize;
+    Ok(res)
 }
 
 #[cfg(test)]
