@@ -16,9 +16,17 @@ use std::path::Path;
 
 use nix::{errno::Errno, sys::statvfs::statvfs};
 
-pub fn free_space(path: impl AsRef<Path>) -> Result<usize, Errno> {
+#[cfg(target_os = "linux")]
+pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
     let stat = statvfs(path.as_ref())?;
     let res = stat.blocks_available() as usize * stat.block_size() as usize;
+    Ok(res)
+}
+
+#[cfg(target_os = "macos")]
+pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
+    let stat = statvfs(path.as_ref())?;
+    let res = stat.blocks_available() as usize;
     Ok(res)
 }
 
@@ -37,7 +45,7 @@ mod tests {
 
         println!("{}", path);
 
-        let v1 = free_space(path).unwrap();
+        let v1 = freespace(path).unwrap();
         let df = String::from_utf8(Command::new("df").args(["-P", path]).output().unwrap().stdout).unwrap();
         let bs: usize = df.trim().split('\n').next().unwrap().split_whitespace().collect_vec()[1]
             .strip_suffix("-blocks")
@@ -48,6 +56,8 @@ mod tests {
             .parse()
             .unwrap();
         let v2 = bs * av;
+
+        println!("{}", df);
 
         assert_eq!(v1, v2);
     }

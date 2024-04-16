@@ -20,7 +20,7 @@ use std::{
 };
 
 use allocator_api2::vec::Vec as VecA;
-use foyer_common::{fs::free_space, range::RangeBoundsExt};
+use foyer_common::{fs::freespace, range::RangeBoundsExt};
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -79,7 +79,7 @@ impl FsDeviceConfigBuilder {
 
         let align = self.align.unwrap_or(Self::DEFAULT_ALIGN);
 
-        let capacity = self.capacity.unwrap_or(free_space(&dir).unwrap() / 10 * 8);
+        let capacity = self.capacity.unwrap_or(freespace(&dir).unwrap() / 10 * 8);
         let capacity = align_v(capacity, align);
 
         let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).clamp(align, capacity);
