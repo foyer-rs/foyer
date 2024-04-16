@@ -233,7 +233,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = LazyStorage::<FsStore<_, _>>::with_handle(config);
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -265,7 +265,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = LazyStorage::<FsStore<_, _>>::with_handle(config);
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 
