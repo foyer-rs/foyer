@@ -111,7 +111,7 @@ async fn test_store() {
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
-            file_capacity: 1 * MB,
+            file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
         },
@@ -138,7 +138,7 @@ async fn test_store_zstd() {
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
-            file_capacity: 1 * MB,
+            file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
         },
@@ -165,7 +165,7 @@ async fn test_store_lz4() {
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
-            file_capacity: 1 * MB,
+            file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
         },
@@ -192,7 +192,7 @@ async fn test_lazy_store() {
         device_config: FsDeviceConfig {
             dir: PathBuf::from(tempdir.path()),
             capacity: 4 * MB,
-            file_capacity: 1 * MB,
+            file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
         },
@@ -220,7 +220,7 @@ async fn test_runtime_store() {
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,
-                file_capacity: 1 * MB,
+                file_size: 1 * MB,
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
@@ -254,7 +254,7 @@ async fn test_runtime_lazy_store() {
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 4 * MB,
-                file_capacity: 1 * MB,
+                file_size: 1 * MB,
                 align: 4 * KB,
                 io_size: 4 * KB,
             },

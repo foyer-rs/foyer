@@ -547,7 +547,7 @@ async fn main() {
     let device_config = FsDeviceConfig {
         dir: PathBuf::from(&args.dir),
         capacity: args.capacity * 1024 * 1024,
-        file_capacity: args.region_size * 1024 * 1024,
+        file_size: args.region_size * 1024 * 1024,
         align: args.align,
         io_size: args.io_size,
     };
