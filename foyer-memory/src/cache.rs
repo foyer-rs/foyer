@@ -307,8 +307,8 @@ where
         self
     }
 
-    pub fn with_eviction_config(mut self, eviction_config: EvictionConfig) -> Self {
-        self.eviction_config = Some(eviction_config);
+    pub fn with_eviction_config(mut self, eviction_config: impl Into<EvictionConfig>) -> Self {
+        self.eviction_config = Some(eviction_config.into());
         self
     }
 
@@ -745,7 +745,7 @@ mod tests {
     fn fifo() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
-            .with_eviction_config(FifoConfig {}.into())
+            .with_eviction_config(FifoConfig {})
             .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
@@ -753,12 +753,9 @@ mod tests {
     fn lru() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
-            .with_eviction_config(
-                LruConfig {
-                    high_priority_pool_ratio: 0.1,
-                }
-                .into(),
-            )
+            .with_eviction_config(LruConfig {
+                high_priority_pool_ratio: 0.1,
+            })
             .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
@@ -766,15 +763,12 @@ mod tests {
     fn lfu() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
-            .with_eviction_config(
-                LfuConfig {
-                    window_capacity_ratio: 0.1,
-                    protected_capacity_ratio: 0.8,
-                    cmsketch_eps: 0.001,
-                    cmsketch_confidence: 0.9,
-                }
-                .into(),
-            )
+            .with_eviction_config(LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            })
             .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
@@ -782,12 +776,9 @@ mod tests {
     fn s3fifo() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
-            .with_eviction_config(
-                S3FifoConfig {
-                    small_queue_capacity_ratio: 0.1,
-                }
-                .into(),
-            )
+            .with_eviction_config(S3FifoConfig {
+                small_queue_capacity_ratio: 0.1,
+            })
             .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }

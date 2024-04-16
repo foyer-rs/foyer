@@ -17,12 +17,9 @@ use foyer::memory::{CacheBuilder, LruConfig};
 fn main() {
     let cache = CacheBuilder::new(16)
         .with_shards(4)
-        .with_eviction_config(
-            LruConfig {
-                high_priority_pool_ratio: 0.1,
-            }
-            .into(),
-        )
+        .with_eviction_config(LruConfig {
+            high_priority_pool_ratio: 0.1,
+        })
         .build();
 
     let entry = cache.insert("hello".to_string(), "world".to_string(), 1);

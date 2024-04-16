@@ -85,7 +85,7 @@ fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &[Strin
 fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
-        .with_eviction_config(FifoConfig {}.into())
+        .with_eviction_config(FifoConfig {})
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
@@ -93,12 +93,9 @@ fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
 fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
-        .with_eviction_config(
-            LruConfig {
-                high_priority_pool_ratio: 0.1,
-            }
-            .into(),
-        )
+        .with_eviction_config(LruConfig {
+            high_priority_pool_ratio: 0.1,
+        })
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
@@ -106,15 +103,12 @@ fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
 fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
-        .with_eviction_config(
-            LfuConfig {
-                window_capacity_ratio: 0.1,
-                protected_capacity_ratio: 0.8,
-                cmsketch_eps: 0.001,
-                cmsketch_confidence: 0.9,
-            }
-            .into(),
-        )
+        .with_eviction_config(LfuConfig {
+            window_capacity_ratio: 0.1,
+            protected_capacity_ratio: 0.8,
+            cmsketch_eps: 0.001,
+            cmsketch_confidence: 0.9,
+        })
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
@@ -122,12 +116,9 @@ fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
 fn new_s3fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
-        .with_eviction_config(
-            S3FifoConfig {
-                small_queue_capacity_ratio: 0.1,
-            }
-            .into(),
-        )
+        .with_eviction_config(S3FifoConfig {
+            small_queue_capacity_ratio: 0.1,
+        })
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
