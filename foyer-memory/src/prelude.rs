@@ -21,6 +21,5 @@ pub use crate::{
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
-    queue::{EvictionQueue, EvictionQueueConfig},
 };
 pub use ahash::RandomState;
