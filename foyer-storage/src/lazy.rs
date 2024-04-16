@@ -227,12 +227,11 @@ pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 mod tests {
     use std::path::PathBuf;
 
-    use foyer_memory::FifoConfig;
+    use foyer_memory::{EvictionConfig, FifoConfig};
 
     use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
-        region_manager::EvictionConfg,
         storage::StorageExt,
         store::{FsStore, FsStoreConfig},
     };
@@ -246,7 +245,7 @@ mod tests {
 
         let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -278,7 +277,7 @@ mod tests {
 
         let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
