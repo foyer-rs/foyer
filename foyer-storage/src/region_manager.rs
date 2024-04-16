@@ -13,10 +13,7 @@
 //  limitations under the License.
 
 use foyer_common::async_queue::AsyncQueue;
-use foyer_memory::{
-    Cache, CacheConfig, DefaultCacheEventListener, FifoCacheConfig, FifoConfig, LfuCacheConfig, LfuConfig,
-    LruCacheConfig, LruConfig, S3FifoCacheConfig, S3FifoConfig,
-};
+use foyer_memory::{Cache, CacheBuilder, EvictionConfig};
 
 use itertools::Itertools;
 
@@ -24,14 +21,6 @@ use crate::{
     device::Device,
     region::{Region, RegionId},
 };
-
-#[derive(Debug, Clone)]
-pub enum EvictionConfg {
-    Fifo(FifoConfig),
-    Lru(LruConfig),
-    Lfu(LfuConfig),
-    S3Fifo(S3FifoConfig),
-}
 
 #[derive(Debug)]
 pub struct RegionManager<D>
@@ -50,45 +39,13 @@ impl<D> RegionManager<D>
 where
     D: Device,
 {
-    pub fn new(region_count: usize, eviction_config: EvictionConfg, device: D) -> Self {
+    pub fn new(region_count: usize, eviction_config: EvictionConfig, device: D) -> Self {
         let clean_regions = AsyncQueue::new();
 
-        // TODO(MrCroxx): REFINE ME!!!
-        let cache_config = match eviction_config {
-            EvictionConfg::Fifo(eviction_config) => CacheConfig::Fifo(FifoCacheConfig {
-                capacity: region_count,
-                shards: 1,
-                eviction_config,
-                object_pool_capacity: region_count,
-                hash_builder: ahash::RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }),
-            EvictionConfg::Lru(eviction_config) => CacheConfig::Lru(LruCacheConfig {
-                capacity: region_count,
-                shards: 1,
-                eviction_config,
-                object_pool_capacity: region_count,
-                hash_builder: ahash::RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }),
-            EvictionConfg::Lfu(eviction_config) => CacheConfig::Lfu(LfuCacheConfig {
-                capacity: region_count,
-                shards: 1,
-                eviction_config,
-                object_pool_capacity: region_count,
-                hash_builder: ahash::RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }),
-            EvictionConfg::S3Fifo(eviction_config) => CacheConfig::S3Fifo(S3FifoCacheConfig {
-                capacity: region_count,
-                shards: 1,
-                eviction_config,
-                object_pool_capacity: region_count,
-                hash_builder: ahash::RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }),
-        };
-        let eviction = Cache::new(cache_config);
+        let eviction = CacheBuilder::new(region_count)
+            .with_object_pool_capacity(region_count)
+            .with_eviction_config(eviction_config)
+            .build();
 
         let regions = (0..region_count as RegionId)
             .map(|id| Region::new(id, device.clone()))

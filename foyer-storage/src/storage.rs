@@ -322,13 +322,12 @@ mod tests {
 
     use std::{path::Path, sync::Arc, time::Duration};
 
-    use foyer_memory::FifoConfig;
+    use foyer_memory::{EvictionConfig, FifoConfig};
     use tokio::sync::Barrier;
 
     use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
-        region_manager::EvictionConfg,
         store::{FsStore, FsStoreConfig},
     };
 
@@ -338,7 +337,7 @@ mod tests {
     fn config_for_test(dir: impl AsRef<Path>) -> FsStoreConfig<u64, Vec<u8>> {
         FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfg::Fifo(FifoConfig {}),
+            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
                 dir: dir.as_ref().into(),
                 capacity: 4 * MB,

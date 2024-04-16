@@ -16,6 +16,7 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     hash::{BuildHasher, Hash},
+    marker::PhantomData,
     ops::Deref,
     sync::Arc,
 };
@@ -38,12 +39,11 @@ use crate::{
     indexer::HashTableIndexer,
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
+    FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
 pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCache<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, L, S>;
-pub type FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheConfig<K, V, Fifo<(K, V)>, L, S>;
 pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCacheEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, L, S>;
 pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
@@ -51,8 +51,6 @@ pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomStat
 
 pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCache<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, L, S>;
-pub type LruCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheConfig<K, V, Lru<(K, V)>, L, S>;
 pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCacheEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, L, S>;
 pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
@@ -60,8 +58,6 @@ pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState
 
 pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCache<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, L, S>;
-pub type LfuCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheConfig<K, V, Lfu<(K, V)>, L, S>;
 pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCacheEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, L, S>;
 pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
@@ -69,8 +65,6 @@ pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState
 
 pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCache<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, L, S>;
-pub type S3FifoCacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheConfig<K, V, S3Fifo<(K, V)>, L, S>;
 pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericCacheEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, L, S>;
 pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
@@ -226,64 +220,177 @@ where
     }
 }
 
-pub enum CacheConfig<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState>
-where
-    K: Key,
-    V: Value,
-    L: CacheEventListener<K, V>,
-    S: BuildHasher + Send + Sync + 'static,
-{
-    Fifo(FifoCacheConfig<K, V, L, S>),
-    Lru(LruCacheConfig<K, V, L, S>),
-    Lfu(LfuCacheConfig<K, V, L, S>),
-    S3Fifo(S3FifoCacheConfig<K, V, L, S>),
+#[derive(Debug, Clone)]
+pub enum EvictionConfig {
+    Fifo(FifoConfig),
+    Lru(LruConfig),
+    Lfu(LfuConfig),
+    S3Fifo(S3FifoConfig),
 }
 
-impl<K, V, L, S> From<FifoCacheConfig<K, V, L, S>> for CacheConfig<K, V, L, S>
-where
-    K: Key,
-    V: Value,
-    L: CacheEventListener<K, V>,
-    S: BuildHasher + Send + Sync + 'static,
-{
-    fn from(value: FifoCacheConfig<K, V, L, S>) -> Self {
-        Self::Fifo(value)
+impl From<FifoConfig> for EvictionConfig {
+    fn from(value: FifoConfig) -> EvictionConfig {
+        EvictionConfig::Fifo(value)
     }
 }
 
-impl<K, V, L, S> From<LruCacheConfig<K, V, L, S>> for CacheConfig<K, V, L, S>
-where
-    K: Key,
-    V: Value,
-    L: CacheEventListener<K, V>,
-    S: BuildHasher + Send + Sync + 'static,
-{
-    fn from(value: LruCacheConfig<K, V, L, S>) -> Self {
-        Self::Lru(value)
+impl From<LruConfig> for EvictionConfig {
+    fn from(value: LruConfig) -> EvictionConfig {
+        EvictionConfig::Lru(value)
     }
 }
 
-impl<K, V, L, S> From<LfuCacheConfig<K, V, L, S>> for CacheConfig<K, V, L, S>
-where
-    K: Key,
-    V: Value,
-    L: CacheEventListener<K, V>,
-    S: BuildHasher + Send + Sync + 'static,
-{
-    fn from(value: LfuCacheConfig<K, V, L, S>) -> Self {
-        Self::Lfu(value)
+impl From<LfuConfig> for EvictionConfig {
+    fn from(value: LfuConfig) -> EvictionConfig {
+        EvictionConfig::Lfu(value)
     }
 }
 
-impl<K, V, L, S> From<S3FifoCacheConfig<K, V, L, S>> for CacheConfig<K, V, L, S>
+impl From<S3FifoConfig> for EvictionConfig {
+    fn from(value: S3FifoConfig) -> EvictionConfig {
+        EvictionConfig::S3Fifo(value)
+    }
+}
+
+pub struct CacheBuilder<K, V, L, S>
 where
     K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(value: S3FifoCacheConfig<K, V, L, S>) -> Self {
-        Self::S3Fifo(value)
+    capacity: usize,
+    shards: Option<usize>,
+    eviction_config: Option<EvictionConfig>,
+    object_pool_capacity: Option<usize>,
+    event_listener: L,
+    hash_builder: S,
+    _marker: PhantomData<(K, V)>,
+}
+
+impl<K, V> CacheBuilder<K, V, DefaultCacheEventListener<K, V>, RandomState>
+where
+    K: Key,
+    V: Value,
+{
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            shards: None,
+            eviction_config: None,
+            object_pool_capacity: None,
+            event_listener: DefaultCacheEventListener::default(),
+            hash_builder: RandomState::default(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<K, V, L, S> CacheBuilder<K, V, L, S>
+where
+    K: Key,
+    V: Value,
+    L: CacheEventListener<K, V>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    const DEFAULT_SHARDS: usize = 1;
+    const DEFAULT_EVICTION_CONFIG: EvictionConfig = EvictionConfig::Lfu(LfuConfig {
+        window_capacity_ratio: 0.1,
+        protected_capacity_ratio: 0.8,
+        cmsketch_eps: 0.001,
+        cmsketch_confidence: 0.9,
+    });
+    const DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL: usize = 10;
+
+    pub fn with_shards(mut self, shards: usize) -> Self {
+        self.shards = Some(shards);
+        self
+    }
+
+    pub fn with_eviction_config(mut self, eviction_config: impl Into<EvictionConfig>) -> Self {
+        self.eviction_config = Some(eviction_config.into());
+        self
+    }
+
+    pub fn with_object_pool_capacity(mut self, object_pool_capacity: usize) -> Self {
+        self.object_pool_capacity = Some(object_pool_capacity);
+        self
+    }
+
+    pub fn with_event_listener<OL>(self, event_listener: OL) -> CacheBuilder<K, V, OL, S>
+    where
+        OL: CacheEventListener<K, V>,
+    {
+        CacheBuilder {
+            capacity: self.capacity,
+            shards: self.shards,
+            eviction_config: self.eviction_config,
+            object_pool_capacity: self.object_pool_capacity,
+            event_listener,
+            hash_builder: self.hash_builder,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, L, OS>
+    where
+        OS: BuildHasher + Send + Sync + 'static,
+    {
+        CacheBuilder {
+            capacity: self.capacity,
+            shards: self.shards,
+            eviction_config: self.eviction_config,
+            object_pool_capacity: self.object_pool_capacity,
+            event_listener: self.event_listener,
+            hash_builder,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn build(self) -> Cache<K, V, L, S> {
+        let capacity = self.capacity;
+        let shards = self.shards.unwrap_or(Self::DEFAULT_SHARDS);
+        let eviction_config = self.eviction_config.unwrap_or(Self::DEFAULT_EVICTION_CONFIG);
+        let object_pool_capacity = self
+            .object_pool_capacity
+            .unwrap_or(capacity / Self::DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL);
+        let event_listener = self.event_listener;
+        let hash_builder = self.hash_builder;
+
+        match eviction_config {
+            EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }))),
+            EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }))),
+            EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }))),
+            EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }))),
+        }
     }
 }
 
@@ -341,15 +448,6 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn new(config: CacheConfig<K, V, L, S>) -> Self {
-        match config {
-            CacheConfig::Fifo(config) => Cache::Fifo(Arc::new(GenericCache::new(config))),
-            CacheConfig::Lru(config) => Cache::Lru(Arc::new(GenericCache::new(config))),
-            CacheConfig::Lfu(config) => Cache::Lfu(Arc::new(GenericCache::new(config))),
-            CacheConfig::S3Fifo(config) => Cache::S3Fifo(Arc::new(GenericCache::new(config))),
-        }
-    }
-
     pub fn insert(&self, key: K, value: V, charge: usize) -> CacheEntry<K, V, L, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value, charge).into(),
@@ -645,68 +743,44 @@ mod tests {
     const CONCURRENCY: usize = 8;
 
     fn fifo() -> Cache<u64, u64> {
-        Cache::new(
-            FifoCacheConfig {
-                capacity: CAPACITY,
-                shards: SHARDS,
-                eviction_config: FifoConfig {},
-                object_pool_capacity: OBJECT_POOL_CAPACITY,
-                hash_builder: RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }
-            .into(),
-        )
+        CacheBuilder::new(CAPACITY)
+            .with_shards(SHARDS)
+            .with_eviction_config(FifoConfig {})
+            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+            .build()
     }
 
     fn lru() -> Cache<u64, u64> {
-        Cache::new(
-            LruCacheConfig {
-                capacity: CAPACITY,
-                shards: SHARDS,
-                eviction_config: LruConfig {
-                    high_priority_pool_ratio: 0.1,
-                },
-                object_pool_capacity: OBJECT_POOL_CAPACITY,
-                hash_builder: RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }
-            .into(),
-        )
+        CacheBuilder::new(CAPACITY)
+            .with_shards(SHARDS)
+            .with_eviction_config(LruConfig {
+                high_priority_pool_ratio: 0.1,
+            })
+            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+            .build()
     }
 
     fn lfu() -> Cache<u64, u64> {
-        Cache::new(
-            LfuCacheConfig {
-                capacity: CAPACITY,
-                shards: SHARDS,
-                eviction_config: LfuConfig {
-                    window_capacity_ratio: 0.1,
-                    protected_capacity_ratio: 0.8,
-                    cmsketch_eps: 0.001,
-                    cmsketch_confidence: 0.9,
-                },
-                object_pool_capacity: OBJECT_POOL_CAPACITY,
-                hash_builder: RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }
-            .into(),
-        )
+        CacheBuilder::new(CAPACITY)
+            .with_shards(SHARDS)
+            .with_eviction_config(LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            })
+            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+            .build()
     }
 
     fn s3fifo() -> Cache<u64, u64> {
-        Cache::new(
-            S3FifoCacheConfig {
-                capacity: CAPACITY,
-                shards: SHARDS,
-                eviction_config: S3FifoConfig {
-                    small_queue_capacity_ratio: 0.1,
-                },
-                object_pool_capacity: OBJECT_POOL_CAPACITY,
-                hash_builder: RandomState::default(),
-                event_listener: DefaultCacheEventListener::default(),
-            }
-            .into(),
-        )
+        CacheBuilder::new(CAPACITY)
+            .with_shards(SHARDS)
+            .with_eviction_config(S3FifoConfig {
+                small_queue_capacity_ratio: 0.1,
+            })
+            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+            .build()
     }
 
     fn init_cache(cache: &Cache<u64, u64>, rng: &mut StdRng) {
