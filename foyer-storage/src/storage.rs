@@ -341,7 +341,7 @@ mod tests {
             device_config: FsDeviceConfig {
                 dir: dir.as_ref().into(),
                 capacity: 4 * MB,
-                file_capacity: MB,
+                file_size: MB,
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
