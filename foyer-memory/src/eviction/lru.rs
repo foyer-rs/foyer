@@ -15,8 +15,8 @@
 use std::{fmt::Debug, ptr::NonNull};
 
 use foyer_intrusive::{
-    collections::dlist::{Dlist, DlistLink},
     core::adapter::Link,
+    dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
 

@@ -71,6 +71,5 @@ mod indexer;
 mod listener;
 mod metrics;
 mod prelude;
-mod queue;
 
 pub use prelude::*;
