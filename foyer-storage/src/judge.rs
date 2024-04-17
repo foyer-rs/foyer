@@ -51,10 +51,6 @@ impl Judges {
         self.judge.set(index, judge);
     }
 
-    pub fn apply(&mut self, judge: Bitmap<64>) {
-        self.judge = judge;
-    }
-
     pub fn set_mask(&mut self, mut mask: Bitmap<64>) {
         mask.invert();
         self.umask = mask;
@@ -75,6 +71,12 @@ impl Judges {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Judges {
+        pub fn apply(&mut self, judge: Bitmap<64>) {
+            self.judge = judge;
+        }
+    }
 
     #[test]
     fn test_judge() {

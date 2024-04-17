@@ -14,7 +14,7 @@
 
 use std::net::SocketAddr;
 
-use foyer_storage::metrics::get_metrics_registry;
+use foyer_storage::get_metrics_registry;
 use http_body_util::Full;
 use hyper::{
     body::{Body, Bytes},
