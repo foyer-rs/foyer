@@ -26,8 +26,10 @@ use std::{
 };
 
 use ahash::RandomState;
-use crossbeam::queue::ArrayQueue;
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    object_pool::ObjectPool,
+};
 use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
@@ -46,7 +48,7 @@ use crate::{
 struct CacheSharedState<T, L> {
     metrics: Metrics,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
-    object_pool: ArrayQueue<Box<T>>,
+    object_pool: ObjectPool<Box<T>>,
     listener: L,
 }
 
@@ -112,11 +114,7 @@ where
         context: <E::Handle as Handle>::Context,
         last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle> {
-        let mut handle = self
-            .state
-            .object_pool
-            .pop()
-            .unwrap_or_else(|| Box::new(E::Handle::new()));
+        let mut handle = self.state.object_pool.acquire();
         handle.init(hash, (key, value), charge, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
@@ -343,7 +341,7 @@ where
         let ((key, value), context, charge) = handle.base_mut().take();
 
         let handle = Box::from_raw(ptr.as_ptr());
-        let _ = self.state.object_pool.push(handle);
+        self.state.object_pool.release(handle);
 
         Some((key, value, context, charge))
     }
@@ -478,7 +476,9 @@ where
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
-            object_pool: ArrayQueue::new(config.object_pool_capacity),
+            object_pool: ObjectPool::new_with_create(config.object_pool_capacity, || {
+                Box::new(<E::Handle as Handle>::new())
+            }),
             listener: config.event_listener,
         });
 

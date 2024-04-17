@@ -862,4 +862,9 @@ mod tests {
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
     }
+
+    #[tokio::test]
+    async fn test_cache_with_zero_object_pool() {
+        case(CacheBuilder::new(8).with_object_pool_capacity(0).build()).await
+    }
 }
