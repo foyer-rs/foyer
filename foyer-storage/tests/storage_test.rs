@@ -36,7 +36,7 @@ const LOOPS: usize = 10;
 
 async fn test_storage<S>(config: S::Config, recorder: Arc<JudgeRecorder<u64, Vec<u8>>>)
 where
-    S: Storage<Key = u64, Value = Vec<u8>>,
+    S: Storage<u64, Vec<u8>>,
 {
     let store = S::open(config.clone()).await.unwrap();
     while !store.is_ready() {

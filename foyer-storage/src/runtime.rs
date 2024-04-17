@@ -12,9 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
-use foyer_common::runtime::BackgroundShutdownRuntime;
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    runtime::BackgroundShutdownRuntime,
+};
 
 use crate::{
     compress::Compression,
@@ -31,22 +34,34 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuntimeStorageConfig<S: Storage> {
+pub struct RuntimeStorageConfig<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     pub store: S::Config,
     pub runtime: RuntimeConfig,
 }
 
 #[derive(Debug)]
-pub struct RuntimeStorageWriter<S: Storage> {
+pub struct RuntimeStorageWriter<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     runtime: Arc<BackgroundShutdownRuntime>,
     writer: S::Writer,
 }
 
-impl<S: Storage> StorageWriter for RuntimeStorageWriter<S> {
-    type Key = S::Key;
-    type Value = S::Value;
-
-    fn key(&self) -> &Self::Key {
+impl<K, V, S> StorageWriter<K, V> for RuntimeStorageWriter<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+    fn key(&self) -> &K {
         self.writer.key()
     }
 
@@ -62,7 +77,7 @@ impl<S: Storage> StorageWriter for RuntimeStorageWriter<S> {
         self.writer.force()
     }
 
-    async fn finish(self, value: Self::Value) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<bool> {
         self.runtime
             .spawn(async move { self.writer.finish(value).await })
             .await
@@ -79,25 +94,40 @@ impl<S: Storage> StorageWriter for RuntimeStorageWriter<S> {
 }
 
 #[derive(Debug)]
-pub struct RuntimeStorage<S: Storage> {
+pub struct RuntimeStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     runtime: Arc<BackgroundShutdownRuntime>,
     store: S,
+    _marker: PhantomData<(K, V)>,
 }
 
-impl<S: Storage> Clone for RuntimeStorage<S> {
+impl<K, V, S> Clone for RuntimeStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     fn clone(&self) -> Self {
         Self {
             runtime: Arc::clone(&self.runtime),
             store: self.store.clone(),
+            _marker: PhantomData,
         }
     }
 }
 
-impl<S: Storage> Storage for RuntimeStorage<S> {
-    type Key = S::Key;
-    type Value = S::Value;
-    type Config = RuntimeStorageConfig<S>;
-    type Writer = RuntimeStorageWriter<S>;
+impl<K, V, S> Storage<K, V> for RuntimeStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+    type Config = RuntimeStorageConfig<K, V, S>;
+    type Writer = RuntimeStorageWriter<K, V, S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -114,7 +144,11 @@ impl<S: Storage> Storage for RuntimeStorage<S> {
             .spawn(async move { S::open(config.store).await })
             .await
             .unwrap()?;
-        Ok(Self { runtime, store })
+        Ok(Self {
+            runtime,
+            store,
+            _marker: PhantomData,
+        })
     }
 
     fn is_ready(&self) -> bool {
@@ -126,7 +160,7 @@ impl<S: Storage> Storage for RuntimeStorage<S> {
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         let writer = self.store.writer(key, weight);
         RuntimeStorageWriter {
             runtime: self.runtime.clone(),
@@ -134,11 +168,11 @@ impl<S: Storage> Storage for RuntimeStorage<S> {
         }
     }
 
-    fn exists(&self, key: &Self::Key) -> crate::error::Result<bool> {
+    fn exists(&self, key: &K) -> crate::error::Result<bool> {
         self.store.exists(key)
     }
 
-    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         let store = self.store.clone();
         let key = key.clone();
         self.runtime
@@ -147,7 +181,7 @@ impl<S: Storage> Storage for RuntimeStorage<S> {
             .unwrap()
     }
 
-    fn remove(&self, key: &Self::Key) -> crate::error::Result<bool> {
+    fn remove(&self, key: &K) -> crate::error::Result<bool> {
         self.store.remove(key)
     }
 
@@ -156,10 +190,10 @@ impl<S: Storage> Storage for RuntimeStorage<S> {
     }
 }
 
-pub type RuntimeStore<K, V> = RuntimeStorage<Store<K, V>>;
-pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<Store<K, V>>;
-pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<Store<K, V>>;
+pub type RuntimeStore<K, V> = RuntimeStorage<K, V, Store<K, V>>;
+pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<K, V, Store<K, V>>;
+pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<K, V, Store<K, V>>;
 
-pub type RuntimeLazyStore<K, V> = RuntimeStorage<LazyStore<K, V>>;
-pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<LazyStore<K, V>>;
-pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<LazyStore<K, V>>;
+pub type RuntimeLazyStore<K, V> = RuntimeStorage<K, V, LazyStore<K, V>>;
+pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<K, V, LazyStore<K, V>>;
+pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<K, V, LazyStore<K, V>>;

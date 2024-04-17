@@ -960,16 +960,13 @@ where
     }
 }
 
-impl<K, V, D> StorageWriter for GenericStoreWriter<K, V, D>
+impl<K, V, D> StorageWriter<K, V> for GenericStoreWriter<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
 {
-    type Key = K;
-    type Value = V;
-
-    fn key(&self) -> &Self::Key {
+    fn key(&self) -> &K {
         self.key.as_ref().unwrap()
     }
 
@@ -985,7 +982,7 @@ where
         self.force()
     }
 
-    async fn finish(self, value: Self::Value) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<bool> {
         self.finish(value).await
     }
 
@@ -998,14 +995,12 @@ where
     }
 }
 
-impl<K, V, D> Storage for GenericStore<K, V, D>
+impl<K, V, D> Storage<K, V> for GenericStore<K, V, D>
 where
     K: StorageKey,
     V: StorageValue,
     D: Device,
 {
-    type Key = K;
-    type Value = V;
     type Config = GenericStoreConfig<K, V, D>;
     type Writer = GenericStoreWriter<K, V, D>;
 
@@ -1021,19 +1016,19 @@ where
         self.close().await
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         self.writer(key, weight)
     }
 
-    fn exists(&self, key: &Self::Key) -> Result<bool> {
+    fn exists(&self, key: &K) -> Result<bool> {
         self.exists(key)
     }
 
-    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         self.lookup(key).await
     }
 
-    fn remove(&self, key: &Self::Key) -> Result<bool> {
+    fn remove(&self, key: &K) -> Result<bool> {
         self.remove(key)
     }
 

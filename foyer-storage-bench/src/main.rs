@@ -223,15 +223,12 @@ where
     }
 }
 
-impl<K, V> StorageWriter for BenchStoreWriter<K, V>
+impl<K, V> StorageWriter<K, V> for BenchStoreWriter<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    type Key = K;
-    type Value = V;
-
-    fn key(&self) -> &Self::Key {
+    fn key(&self) -> &K {
         match self {
             BenchStoreWriter::StoreWriter { writer } => writer.key(),
             BenchStoreWriter::RuntimeStoreWriter { writer } => writer.key(),
@@ -259,7 +256,7 @@ where
         }
     }
 
-    async fn finish(self, value: Self::Value) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<bool> {
         match self {
             BenchStoreWriter::StoreWriter { writer } => writer.finish(value).await,
             BenchStoreWriter::RuntimeStoreWriter { writer } => writer.finish(value).await,
@@ -304,13 +301,11 @@ where
     }
 }
 
-impl<K, V> Storage for BenchStore<K, V>
+impl<K, V> Storage<K, V> for BenchStore<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    type Key = K;
-    type Value = V;
     type Config = BenchStoreConfig<K, V>;
     type Writer = BenchStoreWriter<K, V>;
 
@@ -337,28 +332,28 @@ where
         }
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         match self {
             BenchStore::Store { store } => store.writer(key, weight).into(),
             BenchStore::RuntimeStore { store } => store.writer(key, weight).into(),
         }
     }
 
-    fn exists(&self, key: &Self::Key) -> Result<bool> {
+    fn exists(&self, key: &K) -> Result<bool> {
         match self {
             BenchStore::Store { store } => store.exists(key),
             BenchStore::RuntimeStore { store } => store.exists(key),
         }
     }
 
-    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self {
             BenchStore::Store { store } => store.lookup(key).await,
             BenchStore::RuntimeStore { store } => store.lookup(key).await,
         }
     }
 
-    fn remove(&self, key: &Self::Key) -> Result<bool> {
+    fn remove(&self, key: &K) -> Result<bool> {
         match self {
             BenchStore::Store { store } => store.remove(key),
             BenchStore::RuntimeStore { store } => store.remove(key),
@@ -650,12 +645,7 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(
-    args: Args,
-    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
-    metrics: Metrics,
-    stop_tx: broadcast::Sender<()>,
-) {
+async fn bench(args: Args, store: impl Storage<u64, Arc<Vec<u8>>>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -695,7 +685,7 @@ async fn bench(
 
 async fn write(
     id: u64,
-    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
+    store: impl Storage<u64, Arc<Vec<u8>>>,
     context: Arc<Context>,
     mut stop: broadcast::Receiver<()>,
 ) {
@@ -807,11 +797,7 @@ async fn write(
     }
 }
 
-async fn read(
-    store: impl Storage<Key = u64, Value = Arc<Vec<u8>>>,
-    context: Arc<Context>,
-    mut stop: broadcast::Receiver<()>,
-) {
+async fn read(store: impl Storage<u64, Arc<Vec<u8>>>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
