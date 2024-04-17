@@ -22,9 +22,7 @@ use foyer_common::{
 use crate::{
     compress::Compression,
     error::Result,
-    lazy::LazyStore,
     storage::{Storage, StorageWriter},
-    store::Store,
 };
 
 #[derive(Debug, Clone)]
@@ -34,7 +32,7 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuntimeStorageConfig<K, V, S>
+pub struct RuntimeStoreConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -45,7 +43,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct RuntimeStorageWriter<K, V, S>
+pub struct RuntimeStoreWriter<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -55,7 +53,7 @@ where
     writer: S::Writer,
 }
 
-impl<K, V, S> StorageWriter<K, V> for RuntimeStorageWriter<K, V, S>
+impl<K, V, S> StorageWriter<K, V> for RuntimeStoreWriter<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -94,7 +92,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct RuntimeStorage<K, V, S>
+pub struct Runtime<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -105,7 +103,7 @@ where
     _marker: PhantomData<(K, V)>,
 }
 
-impl<K, V, S> Clone for RuntimeStorage<K, V, S>
+impl<K, V, S> Clone for Runtime<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -120,14 +118,14 @@ where
     }
 }
 
-impl<K, V, S> Storage<K, V> for RuntimeStorage<K, V, S>
+impl<K, V, S> Storage<K, V> for Runtime<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: Storage<K, V>,
 {
-    type Config = RuntimeStorageConfig<K, V, S>;
-    type Writer = RuntimeStorageWriter<K, V, S>;
+    type Config = RuntimeStoreConfig<K, V, S>;
+    type Writer = RuntimeStoreWriter<K, V, S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -162,7 +160,7 @@ where
 
     fn writer(&self, key: K, weight: usize) -> Self::Writer {
         let writer = self.store.writer(key, weight);
-        RuntimeStorageWriter {
+        RuntimeStoreWriter {
             runtime: self.runtime.clone(),
             writer,
         }
@@ -189,11 +187,3 @@ where
         self.store.clear()
     }
 }
-
-pub type RuntimeStore<K, V> = RuntimeStorage<K, V, Store<K, V>>;
-pub type RuntimeStoreWriter<K, V> = RuntimeStorageWriter<K, V, Store<K, V>>;
-pub type RuntimeStoreConfig<K, V> = RuntimeStorageConfig<K, V, Store<K, V>>;
-
-pub type RuntimeLazyStore<K, V> = RuntimeStorage<K, V, LazyStore<K, V>>;
-pub type RuntimeLazyStoreWriter<K, V> = RuntimeStorageWriter<K, V, LazyStore<K, V>>;
-pub type RuntimeLazyStoreConfig<K, V> = RuntimeStorageConfig<K, V, LazyStore<K, V>>;

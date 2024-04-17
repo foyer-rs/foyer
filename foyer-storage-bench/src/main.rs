@@ -33,17 +33,17 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 use export::MetricsExporter;
-use foyer_common::code::{StorageKey, StorageValue};
+
 use foyer_memory::{EvictionConfig, LfuConfig};
 use foyer_storage::{
     admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
-    compress::Compression,
     device::fs::FsDeviceConfig,
     error::Result,
     reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionPolicy},
-    runtime::{RuntimeConfig, RuntimeStore, RuntimeStoreConfig, RuntimeStoreWriter},
-    storage::{AsyncStorageExt, Storage, StorageExt, StorageWriter},
-    store::{FsStoreConfig, Store, StoreConfig, StoreWriter},
+    runtime::{RuntimeConfig, RuntimeStoreConfig},
+    storage::{AsyncStorageExt, Storage, StorageExt},
+    store::FsStoreConfig,
+    store::{Store, StoreConfig},
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -171,204 +171,6 @@ pub struct Args {
 }
 
 #[derive(Debug)]
-pub enum BenchStoreConfig<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    StoreConfig { config: StoreConfig<K, V> },
-    RuntimeStoreConfig { config: RuntimeStoreConfig<K, V> },
-}
-
-impl<K, V> Clone for BenchStoreConfig<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Self::StoreConfig { config } => Self::StoreConfig { config: config.clone() },
-            Self::RuntimeStoreConfig { config } => Self::RuntimeStoreConfig { config: config.clone() },
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum BenchStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    StoreWriter { writer: StoreWriter<K, V> },
-    RuntimeStoreWriter { writer: RuntimeStoreWriter<K, V> },
-}
-
-impl<K, V> From<StoreWriter<K, V>> for BenchStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(writer: StoreWriter<K, V>) -> Self {
-        Self::StoreWriter { writer }
-    }
-}
-
-impl<K, V> From<RuntimeStoreWriter<K, V>> for BenchStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(writer: RuntimeStoreWriter<K, V>) -> Self {
-        Self::RuntimeStoreWriter { writer }
-    }
-}
-
-impl<K, V> StorageWriter<K, V> for BenchStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn key(&self) -> &K {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.key(),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.key(),
-        }
-    }
-
-    fn weight(&self) -> usize {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.weight(),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.weight(),
-        }
-    }
-
-    fn judge(&mut self) -> bool {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.judge(),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.judge(),
-        }
-    }
-
-    fn force(&mut self) {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.force(),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.force(),
-        }
-    }
-
-    async fn finish(self, value: V) -> Result<bool> {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.finish(value).await,
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.finish(value).await,
-        }
-    }
-
-    fn compression(&self) -> Compression {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.compression(),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.compression(),
-        }
-    }
-
-    fn set_compression(&mut self, compression: Compression) {
-        match self {
-            BenchStoreWriter::StoreWriter { writer } => writer.set_compression(compression),
-            BenchStoreWriter::RuntimeStoreWriter { writer } => writer.set_compression(compression),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum BenchStore<K = u64, V = Arc<Vec<u8>>>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    Store { store: Store<K, V> },
-    RuntimeStore { store: RuntimeStore<K, V> },
-}
-
-impl<K, V> Clone for BenchStore<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Self::Store { store } => Self::Store { store: store.clone() },
-            Self::RuntimeStore { store } => Self::RuntimeStore { store: store.clone() },
-        }
-    }
-}
-
-impl<K, V> Storage<K, V> for BenchStore<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    type Config = BenchStoreConfig<K, V>;
-    type Writer = BenchStoreWriter<K, V>;
-
-    async fn open(config: Self::Config) -> Result<Self> {
-        match config {
-            BenchStoreConfig::StoreConfig { config } => Store::open(config).await.map(|store| Self::Store { store }),
-            BenchStoreConfig::RuntimeStoreConfig { config } => RuntimeStore::open(config)
-                .await
-                .map(|store| Self::RuntimeStore { store }),
-        }
-    }
-
-    fn is_ready(&self) -> bool {
-        match self {
-            BenchStore::Store { store } => store.is_ready(),
-            BenchStore::RuntimeStore { store } => store.is_ready(),
-        }
-    }
-
-    async fn close(&self) -> Result<()> {
-        match self {
-            BenchStore::Store { store } => store.close().await,
-            BenchStore::RuntimeStore { store } => store.close().await,
-        }
-    }
-
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
-        match self {
-            BenchStore::Store { store } => store.writer(key, weight).into(),
-            BenchStore::RuntimeStore { store } => store.writer(key, weight).into(),
-        }
-    }
-
-    fn exists(&self, key: &K) -> Result<bool> {
-        match self {
-            BenchStore::Store { store } => store.exists(key),
-            BenchStore::RuntimeStore { store } => store.exists(key),
-        }
-    }
-
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
-        match self {
-            BenchStore::Store { store } => store.lookup(key).await,
-            BenchStore::RuntimeStore { store } => store.lookup(key).await,
-        }
-    }
-
-    fn remove(&self, key: &K) -> Result<bool> {
-        match self {
-            BenchStore::Store { store } => store.remove(key),
-            BenchStore::RuntimeStore { store } => store.remove(key),
-        }
-    }
-
-    fn clear(&self) -> Result<()> {
-        match self {
-            BenchStore::Store { store } => store.clear(),
-            BenchStore::RuntimeStore { store } => store.clear(),
-        }
-    }
-}
-
-#[derive(Debug)]
 enum TimeSeriesDistribution {
     None,
     Uniform { interval: Duration },
@@ -413,8 +215,6 @@ struct Context {
     distribution: TimeSeriesDistribution,
     metrics: Metrics,
 }
-
-fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
 #[cfg(feature = "tokio-console")]
 fn init_logger() {
@@ -477,8 +277,6 @@ fn init_logger() {
 
 #[tokio::main]
 async fn main() {
-    is_send_sync_static::<BenchStore>();
-
     init_logger();
 
     #[cfg(feature = "deadlock")]
@@ -585,22 +383,20 @@ async fn main() {
     };
 
     let config = if args.runtime {
-        BenchStoreConfig::RuntimeStoreConfig {
-            config: RuntimeStoreConfig {
-                store: config.into(),
-                runtime: RuntimeConfig {
-                    worker_threads: None,
-                    thread_name: Some("foyer".to_string()),
-                },
+        StoreConfig::RuntimeFs(RuntimeStoreConfig {
+            store: config,
+            runtime: RuntimeConfig {
+                worker_threads: None,
+                thread_name: Some("foyer".to_string()),
             },
-        }
+        })
     } else {
-        BenchStoreConfig::StoreConfig { config: config.into() }
+        StoreConfig::Fs(config)
     };
 
     println!("{config:#?}");
 
-    let store = BenchStore::open(config).await.unwrap();
+    let store = Store::open(config).await.unwrap();
 
     let (stop_tx, _) = broadcast::channel(4096);
 

@@ -21,10 +21,9 @@ use foyer_memory::{EvictionConfig, FifoConfig};
 use foyer_storage::{
     compress::Compression,
     device::fs::FsDeviceConfig,
-    lazy::LazyStore,
-    runtime::{RuntimeConfig, RuntimeLazyStore, RuntimeStorageConfig, RuntimeStore},
+    runtime::{RuntimeConfig, RuntimeStoreConfig},
     storage::{Storage, StorageExt},
-    store::{FsStore, FsStoreConfig},
+    store::{FsStoreConfig, Store, StoreConfig},
     test_utils::JudgeRecorder,
 };
 
@@ -34,11 +33,8 @@ const MB: usize = 1024 * 1024;
 const INSERTS: usize = 100;
 const LOOPS: usize = 10;
 
-async fn test_storage<S>(config: S::Config, recorder: Arc<JudgeRecorder<u64, Vec<u8>>>)
-where
-    S: Storage<u64, Vec<u8>>,
-{
-    let store = S::open(config.clone()).await.unwrap();
+async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecorder<u64, Vec<u8>>>) {
+    let store = Store::open(config.clone()).await.unwrap();
     while !store.is_ready() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -65,7 +61,7 @@ where
     drop(store);
 
     for _ in 0..LOOPS {
-        let store = S::open(config.clone()).await.unwrap();
+        let store = Store::open(config.clone()).await.unwrap();
         while !store.is_ready() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -102,10 +98,10 @@ where
 }
 
 #[tokio::test]
-async fn test_store() {
+async fn test_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FsStoreConfig {
+    let config = StoreConfig::Fs(FsStoreConfig {
         name: "".to_string(),
         eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
@@ -123,16 +119,16 @@ async fn test_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
-    };
+    });
 
-    test_storage::<FsStore<_, _>>(config, recorder).await;
+    test_store(config, recorder).await;
 }
 
 #[tokio::test]
-async fn test_store_zstd() {
+async fn test_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FsStoreConfig {
+    let config = StoreConfig::Fs(FsStoreConfig {
         name: "".to_string(),
         eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
@@ -150,16 +146,16 @@ async fn test_store_zstd() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Zstd,
-    };
+    });
 
-    test_storage::<FsStore<_, _>>(config, recorder).await;
+    test_store(config, recorder).await;
 }
 
 #[tokio::test]
-async fn test_store_lz4() {
+async fn test_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FsStoreConfig {
+    let config = StoreConfig::Fs(FsStoreConfig {
         name: "".to_string(),
         eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
@@ -177,16 +173,16 @@ async fn test_store_lz4() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Lz4,
-    };
+    });
 
-    test_storage::<FsStore<_, _>>(config, recorder).await;
+    test_store(config, recorder).await;
 }
 
 #[tokio::test]
-async fn test_lazy_store() {
+async fn test_lazy_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = FsStoreConfig {
+    let config = StoreConfig::LazyFs(FsStoreConfig {
         name: "".to_string(),
         eviction_config: EvictionConfig::Fifo(FifoConfig {}),
         device_config: FsDeviceConfig {
@@ -204,16 +200,16 @@ async fn test_lazy_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
-    };
+    });
 
-    test_storage::<LazyStore<_, _>>(config.into(), recorder).await;
+    test_store(config, recorder).await;
 }
 
 #[tokio::test]
-async fn test_runtime_store() {
+async fn test_runtime_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = RuntimeStorageConfig {
+    let config = StoreConfig::RuntimeFs(RuntimeStoreConfig {
         store: FsStoreConfig {
             name: "".to_string(),
             eviction_config: EvictionConfig::Fifo(FifoConfig {}),
@@ -232,22 +228,21 @@ async fn test_runtime_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
-        }
-        .into(),
+        },
         runtime: RuntimeConfig {
             worker_threads: None,
             thread_name: None,
         },
-    };
+    });
 
-    test_storage::<RuntimeStore<_, _>>(config, recorder).await;
+    test_store(config, recorder).await;
 }
 
 #[tokio::test]
-async fn test_runtime_lazy_store() {
+async fn test_runtime_lazy_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
-    let config = RuntimeStorageConfig {
+    let config = StoreConfig::RuntimeLazyFs(RuntimeStoreConfig {
         store: FsStoreConfig {
             name: "".to_string(),
             eviction_config: EvictionConfig::Fifo(FifoConfig {}),
@@ -266,13 +261,12 @@ async fn test_runtime_lazy_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
-        }
-        .into(),
+        },
         runtime: RuntimeConfig {
             worker_threads: None,
             thread_name: None,
         },
-    };
+    });
 
-    test_storage::<RuntimeLazyStore<_, _>>(config, recorder).await;
+    test_store(config, recorder).await;
 }
