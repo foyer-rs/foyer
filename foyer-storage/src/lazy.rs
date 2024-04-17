@@ -14,6 +14,7 @@
 
 use std::sync::{Arc, OnceLock};
 
+use foyer_common::code::{StorageKey, StorageValue};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -24,16 +25,23 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum LazyStorageWriter<S: Storage> {
+pub enum LazyStorageWriter<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     Store { writer: S::Writer },
-    None { writer: NoneStoreWriter<S::Key, S::Value> },
+    None { writer: NoneStoreWriter<K, V> },
 }
 
-impl<S: Storage> StorageWriter for LazyStorageWriter<S> {
-    type Key = S::Key;
-    type Value = S::Value;
-
-    fn key(&self) -> &Self::Key {
+impl<K, V, S> StorageWriter<K, V> for LazyStorageWriter<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+    fn key(&self) -> &K {
         match self {
             LazyStorageWriter::Store { writer } => writer.key(),
             LazyStorageWriter::None { writer } => writer.key(),
@@ -61,7 +69,7 @@ impl<S: Storage> StorageWriter for LazyStorageWriter<S> {
         }
     }
 
-    async fn finish(self, value: Self::Value) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<bool> {
         match self {
             LazyStorageWriter::Store { writer } => writer.finish(value).await,
             LazyStorageWriter::None { writer } => writer.finish(value).await,
@@ -84,12 +92,22 @@ impl<S: Storage> StorageWriter for LazyStorageWriter<S> {
 }
 
 #[derive(Debug)]
-pub struct LazyStorage<S: Storage> {
+pub struct LazyStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     once: Arc<OnceLock<S>>,
-    none: NoneStore<S::Key, S::Value>,
+    none: NoneStore<K, V>,
 }
 
-impl<S: Storage> Clone for LazyStorage<S> {
+impl<K, V, S> Clone for LazyStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     fn clone(&self) -> Self {
         Self {
             once: Arc::clone(&self.once),
@@ -98,7 +116,12 @@ impl<S: Storage> Clone for LazyStorage<S> {
     }
 }
 
-impl<S: Storage> LazyStorage<S> {
+impl<K, V, S> LazyStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     fn with_handle(config: S::Config) -> (Self, JoinHandle<Result<S>>) {
         let once = Arc::new(OnceLock::new());
 
@@ -126,11 +149,14 @@ impl<S: Storage> LazyStorage<S> {
     }
 }
 
-impl<S: Storage> Storage for LazyStorage<S> {
-    type Key = S::Key;
-    type Value = S::Value;
+impl<K, V, S> Storage<K, V> for LazyStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
     type Config = S::Config;
-    type Writer = LazyStorageWriter<S>;
+    type Writer = LazyStorageWriter<K, V, S>;
 
     async fn open(config: S::Config) -> Result<Self> {
         let (store, task) = Self::with_handle(config);
@@ -149,7 +175,7 @@ impl<S: Storage> Storage for LazyStorage<S> {
         }
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         match self.once.get() {
             Some(store) => LazyStorageWriter::Store {
                 writer: store.writer(key, weight),
@@ -160,21 +186,21 @@ impl<S: Storage> Storage for LazyStorage<S> {
         }
     }
 
-    fn exists(&self, key: &Self::Key) -> Result<bool> {
+    fn exists(&self, key: &K) -> Result<bool> {
         match self.once.get() {
             Some(store) => store.exists(key),
             None => self.none.exists(key),
         }
     }
 
-    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self.once.get() {
             Some(store) => store.lookup(key).await,
             None => self.none.lookup(key).await,
         }
     }
 
-    fn remove(&self, key: &Self::Key) -> Result<bool> {
+    fn remove(&self, key: &K) -> Result<bool> {
         match self.once.get() {
             Some(store) => store.remove(key),
             None => self.none.remove(key),
@@ -189,8 +215,8 @@ impl<S: Storage> Storage for LazyStorage<S> {
     }
 }
 
-pub type LazyStore<K, V> = LazyStorage<Store<K, V>>;
-pub type LazyStoreWriter<K, V> = LazyStorageWriter<Store<K, V>>;
+pub type LazyStore<K, V> = LazyStorage<K, V, Store<K, V>>;
+pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
@@ -232,7 +258,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<FsStore<_, _>>::with_handle(config);
+        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -264,7 +290,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<FsStore<_, _>>::with_handle(config);
+        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 

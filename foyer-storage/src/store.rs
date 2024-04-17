@@ -29,13 +29,21 @@ pub type FsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice>;
 pub type FsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice>;
 
 #[derive(Debug)]
-pub struct NoneStoreWriter<K: StorageKey, V: StorageValue> {
+pub struct NoneStoreWriter<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     key: K,
     weight: usize,
     _marker: PhantomData<V>,
 }
 
-impl<K: StorageKey, V: StorageValue> NoneStoreWriter<K, V> {
+impl<K, V> NoneStoreWriter<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     pub fn new(key: K, weight: usize) -> Self {
         Self {
             key,
@@ -45,11 +53,12 @@ impl<K: StorageKey, V: StorageValue> NoneStoreWriter<K, V> {
     }
 }
 
-impl<K: StorageKey, V: StorageValue> StorageWriter for NoneStoreWriter<K, V> {
-    type Key = K;
-    type Value = V;
-
-    fn key(&self) -> &Self::Key {
+impl<K, V> StorageWriter<K, V> for NoneStoreWriter<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn key(&self) -> &K {
         &self.key
     }
 
@@ -63,7 +72,7 @@ impl<K: StorageKey, V: StorageValue> StorageWriter for NoneStoreWriter<K, V> {
 
     fn force(&mut self) {}
 
-    async fn finish(self, _: Self::Value) -> Result<bool> {
+    async fn finish(self, _: V) -> Result<bool> {
         Ok(false)
     }
 
@@ -89,9 +98,7 @@ impl<K: StorageKey, V: StorageValue> Clone for NoneStore<K, V> {
     }
 }
 
-impl<K: StorageKey, V: StorageValue> Storage for NoneStore<K, V> {
-    type Key = K;
-    type Value = V;
+impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
     type Config = ();
     type Writer = NoneStoreWriter<K, V>;
 
@@ -107,19 +114,19 @@ impl<K: StorageKey, V: StorageValue> Storage for NoneStore<K, V> {
         Ok(())
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         NoneStoreWriter::new(key, weight)
     }
 
-    fn exists(&self, _: &Self::Key) -> Result<bool> {
+    fn exists(&self, _: &K) -> Result<bool> {
         Ok(false)
     }
 
-    async fn lookup(&self, _: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, _: &K) -> Result<Option<V>> {
         Ok(None)
     }
 
-    fn remove(&self, _: &Self::Key) -> Result<bool> {
+    fn remove(&self, _: &K) -> Result<bool> {
         Ok(false)
     }
 
@@ -214,15 +221,12 @@ where
     }
 }
 
-impl<K, V> StorageWriter for StoreWriter<K, V>
+impl<K, V> StorageWriter<K, V> for StoreWriter<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    type Key = K;
-    type Value = V;
-
-    fn key(&self) -> &Self::Key {
+    fn key(&self) -> &K {
         match self {
             StoreWriter::FsStoreWriter { writer } => writer.key(),
             StoreWriter::NoneStoreWriter { writer } => writer.key(),
@@ -250,7 +254,7 @@ where
         }
     }
 
-    async fn finish(self, value: Self::Value) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<bool> {
         match self {
             StoreWriter::FsStoreWriter { writer } => writer.finish(value).await,
             StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
@@ -272,13 +276,11 @@ where
     }
 }
 
-impl<K, V> Storage for Store<K, V>
+impl<K, V> Storage<K, V> for Store<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    type Key = K;
-    type Value = V;
     type Config = StoreConfig<K, V>;
     type Writer = StoreWriter<K, V>;
 
@@ -309,28 +311,28 @@ where
         }
     }
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K, weight: usize) -> Self::Writer {
         match self {
             Store::FsStore { store } => store.writer(key, weight).into(),
             Store::NoneStore { store } => store.writer(key, weight).into(),
         }
     }
 
-    fn exists(&self, key: &Self::Key) -> Result<bool> {
+    fn exists(&self, key: &K) -> Result<bool> {
         match self {
             Store::FsStore { store } => store.exists(key),
             Store::NoneStore { store } => store.exists(key),
         }
     }
 
-    async fn lookup(&self, key: &Self::Key) -> Result<Option<Self::Value>> {
+    async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self {
             Store::FsStore { store } => store.lookup(key).await,
             Store::NoneStore { store } => store.lookup(key).await,
         }
     }
 
-    fn remove(&self, key: &Self::Key) -> Result<bool> {
+    fn remove(&self, key: &K) -> Result<bool> {
         match self {
             Store::FsStore { store } => store.remove(key),
             Store::NoneStore { store } => store.remove(key),

@@ -25,11 +25,12 @@ use crate::{compress::Compression, error::Result};
 pub trait FetchValueFuture<V>: Future<Output = anyhow::Result<V>> + Send + 'static {}
 impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture<V> for T {}
 
-pub trait StorageWriter: Send + Sync + Debug {
-    type Key: StorageKey;
-    type Value: StorageValue;
-
-    fn key(&self) -> &Self::Key;
+pub trait StorageWriter<K, V>: Send + Sync + Debug
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn key(&self) -> &K;
 
     fn weight(&self) -> usize;
 
@@ -41,14 +42,16 @@ pub trait StorageWriter: Send + Sync + Debug {
 
     fn set_compression(&mut self, compression: Compression);
 
-    fn finish(self, value: Self::Value) -> impl Future<Output = Result<bool>> + Send;
+    fn finish(self, value: V) -> impl Future<Output = Result<bool>> + Send;
 }
 
-pub trait Storage: Send + Sync + Debug + Clone + 'static {
-    type Key: StorageKey;
-    type Value: StorageValue;
+pub trait Storage<K, V>: Send + Sync + Debug + Clone + 'static
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     type Config: Send + Clone + Debug;
-    type Writer: StorageWriter<Key = Self::Key, Value = Self::Value>;
+    type Writer: StorageWriter<K, V>;
 
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
@@ -58,29 +61,33 @@ pub trait Storage: Send + Sync + Debug + Clone + 'static {
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer;
+    fn writer(&self, key: K, weight: usize) -> Self::Writer;
 
-    fn exists(&self, key: &Self::Key) -> Result<bool>;
+    fn exists(&self, key: &K) -> Result<bool>;
 
     #[must_use]
-    fn lookup(&self, key: &Self::Key) -> impl Future<Output = Result<Option<Self::Value>>> + Send;
+    fn lookup(&self, key: &K) -> impl Future<Output = Result<Option<V>>> + Send;
 
-    fn remove(&self, key: &Self::Key) -> Result<bool>;
+    fn remove(&self, key: &K) -> Result<bool>;
 
     fn clear(&self) -> Result<()>;
 }
 
-pub trait StorageExt: Storage {
+pub trait StorageExt<K, V>: Storage<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     #[must_use]
     #[tracing::instrument(skip(self, value))]
-    fn insert(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
+    fn insert(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         self.writer(key, weight).finish(value)
     }
 
     #[must_use]
     #[tracing::instrument(skip(self, value))]
-    fn insert_if_not_exists(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_if_not_exists(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
         async move {
             if self.exists(&key)? {
                 return Ok(false);
@@ -97,9 +104,9 @@ pub trait StorageExt: Storage {
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
     #[tracing::instrument(skip(self, f))]
-    fn insert_with<F>(&self, key: Self::Key, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
-        F: FnOnce() -> anyhow::Result<Self::Value> + Send,
+        F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
             let mut writer = self.writer(key, weight);
@@ -124,15 +131,10 @@ pub trait StorageExt: Storage {
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_with_future<F, FU>(
-        &self,
-        key: Self::Key,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> FU + Send,
-        FU: FetchValueFuture<Self::Value>,
+        FU: FetchValueFuture<V>,
     {
         async move {
             let mut writer = self.writer(key, weight);
@@ -151,14 +153,9 @@ pub trait StorageExt: Storage {
     }
 
     #[tracing::instrument(skip(self, f))]
-    fn insert_if_not_exists_with<F>(
-        &self,
-        key: Self::Key,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
-        F: FnOnce() -> anyhow::Result<Self::Value> + Send,
+        F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
             if self.exists(&key)? {
@@ -171,13 +168,13 @@ pub trait StorageExt: Storage {
     #[tracing::instrument(skip(self, f))]
     fn insert_if_not_exists_with_future<F, FU>(
         &self,
-        key: Self::Key,
+        key: K,
         f: F,
         weight: usize,
     ) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> FU + Send,
-        FU: FetchValueFuture<Self::Value>,
+        FU: FetchValueFuture<V>,
     {
         async move {
             if self.exists(&key)? {
@@ -188,11 +185,21 @@ pub trait StorageExt: Storage {
     }
 }
 
-impl<S: Storage> StorageExt for S {}
+impl<K, V, S> StorageExt<K, V> for S
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+}
 
-pub trait AsyncStorageExt: Storage {
+pub trait AsyncStorageExt<K, V>: Storage<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     #[tracing::instrument(skip(self, value))]
-    fn insert_async(&self, key: Self::Key, value: Self::Value) {
+    fn insert_async(&self, key: K, value: V) {
         let store = self.clone();
         tokio::spawn(async move {
             if let Err(e) = store.insert(key, value).await {
@@ -202,7 +209,7 @@ pub trait AsyncStorageExt: Storage {
     }
 
     #[tracing::instrument(skip(self, value))]
-    fn insert_if_not_exists_async(&self, key: Self::Key, value: Self::Value) {
+    fn insert_if_not_exists_async(&self, key: K, value: V) {
         let store = self.clone();
         tokio::spawn(async move {
             if let Err(e) = store.insert_if_not_exists(key, value).await {
@@ -211,7 +218,7 @@ pub trait AsyncStorageExt: Storage {
         });
     }
 
-    fn insert_async_with_callback<F, FU>(&self, key: Self::Key, value: Self::Value, f: F)
+    fn insert_async_with_callback<F, FU>(&self, key: K, value: V, f: F)
     where
         F: FnOnce(Result<bool>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
@@ -224,7 +231,7 @@ pub trait AsyncStorageExt: Storage {
         });
     }
 
-    fn insert_if_not_exists_async_with_callback<F, FU>(&self, key: Self::Key, value: Self::Value, f: F)
+    fn insert_if_not_exists_async_with_callback<F, FU>(&self, key: K, value: V, f: F)
     where
         F: FnOnce(Result<bool>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
@@ -238,11 +245,21 @@ pub trait AsyncStorageExt: Storage {
     }
 }
 
-impl<S: Storage> AsyncStorageExt for S {}
+impl<K, V, S> AsyncStorageExt<K, V> for S
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+}
 
-pub trait ForceStorageExt: Storage {
+pub trait ForceStorageExt<K, V>: Storage<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
     #[tracing::instrument(skip(self, value))]
-    fn insert_force(&self, key: Self::Key, value: Self::Value) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
         let weight = key.serialized_len() + value.serialized_len();
         let mut writer = self.writer(key, weight);
         writer.force();
@@ -256,9 +273,9 @@ pub trait ForceStorageExt: Storage {
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with<F>(&self, key: Self::Key, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
-        F: FnOnce() -> anyhow::Result<Self::Value> + Send,
+        F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
             let mut writer = self.writer(key, weight);
@@ -285,15 +302,10 @@ pub trait ForceStorageExt: Storage {
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with_future<F, FU>(
-        &self,
-        key: Self::Key,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> FU + Send,
-        FU: FetchValueFuture<Self::Value>,
+        FU: FetchValueFuture<V>,
     {
         async move {
             let mut writer = self.writer(key, weight);
@@ -314,7 +326,13 @@ pub trait ForceStorageExt: Storage {
     }
 }
 
-impl<S> ForceStorageExt for S where S: Storage {}
+impl<K, V, S> ForceStorageExt<K, V> for S
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+}
 
 #[cfg(test)]
 mod tests {
@@ -431,7 +449,7 @@ mod tests {
         assert!(storage.exists(&6).unwrap());
     }
 
-    async fn exists_with_retry(storage: &impl Storage<Key = u64, Value = Vec<u8>>, key: &u64) -> bool {
+    async fn exists_with_retry(storage: &impl Storage<u64, Vec<u8>>, key: &u64) -> bool {
         tokio::time::sleep(Duration::from_millis(1)).await;
         for _ in 0..10 {
             if storage.exists(key).unwrap() {
