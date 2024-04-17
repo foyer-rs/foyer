@@ -19,12 +19,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use foyer_memory::{EvictionConfig, FifoConfig};
 use foyer_storage::{
-    compress::Compression,
-    device::fs::FsDeviceConfig,
-    runtime::{RuntimeConfig, RuntimeStoreConfig},
-    storage::{Storage, StorageExt},
-    store::{FsStoreConfig, Store, StoreConfig},
-    test_utils::JudgeRecorder,
+    test_utils::JudgeRecorder, Compression, FsDeviceConfig, FsStoreConfig, RuntimeConfig, RuntimeStoreConfig, Storage,
+    StorageExt, Store, StoreConfig,
 };
 
 const KB: usize = 1024;

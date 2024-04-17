@@ -227,10 +227,6 @@ where
         Ok(Some(buf))
     }
 
-    pub fn id(&self) -> RegionId {
-        self.id
-    }
-
     pub fn device(&self) -> &D {
         &self.device
     }

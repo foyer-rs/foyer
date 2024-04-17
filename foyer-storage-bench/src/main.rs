@@ -36,14 +36,9 @@ use export::MetricsExporter;
 
 use foyer_memory::{EvictionConfig, LfuConfig};
 use foyer_storage::{
-    admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionPolicy},
-    device::fs::FsDeviceConfig,
-    error::Result,
-    reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionPolicy},
-    runtime::{RuntimeConfig, RuntimeStoreConfig},
-    storage::{AsyncStorageExt, Storage, StorageExt},
-    store::FsStoreConfig,
-    store::{Store, StoreConfig},
+    AdmissionPolicy, AsyncStorageExt, FsDeviceConfig, FsStoreConfig, RatedTicketAdmissionPolicy,
+    RatedTicketReinsertionPolicy, ReinsertionPolicy, Result, RuntimeConfig, RuntimeStoreConfig, Storage, StorageExt,
+    Store, StoreConfig,
 };
 use futures::future::join_all;
 use itertools::Itertools;
