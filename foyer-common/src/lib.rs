@@ -21,6 +21,7 @@ pub mod buf;
 pub mod code;
 pub mod continuum;
 pub mod erwlock;
+pub mod object_pool;
 pub mod range;
 pub mod rate;
 pub mod rated_ticket;
