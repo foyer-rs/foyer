@@ -20,12 +20,12 @@ use tokio::task::JoinHandle;
 use crate::{
     compress::Compression,
     error::Result,
+    none::{NoneStore, NoneStoreWriter},
     storage::{Storage, StorageWriter},
-    store::{NoneStore, NoneStoreWriter, Store},
 };
 
 #[derive(Debug)]
-pub enum LazyStorageWriter<K, V, S>
+pub enum LazyStoreWriter<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -35,7 +35,7 @@ where
     None { writer: NoneStoreWriter<K, V> },
 }
 
-impl<K, V, S> StorageWriter<K, V> for LazyStorageWriter<K, V, S>
+impl<K, V, S> StorageWriter<K, V> for LazyStoreWriter<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -43,56 +43,56 @@ where
 {
     fn key(&self) -> &K {
         match self {
-            LazyStorageWriter::Store { writer } => writer.key(),
-            LazyStorageWriter::None { writer } => writer.key(),
+            LazyStoreWriter::Store { writer } => writer.key(),
+            LazyStoreWriter::None { writer } => writer.key(),
         }
     }
 
     fn weight(&self) -> usize {
         match self {
-            LazyStorageWriter::Store { writer } => writer.weight(),
-            LazyStorageWriter::None { writer } => writer.weight(),
+            LazyStoreWriter::Store { writer } => writer.weight(),
+            LazyStoreWriter::None { writer } => writer.weight(),
         }
     }
 
     fn judge(&mut self) -> bool {
         match self {
-            LazyStorageWriter::Store { writer } => writer.judge(),
-            LazyStorageWriter::None { writer } => writer.judge(),
+            LazyStoreWriter::Store { writer } => writer.judge(),
+            LazyStoreWriter::None { writer } => writer.judge(),
         }
     }
 
     fn force(&mut self) {
         match self {
-            LazyStorageWriter::Store { writer } => writer.force(),
-            LazyStorageWriter::None { writer } => writer.force(),
+            LazyStoreWriter::Store { writer } => writer.force(),
+            LazyStoreWriter::None { writer } => writer.force(),
         }
     }
 
     async fn finish(self, value: V) -> Result<bool> {
         match self {
-            LazyStorageWriter::Store { writer } => writer.finish(value).await,
-            LazyStorageWriter::None { writer } => writer.finish(value).await,
+            LazyStoreWriter::Store { writer } => writer.finish(value).await,
+            LazyStoreWriter::None { writer } => writer.finish(value).await,
         }
     }
 
     fn compression(&self) -> Compression {
         match self {
-            LazyStorageWriter::Store { writer } => writer.compression(),
-            LazyStorageWriter::None { writer } => writer.compression(),
+            LazyStoreWriter::Store { writer } => writer.compression(),
+            LazyStoreWriter::None { writer } => writer.compression(),
         }
     }
 
     fn set_compression(&mut self, compression: Compression) {
         match self {
-            LazyStorageWriter::Store { writer } => writer.set_compression(compression),
-            LazyStorageWriter::None { writer } => writer.set_compression(compression),
+            LazyStoreWriter::Store { writer } => writer.set_compression(compression),
+            LazyStoreWriter::None { writer } => writer.set_compression(compression),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct LazyStorage<K, V, S>
+pub struct Lazy<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -102,7 +102,7 @@ where
     none: NoneStore<K, V>,
 }
 
-impl<K, V, S> Clone for LazyStorage<K, V, S>
+impl<K, V, S> Clone for Lazy<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -116,7 +116,7 @@ where
     }
 }
 
-impl<K, V, S> LazyStorage<K, V, S>
+impl<K, V, S> Lazy<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -149,14 +149,14 @@ where
     }
 }
 
-impl<K, V, S> Storage<K, V> for LazyStorage<K, V, S>
+impl<K, V, S> Storage<K, V> for Lazy<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: Storage<K, V>,
 {
     type Config = S::Config;
-    type Writer = LazyStorageWriter<K, V, S>;
+    type Writer = LazyStoreWriter<K, V, S>;
 
     async fn open(config: S::Config) -> Result<Self> {
         let (store, task) = Self::with_handle(config);
@@ -177,10 +177,10 @@ where
 
     fn writer(&self, key: K, weight: usize) -> Self::Writer {
         match self.once.get() {
-            Some(store) => LazyStorageWriter::Store {
+            Some(store) => LazyStoreWriter::Store {
                 writer: store.writer(key, weight),
             },
-            None => LazyStorageWriter::None {
+            None => LazyStoreWriter::None {
                 writer: NoneStoreWriter::new(key, weight),
             },
         }
@@ -214,9 +214,6 @@ where
         }
     }
 }
-
-pub type LazyStore<K, V> = LazyStorage<K, V, Store<K, V>>;
-pub type LazyStoreWriter<K, V> = LazyStorageWriter<K, V, Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
@@ -258,7 +255,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = Lazy::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -290,7 +287,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = LazyStorage::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = Lazy::<_, _, FsStore<_, _>>::with_handle(config);
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 

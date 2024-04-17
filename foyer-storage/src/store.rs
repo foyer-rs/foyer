@@ -12,15 +12,17 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
-
 use foyer_common::code::{StorageKey, StorageValue};
+use std::fmt::Debug;
 
 use crate::{
     compress::Compression,
     device::fs::FsDevice,
     error::Result,
     generic::{GenericStore, GenericStoreConfig, GenericStoreWriter},
+    lazy::{Lazy, LazyStoreWriter},
+    none::{NoneStore, NoneStoreWriter},
+    runtime::{Runtime, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{Storage, StorageWriter},
 };
 
@@ -28,121 +30,33 @@ pub type FsStore<K, V> = GenericStore<K, V, FsDevice>;
 pub type FsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice>;
 pub type FsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice>;
 
-#[derive(Debug)]
-pub struct NoneStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    key: K,
-    weight: usize,
-    _marker: PhantomData<V>,
-}
-
-impl<K, V> NoneStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    pub fn new(key: K, weight: usize) -> Self {
-        Self {
-            key,
-            weight,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<K, V> StorageWriter<K, V> for NoneStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn key(&self) -> &K {
-        &self.key
-    }
-
-    fn weight(&self) -> usize {
-        self.weight
-    }
-
-    fn judge(&mut self) -> bool {
-        false
-    }
-
-    fn force(&mut self) {}
-
-    async fn finish(self, _: V) -> Result<bool> {
-        Ok(false)
-    }
-
-    fn compression(&self) -> Compression {
-        Compression::None
-    }
-
-    fn set_compression(&mut self, _: Compression) {}
-}
-
-#[derive(Debug)]
-pub struct NoneStore<K: StorageKey, V: StorageValue>(PhantomData<(K, V)>);
-
-impl<K: StorageKey, V: StorageValue> Default for NoneStore<K, V> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: StorageKey, V: StorageValue> Clone for NoneStore<K, V> {
-    fn clone(&self) -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
-    type Config = ();
-    type Writer = NoneStoreWriter<K, V>;
-
-    async fn open(_: Self::Config) -> Result<Self> {
-        Ok(NoneStore(PhantomData))
-    }
-
-    fn is_ready(&self) -> bool {
-        true
-    }
-
-    async fn close(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
-        NoneStoreWriter::new(key, weight)
-    }
-
-    fn exists(&self, _: &K) -> Result<bool> {
-        Ok(false)
-    }
-
-    async fn lookup(&self, _: &K) -> Result<Option<V>> {
-        Ok(None)
-    }
-
-    fn remove(&self, _: &K) -> Result<bool> {
-        Ok(false)
-    }
-
-    fn clear(&self) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
 pub enum StoreConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    FsStoreConfig(Box<FsStoreConfig<K, V>>),
-    NoneStoreConfig,
+    None,
+
+    Fs(FsStoreConfig<K, V>),
+    LazyFs(FsStoreConfig<K, V>),
+    RuntimeFs(RuntimeStoreConfig<K, V, FsStore<K, V>>),
+    RuntimeLazyFs(RuntimeStoreConfig<K, V, Lazy<K, V, FsStore<K, V>>>),
+}
+
+impl<K, V> Debug for StoreConfig<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Fs(config) => f.debug_tuple("Fs").field(config).finish(),
+            Self::LazyFs(config) => f.debug_tuple("LazyFs").field(config).finish(),
+            Self::RuntimeFs(config) => f.debug_tuple("RuntimeFs").field(config).finish(),
+            Self::RuntimeLazyFs(config) => f.debug_tuple("RuntimeLazyFs").field(config).finish(),
+        }
+    }
 }
 
 impl<K, V> Clone for StoreConfig<K, V>
@@ -152,71 +66,70 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::FsStoreConfig(config) => Self::FsStoreConfig(config.clone()),
-            Self::NoneStoreConfig => Self::NoneStoreConfig,
+            StoreConfig::None => StoreConfig::None,
+            StoreConfig::Fs(config) => StoreConfig::Fs(config.clone()),
+            StoreConfig::LazyFs(config) => StoreConfig::LazyFs(config.clone()),
+            StoreConfig::RuntimeFs(config) => StoreConfig::RuntimeFs(config.clone()),
+            StoreConfig::RuntimeLazyFs(config) => StoreConfig::RuntimeLazyFs(config.clone()),
         }
     }
 }
 
-impl<K, V> From<FsStoreConfig<K, V>> for StoreConfig<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(config: FsStoreConfig<K, V>) -> Self {
-        StoreConfig::FsStoreConfig(Box::new(config))
-    }
-}
-
-#[derive(Debug)]
 pub enum StoreWriter<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    FsStoreWriter { writer: FsStoreWriter<K, V> },
-    NoneStoreWriter { writer: NoneStoreWriter<K, V> },
+    None(NoneStoreWriter<K, V>),
+
+    Fs(FsStoreWriter<K, V>),
+    LazyFs(LazyStoreWriter<K, V, FsStore<K, V>>),
+    RuntimeFs(RuntimeStoreWriter<K, V, FsStore<K, V>>),
+    RuntimeLazyFs(RuntimeStoreWriter<K, V, Lazy<K, V, FsStore<K, V>>>),
 }
 
-impl<K, V> From<FsStoreWriter<K, V>> for StoreWriter<K, V>
+impl<K, V> Debug for StoreWriter<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    fn from(writer: FsStoreWriter<K, V>) -> Self {
-        StoreWriter::FsStoreWriter { writer }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None(writer) => f.debug_tuple("None").field(writer).finish(),
+            Self::Fs(writer) => f.debug_tuple("Fs").field(writer).finish(),
+            Self::LazyFs(writer) => f.debug_tuple("LazyFs").field(writer).finish(),
+            Self::RuntimeFs(writer) => f.debug_tuple("RuntimeFs").field(writer).finish(),
+            Self::RuntimeLazyFs(writer) => f.debug_tuple("RuntimeLazyFs").field(writer).finish(),
+        }
     }
 }
 
-impl<K, V> From<NoneStoreWriter<K, V>> for StoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn from(writer: NoneStoreWriter<K, V>) -> Self {
-        StoreWriter::NoneStoreWriter { writer }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone)]
 pub enum Store<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    FsStore { store: FsStore<K, V> },
-    NoneStore { store: NoneStore<K, V> },
+    None(NoneStore<K, V>),
+
+    Fs(FsStore<K, V>),
+    LazyFs(Lazy<K, V, FsStore<K, V>>),
+    RuntimeFs(Runtime<K, V, FsStore<K, V>>),
+    RuntimeLazyFs(Runtime<K, V, Lazy<K, V, FsStore<K, V>>>),
 }
 
-impl<K, V> Clone for Store<K, V>
+impl<K, V> Debug for Store<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    fn clone(&self) -> Self {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::FsStore { store } => Self::FsStore { store: store.clone() },
-            Self::NoneStore { store } => Self::NoneStore { store: store.clone() },
+            Self::None(store) => f.debug_tuple("None").field(store).finish(),
+            Self::Fs(store) => f.debug_tuple("Fs").field(store).finish(),
+            Self::LazyFs(store) => f.debug_tuple("LazyFs").field(store).finish(),
+            Self::RuntimeFs(store) => f.debug_tuple("RuntimeFs").field(store).finish(),
+            Self::RuntimeLazyFs(store) => f.debug_tuple("RuntimeLazyFs").field(store).finish(),
         }
     }
 }
@@ -228,50 +141,71 @@ where
 {
     fn key(&self) -> &K {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.key(),
-            StoreWriter::NoneStoreWriter { writer } => writer.key(),
+            StoreWriter::None(writer) => writer.key(),
+            StoreWriter::Fs(writer) => writer.key(),
+            StoreWriter::LazyFs(writer) => writer.key(),
+            StoreWriter::RuntimeFs(writer) => writer.key(),
+            StoreWriter::RuntimeLazyFs(writer) => writer.key(),
         }
     }
 
     fn weight(&self) -> usize {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.weight(),
-            StoreWriter::NoneStoreWriter { writer } => writer.weight(),
+            StoreWriter::None(writer) => writer.weight(),
+            StoreWriter::Fs(writer) => writer.weight(),
+            StoreWriter::LazyFs(writer) => writer.weight(),
+            StoreWriter::RuntimeFs(writer) => writer.weight(),
+            StoreWriter::RuntimeLazyFs(writer) => writer.weight(),
         }
     }
 
     fn judge(&mut self) -> bool {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.judge(),
-            StoreWriter::NoneStoreWriter { writer } => writer.judge(),
+            StoreWriter::None(writer) => writer.judge(),
+            StoreWriter::Fs(writer) => writer.judge(),
+            StoreWriter::LazyFs(writer) => writer.judge(),
+            StoreWriter::RuntimeFs(writer) => writer.judge(),
+            StoreWriter::RuntimeLazyFs(writer) => writer.judge(),
         }
     }
 
     fn force(&mut self) {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.force(),
-            StoreWriter::NoneStoreWriter { writer } => writer.force(),
-        }
-    }
-
-    async fn finish(self, value: V) -> Result<bool> {
-        match self {
-            StoreWriter::FsStoreWriter { writer } => writer.finish(value).await,
-            StoreWriter::NoneStoreWriter { writer } => writer.finish(value).await,
+            StoreWriter::None(writer) => writer.force(),
+            StoreWriter::Fs(writer) => writer.force(),
+            StoreWriter::LazyFs(writer) => writer.force(),
+            StoreWriter::RuntimeFs(writer) => writer.force(),
+            StoreWriter::RuntimeLazyFs(writer) => writer.force(),
         }
     }
 
     fn compression(&self) -> Compression {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.compression(),
-            StoreWriter::NoneStoreWriter { writer } => writer.compression(),
+            StoreWriter::None(writer) => writer.compression(),
+            StoreWriter::Fs(writer) => writer.compression(),
+            StoreWriter::LazyFs(writer) => writer.compression(),
+            StoreWriter::RuntimeFs(writer) => writer.compression(),
+            StoreWriter::RuntimeLazyFs(writer) => writer.compression(),
         }
     }
 
     fn set_compression(&mut self, compression: Compression) {
         match self {
-            StoreWriter::FsStoreWriter { writer } => writer.set_compression(compression),
-            StoreWriter::NoneStoreWriter { writer } => writer.set_compression(compression),
+            StoreWriter::None(writer) => writer.set_compression(compression),
+            StoreWriter::Fs(writer) => writer.set_compression(compression),
+            StoreWriter::LazyFs(writer) => writer.set_compression(compression),
+            StoreWriter::RuntimeFs(writer) => writer.set_compression(compression),
+            StoreWriter::RuntimeLazyFs(writer) => writer.set_compression(compression),
+        }
+    }
+
+    async fn finish(self, value: V) -> Result<bool> {
+        match self {
+            StoreWriter::None(writer) => writer.finish(value).await,
+            StoreWriter::Fs(writer) => writer.finish(value).await,
+            StoreWriter::LazyFs(writer) => writer.finish(value).await,
+            StoreWriter::RuntimeFs(writer) => writer.finish(value).await,
+            StoreWriter::RuntimeLazyFs(writer) => writer.finish(value).await,
         }
     }
 }
@@ -285,64 +219,83 @@ where
     type Writer = StoreWriter<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
-        match config {
-            StoreConfig::FsStoreConfig(config) => {
-                let store = FsStore::open(*config).await?;
-                Ok(Self::FsStore { store })
-            }
-            StoreConfig::NoneStoreConfig => {
-                let store = NoneStore::open(()).await?;
-                Ok(Self::NoneStore { store })
-            }
-        }
+        let store = match config {
+            StoreConfig::None => Self::None(NoneStore::open(()).await?),
+            StoreConfig::Fs(config) => Self::Fs(FsStore::open(config).await?),
+            StoreConfig::LazyFs(config) => Self::LazyFs(Lazy::open(config).await?),
+            StoreConfig::RuntimeFs(config) => Self::RuntimeFs(Runtime::open(config).await?),
+            StoreConfig::RuntimeLazyFs(config) => Self::RuntimeLazyFs(Runtime::open(config).await?),
+        };
+        Ok(store)
     }
 
     fn is_ready(&self) -> bool {
         match self {
-            Store::FsStore { store } => store.is_ready(),
-            Store::NoneStore { store } => store.is_ready(),
+            Store::None(store) => store.is_ready(),
+            Store::Fs(store) => store.is_ready(),
+            Store::LazyFs(store) => store.is_ready(),
+            Store::RuntimeFs(store) => store.is_ready(),
+            Store::RuntimeLazyFs(store) => store.is_ready(),
         }
     }
 
     async fn close(&self) -> Result<()> {
         match self {
-            Store::FsStore { store } => store.close().await,
-            Store::NoneStore { store } => store.close().await,
+            Store::None(store) => store.close().await,
+            Store::Fs(store) => store.close().await,
+            Store::LazyFs(store) => store.close().await,
+            Store::RuntimeFs(store) => store.close().await,
+            Store::RuntimeLazyFs(store) => store.close().await,
         }
     }
 
     fn writer(&self, key: K, weight: usize) -> Self::Writer {
         match self {
-            Store::FsStore { store } => store.writer(key, weight).into(),
-            Store::NoneStore { store } => store.writer(key, weight).into(),
+            Store::None(store) => StoreWriter::None(store.writer(key, weight)),
+            Store::Fs(store) => StoreWriter::Fs(store.writer(key, weight)),
+            Store::LazyFs(store) => StoreWriter::LazyFs(store.writer(key, weight)),
+            Store::RuntimeFs(store) => StoreWriter::RuntimeFs(store.writer(key, weight)),
+            Store::RuntimeLazyFs(store) => StoreWriter::RuntimeLazyFs(store.writer(key, weight)),
         }
     }
 
     fn exists(&self, key: &K) -> Result<bool> {
         match self {
-            Store::FsStore { store } => store.exists(key),
-            Store::NoneStore { store } => store.exists(key),
+            Store::None(store) => store.exists(key),
+            Store::Fs(store) => store.exists(key),
+            Store::LazyFs(store) => store.exists(key),
+            Store::RuntimeFs(store) => store.exists(key),
+            Store::RuntimeLazyFs(store) => store.exists(key),
         }
     }
 
     async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self {
-            Store::FsStore { store } => store.lookup(key).await,
-            Store::NoneStore { store } => store.lookup(key).await,
+            Store::None(store) => store.lookup(key).await,
+            Store::Fs(store) => store.lookup(key).await,
+            Store::LazyFs(store) => store.lookup(key).await,
+            Store::RuntimeFs(store) => store.lookup(key).await,
+            Store::RuntimeLazyFs(store) => store.lookup(key).await,
         }
     }
 
     fn remove(&self, key: &K) -> Result<bool> {
         match self {
-            Store::FsStore { store } => store.remove(key),
-            Store::NoneStore { store } => store.remove(key),
+            Store::None(store) => store.remove(key),
+            Store::Fs(store) => store.remove(key),
+            Store::LazyFs(store) => store.remove(key),
+            Store::RuntimeFs(store) => store.remove(key),
+            Store::RuntimeLazyFs(store) => store.remove(key),
         }
     }
 
     fn clear(&self) -> Result<()> {
         match self {
-            Store::FsStore { store } => store.clear(),
-            Store::NoneStore { store } => store.clear(),
+            Store::None(store) => store.clear(),
+            Store::Fs(store) => store.clear(),
+            Store::LazyFs(store) => store.clear(),
+            Store::RuntimeFs(store) => store.clear(),
+            Store::RuntimeLazyFs(store) => store.clear(),
         }
     }
 }
