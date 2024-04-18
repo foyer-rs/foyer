@@ -21,7 +21,7 @@ mod utils;
 use std::{
     collections::BTreeMap,
     fs::create_dir_all,
-    ops::Range,
+    ops::{Deref, Range},
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -48,6 +48,7 @@ use rand::{
     Rng, SeedableRng,
 };
 use rate::RateLimiter;
+use serde::{Deserialize, Serialize};
 use text::text;
 use tokio::sync::broadcast;
 use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
@@ -211,6 +212,42 @@ struct Context {
     metrics: Metrics,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Value {
+    // https://github.com/serde-rs/bytes/issues/43
+    #[serde(with = "arc_bytes")]
+    inner: Arc<Vec<u8>>,
+}
+
+impl Deref for Value {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_slice()
+    }
+}
+
+mod arc_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_bytes::ByteBuf;
+    use std::sync::Arc;
+
+    pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(data.as_slice())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let buf = ByteBuf::deserialize(deserializer)?;
+        Ok(Arc::new(buf.into_vec()))
+    }
+}
+
 #[cfg(feature = "tokio-console")]
 fn init_logger() {
     console_subscriber::init();
@@ -340,8 +377,8 @@ async fn main() {
         io_size: args.io_size,
     };
 
-    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
-    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Arc<Vec<u8>>>>> = vec![];
+    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Value>>> = vec![];
+    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Value>>> = vec![];
     if args.ticket_insert_rate_limit > 0 {
         let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
         admissions.push(Arc::new(rt));
@@ -436,7 +473,7 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(args: Args, store: impl Storage<u64, Arc<Vec<u8>>>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
+async fn bench(args: Args, store: impl Storage<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -474,12 +511,7 @@ async fn bench(args: Args, store: impl Storage<u64, Arc<Vec<u8>>>, metrics: Metr
     join_all(r_handles).await;
 }
 
-async fn write(
-    id: u64,
-    store: impl Storage<u64, Arc<Vec<u8>>>,
-    context: Arc<Context>,
-    mut stop: broadcast::Receiver<()>,
-) {
+async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
@@ -535,7 +567,9 @@ async fn write(
 
         let idx = id + step * c;
         let entry_size = OsRng.gen_range(context.entry_size_range.clone());
-        let data = Arc::new(text(idx as usize, entry_size));
+        let data = Value {
+            inner: Arc::new(text(idx as usize, entry_size)),
+        };
 
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if let Some(limiter) = &mut limiter {
@@ -588,7 +622,7 @@ async fn write(
     }
 }
 
-async fn read(store: impl Storage<u64, Arc<Vec<u8>>>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
+async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);

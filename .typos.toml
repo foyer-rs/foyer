@@ -5,4 +5,5 @@
 [files]
 extend-exclude = [
     "foyer-workspace-hack/Cargo.toml",
+    "*.svg",
 ]
