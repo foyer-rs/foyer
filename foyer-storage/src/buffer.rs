@@ -223,7 +223,7 @@ where
         // write value
         match compression {
             Compression::None => {
-                bincode::serialize_into(&mut self.buffer, &value).map_err(BufferError::from)?;
+                bincode::serialize_into(WritableVecA(&mut self.buffer), &value).map_err(BufferError::from)?;
             }
             Compression::Zstd => {
                 let encoder = zstd::Encoder::new(WritableVecA(&mut self.buffer), 0)
