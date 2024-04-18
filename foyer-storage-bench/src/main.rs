@@ -654,7 +654,7 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
 
         if let Some(buf) = res {
             let entry_size = buf.len();
-            assert_eq!(&text(idx as usize, entry_size), buf.as_ref());
+            assert_eq!(text(idx as usize, entry_size), *buf);
             if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
