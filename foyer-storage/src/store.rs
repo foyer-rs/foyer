@@ -149,16 +149,6 @@ where
         }
     }
 
-    fn weight(&self) -> usize {
-        match self {
-            StoreWriter::None(writer) => writer.weight(),
-            StoreWriter::Fs(writer) => writer.weight(),
-            StoreWriter::LazyFs(writer) => writer.weight(),
-            StoreWriter::RuntimeFs(writer) => writer.weight(),
-            StoreWriter::RuntimeLazyFs(writer) => writer.weight(),
-        }
-    }
-
     fn judge(&mut self) -> bool {
         match self {
             StoreWriter::None(writer) => writer.judge(),
@@ -249,13 +239,13 @@ where
         }
     }
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K) -> Self::Writer {
         match self {
-            Store::None(store) => StoreWriter::None(store.writer(key, weight)),
-            Store::Fs(store) => StoreWriter::Fs(store.writer(key, weight)),
-            Store::LazyFs(store) => StoreWriter::LazyFs(store.writer(key, weight)),
-            Store::RuntimeFs(store) => StoreWriter::RuntimeFs(store.writer(key, weight)),
-            Store::RuntimeLazyFs(store) => StoreWriter::RuntimeLazyFs(store.writer(key, weight)),
+            Store::None(store) => StoreWriter::None(store.writer(key)),
+            Store::Fs(store) => StoreWriter::Fs(store.writer(key)),
+            Store::LazyFs(store) => StoreWriter::LazyFs(store.writer(key)),
+            Store::RuntimeFs(store) => StoreWriter::RuntimeFs(store.writer(key)),
+            Store::RuntimeLazyFs(store) => StoreWriter::RuntimeLazyFs(store.writer(key)),
         }
     }
 

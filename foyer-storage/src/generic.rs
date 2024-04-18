@@ -29,7 +29,7 @@ use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{CodingError, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
 };
 
 use foyer_memory::EvictionConfig;
@@ -44,6 +44,7 @@ use twox_hash::XxHash64;
 
 use crate::{
     admission::{AdmissionContext, AdmissionPolicy},
+    buffer::BufferError,
     catalog::{Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
@@ -343,8 +344,8 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self))]
-    fn writer(&self, key: K, weight: usize) -> GenericStoreWriter<K, V, D> {
-        GenericStoreWriter::new(self.clone(), key, weight)
+    fn writer(&self, key: K) -> GenericStoreWriter<K, V, D> {
+        GenericStoreWriter::new(self.clone(), key)
     }
 
     #[tracing::instrument(skip_all)]
@@ -408,7 +409,7 @@ where
 
                 let res = match read_entry::<K, V>(buf.as_ref()) {
                     Ok((_key, value)) => {
-                        self.inner.metrics.op_bytes_lookup.inc_by(value.serialized_len() as u64);
+                        self.inner.metrics.op_bytes_lookup.inc_by(buf.len() as u64);
                         Ok(Some(value))
                     }
                     Err(e) => {
@@ -529,7 +530,7 @@ where
 
     fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D>) {
         for (index, admission) in self.inner.admissions.iter().enumerate() {
-            let judge = admission.judge(writer.key.as_ref().unwrap(), writer.weight);
+            let judge = admission.judge(writer.key.as_ref().unwrap());
             writer.judges.set(index, judge);
         }
         writer.is_judged = true;
@@ -556,16 +557,17 @@ where
 
         for (i, admission) in self.inner.admissions.iter().enumerate() {
             let judge = writer.judges.get(i);
-            admission.on_insert(&key, writer.weight, judge);
+            admission.on_insert(&key, judge);
         }
 
+        // TODO(MrCroxx): FIX ME!!!
         // record aligned header + key + value size for metrics
-        let len = bits::align_up(
-            self.inner.device.align(),
-            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
-        );
-        self.inner.metrics.op_bytes_insert.inc_by(len as u64);
-        self.inner.metrics.insert_entry_bytes.observe(len as f64);
+        // let len = bits::align_up(
+        //     self.inner.device.align(),
+        //     EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
+        // );
+        // self.inner.metrics.op_bytes_insert.inc_by(len as u64);
+        // self.inner.metrics.insert_entry_bytes.observe(len as f64);
 
         self.inner.catalog.insert(
             key.clone(),
@@ -607,7 +609,6 @@ where
     store: GenericStore<K, V, D>,
     /// `key` is always `Some` before `apply_writer`.
     key: Option<K>,
-    weight: usize,
 
     sequence: Option<Sequence>,
 
@@ -628,13 +629,12 @@ where
     V: StorageValue,
     D: Device,
 {
-    fn new(store: GenericStore<K, V, D>, key: K, weight: usize) -> Self {
+    fn new(store: GenericStore<K, V, D>, key: K) -> Self {
         let judges = Judges::new(store.inner.admissions.len());
         let compression = store.inner.compression;
         Self {
             store,
             key: Some(key),
-            weight,
             sequence: None,
             judges,
             is_judged: false,
@@ -695,7 +695,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreWriter")
             .field("key", &self.key)
-            .field("weight", &self.weight)
             .field("judges", &self.judges)
             .field("is_judged", &self.is_judged)
             .field("duration", &self.duration)
@@ -719,7 +718,7 @@ where
             if self.is_judged {
                 for (i, admission) in self.store.inner.admissions.iter().enumerate() {
                     let judge = self.judges.get(i);
-                    admission.on_drop(self.key.as_ref().unwrap(), self.weight, judge);
+                    admission.on_drop(self.key.as_ref().unwrap(), judge);
                 }
             }
 
@@ -803,29 +802,27 @@ where
     // read entry header
     let header = EntryHeader::read(buf)?;
 
+    // TODO(MrCroxx): optimize buffer copy here.
+
     // read value
     let mut offset = EntryHeader::serialized_len();
     let compressed = &buf[offset..offset + header.value_len as usize];
     offset += header.value_len as usize;
     let value = match header.compression {
-        Compression::None => V::read(compressed)?,
+        Compression::None => bincode::deserialize_from(compressed).map_err(BufferError::from)?,
         Compression::Zstd => {
-            let mut decompressed = Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
-            zstd::stream::copy_decode(compressed, &mut decompressed).map_err(CodingError::from)?;
-            V::read(&decompressed[..])?
+            let decoder = zstd::Decoder::new(compressed).map_err(BufferError::from)?;
+            bincode::deserialize_from(decoder).map_err(BufferError::from)?
         }
         Compression::Lz4 => {
-            let mut decompressed = Vec::with_capacity((header.value_len + header.value_len / 2) as usize);
-            let mut decoder = lz4::Decoder::new(compressed).map_err(CodingError::from)?;
-            std::io::copy(&mut decoder, &mut decompressed).map_err(CodingError::from)?;
-            let (_r, res) = decoder.finish();
-            res.map_err(CodingError::from)?;
-            V::read(&decompressed[..])?
+            let decoder = lz4::Decoder::new(compressed).map_err(BufferError::from)?;
+            bincode::deserialize_from(decoder).map_err(BufferError::from)?
         }
     };
 
     // read key
-    let key = K::read(&buf[offset..offset + header.key_len as usize])?;
+    let compressed = &buf[offset..offset + header.key_len as usize];
+    let key = bincode::deserialize_from(compressed).map_err(BufferError::from)?;
     offset += header.key_len as usize;
 
     let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
@@ -917,7 +914,7 @@ where
             let rel_start = EntryHeader::serialized_len() + header.value_len as usize;
             let rel_end = rel_start + header.key_len as usize;
 
-            let Ok(key) = K::read(&slice.as_ref()[rel_start..rel_end]) else {
+            let Ok(key) = bincode::deserialize_from(&slice.as_ref()[rel_start..rel_end]) else {
                 return Ok(None);
             };
             drop(slice);
@@ -930,7 +927,7 @@ where
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
-            let Ok(key) = K::read(&s.as_ref()[rel_start..rel_end]) else {
+            let Ok(key) = bincode::deserialize_from(&s.as_ref()[rel_start..rel_end]) else {
                 return Ok(None);
             };
             drop(s);
@@ -949,7 +946,7 @@ where
         Ok(Some((key, info)))
     }
 
-    pub async fn next_kv(&mut self) -> Result<Option<(K, V)>> {
+    pub async fn next_kv(&mut self) -> Result<Option<(K, V, usize)>> {
         let (_, item) = match self.next().await {
             Ok(Some(res)) => res,
             Ok(None) => return Ok(None),
@@ -966,10 +963,12 @@ where
         let Some(slice) = self.region.load_range(start..end).await? else {
             return Ok(None);
         };
-        let kv = read_entry::<K, V>(slice.as_ref()).ok();
+        let res = read_entry::<K, V>(slice.as_ref())
+            .ok()
+            .map(|(k, v)| (k, v, slice.len()));
         drop(slice);
 
-        Ok(kv)
+        Ok(res)
     }
 }
 
@@ -981,10 +980,6 @@ where
 {
     fn key(&self) -> &K {
         self.key.as_ref().unwrap()
-    }
-
-    fn weight(&self) -> usize {
-        self.weight
     }
 
     fn judge(&mut self) -> bool {
@@ -1029,8 +1024,8 @@ where
         self.close().await
     }
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
-        self.writer(key, weight)
+    fn writer(&self, key: K) -> Self::Writer {
+        self.writer(key)
     }
 
     fn exists<Q>(&self, key: &Q) -> Result<bool>

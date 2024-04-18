@@ -88,14 +88,14 @@ where
 
     fn init(&self, _: AdmissionContext<Self::Key, Self::Value>) {}
 
-    fn judge(&self, key: &K, _weight: usize) -> bool {
+    fn judge(&self, key: &K) -> bool {
         self.records.lock().push(Record::Admit(key.clone()));
         true
     }
 
-    fn on_insert(&self, _key: &K, _weight: usize, _judge: bool) {}
+    fn on_insert(&self, _key: &K, _judge: bool) {}
 
-    fn on_drop(&self, _key: &K, _weight: usize, _judge: bool) {}
+    fn on_drop(&self, _key: &K, _judge: bool) {}
 }
 
 impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
@@ -109,12 +109,12 @@ where
 
     fn init(&self, _: ReinsertionContext<Self::Key, Self::Value>) {}
 
-    fn judge(&self, key: &K, _weight: usize) -> bool {
+    fn judge(&self, key: &K) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));
         false
     }
 
-    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
 
-    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }

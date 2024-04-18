@@ -67,7 +67,7 @@ where
         self.context.set(context).unwrap();
     }
 
-    fn judge(&self, _key: &Self::Key, _weight: usize) -> bool {
+    fn judge(&self, _key: &Self::Key) -> bool {
         let res = self.inner.probe();
 
         let metrics = self.context.get().unwrap().metrics.as_ref();
@@ -83,7 +83,7 @@ where
         res
     }
 
-    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
 
-    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }

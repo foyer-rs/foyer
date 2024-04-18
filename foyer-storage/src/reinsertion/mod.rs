@@ -47,11 +47,11 @@ pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
 
     fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>);
 
-    fn judge(&self, key: &Self::Key, weight: usize) -> bool;
+    fn judge(&self, key: &Self::Key) -> bool;
 
-    fn on_insert(&self, key: &Self::Key, weight: usize, judge: bool);
+    fn on_insert(&self, key: &Self::Key, judge: bool);
 
-    fn on_drop(&self, key: &Self::Key, weight: usize, judge: bool);
+    fn on_drop(&self, key: &Self::Key, judge: bool);
 }
 
 pub mod exist;
