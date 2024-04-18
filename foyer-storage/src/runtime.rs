@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{borrow::Borrow, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
@@ -166,11 +166,19 @@ where
         }
     }
 
-    fn exists(&self, key: &K) -> crate::error::Result<bool> {
+    fn exists<Q>(&self, key: &Q) -> crate::error::Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.store.exists(key)
     }
 
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+    {
         let store = self.store.clone();
         let key = key.clone();
         self.runtime
@@ -179,7 +187,11 @@ where
             .unwrap()
     }
 
-    fn remove(&self, key: &K) -> crate::error::Result<bool> {
+    fn remove<Q>(&self, key: &Q) -> crate::error::Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.store.remove(key)
     }
 

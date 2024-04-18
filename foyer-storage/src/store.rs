@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 use foyer_common::code::{StorageKey, StorageValue};
-use std::fmt::Debug;
+use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
     compress::Compression,
@@ -259,7 +259,11 @@ where
         }
     }
 
-    fn exists(&self, key: &K) -> Result<bool> {
+    fn exists<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self {
             Store::None(store) => store.exists(key),
             Store::Fs(store) => store.exists(key),
@@ -269,7 +273,11 @@ where
         }
     }
 
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+    {
         match self {
             Store::None(store) => store.lookup(key).await,
             Store::Fs(store) => store.lookup(key).await,
@@ -279,7 +287,11 @@ where
         }
     }
 
-    fn remove(&self, key: &K) -> Result<bool> {
+    fn remove<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self {
             Store::None(store) => store.remove(key),
             Store::Fs(store) => store.remove(key),

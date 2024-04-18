@@ -18,10 +18,10 @@ use crate::buf::BufExt;
 use bytes::{Buf, BufMut};
 use paste::paste;
 
-pub trait Key: Send + Sync + 'static + Hash + Eq + PartialEq + Ord + PartialOrd {}
+pub trait Key: Send + Sync + 'static + Hash + Eq + PartialEq {}
 pub trait Value: Send + Sync + 'static {}
 
-impl<T: Send + Sync + 'static + std::hash::Hash + Eq + Ord> Key for T {}
+impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
 pub type CodingError = anyhow::Error;
