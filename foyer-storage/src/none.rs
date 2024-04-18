@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::marker::PhantomData;
+use std::{borrow::Borrow, hash::Hash, marker::PhantomData};
 
 use foyer_common::code::{StorageKey, StorageValue};
 
@@ -112,15 +112,27 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         NoneStoreWriter::new(key, weight)
     }
 
-    fn exists(&self, _: &K) -> Result<bool> {
+    fn exists<Q>(&self, _: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         Ok(false)
     }
 
-    async fn lookup(&self, _: &K) -> Result<Option<V>> {
+    async fn lookup<Q>(&self, _: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         Ok(None)
     }
 
-    fn remove(&self, _: &K) -> Result<bool> {
+    fn remove<Q>(&self, _: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         Ok(false)
     }
 

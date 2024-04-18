@@ -12,7 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::{Arc, OnceLock};
+use std::{
+    borrow::Borrow,
+    hash::Hash,
+    sync::{Arc, OnceLock},
+};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use tokio::task::JoinHandle;
@@ -186,21 +190,33 @@ where
         }
     }
 
-    fn exists(&self, key: &K) -> Result<bool> {
+    fn exists<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self.once.get() {
             Some(store) => store.exists(key),
             None => self.none.exists(key),
         }
     }
 
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+    {
         match self.once.get() {
             Some(store) => store.lookup(key).await,
             None => self.none.lookup(key).await,
         }
     }
 
-    fn remove(&self, key: &K) -> Result<bool> {
+    fn remove<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         match self.once.get() {
             Some(store) => store.remove(key),
             None => self.none.remove(key),
@@ -255,7 +271,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = Lazy::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);
 
         assert!(!store.insert(100, 100).await.unwrap());
 
@@ -287,7 +303,7 @@ mod tests {
             compression: crate::compress::Compression::None,
         };
 
-        let (store, handle) = Lazy::<_, _, FsStore<_, _>>::with_handle(config);
+        let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);
 
         assert!(store.lookup(&100).await.unwrap().is_none());
 

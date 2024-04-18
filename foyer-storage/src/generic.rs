@@ -13,8 +13,9 @@
 //  limitations under the License.
 
 use std::{
+    borrow::Borrow,
     fmt::Debug,
-    hash::Hasher,
+    hash::{Hash, Hasher},
     marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -346,13 +347,21 @@ where
         GenericStoreWriter::new(self.clone(), key, weight)
     }
 
-    #[tracing::instrument(skip(self))]
-    fn exists(&self, key: &K) -> Result<bool> {
+    #[tracing::instrument(skip_all)]
+    fn exists<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         Ok(self.inner.catalog.lookup(key).is_some())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    #[tracing::instrument(skip_all)]
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let now = Instant::now();
 
         let (_sequence, index) = match self.inner.catalog.lookup(key) {
@@ -419,8 +428,12 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    fn remove(&self, key: &K) -> Result<bool> {
+    #[tracing::instrument(skip_all)]
+    fn remove<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let _timer = self.inner.metrics.op_duration_remove.start_timer();
 
         let res = self.inner.catalog.remove(key).is_some();
@@ -1020,15 +1033,27 @@ where
         self.writer(key, weight)
     }
 
-    fn exists(&self, key: &K) -> Result<bool> {
+    fn exists<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.exists(key)
     }
 
-    async fn lookup(&self, key: &K) -> Result<Option<V>> {
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.lookup(key).await
     }
 
-    fn remove(&self, key: &K) -> Result<bool> {
+    fn remove<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.remove(key)
     }
 

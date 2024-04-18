@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fmt::Debug;
+use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use futures::Future;
@@ -63,12 +63,21 @@ where
 
     fn writer(&self, key: K, weight: usize) -> Self::Writer;
 
-    fn exists(&self, key: &K) -> Result<bool>;
+    fn exists<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
 
     #[must_use]
-    fn lookup(&self, key: &K) -> impl Future<Output = Result<Option<V>>> + Send;
+    fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<V>>> + Send
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static;
 
-    fn remove(&self, key: &K) -> Result<bool>;
+    fn remove<Q>(&self, key: &Q) -> Result<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
 
     fn clear(&self) -> Result<()>;
 }

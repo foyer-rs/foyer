@@ -13,8 +13,9 @@
 //  limitations under the License.
 
 use std::{
-    collections::btree_map::{BTreeMap, Entry},
-    hash::Hasher,
+    borrow::Borrow,
+    collections::hash_map::{Entry, HashMap},
+    hash::{Hash, Hasher},
     sync::Arc,
     time::Instant,
 };
@@ -89,10 +90,10 @@ where
     bits: usize,
 
     /// Sharded by key hash.
-    items: Vec<RwLock<BTreeMap<K, Item<K, V>>>>,
+    items: Vec<RwLock<HashMap<K, Item<K, V>>>>,
 
     /// Sharded by region id.
-    regions: Vec<Mutex<BTreeMap<K, u64>>>,
+    regions: Vec<Mutex<HashMap<K, u64>>>,
 
     metrics: Arc<Metrics>,
 }
@@ -103,8 +104,8 @@ where
     V: StorageValue,
 {
     pub fn new(regions: usize, bits: usize, metrics: Arc<Metrics>) -> Self {
-        let infos = (0..1 << bits).map(|_| RwLock::new(BTreeMap::new())).collect_vec();
-        let regions = (0..regions).map(|_| Mutex::new(BTreeMap::new())).collect_vec();
+        let infos = (0..1 << bits).map(|_| RwLock::new(HashMap::new())).collect_vec();
+        let regions = (0..regions).map(|_| Mutex::new(HashMap::new())).collect_vec();
         Self {
             bits,
             items: infos,
@@ -140,12 +141,20 @@ where
         }
     }
 
-    pub fn lookup(&self, key: &K) -> Option<Item<K, V>> {
+    pub fn lookup<Q>(&self, key: &Q) -> Option<Item<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let shard = self.shard(key);
         self.items[shard].read().get(key).cloned()
     }
 
-    pub fn remove(&self, key: &K) -> Option<Item<K, V>> {
+    pub fn remove<Q>(&self, key: &Q) -> Option<Item<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let shard = self.shard(key);
         let info: Option<Item<K, V>> = self.items[shard].write().remove(key);
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
@@ -158,7 +167,7 @@ where
     }
 
     pub fn take_region(&self, region: &RegionId) -> Vec<(K, Item<K, V>)> {
-        let mut keys = BTreeMap::new();
+        let mut keys = HashMap::new();
         std::mem::swap(&mut *self.regions[*region as usize].lock(), &mut keys);
 
         let mut items = Vec::with_capacity(keys.len());
@@ -186,11 +195,19 @@ where
         }
     }
 
-    fn shard(&self, key: &K) -> usize {
+    fn shard<Q>(&self, key: &Q) -> usize
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.hash(key) as usize & ((1 << self.bits) - 1)
     }
 
-    fn hash(&self, key: &K) -> u64 {
+    fn hash<Q>(&self, key: &Q) -> u64
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let mut hasher = XxHash64::default();
         key.hash(&mut hasher);
         hasher.finish()
