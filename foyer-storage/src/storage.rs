@@ -32,8 +32,6 @@ where
 {
     fn key(&self) -> &K;
 
-    fn weight(&self) -> usize;
-
     fn judge(&mut self) -> bool;
 
     fn force(&mut self);
@@ -61,7 +59,7 @@ where
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer;
+    fn writer(&self, key: K) -> Self::Writer;
 
     fn exists<Q>(&self, key: &Q) -> Result<bool>
     where
@@ -90,8 +88,7 @@ where
     #[must_use]
     #[tracing::instrument(skip(self, value))]
     fn insert(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
-        let weight = key.serialized_len() + value.serialized_len();
-        self.writer(key, weight).finish(value)
+        self.writer(key).finish(value)
     }
 
     #[must_use]
@@ -113,12 +110,12 @@ where
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
     #[tracing::instrument(skip(self, f))]
-    fn insert_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
-            let mut writer = self.writer(key, weight);
+            let mut writer = self.writer(key);
             if !writer.judge() {
                 return Ok(false);
             }
@@ -146,7 +143,7 @@ where
         FU: FetchValueFuture<V>,
     {
         async move {
-            let mut writer = self.writer(key, weight);
+            let mut writer = self.writer(key);
             if !writer.judge() {
                 return Ok(false);
             }
@@ -170,7 +167,7 @@ where
             if self.exists(&key)? {
                 return Ok(false);
             }
-            self.insert_with(key, f, weight).await
+            self.insert_with(key, f).await
         }
     }
 
@@ -269,8 +266,7 @@ where
 {
     #[tracing::instrument(skip(self, value))]
     fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
-        let weight = key.serialized_len() + value.serialized_len();
-        let mut writer = self.writer(key, weight);
+        let mut writer = self.writer(key);
         writer.force();
         writer.finish(value)
     }
@@ -282,12 +278,12 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
-            let mut writer = self.writer(key, weight);
+            let mut writer = self.writer(key);
             writer.force();
             if !writer.judge() {
                 return Ok(false);
@@ -311,13 +307,13 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
     {
         async move {
-            let mut writer = self.writer(key, weight);
+            let mut writer = self.writer(key);
             writer.force();
             if !writer.judge() {
                 return Ok(false);
@@ -393,9 +389,8 @@ mod tests {
 
         assert!(!storage.exists(&1).unwrap());
 
-        let mut writer = storage.writer(1, KB);
+        let mut writer = storage.writer(1);
         assert_eq!(writer.key(), &1);
-        assert_eq!(writer.weight(), KB);
         assert!(writer.judge());
         assert_eq!(writer.compression(), Compression::None);
         writer.set_compression(Compression::Lz4);
@@ -428,7 +423,7 @@ mod tests {
         assert!(storage.insert_if_not_exists(2, vec![b'x'; KB]).await.unwrap());
         assert!(storage.exists(&2).unwrap());
 
-        assert!(storage.insert_with(3, || { Ok(vec![b'x'; KB]) }, KB).await.unwrap());
+        assert!(storage.insert_with(3, || { Ok(vec![b'x'; KB]) },).await.unwrap());
         assert!(storage.exists(&3).unwrap());
 
         assert!(storage

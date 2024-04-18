@@ -134,23 +134,21 @@ where
                     Err(e) => return Err(e),
                 };
 
-                while let Some((key, value)) = iter.next_kv().await? {
-                    let weight = key.serialized_len() + value.serialized_len();
-
+                while let Some((key, value, len)) = iter.next_kv().await? {
                     let mut judges = Judges::new(reinsertions.len());
                     for (index, reinsertion) in reinsertions.iter().enumerate() {
-                        let judge = reinsertion.judge(&key, weight);
+                        let judge = reinsertion.judge(&key);
                         judges.set(index, judge);
                     }
                     if !judges.judge() {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, judge);
+                            reinsertion.on_drop(&key, judge);
                         }
                         continue;
                     }
 
-                    let mut writer = self.store.writer(key.clone(), weight);
+                    let mut writer = self.store.writer(key.clone());
                     writer.set_skippable();
 
                     if !writer.judge() {
@@ -160,12 +158,12 @@ where
                     if writer.finish(value).await? {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_insert(&key, weight, judge);
+                            reinsertion.on_insert(&key, judge);
                         }
                     } else {
                         for (index, reinsertion) in reinsertions.iter().enumerate() {
                             let judge = judges.get(index);
-                            reinsertion.on_drop(&key, weight, judge);
+                            reinsertion.on_drop(&key, judge);
                         }
                         // The writer is already been judged and admitted, but not inserted successfully and skipped.
                         // That means allocating timeouts and there is no clean region available.
@@ -173,7 +171,7 @@ where
                         return Ok(false);
                     }
 
-                    metrics.op_bytes_reinsert.inc_by(weight as u64);
+                    metrics.op_bytes_reinsert.inc_by(len as u64);
                 }
 
                 tracing::info!("[reclaimer] finish reinsertion, region: {}", region_id);

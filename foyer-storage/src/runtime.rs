@@ -63,10 +63,6 @@ where
         self.writer.key()
     }
 
-    fn weight(&self) -> usize {
-        self.writer.weight()
-    }
-
     fn judge(&mut self) -> bool {
         self.writer.judge()
     }
@@ -158,8 +154,8 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
-        let writer = self.store.writer(key, weight);
+    fn writer(&self, key: K) -> Self::Writer {
+        let writer = self.store.writer(key);
         RuntimeStoreWriter {
             runtime: self.runtime.clone(),
             writer,

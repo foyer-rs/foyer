@@ -52,13 +52,6 @@ where
         }
     }
 
-    fn weight(&self) -> usize {
-        match self {
-            LazyStoreWriter::Store { writer } => writer.weight(),
-            LazyStoreWriter::None { writer } => writer.weight(),
-        }
-    }
-
     fn judge(&mut self) -> bool {
         match self {
             LazyStoreWriter::Store { writer } => writer.judge(),
@@ -179,13 +172,13 @@ where
         }
     }
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
+    fn writer(&self, key: K) -> Self::Writer {
         match self.once.get() {
             Some(store) => LazyStoreWriter::Store {
-                writer: store.writer(key, weight),
+                writer: store.writer(key),
             },
             None => LazyStoreWriter::None {
-                writer: NoneStoreWriter::new(key, weight),
+                writer: NoneStoreWriter::new(key),
             },
         }
     }

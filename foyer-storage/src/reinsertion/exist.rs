@@ -53,12 +53,12 @@ where
         self.catalog.get_or_init(|| context.catalog.clone());
     }
 
-    fn judge(&self, key: &Self::Key, _weight: usize) -> bool {
+    fn judge(&self, key: &Self::Key) -> bool {
         let indices = self.catalog.get().unwrap();
         indices.lookup(key).is_some()
     }
 
-    fn on_insert(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
 
-    fn on_drop(&self, _key: &Self::Key, _weight: usize, _judge: bool) {}
+    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }

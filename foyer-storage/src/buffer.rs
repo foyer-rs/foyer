@@ -18,7 +18,7 @@ use allocator_api2::vec::Vec as VecA;
 use either::Either;
 use foyer_common::{
     bits::{align_up, is_aligned},
-    code::{Cursor, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
 };
 
 use crate::{
@@ -31,8 +31,12 @@ use crate::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum BufferError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("device error: {0}")]
     Device(#[from] DeviceError),
+    #[error("bincode error: {0}")]
+    Bincode(#[from] bincode::Error),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
@@ -208,45 +212,41 @@ where
         let old = self.buffer.len();
         debug_assert!(is_aligned(self.device.align(), old));
 
-        // reserve underlying buffer to reduce reallocation
-        let uncompressed = align_up(
-            self.device.align(),
-            EntryHeader::serialized_len() + key.serialized_len() + value.serialized_len(),
-        );
-        self.buffer.reserve(old + uncompressed);
-
         let mut cursor = old;
-        // reserve space for header
+
+        // TODO(MrCroxx): reserve buffer capacity for entry
+
+        // reserve space for header, header will be filled after the serialized len is known
         cursor += EntryHeader::serialized_len();
         unsafe { self.buffer.set_len(cursor) };
 
         // write value
-        let mut vcursor = value.into_cursor();
         match compression {
             Compression::None => {
-                std::io::copy(&mut vcursor, &mut WritableVecA(&mut self.buffer)).map_err(DeviceError::from)?;
+                bincode::serialize_into(WritableVecA(&mut self.buffer), &value).map_err(BufferError::from)?;
             }
             Compression::Zstd => {
-                zstd::stream::copy_encode(&mut vcursor, &mut WritableVecA(&mut self.buffer), 0)
-                    .map_err(DeviceError::from)?;
+                let encoder = zstd::Encoder::new(WritableVecA(&mut self.buffer), 0)
+                    .map_err(BufferError::from)?
+                    .auto_finish();
+                bincode::serialize_into(encoder, &value).map_err(BufferError::from)?;
             }
+
             Compression::Lz4 => {
-                let buf = &mut WritableVecA(&mut self.buffer);
-                let mut encoder = lz4::EncoderBuilder::new()
+                let encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
-                    .build(buf)
-                    .map_err(DeviceError::from)?;
-                std::io::copy(&mut vcursor, &mut encoder).map_err(DeviceError::from)?;
-                let (_w, res) = encoder.finish();
-                res.map_err(DeviceError::from)?;
+                    .auto_flush(true)
+                    .build(WritableVecA(&mut self.buffer))
+                    .map_err(BufferError::from)?;
+                bincode::serialize_into(encoder, &value).map_err(BufferError::from)?;
             }
         }
+
         let compressed_value_len = self.buffer.len() - cursor;
         cursor = self.buffer.len();
 
         // write key
-        let mut kcursor = key.into_cursor();
-        std::io::copy(&mut kcursor, &mut WritableVecA(&mut self.buffer)).map_err(DeviceError::from)?;
+        bincode::serialize_into(&mut self.buffer, &key).map_err(BufferError::from)?;
         let encoded_key_len = self.buffer.len() - cursor;
         cursor = self.buffer.len();
 
@@ -268,8 +268,6 @@ where
         // (*) if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
             unsafe { self.buffer.set_len(old) };
-            let key = kcursor.into_inner();
-            let value = vcursor.into_inner();
             return Ok(Either::Right(Entry {
                 key,
                 value,
@@ -282,9 +280,6 @@ where
         let target = align_up(self.device.align(), self.buffer.len());
         self.buffer.reserve(target - self.buffer.len());
         unsafe { self.buffer.set_len(target) }
-
-        let key = kcursor.into_inner();
-        let value = vcursor.into_inner();
 
         self.entries.push(PositionedEntry {
             entry: Entry {
@@ -325,6 +320,18 @@ mod tests {
         }
     }
 
+    fn assert_buffer(positioneds: impl IntoIterator<Item = PositionedEntry<(), Vec<u8>>>, buf: &[u8]) {
+        for positioned in positioneds {
+            let b = &buf[positioned.offset..positioned.offset + positioned.len];
+            let h = EntryHeader::read(b).unwrap();
+            let v: &[u8] = bincode::deserialize(
+                &b[EntryHeader::serialized_len()..EntryHeader::serialized_len() + h.value_len as usize],
+            )
+            .unwrap();
+            assert_eq!(v, positioned.entry.value);
+        }
+    }
+
     #[tokio::test]
     async fn test_flush_buffer() {
         let tempdir = tempdir().unwrap();
@@ -342,10 +349,9 @@ mod tests {
         let mut buffer = FlushBuffer::new(device.clone());
         assert_eq!(buffer.region(), None);
 
-        const HEADER: usize = EntryHeader::serialized_len();
-
         {
             let entry = ent(5 * 1024 - 128); // ~ 5 KiB
+            let mut positioneds = vec![];
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -364,6 +370,7 @@ mod tests {
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].offset, 4 * 1024);
             assert_eq!(entries[1].offset, 12 * 1024);
+            positioneds.extend(entries);
 
             // 20 ~ 28 KiB
             let entries = buffer.write(entry.clone()).await.unwrap().unwrap_left();
@@ -371,28 +378,20 @@ mod tests {
             let entries = buffer.flush().await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 20 * 1024);
+            positioneds.extend(entries);
 
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 0, 0).await;
             res.unwrap();
-            assert_eq!(
-                &buf[HEADER + 4 * 1024..HEADER + 9 * 1024 - 128],
-                &[b'x'; 5 * 1024 - 128]
-            );
-            assert_eq!(
-                &buf[HEADER + 12 * 1024..HEADER + 17 * 1024 - 128],
-                &[b'x'; 5 * 1024 - 128]
-            );
-            assert_eq!(
-                &buf[HEADER + 20 * 1024..HEADER + 25 * 1024 - 128],
-                &[b'x'; 5 * 1024 - 128]
-            );
+
+            assert_buffer(positioneds, &buf);
 
             assert!(buffer.entries.is_empty());
         }
 
         {
             let entry = ent(54 * 1024 - 128); // ~ 54 KiB
+            let mut positioneds = vec![];
 
             let res = buffer.write(entry).await;
             let entry = match res {
@@ -407,6 +406,7 @@ mod tests {
             let entries = buffer.write(entry).await.unwrap().unwrap_left();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 4 * 1024);
+            positioneds.extend(entries);
 
             let entry = ent(3 * 1024 - 128); // ~ 3 KiB
 
@@ -414,18 +414,13 @@ mod tests {
             let entries = buffer.write(entry).await.unwrap().unwrap_left();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].offset, 60 * 1024);
+            positioneds.extend(entries);
 
             let buf = device.io_buffer(64 * 1024, 64 * 1024);
             let (res, buf) = device.read(buf, .., 1, 0).await;
             res.unwrap();
-            assert_eq!(
-                &buf[HEADER + 4 * 1024..HEADER + 58 * 1024 - 128],
-                &[b'x'; 54 * 1024 - 128]
-            );
-            assert_eq!(
-                &buf[HEADER + 60 * 1024..HEADER + 63 * 1024 - 128],
-                &[b'x'; 3 * 1024 - 128]
-            );
+
+            assert_buffer(positioneds, &buf);
 
             assert!(buffer.entries.is_empty());
         }

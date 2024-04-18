@@ -29,7 +29,6 @@ where
     V: StorageValue,
 {
     key: K,
-    weight: usize,
     _marker: PhantomData<V>,
 }
 
@@ -38,10 +37,9 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn new(key: K, weight: usize) -> Self {
+    pub fn new(key: K) -> Self {
         Self {
             key,
-            weight,
             _marker: PhantomData,
         }
     }
@@ -54,10 +52,6 @@ where
 {
     fn key(&self) -> &K {
         &self.key
-    }
-
-    fn weight(&self) -> usize {
-        self.weight
     }
 
     fn judge(&mut self) -> bool {
@@ -108,8 +102,8 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         Ok(())
     }
 
-    fn writer(&self, key: K, weight: usize) -> Self::Writer {
-        NoneStoreWriter::new(key, weight)
+    fn writer(&self, key: K) -> Self::Writer {
+        NoneStoreWriter::new(key)
     }
 
     fn exists<Q>(&self, _: &Q) -> Result<bool>
