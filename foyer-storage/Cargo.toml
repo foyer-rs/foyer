@@ -16,7 +16,7 @@ normal = ["foyer-workspace-hack"]
 [dependencies]
 ahash = "0.8"
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
-allocator-api2 = "0.2"                                       
+allocator-api2 = "0.2"
 anyhow = "1.0"
 bincode = "1"
 bitflags = "2.3.1"

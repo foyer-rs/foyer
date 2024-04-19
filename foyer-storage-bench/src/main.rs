@@ -34,8 +34,8 @@ use clap::Parser;
 use export::MetricsExporter;
 
 use foyer_storage::{
-    AsyncStorageExt, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, Result,
-    RuntimeConfigBuilder, Storage, StorageExt, Store, StoreBuilder,
+    AsyncStorageExt, CachedEntry, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy,
+    Result, RuntimeConfigBuilder, Storage, StorageExt, Store, StoreBuilder,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -554,15 +554,15 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
 
         let time = Instant::now();
         let ctx = context.clone();
-        let callback = move |res: Result<bool>| async move {
-            let inserted = res.unwrap();
+        let callback = move |res: Result<Option<CachedEntry<u64, Value>>>| async move {
+            let entry = res.unwrap();
             let lat = time.elapsed().as_micros() as u64;
             ctx.counts[id as usize].fetch_add(1, Ordering::Relaxed);
             if let Err(e) = ctx.metrics.insert_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
 
-            if inserted {
+            if entry.is_some() {
                 ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
                 ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
@@ -628,7 +628,7 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
 
         if let Some(buf) = res {
             let entry_size = buf.len();
-            assert_eq!(text(idx as usize, entry_size), *buf);
+            assert_eq!(text(idx as usize, entry_size), **buf.value());
             if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
                 tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }

@@ -135,36 +135,24 @@ where
                 };
 
                 while let Some((key, value, len)) = iter.next_kv().await? {
+                    // Judge by reinsertion policy.
                     let mut judges = Judges::new(reinsertions.len());
                     for (index, reinsertion) in reinsertions.iter().enumerate() {
                         let judge = reinsertion.judge(&key);
                         judges.set(index, judge);
                     }
                     if !judges.judge() {
-                        for (index, reinsertion) in reinsertions.iter().enumerate() {
-                            let judge = judges.get(index);
-                            reinsertion.on_drop(&key, judge);
-                        }
                         continue;
                     }
 
-                    let mut writer = self.store.writer(key.clone());
+                    let mut writer = self.store.writer(key);
                     writer.set_skippable();
 
                     if !writer.judge() {
                         continue;
                     }
 
-                    if writer.finish(value).await? {
-                        for (index, reinsertion) in reinsertions.iter().enumerate() {
-                            let judge = judges.get(index);
-                            reinsertion.on_insert(&key, judge);
-                        }
-                    } else {
-                        for (index, reinsertion) in reinsertions.iter().enumerate() {
-                            let judge = judges.get(index);
-                            reinsertion.on_drop(&key, judge);
-                        }
+                    if writer.finish(value).await?.is_none() {
                         // The writer is already been judged and admitted, but not inserted successfully and skipped.
                         // That means allocating timeouts and there is no clean region available.
                         // Reinsertion should be interrupted to make sure foreground insertion.

@@ -82,8 +82,4 @@ where
 
         res
     }
-
-    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
-
-    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }

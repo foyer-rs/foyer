@@ -25,7 +25,7 @@ use crate::{
     compress::Compression,
     error::Result,
     none::{NoneStore, NoneStoreWriter},
-    storage::{Storage, StorageWriter},
+    storage::{CachedEntry, Storage, StorageWriter},
 };
 
 #[derive(Debug)]
@@ -66,7 +66,7 @@ where
         }
     }
 
-    async fn finish(self, value: V) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
         match self {
             LazyStoreWriter::Store { writer } => writer.finish(value).await,
             LazyStoreWriter::None { writer } => writer.finish(value).await,
@@ -194,7 +194,7 @@ where
         }
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
@@ -228,7 +228,7 @@ where
 mod tests {
     use std::path::PathBuf;
 
-    use foyer_memory::{EvictionConfig, FifoConfig};
+    use foyer_memory::FifoConfig;
 
     use super::*;
     use crate::{
@@ -246,7 +246,7 @@ mod tests {
 
         let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
+            eviction_config: FifoConfig {}.into(),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -266,19 +266,19 @@ mod tests {
 
         let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);
 
-        assert!(!store.insert(100, 100).await.unwrap());
+        assert!(store.insert(100, 100).await.unwrap().is_none());
 
         handle.await.unwrap().unwrap();
 
-        assert!(store.insert(100, 100).await.unwrap());
-        assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
+        assert!(store.insert(100, 100).await.unwrap().is_some());
+        assert_eq!(store.lookup(&100).await.unwrap().unwrap().value(), &100);
 
         store.close().await.unwrap();
         drop(store);
 
         let config = FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
+            eviction_config: FifoConfig {}.into(),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -302,7 +302,7 @@ mod tests {
 
         handle.await.unwrap().unwrap();
 
-        assert_eq!(store.lookup(&100).await.unwrap(), Some(100));
+        assert_eq!(store.lookup(&100).await.unwrap().unwrap().value(), &100);
         store.close().await.unwrap();
     }
 }

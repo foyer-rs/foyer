@@ -56,7 +56,7 @@ use crate::{
     region::{Region, RegionHeader, RegionId},
     region_manager::RegionManager,
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
-    storage::{Storage, StorageWriter},
+    storage::{CachedEntry, Storage, StorageWriter},
 };
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
@@ -356,7 +356,7 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -375,7 +375,7 @@ where
         };
 
         match index {
-            crate::catalog::Index::Inflight { key: _, value } => {
+            crate::catalog::Index::Inflight { key, value } => {
                 let value = value.clone();
 
                 self.inner
@@ -383,7 +383,7 @@ where
                     .op_duration_lookup_hit
                     .observe(now.elapsed().as_secs_f64());
 
-                Ok(Some(value))
+                Ok(Some(CachedEntry::Shared { key, value }))
             }
             crate::catalog::Index::Region { view } => {
                 let region = view.id();
@@ -406,9 +406,12 @@ where
                 };
 
                 let res = match read_entry::<K, V>(buf.as_ref()) {
-                    Ok((_key, value)) => {
+                    Ok((key, value)) => {
                         self.inner.metrics.op_bytes_lookup.inc_by(buf.len() as u64);
-                        Ok(Some(value))
+                        Ok(Some(CachedEntry::Owned {
+                            key: Box::new(key),
+                            value: Box::new(value),
+                        }))
                     }
                     Err(e) => {
                         // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
@@ -515,7 +518,7 @@ where
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some((key, item)) = iter.next().await? {
                 sequence = std::cmp::max(sequence, *item.sequence());
-                catalog.insert(key, item);
+                catalog.insert(Arc::new(key), item);
             }
             region_manager.eviction_push(region_id);
             Some(sequence)
@@ -535,11 +538,15 @@ where
     }
 
     #[tracing::instrument(skip(self, value))]
-    async fn apply_writer(&self, mut writer: GenericStoreWriter<K, V, D>, value: V) -> Result<bool> {
+    async fn apply_writer(
+        &self,
+        mut writer: GenericStoreWriter<K, V, D>,
+        value: V,
+    ) -> Result<Option<CachedEntry<K, V>>> {
         debug_assert!(!writer.is_inserted);
 
         if !writer.judge() {
-            return Ok(false);
+            return Ok(None);
         }
 
         let now = Instant::now();
@@ -551,12 +558,8 @@ where
         };
 
         writer.is_inserted = true;
-        let key = writer.key.take().unwrap();
-
-        for (i, admission) in self.inner.admissions.iter().enumerate() {
-            let judge = writer.judges.get(i);
-            admission.on_insert(&key, judge);
-        }
+        let key = Arc::new(writer.key.take().unwrap());
+        let value = Arc::new(value);
 
         // TODO(MrCroxx): FIX ME!!!
         // record aligned header + key + value size for metrics
@@ -582,8 +585,8 @@ where
         self.inner.flusher_entry_txs[flusher]
             .send(Entry {
                 sequence,
-                key,
-                value,
+                key: key.clone(),
+                value: value.clone(),
                 compression: writer.compression,
             })
             .unwrap();
@@ -594,7 +597,7 @@ where
             .op_duration_insert_inserted
             .observe(duration.as_secs_f64());
 
-        Ok(true)
+        Ok(Some(CachedEntry::Shared { key, value }))
     }
 }
 
@@ -654,7 +657,7 @@ where
         self.judges.judge()
     }
 
-    pub async fn finish(self, value: V) -> Result<bool> {
+    pub async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
         let store = self.store.clone();
         store.apply_writer(self, value).await
     }
@@ -712,13 +715,6 @@ where
             debug_assert!(self.key.is_some());
 
             let filtered = self.is_judged && !self.judge();
-            // make sure each key after `judge` will call either `on_insert` or `on_drop`.
-            if self.is_judged {
-                for (i, admission) in self.store.inner.admissions.iter().enumerate() {
-                    let judge = self.judges.get(i);
-                    admission.on_drop(self.key.as_ref().unwrap(), judge);
-                }
-            }
 
             if filtered {
                 self.store
@@ -988,7 +984,7 @@ where
         self.force()
     }
 
-    async fn finish(self, value: V) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
         self.finish(value).await
     }
 
@@ -1034,7 +1030,7 @@ where
         self.exists(key)
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -1086,7 +1082,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
+            eviction_config: FifoConfig {}.into(),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1122,7 +1118,7 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * MB],);
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }
@@ -1132,7 +1128,7 @@ mod tests {
 
         let config = TestStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
+            eviction_config: FifoConfig {}.into(),
             device_config: FsDeviceConfig {
                 dir: PathBuf::from(tempdir.path()),
                 capacity: 16 * MB,
@@ -1153,7 +1149,7 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap(), vec![i as u8; 1 * MB],);
+                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
             } else {
                 assert!(store.lookup(&i).await.unwrap().is_none());
             }

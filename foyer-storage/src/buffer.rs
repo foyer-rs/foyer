@@ -306,6 +306,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -313,8 +315,8 @@ mod tests {
 
     fn ent(size: usize) -> Entry<(), Vec<u8>> {
         Entry {
-            key: (),
-            value: vec![b'x'; size],
+            key: Arc::new(()),
+            value: Arc::new(vec![b'x'; size]),
             compression: Compression::None,
             sequence: 0,
         }
@@ -328,7 +330,7 @@ mod tests {
                 &b[EntryHeader::serialized_len()..EntryHeader::serialized_len() + h.value_len as usize],
             )
             .unwrap();
-            assert_eq!(v, positioned.entry.value);
+            assert_eq!(v, positioned.entry.value.as_ref());
         }
     }
 

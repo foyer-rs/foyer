@@ -34,8 +34,8 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub key: K,
-    pub value: V,
+    pub key: Arc<K>,
+    pub value: Arc<V>,
     pub sequence: Sequence,
     pub compression: Compression,
 }

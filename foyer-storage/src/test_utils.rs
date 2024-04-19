@@ -40,8 +40,8 @@ where
 
 impl<K, V> JudgeRecorder<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: StorageKey + Clone,
+    V: StorageValue + Clone,
 {
     pub fn dump(&self) -> Vec<Record<K>> {
         self.records.lock().clone()
@@ -79,8 +79,8 @@ where
 
 impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: StorageKey + Clone,
+    V: StorageValue + Clone,
 {
     type Key = K;
 
@@ -92,16 +92,12 @@ where
         self.records.lock().push(Record::Admit(key.clone()));
         true
     }
-
-    fn on_insert(&self, _key: &K, _judge: bool) {}
-
-    fn on_drop(&self, _key: &K, _judge: bool) {}
 }
 
 impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: StorageKey + Clone,
+    V: StorageValue + Clone,
 {
     type Key = K;
 
@@ -113,8 +109,4 @@ where
         self.records.lock().push(Record::Evict(key.clone()));
         false
     }
-
-    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
-
-    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }
