@@ -22,4 +22,5 @@ coverage:
         only_pulls: true
 ignore:
   - "foyer-storage-bench"
+  - "foyer-experimental"
   - "foyer-experimental-bench"
