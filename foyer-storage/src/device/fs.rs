@@ -216,7 +216,14 @@ impl Device for FsDevice {
         Ok(())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    async fn flush(&self) -> DeviceResult<()> {
+        // Use `nix` aftre https://github.com/nix-rust/nix/issues/2376 is closed.
+        asyncify(move || unsafe { libc::sync() }).await;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     async fn flush(&self) -> DeviceResult<()> {
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
         Ok(())
