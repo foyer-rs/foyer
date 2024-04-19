@@ -246,7 +246,7 @@ where
         cursor = self.buffer.len();
 
         // write key
-        bincode::serialize_into(&mut self.buffer, &key).map_err(BufferError::from)?;
+        bincode::serialize_into(WritableVecA(&mut self.buffer), &key).map_err(BufferError::from)?;
         let encoded_key_len = self.buffer.len() - cursor;
         cursor = self.buffer.len();
 
