@@ -79,9 +79,9 @@ jobs:
           cargo fmt --all -- --check
       - name: Run rust clippy check
         run: |
-          cargo clippy --all-targets --features tokio-console -- -D warnings
-          cargo clippy --all-targets --features deadlock -- -D warnings
-          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features tokio-console --no-deps -- -D warnings
+          cargo clippy --all-targets --features deadlock --no-deps -- -D warnings
+          cargo clippy --all-targets --no-deps -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
@@ -265,7 +265,7 @@ jobs:
           TOKIO_WORKER_THREADS: 1
           CI: true
         run: |-
-          cargo clippy --all-targets
+          cargo clippy --all-targets --no-deps
       - name: Run nextest (madsim)
         env:
           RUST_BACKTRACE: 1
