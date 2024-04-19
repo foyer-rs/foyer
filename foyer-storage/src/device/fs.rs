@@ -206,10 +206,20 @@ impl Device for FsDevice {
         .await
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     async fn flush(&self) -> DeviceResult<()> {
         let fd = self.inner.dir.as_raw_fd();
-        asyncify(move || nix::unistd::fsync(fd).map_err(DeviceError::from)).await?;
+        // Commit fs cache to disk. Linux waits for I/O completions.
+        //
+        // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
+        asyncify(move || nix::unistd::syncfs(fd).map_err(DeviceError::from)).await?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn flush(&self) -> DeviceResult<()> {
+        // Use `nix` aftre https://github.com/nix-rust/nix/issues/2376 is closed.
+        asyncify(move || unsafe { libc::sync() }).await;
         Ok(())
     }
 
