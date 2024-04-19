@@ -206,7 +206,7 @@ impl Device for FsDevice {
         .await
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     async fn flush(&self) -> DeviceResult<()> {
         let fd = self.inner.dir.as_raw_fd();
         // Commit fs cache to disk. Linux waits for I/O completions.
@@ -216,7 +216,7 @@ impl Device for FsDevice {
         Ok(())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     async fn flush(&self) -> DeviceResult<()> {
         // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
         Ok(())
