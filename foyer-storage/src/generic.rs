@@ -72,14 +72,14 @@ where
     /// Metrics of this foyer instance has label `foyer = {{ name }}`.
     pub name: String,
 
-    /// Evictino policy configurations.
+    /// Eviction policy configurations.
     pub eviction_config: EvictionConfig,
 
     /// Device configurations.
     pub device_config: D::Config,
 
-    /// Catalog indices sharding bits.
-    pub catalog_bits: usize,
+    /// Catalog indices sharding count.
+    pub catalog_shards: usize,
 
     /// Admission policies.
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
@@ -115,7 +115,7 @@ where
         f.debug_struct("StoreConfig")
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
-            .field("catalog_bits", &self.catalog_bits)
+            .field("catalog_shards", &self.catalog_shards)
             .field("admissions", &self.admissions)
             .field("reinsertions", &self.reinsertions)
             .field("flushers", &self.flushers)
@@ -138,7 +138,7 @@ where
             name: self.name.clone(),
             eviction_config: self.eviction_config.clone(),
             device_config: self.device_config.clone(),
-            catalog_bits: self.catalog_bits,
+            catalog_shards: self.catalog_shards,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
             flushers: self.flushers,
@@ -211,8 +211,6 @@ where
     D: Device,
 {
     async fn open(config: GenericStoreConfig<K, V, D>) -> Result<Self> {
-        tracing::info!("open store with config:\n{:#?}", config);
-
         let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let device = D::open(config.device_config).await?;
@@ -224,7 +222,7 @@ where
             device.clone(),
         ));
 
-        let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_bits, metrics.clone()));
+        let catalog = Arc::new(Catalog::new(device.regions(), config.catalog_shards, metrics.clone()));
 
         let (flushers_stop_tx, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
         let flusher_stop_rxs = (0..config.flushers).map(|_| flushers_stop_tx.subscribe()).collect_vec();
@@ -1096,7 +1094,7 @@ mod tests {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            catalog_bits: 1,
+            catalog_shards: 1,
             admissions,
             reinsertions,
             flushers: 1,
@@ -1142,7 +1140,7 @@ mod tests {
                 align: 4096,
                 io_size: 4096 * KB,
             },
-            catalog_bits: 1,
+            catalog_shards: 1,
             admissions: vec![],
             reinsertions: vec![],
             flushers: 1,

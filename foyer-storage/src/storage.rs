@@ -368,7 +368,7 @@ mod tests {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            catalog_bits: 1,
+            catalog_shards: 1,
             admissions: vec![],
             reinsertions: vec![],
             flushers: 1,

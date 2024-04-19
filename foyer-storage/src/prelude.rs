@@ -19,7 +19,7 @@ pub use crate::{
     error::{Error, Result},
     metrics::{get_metrics_registry, set_metrics_registry},
     reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionContext, ReinsertionPolicy},
-    runtime::{RuntimeConfig, RuntimeStoreConfig},
+    runtime::{RuntimeConfig, RuntimeConfigBuilder, RuntimeStoreConfig},
     storage::{AsyncStorageExt, ForceStorageExt, Storage, StorageExt, StorageWriter},
-    store::{FsStoreConfig, Store, StoreConfig, StoreWriter},
+    store::{FsStoreConfig, Store, StoreBuilder, StoreConfig, StoreWriter},
 };

@@ -25,10 +25,47 @@ use crate::{
     storage::{Storage, StorageWriter},
 };
 
+pub struct RuntimeConfigBuilder {
+    worker_threads: Option<usize>,
+    thread_name: String,
+}
+
+impl Default for RuntimeConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuntimeConfigBuilder {
+    pub fn new() -> Self {
+        Self {
+            worker_threads: None,
+            thread_name: "foyer".to_string(),
+        }
+    }
+
+    pub fn with_worker_threads(mut self, worker_threads: usize) -> Self {
+        self.worker_threads = Some(worker_threads);
+        self
+    }
+
+    pub fn with_thread_name(mut self, thread_name: &str) -> Self {
+        self.thread_name = thread_name.to_string();
+        self
+    }
+
+    pub fn build(self) -> RuntimeConfig {
+        RuntimeConfig {
+            worker_threads: self.worker_threads,
+            thread_name: self.thread_name,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    pub worker_threads: Option<usize>,
-    pub thread_name: Option<String>,
+    worker_threads: Option<usize>,
+    thread_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -38,8 +75,8 @@ where
     V: StorageValue,
     S: Storage<K, V>,
 {
-    pub store: S::Config,
-    pub runtime: RuntimeConfig,
+    pub store_config: S::Config,
+    pub runtime_config: RuntimeConfig,
 }
 
 #[derive(Debug)]
@@ -125,17 +162,16 @@ where
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if let Some(worker_threads) = config.runtime.worker_threads {
+        if let Some(worker_threads) = config.runtime_config.worker_threads {
             builder.worker_threads(worker_threads);
         }
-        if let Some(thread_name) = config.runtime.thread_name {
-            builder.thread_name(thread_name);
-        }
+        builder.thread_name(config.runtime_config.thread_name);
+
         let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
         let runtime = BackgroundShutdownRuntime::from(runtime);
         let runtime = Arc::new(runtime);
         let store = runtime
-            .spawn(async move { S::open(config.store).await })
+            .spawn(async move { S::open(config.store_config).await })
             .await
             .unwrap()?;
         Ok(Self {

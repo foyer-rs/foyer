@@ -45,6 +45,7 @@ where
         let eviction = CacheBuilder::new(region_count)
             .with_object_pool_capacity(region_count)
             .with_eviction_config(eviction_config)
+            .with_shards(1)
             .build();
 
         let regions = (0..region_count as RegionId)

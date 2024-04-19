@@ -260,8 +260,8 @@ where
     S: BuildHasher + Send + Sync + 'static,
 {
     capacity: usize,
-    shards: Option<usize>,
-    eviction_config: Option<EvictionConfig>,
+    shards: usize,
+    eviction_config: EvictionConfig,
     object_pool_capacity: Option<usize>,
     event_listener: L,
     hash_builder: S,
@@ -276,8 +276,14 @@ where
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            shards: None,
-            eviction_config: None,
+            shards: 8,
+            eviction_config: LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            }
+            .into(),
             object_pool_capacity: None,
             event_listener: DefaultCacheEventListener::default(),
             hash_builder: RandomState::default(),
@@ -293,22 +299,15 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    const DEFAULT_SHARDS: usize = 1;
-    const DEFAULT_EVICTION_CONFIG: EvictionConfig = EvictionConfig::Lfu(LfuConfig {
-        window_capacity_ratio: 0.1,
-        protected_capacity_ratio: 0.8,
-        cmsketch_eps: 0.001,
-        cmsketch_confidence: 0.9,
-    });
     const DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL: usize = 10;
 
     pub fn with_shards(mut self, shards: usize) -> Self {
-        self.shards = Some(shards);
+        self.shards = shards;
         self
     }
 
     pub fn with_eviction_config(mut self, eviction_config: impl Into<EvictionConfig>) -> Self {
-        self.eviction_config = Some(eviction_config.into());
+        self.eviction_config = eviction_config.into();
         self
     }
 
@@ -348,47 +347,42 @@ where
     }
 
     pub fn build(self) -> Cache<K, V, L, S> {
-        let capacity = self.capacity;
-        let shards = self.shards.unwrap_or(Self::DEFAULT_SHARDS);
-        let eviction_config = self.eviction_config.unwrap_or(Self::DEFAULT_EVICTION_CONFIG);
         let object_pool_capacity = self
             .object_pool_capacity
-            .unwrap_or(capacity / Self::DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL);
-        let event_listener = self.event_listener;
-        let hash_builder = self.hash_builder;
+            .unwrap_or(self.capacity / Self::DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL);
 
-        match eviction_config {
+        match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
-                capacity,
-                shards,
+                capacity: self.capacity,
+                shards: self.shards,
                 eviction_config,
                 object_pool_capacity,
-                hash_builder,
-                event_listener,
+                hash_builder: self.hash_builder,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
-                capacity,
-                shards,
+                capacity: self.capacity,
+                shards: self.shards,
                 eviction_config,
                 object_pool_capacity,
-                hash_builder,
-                event_listener,
+                hash_builder: self.hash_builder,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
-                capacity,
-                shards,
+                capacity: self.capacity,
+                shards: self.shards,
                 eviction_config,
                 object_pool_capacity,
-                hash_builder,
-                event_listener,
+                hash_builder: self.hash_builder,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
-                capacity,
-                shards,
+                capacity: self.capacity,
+                shards: self.shards,
                 eviction_config,
                 object_pool_capacity,
-                hash_builder,
-                event_listener,
+                hash_builder: self.hash_builder,
+                event_listener: self.event_listener,
             }))),
         }
     }

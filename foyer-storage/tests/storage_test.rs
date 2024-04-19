@@ -19,8 +19,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use foyer_memory::{EvictionConfig, FifoConfig};
 use foyer_storage::{
-    test_utils::JudgeRecorder, Compression, FsDeviceConfig, FsStoreConfig, RuntimeConfig, RuntimeStoreConfig, Storage,
-    StorageExt, Store, StoreConfig,
+    test_utils::JudgeRecorder, Compression, FsDeviceConfig, FsStoreConfig, RuntimeConfigBuilder, RuntimeStoreConfig,
+    Storage, StorageExt, Store, StoreConfig,
 };
 
 const KB: usize = 1024;
@@ -107,7 +107,7 @@ async fn test_fs_store() {
             align: 4 * KB,
             io_size: 4 * KB,
         },
-        catalog_bits: 1,
+        catalog_shards: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
         flushers: 1,
@@ -134,7 +134,7 @@ async fn test_fs_store_zstd() {
             align: 4 * KB,
             io_size: 4 * KB,
         },
-        catalog_bits: 1,
+        catalog_shards: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
         flushers: 1,
@@ -161,7 +161,7 @@ async fn test_fs_store_lz4() {
             align: 4 * KB,
             io_size: 4 * KB,
         },
-        catalog_bits: 1,
+        catalog_shards: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
         flushers: 1,
@@ -188,7 +188,7 @@ async fn test_lazy_fs_store() {
             align: 4 * KB,
             io_size: 4 * KB,
         },
-        catalog_bits: 1,
+        catalog_shards: 1,
         admissions: vec![recorder.clone()],
         reinsertions: vec![recorder.clone()],
         flushers: 1,
@@ -206,7 +206,7 @@ async fn test_runtime_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
     let config = StoreConfig::RuntimeFs(RuntimeStoreConfig {
-        store: FsStoreConfig {
+        store_config: FsStoreConfig {
             name: "".to_string(),
             eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
@@ -216,7 +216,7 @@ async fn test_runtime_fs_store() {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            catalog_bits: 1,
+            catalog_shards: 1,
             admissions: vec![recorder.clone()],
             reinsertions: vec![recorder.clone()],
             flushers: 1,
@@ -225,10 +225,7 @@ async fn test_runtime_fs_store() {
             recover_concurrency: 2,
             compression: Compression::None,
         },
-        runtime: RuntimeConfig {
-            worker_threads: None,
-            thread_name: None,
-        },
+        runtime_config: RuntimeConfigBuilder::new().build(),
     });
 
     test_store(config, recorder).await;
@@ -239,7 +236,7 @@ async fn test_runtime_lazy_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(JudgeRecorder::default());
     let config = StoreConfig::RuntimeLazyFs(RuntimeStoreConfig {
-        store: FsStoreConfig {
+        store_config: FsStoreConfig {
             name: "".to_string(),
             eviction_config: EvictionConfig::Fifo(FifoConfig {}),
             device_config: FsDeviceConfig {
@@ -249,7 +246,7 @@ async fn test_runtime_lazy_fs_store() {
                 align: 4 * KB,
                 io_size: 4 * KB,
             },
-            catalog_bits: 1,
+            catalog_shards: 1,
             admissions: vec![recorder.clone()],
             reinsertions: vec![recorder.clone()],
             flushers: 1,
@@ -258,10 +255,7 @@ async fn test_runtime_lazy_fs_store() {
             recover_concurrency: 2,
             compression: Compression::None,
         },
-        runtime: RuntimeConfig {
-            worker_threads: None,
-            thread_name: None,
-        },
+        runtime_config: RuntimeConfigBuilder::new().build(),
     });
 
     test_store(config, recorder).await;
