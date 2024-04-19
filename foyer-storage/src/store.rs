@@ -24,7 +24,7 @@ use crate::{
     lazy::{Lazy, LazyStoreWriter},
     none::{NoneStore, NoneStoreWriter},
     runtime::{Runtime, RuntimeStoreConfig, RuntimeStoreWriter},
-    storage::{Storage, StorageWriter},
+    storage::{CachedEntry, Storage, StorageWriter},
     AdmissionPolicy, FsDeviceConfig, ReinsertionPolicy, RuntimeConfig,
 };
 
@@ -354,7 +354,6 @@ where
     }
 }
 
-#[derive(Clone)]
 pub enum Store<K, V>
 where
     K: StorageKey,
@@ -380,6 +379,22 @@ where
             Self::LazyFs(store) => f.debug_tuple("LazyFs").field(store).finish(),
             Self::RuntimeFs(store) => f.debug_tuple("RuntimeFs").field(store).finish(),
             Self::RuntimeLazyFs(store) => f.debug_tuple("RuntimeLazyFs").field(store).finish(),
+        }
+    }
+}
+
+impl<K, V> Clone for Store<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::None(store) => Self::None(store.clone()),
+            Self::Fs(store) => Self::Fs(store.clone()),
+            Self::LazyFs(store) => Self::LazyFs(store.clone()),
+            Self::RuntimeFs(store) => Self::RuntimeFs(store.clone()),
+            Self::RuntimeLazyFs(store) => Self::RuntimeLazyFs(store.clone()),
         }
     }
 }
@@ -439,7 +454,7 @@ where
         }
     }
 
-    async fn finish(self, value: V) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
         match self {
             StoreWriter::None(writer) => writer.finish(value).await,
             StoreWriter::Fs(writer) => writer.finish(value).await,
@@ -513,7 +528,7 @@ where
         }
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,

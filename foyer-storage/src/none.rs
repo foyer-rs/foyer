@@ -19,7 +19,7 @@ use foyer_common::code::{StorageKey, StorageValue};
 use crate::{
     compress::Compression,
     error::Result,
-    storage::{Storage, StorageWriter},
+    storage::{CachedEntry, Storage, StorageWriter},
 };
 
 #[derive(Debug)]
@@ -60,8 +60,8 @@ where
 
     fn force(&mut self) {}
 
-    async fn finish(self, _: V) -> Result<bool> {
-        Ok(false)
+    async fn finish(self, _: V) -> Result<Option<CachedEntry<K, V>>> {
+        Ok(None)
     }
 
     fn compression(&self) -> Compression {
@@ -114,7 +114,7 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         Ok(false)
     }
 
-    async fn lookup<Q>(&self, _: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, _: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

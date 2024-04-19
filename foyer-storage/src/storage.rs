@@ -12,16 +12,73 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use futures::Future;
 
 use crate::{compress::Compression, error::Result};
 
+#[derive(Debug)]
+pub enum CachedEntry<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    Shared { key: Arc<K>, value: Arc<V> },
+    Owned { key: Box<K>, value: Box<V> },
+}
+
+impl<K, V> Deref for CachedEntry<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl<K, V> CachedEntry<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    pub fn key(&self) -> &K {
+        match self {
+            CachedEntry::Shared { key, value: _ } => key,
+            CachedEntry::Owned { key, value: _ } => key,
+        }
+    }
+
+    pub fn value(&self) -> &V {
+        match self {
+            CachedEntry::Shared { key: _, value } => value,
+            CachedEntry::Owned { key: _, value } => value,
+        }
+    }
+}
+
+impl<K, V> CachedEntry<K, V>
+where
+    K: StorageKey + Clone,
+    V: StorageValue + Clone,
+{
+    /// `to_owned` reuqires the key and value implements [`Clone`].
+    ///
+    /// If the overhead of cloning the key or the value is heavy, try to wrap the value type with [`Arc`].
+    pub fn to_owned(self) -> (K, V) {
+        match self {
+            CachedEntry::Shared { key, value } => (key.as_ref().clone(), value.as_ref().clone()),
+            CachedEntry::Owned { key, value } => (*key, *value),
+        }
+    }
+}
+
 // TODO(MrCroxx): Use `trait_alias` after stable.
 // pub trait FetchValueFuture<V> = Future<Output = anyhow::Result<V>> + Send + 'static;
-
 pub trait FetchValueFuture<V>: Future<Output = anyhow::Result<V>> + Send + 'static {}
 impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture<V> for T {}
 
@@ -40,7 +97,7 @@ where
 
     fn set_compression(&mut self, compression: Compression);
 
-    fn finish(self, value: V) -> impl Future<Output = Result<bool>> + Send;
+    fn finish(self, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send;
 }
 
 pub trait Storage<K, V>: Send + Sync + Debug + Clone + 'static
@@ -67,7 +124,7 @@ where
         Q: Hash + Eq + ?Sized;
 
     #[must_use]
-    fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<V>>> + Send
+    fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static;
@@ -87,7 +144,7 @@ where
 {
     #[must_use]
     #[tracing::instrument(skip(self, value))]
-    fn insert(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
+    fn insert(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
         self.writer(key).finish(value)
     }
 
@@ -98,7 +155,7 @@ where
             if self.exists(&key)? {
                 return Ok(false);
             }
-            self.insert(key, value).await
+            self.insert(key, value).await.map(|res| res.is_some())
         }
     }
 
@@ -110,20 +167,20 @@ where
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
     #[tracing::instrument(skip(self, f))]
-    fn insert_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
     {
         async move {
             let mut writer = self.writer(key);
             if !writer.judge() {
-                return Ok(false);
+                return Ok(None);
             }
             let value = match f() {
                 Ok(value) => value,
                 Err(e) => {
                     tracing::warn!("fetch value error: {:?}", e);
-                    return Ok(false);
+                    return Ok(None);
                 }
             };
             writer.finish(value).await
@@ -137,7 +194,12 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_with_future<F, FU>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    fn insert_with_future<F, FU>(
+        &self,
+        key: K,
+        f: F,
+        weight: usize,
+    ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
@@ -145,13 +207,13 @@ where
         async move {
             let mut writer = self.writer(key);
             if !writer.judge() {
-                return Ok(false);
+                return Ok(None);
             }
             let value = match f().await {
                 Ok(value) => value,
                 Err(e) => {
                     tracing::warn!("fetch value error: {:?}", e);
-                    return Ok(false);
+                    return Ok(None);
                 }
             };
             writer.finish(value).await
@@ -167,7 +229,7 @@ where
             if self.exists(&key)? {
                 return Ok(false);
             }
-            self.insert_with(key, f).await
+            self.insert_with(key, f).await.map(|res| res.is_some())
         }
     }
 
@@ -186,7 +248,7 @@ where
             if self.exists(&key)? {
                 return Ok(false);
             }
-            self.insert_with_future(key, f, weight).await
+            self.insert_with_future(key, f, weight).await.map(|res| res.is_some())
         }
     }
 }
@@ -226,7 +288,7 @@ where
 
     fn insert_async_with_callback<F, FU>(&self, key: K, value: V, f: F)
     where
-        F: FnOnce(Result<bool>) -> FU + Send + 'static,
+        F: FnOnce(Result<Option<CachedEntry<K, V>>>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
     {
         let store = self.clone();
@@ -265,7 +327,7 @@ where
     V: StorageValue,
 {
     #[tracing::instrument(skip(self, value))]
-    fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
         let mut writer = self.writer(key);
         writer.force();
         writer.finish(value)
@@ -278,7 +340,7 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
     {
@@ -286,13 +348,13 @@ where
             let mut writer = self.writer(key);
             writer.force();
             if !writer.judge() {
-                return Ok(false);
+                return Ok(None);
             }
             let value = match f() {
                 Ok(value) => value,
                 Err(e) => {
                     tracing::warn!("fetch value error: {:?}", e);
-                    return Ok(false);
+                    return Ok(None);
                 }
             };
             let inserted = writer.finish(value).await?;
@@ -307,7 +369,11 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip(self, f))]
-    fn insert_force_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
+    fn insert_force_with_future<F, FU>(
+        &self,
+        key: K,
+        f: F,
+    ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
@@ -316,13 +382,13 @@ where
             let mut writer = self.writer(key);
             writer.force();
             if !writer.judge() {
-                return Ok(false);
+                return Ok(None);
             }
             let value = match f().await {
                 Ok(value) => value,
                 Err(e) => {
                     tracing::warn!("fetch value error: {:?}", e);
-                    return Ok(false);
+                    return Ok(None);
                 }
             };
             let inserted = writer.finish(value).await?;
@@ -345,7 +411,7 @@ mod tests {
 
     use std::{path::Path, sync::Arc, time::Duration};
 
-    use foyer_memory::{EvictionConfig, FifoConfig};
+    use foyer_memory::FifoConfig;
     use tokio::sync::Barrier;
 
     use super::*;
@@ -360,7 +426,7 @@ mod tests {
     fn config_for_test(dir: impl AsRef<Path>) -> FsStoreConfig<u64, Vec<u8>> {
         FsStoreConfig {
             name: "".to_string(),
-            eviction_config: EvictionConfig::Fifo(FifoConfig {}),
+            eviction_config: FifoConfig {}.into(),
             device_config: FsDeviceConfig {
                 dir: dir.as_ref().into(),
                 capacity: 4 * MB,
@@ -396,10 +462,10 @@ mod tests {
         writer.set_compression(Compression::Lz4);
         assert_eq!(writer.compression(), Compression::Lz4);
         writer.force();
-        assert!(writer.finish(vec![b'x'; KB]).await.unwrap());
+        assert!(writer.finish(vec![b'x'; KB]).await.unwrap().is_some());
 
         assert!(storage.exists(&1).unwrap());
-        assert_eq!(storage.lookup(&1).await.unwrap().unwrap(), vec![b'x'; KB]);
+        assert_eq!(storage.lookup(&1).await.unwrap().unwrap().value(), &vec![b'x'; KB]);
 
         assert!(storage.remove(&1).unwrap());
         assert!(!storage.exists(&1).unwrap());
@@ -416,20 +482,25 @@ mod tests {
 
         let storage = FsStore::open(config).await.unwrap();
 
-        assert!(storage.insert(1, vec![b'x'; KB]).await.unwrap());
+        assert!(storage.insert(1, vec![b'x'; KB]).await.unwrap().is_some());
         assert!(storage.exists(&1).unwrap());
 
         assert!(!storage.insert_if_not_exists(1, vec![b'x'; KB]).await.unwrap());
         assert!(storage.insert_if_not_exists(2, vec![b'x'; KB]).await.unwrap());
         assert!(storage.exists(&2).unwrap());
 
-        assert!(storage.insert_with(3, || { Ok(vec![b'x'; KB]) },).await.unwrap());
+        assert!(storage
+            .insert_with(3, || { Ok(vec![b'x'; KB]) },)
+            .await
+            .unwrap()
+            .is_some());
         assert!(storage.exists(&3).unwrap());
 
         assert!(storage
             .insert_with_future(4, || { async move { Ok(vec![b'x'; KB]) } }, KB)
             .await
-            .unwrap());
+            .unwrap()
+            .is_some());
         assert!(storage.exists(&4).unwrap());
 
         assert!(!storage
@@ -480,7 +551,7 @@ mod tests {
         let barrier = Arc::new(Barrier::new(2));
         let b = barrier.clone();
         storage.insert_async_with_callback(3, vec![b'x'; KB], |res| async move {
-            assert!(res.unwrap());
+            assert!(res.unwrap().is_some());
             b.wait().await;
         });
         barrier.wait().await;

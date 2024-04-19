@@ -14,13 +14,16 @@
 
 use std::{
     borrow::Borrow,
-    collections::hash_map::{Entry, HashMap},
+    fmt::Debug,
     hash::{Hash, Hasher},
     sync::Arc,
     time::Instant,
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    arc_key_hash_map::{ArcKeyHashMap, Entry},
+    code::{StorageKey, StorageValue},
+};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use twox_hash::XxHash64;
@@ -32,17 +35,33 @@ use crate::{
 
 pub type Sequence = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Index<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    Inflight { key: K, value: V },
+    Inflight { key: Arc<K>, value: Arc<V> },
     Region { view: RegionView },
 }
 
-#[derive(Debug, Clone)]
+impl<K, V> Clone for Index<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Inflight { key, value } => Self::Inflight {
+                key: key.clone(),
+                value: value.clone(),
+            },
+            Self::Region { view } => Self::Region { view: view.clone() },
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Item<K, V>
 where
     K: StorageKey,
@@ -52,6 +71,20 @@ where
     index: Index<K, V>,
 
     inserted: Option<Instant>,
+}
+
+impl<K, V> Clone for Item<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn clone(&self) -> Self {
+        Self {
+            sequence: self.sequence,
+            index: self.index.clone(),
+            inserted: self.inserted,
+        }
+    }
 }
 
 impl<K, V> Item<K, V>
@@ -87,10 +120,10 @@ where
     V: StorageValue,
 {
     /// Sharded by key hash.
-    items: Vec<RwLock<HashMap<K, Item<K, V>>>>,
+    items: Vec<RwLock<ArcKeyHashMap<K, Item<K, V>>>>,
 
     /// Sharded by region id.
-    regions: Vec<Mutex<HashMap<K, u64>>>,
+    regions: Vec<Mutex<ArcKeyHashMap<K, u64>>>,
 
     metrics: Arc<Metrics>,
 }
@@ -103,8 +136,8 @@ where
     pub fn new(regions: usize, shards: usize, metrics: Arc<Metrics>) -> Self {
         assert!(shards > 0, "catalog shard count must be > 0, given: {}", shards);
 
-        let items = (0..shards).map(|_| RwLock::new(HashMap::new())).collect_vec();
-        let regions = (0..regions).map(|_| Mutex::new(HashMap::new())).collect_vec();
+        let items = (0..shards).map(|_| RwLock::new(ArcKeyHashMap::new())).collect_vec();
+        let regions = (0..regions).map(|_| Mutex::new(ArcKeyHashMap::new())).collect_vec();
 
         Self {
             items,
@@ -114,7 +147,7 @@ where
         }
     }
 
-    pub fn insert(&self, key: K, mut item: Item<K, V>) {
+    pub fn insert(&self, key: Arc<K>, mut item: Item<K, V>) {
         // TODO(MrCroxx): compare sequence.
 
         if let Index::Region { view } = &item.index {
@@ -165,8 +198,8 @@ where
         info
     }
 
-    pub fn take_region(&self, region: &RegionId) -> Vec<(K, Item<K, V>)> {
-        let mut keys = HashMap::new();
+    pub fn take_region(&self, region: &RegionId) -> Vec<(Arc<K>, Item<K, V>)> {
+        let mut keys = ArcKeyHashMap::new();
         std::mem::swap(&mut *self.regions[*region as usize].lock(), &mut keys);
 
         let mut items = Vec::with_capacity(keys.len());
@@ -175,8 +208,9 @@ where
             match self.items[shard].write().entry(key.clone()) {
                 Entry::Vacant(_) => continue,
                 Entry::Occupied(o) => {
-                    if o.get().sequence == sequence {
-                        let item = o.remove();
+                    if o.get().value().sequence == sequence {
+                        let (entry, _v) = o.remove();
+                        let (key, item) = entry.take();
                         items.push((key.clone(), item));
                     }
                 }

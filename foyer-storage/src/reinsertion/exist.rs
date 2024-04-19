@@ -57,8 +57,4 @@ where
         let indices = self.catalog.get().unwrap();
         indices.lookup(key).is_some()
     }
-
-    fn on_insert(&self, _key: &Self::Key, _judge: bool) {}
-
-    fn on_drop(&self, _key: &Self::Key, _judge: bool) {}
 }

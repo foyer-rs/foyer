@@ -48,10 +48,6 @@ pub trait AdmissionPolicy: Send + Sync + 'static + Debug {
     fn init(&self, context: AdmissionContext<Self::Key, Self::Value>);
 
     fn judge(&self, key: &Self::Key) -> bool;
-
-    fn on_insert(&self, key: &Self::Key, judge: bool);
-
-    fn on_drop(&self, key: &Self::Key, judge: bool);
 }
 
 pub mod rated_ticket;

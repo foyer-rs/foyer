@@ -22,7 +22,7 @@ use foyer_common::{
 use crate::{
     compress::Compression,
     error::Result,
-    storage::{Storage, StorageWriter},
+    storage::{CachedEntry, Storage, StorageWriter},
 };
 
 pub struct RuntimeConfigBuilder {
@@ -68,7 +68,7 @@ pub struct RuntimeConfig {
     thread_name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RuntimeStoreConfig<K, V, S>
 where
     K: StorageKey,
@@ -77,6 +77,20 @@ where
 {
     pub store_config: S::Config,
     pub runtime_config: RuntimeConfig,
+}
+
+impl<K, V, S> Clone for RuntimeStoreConfig<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            store_config: self.store_config.clone(),
+            runtime_config: self.runtime_config.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -108,7 +122,7 @@ where
         self.writer.force()
     }
 
-    async fn finish(self, value: V) -> Result<bool> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
         self.runtime
             .spawn(async move { self.writer.finish(value).await })
             .await
@@ -206,7 +220,7 @@ where
         self.store.exists(key)
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
