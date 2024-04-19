@@ -22,7 +22,6 @@ use std::{
     collections::BTreeMap,
     fs::create_dir_all,
     ops::{Deref, Range},
-    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -34,11 +33,9 @@ use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
 use export::MetricsExporter;
 
-use foyer_memory::{EvictionConfig, LfuConfig};
 use foyer_storage::{
-    AdmissionPolicy, AsyncStorageExt, FsDeviceConfig, FsStoreConfig, RatedTicketAdmissionPolicy,
-    RatedTicketReinsertionPolicy, ReinsertionPolicy, Result, RuntimeConfig, RuntimeStoreConfig, Storage, StorageExt,
-    Store, StoreConfig,
+    AsyncStorageExt, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, Result,
+    RuntimeConfigBuilder, Storage, StorageExt, Store, StoreBuilder,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -96,7 +93,7 @@ pub struct Args {
 
     /// (MiB)
     #[arg(long, default_value_t = 64)]
-    region_size: usize,
+    file_size: usize,
 
     #[arg(long, default_value_t = 4)]
     flushers: usize,
@@ -129,13 +126,13 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     ticket_reinsert_rate_limit: usize,
 
-    /// `0` means equal to reclaimer count
+    /// `0` means use default
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
 
     /// Catalog indices sharding bits.
-    #[arg(long, default_value_t = 6)]
-    catalog_bits: usize,
+    #[arg(long, default_value_t = 64)]
+    catalog_shards: usize,
 
     /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
@@ -362,70 +359,47 @@ async fn main() {
     let metrics_dump_start = metrics.dump();
     let time = Instant::now();
 
-    let eviction_config = EvictionConfig::Lfu(LfuConfig {
-        window_capacity_ratio: 0.1,
-        protected_capacity_ratio: 0.8,
-        cmsketch_eps: 0.001,
-        cmsketch_confidence: 0.9,
-    });
+    let mut builder = StoreBuilder::new()
+        .with_name("foyer-storage-bench")
+        .with_device_config(
+            FsDeviceConfigBuilder::new(&args.dir)
+                .with_capacity(args.capacity * 1024 * 1024)
+                .with_file_size(args.file_size * 1024 * 1024)
+                .with_align(args.align)
+                .with_io_size(args.io_size)
+                .build(),
+        )
+        .with_catalog_shards(args.catalog_shards)
+        .with_flushers(args.flushers)
+        .with_reclaimers(args.reclaimers)
+        .with_recover_concurrency(args.recover_concurrency)
+        .with_compression(
+            args.compression
+                .as_str()
+                .try_into()
+                .expect("unsupported compression algorithm"),
+        );
 
-    let device_config = FsDeviceConfig {
-        dir: PathBuf::from(&args.dir),
-        capacity: args.capacity * 1024 * 1024,
-        file_size: args.region_size * 1024 * 1024,
-        align: args.align,
-        io_size: args.io_size,
-    };
-
-    let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Value>>> = vec![];
-    let mut reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Value>>> = vec![];
     if args.ticket_insert_rate_limit > 0 {
-        let rt = RatedTicketAdmissionPolicy::new(args.ticket_insert_rate_limit * 1024 * 1024);
-        admissions.push(Arc::new(rt));
+        builder = builder.with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
+            args.ticket_insert_rate_limit * 1024 * 1024,
+        )));
     }
     if args.ticket_reinsert_rate_limit > 0 {
-        let rt = RatedTicketReinsertionPolicy::new(args.ticket_reinsert_rate_limit * 1024 * 1024);
-        reinsertions.push(Arc::new(rt));
+        builder = builder.with_reinsertion_policy(Arc::new(RatedTicketReinsertionPolicy::new(
+            args.ticket_reinsert_rate_limit * 1024 * 1024,
+        )));
     }
 
-    let clean_region_threshold = if args.clean_region_threshold == 0 {
-        args.reclaimers
-    } else {
-        args.clean_region_threshold
-    };
+    if args.clean_region_threshold > 0 {
+        builder = builder.with_clean_region_threshold(args.clean_region_threshold);
+    }
 
-    let compression = args
-        .compression
-        .as_str()
-        .try_into()
-        .expect("unsupported compression algorithm");
+    if args.runtime {
+        builder = builder.with_runtime_config(RuntimeConfigBuilder::new().with_thread_name("foyer").build());
+    }
 
-    let config = FsStoreConfig {
-        name: "".to_string(),
-        eviction_config,
-        device_config,
-        catalog_bits: args.catalog_bits,
-        admissions,
-        reinsertions,
-        flushers: args.flushers,
-        reclaimers: args.reclaimers,
-        recover_concurrency: args.recover_concurrency,
-        clean_region_threshold,
-        compression,
-    };
-
-    let config = if args.runtime {
-        StoreConfig::RuntimeFs(RuntimeStoreConfig {
-            store: config,
-            runtime: RuntimeConfig {
-                worker_threads: None,
-                thread_name: Some("foyer".to_string()),
-            },
-        })
-    } else {
-        StoreConfig::Fs(config)
-    };
-
+    let config = builder.build_config();
     println!("{config:#?}");
 
     let store = Store::open(config).await.unwrap();

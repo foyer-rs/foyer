@@ -42,7 +42,7 @@ use crate::{
     indexer::Indexer,
     listener::CacheEventListener,
     metrics::Metrics,
-    CacheContext,
+    CacheContext, DefaultCacheEventListener,
 };
 
 struct CacheSharedState<T, L> {
@@ -442,7 +442,7 @@ where
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-pub struct GenericCache<K, V, E, I, L, S = RandomState>
+pub struct GenericCache<K, V, E, I, L = DefaultCacheEventListener<K, V>, S = RandomState>
 where
     K: Key,
     V: Value,

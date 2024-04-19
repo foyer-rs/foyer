@@ -13,7 +13,8 @@
 //  limitations under the License.
 
 use foyer_common::code::{StorageKey, StorageValue};
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use foyer_memory::{EvictionConfig, LfuConfig};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
 use crate::{
     compress::Compression,
@@ -24,11 +25,260 @@ use crate::{
     none::{NoneStore, NoneStoreWriter},
     runtime::{Runtime, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{Storage, StorageWriter},
+    AdmissionPolicy, FsDeviceConfig, ReinsertionPolicy, RuntimeConfig,
 };
 
 pub type FsStore<K, V> = GenericStore<K, V, FsDevice>;
 pub type FsStoreConfig<K, V> = GenericStoreConfig<K, V, FsDevice>;
 pub type FsStoreWriter<K, V> = GenericStoreWriter<K, V, FsDevice>;
+
+#[derive(Debug, Clone)]
+pub enum DeviceConfig {
+    None,
+    Fs(FsDeviceConfig),
+}
+
+impl From<FsDeviceConfig> for DeviceConfig {
+    fn from(value: FsDeviceConfig) -> Self {
+        Self::Fs(value)
+    }
+}
+
+pub struct StoreBuilder<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    name: String,
+    eviction_config: EvictionConfig,
+    device_config: DeviceConfig,
+    catalog_shards: usize,
+    admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    flushers: usize,
+    reclaimers: usize,
+    clean_region_threshold: Option<usize>,
+    recover_concurrency: usize,
+    compression: Compression,
+    lazy: bool,
+    runtime_config: Option<RuntimeConfig>,
+}
+
+impl<K, V> Default for StoreBuilder<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> StoreBuilder<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    pub fn new() -> Self {
+        Self {
+            name: "foyer".to_string(),
+            eviction_config: LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            }
+            .into(),
+            device_config: DeviceConfig::None,
+            catalog_shards: 64,
+            admissions: vec![],
+            reinsertions: vec![],
+            flushers: 4,
+            reclaimers: 4,
+            clean_region_threshold: None,
+            recover_concurrency: 8,
+            compression: Compression::None,
+            runtime_config: None,
+            lazy: false,
+        }
+    }
+}
+
+impl<K, V> StoreBuilder<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    /// For distinguish different foyer metrics.
+    ///
+    /// Metrics of this foyer instance has label `foyer = {{ name }}`.
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
+    }
+
+    /// Eviction policy configurations.
+    ///
+    /// The default eviction policy is a general-used LFU configuration.
+    pub fn with_eviction_config(mut self, eviction_config: impl Into<EvictionConfig>) -> Self {
+        self.eviction_config = eviction_config.into();
+        self
+    }
+
+    /// Device configurations.
+    ///
+    /// If not give, an always-return-none store will be used.
+    pub fn with_device_config(mut self, device_config: impl Into<DeviceConfig>) -> Self {
+        self.device_config = device_config.into();
+        self
+    }
+
+    /// Catalog indices sharding count.
+    pub fn with_catalog_shards(mut self, catalog_shards: usize) -> Self {
+        self.catalog_shards = catalog_shards;
+        self
+    }
+
+    /// Push a new admission policy in order.
+    pub fn with_admission_policy(mut self, admission: Arc<dyn AdmissionPolicy<Key = K, Value = V>>) -> Self {
+        self.admissions.push(admission);
+        self
+    }
+
+    /// Push a new reinsertion policy in order.
+    pub fn with_reinsertion_policy(mut self, reinsertion: Arc<dyn ReinsertionPolicy<Key = K, Value = V>>) -> Self {
+        self.reinsertions.push(reinsertion);
+        self
+    }
+
+    /// Count of flushers.
+    pub fn with_flushers(mut self, flushers: usize) -> Self {
+        self.flushers = flushers;
+        self
+    }
+
+    /// Count of reclaimers.
+    pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
+        self.reclaimers = reclaimers;
+        self
+    }
+
+    /// Clean region count threshold to trigger reclamation.
+    ///
+    /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
+    ///
+    /// The default clean region thrshold is the reclaimer count.
+    pub fn with_clean_region_threshold(mut self, clean_region_threshold: usize) -> Self {
+        self.clean_region_threshold = Some(clean_region_threshold);
+        self
+    }
+
+    /// Concurrency of recovery.
+    pub fn with_recover_concurrency(mut self, recover_concurrency: usize) -> Self {
+        self.recover_concurrency = recover_concurrency;
+        self
+    }
+
+    /// Compression algorithm.
+    pub fn with_compression(mut self, compression: Compression) -> Self {
+        self.compression = compression;
+        self
+    }
+
+    /// Enable a dedicated tokio runtime for the store with a runtime config.
+    ///
+    /// If not given, the store will use the user's runtime.
+    pub fn with_runtime_config(mut self, runtime_config: RuntimeConfig) -> Self {
+        self.runtime_config = Some(runtime_config);
+        self
+    }
+
+    /// Decide if lazy reocvery feature is enabled.
+    ///
+    /// If enabled, the opening for the store will return immediately, but always return `None` before recovery is finished.
+    pub fn with_lazy(mut self, lazy: bool) -> Self {
+        self.lazy = lazy;
+        self
+    }
+
+    /// Build and return the [`StoreConfig`] only.
+    pub fn build_config(self) -> StoreConfig<K, V> {
+        let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
+
+        match (self.device_config, self.runtime_config, self.lazy) {
+            (DeviceConfig::None, _, _) => StoreConfig::None,
+            (DeviceConfig::Fs(device_config), None, false) => StoreConfig::Fs(FsStoreConfig {
+                name: self.name,
+                eviction_config: self.eviction_config,
+                device_config,
+                catalog_shards: self.catalog_shards,
+                admissions: self.admissions,
+                reinsertions: self.reinsertions,
+                flushers: self.flushers,
+                reclaimers: self.reclaimers,
+                clean_region_threshold,
+                recover_concurrency: self.recover_concurrency,
+                compression: self.compression,
+            }),
+            (DeviceConfig::Fs(device_config), None, true) => StoreConfig::LazyFs(FsStoreConfig {
+                name: self.name,
+                eviction_config: self.eviction_config,
+                device_config,
+                catalog_shards: self.catalog_shards,
+                admissions: self.admissions,
+                reinsertions: self.reinsertions,
+                flushers: self.flushers,
+                reclaimers: self.reclaimers,
+                clean_region_threshold,
+                recover_concurrency: self.recover_concurrency,
+                compression: self.compression,
+            }),
+            (DeviceConfig::Fs(device_config), Some(runtime_config), true) => {
+                StoreConfig::RuntimeFs(RuntimeStoreConfig {
+                    store_config: FsStoreConfig {
+                        name: self.name,
+                        eviction_config: self.eviction_config,
+                        device_config,
+                        catalog_shards: self.catalog_shards,
+                        admissions: self.admissions,
+                        reinsertions: self.reinsertions,
+                        flushers: self.flushers,
+                        reclaimers: self.reclaimers,
+                        clean_region_threshold,
+                        recover_concurrency: self.recover_concurrency,
+                        compression: self.compression,
+                    },
+                    runtime_config,
+                })
+            }
+            (DeviceConfig::Fs(device_config), Some(runtime_config), false) => {
+                StoreConfig::RuntimeLazyFs(RuntimeStoreConfig {
+                    store_config: FsStoreConfig {
+                        name: self.name,
+                        eviction_config: self.eviction_config,
+                        device_config,
+                        catalog_shards: self.catalog_shards,
+                        admissions: self.admissions,
+                        reinsertions: self.reinsertions,
+                        flushers: self.flushers,
+                        reclaimers: self.reclaimers,
+                        clean_region_threshold,
+                        recover_concurrency: self.recover_concurrency,
+                        compression: self.compression,
+                    },
+                    runtime_config,
+                })
+            }
+        }
+    }
+
+    /// Open a store with the given configuration.
+    pub async fn build(self) -> Result<Store<K, V>> {
+        let config = self.build_config();
+        tracing::info!("Open foyer store with config:\n{config:#?}");
+        Store::open(config).await
+    }
+}
 
 pub enum StoreConfig<K, V>
 where

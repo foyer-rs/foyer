@@ -86,9 +86,6 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    /// `items` sharding bits.
-    bits: usize,
-
     /// Sharded by key hash.
     items: Vec<RwLock<HashMap<K, Item<K, V>>>>,
 
@@ -103,12 +100,14 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn new(regions: usize, bits: usize, metrics: Arc<Metrics>) -> Self {
-        let infos = (0..1 << bits).map(|_| RwLock::new(HashMap::new())).collect_vec();
+    pub fn new(regions: usize, shards: usize, metrics: Arc<Metrics>) -> Self {
+        assert!(shards > 0, "catalog shard count must be > 0, given: {}", shards);
+
+        let items = (0..shards).map(|_| RwLock::new(HashMap::new())).collect_vec();
         let regions = (0..regions).map(|_| Mutex::new(HashMap::new())).collect_vec();
+
         Self {
-            bits,
-            items: infos,
+            items,
             regions,
 
             metrics,
@@ -195,14 +194,16 @@ where
         }
     }
 
+    #[inline(always)]
     fn shard<Q>(&self, key: &Q) -> usize
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.hash(key) as usize & ((1 << self.bits) - 1)
+        self.hash(key) as usize % self.items.len()
     }
 
+    #[inline(always)]
     fn hash<Q>(&self, key: &Q) -> u64
     where
         K: Borrow<Q>,
