@@ -144,7 +144,7 @@ jobs:
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
-          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --file-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -182,7 +182,7 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --file-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
@@ -230,7 +230,7 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --region-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --file-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
