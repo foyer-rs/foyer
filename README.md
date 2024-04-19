@@ -16,9 +16,11 @@
 
 *foyer* is built against the latest stable release. The minimum supported version is 1.77.2. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
-## Development state
+## Development state & Roadmap
 
-Currently, *foyer* only finished few features, and is still under heavy development.
+Currently, *foyer* is still under heavy development.
+
+The development state and the roadmap can be found [here](https://github.com/users/MrCroxx/projects/4?query=is%3Aopen+sort%3Aupdated-desc).
 
 ## Features
 
@@ -34,18 +36,12 @@ Currently, *foyer* only finished few features, and is still under heavy developm
 
 The examples can be found [here](https://github.com/MrCroxx/foyer/tree/main/examples).
 
-## Roadmap
-
-- [ ] More user-friendly API.
-- [ ] User-friendly Documents and examples.
-- [ ] Support TTL.
-- [ ] Simplify `foyer-storage`.
-- [ ] Refactor `foyer-storage` region reclaiming policy.
-- [ ] Support on Windows.
-- [ ] Unify in-memory cache and disk cache configuration.
-
 ## Contributing
 
-Contributions for *foyer* are welcomed! Issues can be found [here](https://github.com/MrCroxx/foyer/issues).
+Contributions for *foyer* are welcomed! 
+
+Issues can be found [here](https://github.com/MrCroxx/foyer/issues).
+
+The development state and the roadmap can be found [here](https://github.com/users/MrCroxx/projects/4?query=is%3Aopen+sort%3Aupdated-desc).
 
 Make sure you've passed `make check` and `make test` before request a review, or CI will fail.
