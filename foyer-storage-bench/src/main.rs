@@ -363,8 +363,8 @@ async fn main() {
         .with_name("foyer-storage-bench")
         .with_device_config(
             FsDeviceConfigBuilder::new(&args.dir)
-                .with_capacity(args.capacity)
-                .with_file_size(args.file_size)
+                .with_capacity(args.capacity * 1024 * 1024)
+                .with_file_size(args.file_size * 1024 * 1024)
                 .with_align(args.align)
                 .with_io_size(args.io_size)
                 .build(),
