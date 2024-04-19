@@ -209,10 +209,7 @@ impl Device for FsDevice {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     async fn flush(&self) -> DeviceResult<()> {
         let fd = self.inner.dir.as_raw_fd();
-        // Commit fs cache to disk. Linux waits for I/O completions.
-        //
-        // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
-        asyncify(move || nix::unistd::syncfs(fd).map_err(DeviceError::from)).await?;
+        asyncify(move || nix::unistd::fsync(fd).map_err(DeviceError::from)).await?;
         Ok(())
     }
 
