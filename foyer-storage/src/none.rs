@@ -14,7 +14,7 @@
 
 use std::{borrow::Borrow, hash::Hash, marker::PhantomData};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, StorageKey, StorageValue, Value};
 
 use crate::{
     compress::Compression,
@@ -23,20 +23,12 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct NoneStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct NoneStoreWriter<K, V> {
     key: K,
     _marker: PhantomData<V>,
 }
 
-impl<K, V> NoneStoreWriter<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> NoneStoreWriter<K, V> {
     pub fn new(key: K) -> Self {
         Self {
             key,
@@ -47,8 +39,8 @@ where
 
 impl<K, V> StorageWriter<K, V> for NoneStoreWriter<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn key(&self) -> &K {
         &self.key
@@ -76,21 +68,25 @@ where
 }
 
 #[derive(Debug)]
-pub struct NoneStore<K: StorageKey, V: StorageValue>(PhantomData<(K, V)>);
+pub struct NoneStore<K, V>(PhantomData<(K, V)>);
 
-impl<K: StorageKey, V: StorageValue> Default for NoneStore<K, V> {
+impl<K, V> Default for NoneStore<K, V> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<K: StorageKey, V: StorageValue> Clone for NoneStore<K, V> {
+impl<K, V> Clone for NoneStore<K, V> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
+impl<K, V> Storage<K, V> for NoneStore<K, V>
+where
+    K: Key,
+    V: Value,
+{
     type Config = ();
     type Writer = NoneStoreWriter<K, V>;
 
@@ -120,7 +116,8 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
 
     async fn lookup<Q>(&self, _: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
-        K: Borrow<Q>,
+        K: StorageKey + Borrow<Q>,
+        V: StorageValue,
         Q: Hash + Eq + ?Sized,
     {
         Ok(None)
