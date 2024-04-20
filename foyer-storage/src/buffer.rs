@@ -18,7 +18,7 @@ use allocator_api2::vec::Vec as VecA;
 use either::Either;
 use foyer_common::{
     bits::{align_up, is_aligned},
-    code::{StorageKey, StorageValue},
+    code::{Key, StorageKey, StorageValue, Value},
 };
 
 use crate::{
@@ -46,8 +46,8 @@ pub type BufferResult<T> = core::result::Result<T, BufferError>;
 #[derive(Debug)]
 pub struct PositionedEntry<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     pub entry: Entry<K, V>,
     pub region: RegionId,
@@ -57,8 +57,8 @@ where
 
 pub struct FlushBuffer<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     // TODO(MrCroxx): optimize buffer allocation
@@ -82,8 +82,8 @@ where
 
 impl<K, V, D> Debug for FlushBuffer<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -97,8 +97,8 @@ where
 
 impl<K, V, D> FlushBuffer<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     pub fn new(device: D) -> Self {
@@ -183,7 +183,14 @@ where
         std::mem::swap(&mut self.entries, &mut entries);
         Ok(entries)
     }
+}
 
+impl<K, V, D> FlushBuffer<K, V, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    D: Device,
+{
     /// Write entry to io buffer.
     ///
     /// The io buffer may be flushed if buffer size equals or exceeds device io size.

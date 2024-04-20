@@ -15,7 +15,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use either::Either;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, StorageKey, StorageValue, Value};
 use tokio::sync::{broadcast, mpsc};
 use tracing::Instrument;
 
@@ -31,8 +31,8 @@ use crate::{
 
 pub struct Entry<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     pub key: Arc<K>,
     pub value: Arc<V>,
@@ -42,8 +42,8 @@ where
 
 impl<K, V> Debug for Entry<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
@@ -55,8 +55,8 @@ where
 
 impl<K, V> Clone for Entry<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn clone(&self) -> Self {
         Self {
@@ -71,8 +71,8 @@ where
 #[derive(Debug)]
 pub struct Flusher<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     region_manager: Arc<RegionManager<D>>,
@@ -90,8 +90,8 @@ where
 
 impl<K, V, D> Flusher<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     pub fn new(
@@ -112,7 +112,14 @@ where
             stop_rx,
         }
     }
+}
 
+impl<K, V, D> Flusher<K, V, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    D: Device,
+{
     pub async fn run(mut self) -> Result<()> {
         loop {
             tokio::select! {

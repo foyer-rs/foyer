@@ -18,7 +18,7 @@ use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -172,6 +172,16 @@ where
     }
 }
 
+struct Uninitialized<K, V, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    D: Device,
+{
+    flushers: Vec<Flusher<K, V, D>>,
+    reclaimers: Vec<Reclaimer<K, V, D>>,
+}
+
 pub struct GenericStoreInner<K, V, D>
 where
     K: StorageKey,
@@ -198,6 +208,9 @@ where
     metrics: Arc<Metrics>,
 
     compression: Compression,
+
+    initialized: AtomicBool,
+    uninitialized: Mutex<Option<Uninitialized<K, V, D>>>,
 
     _marker: PhantomData<V>,
 }
@@ -250,6 +263,10 @@ where
             reclaimers_stop_tx,
             metrics: metrics.clone(),
             compression: config.compression,
+
+            initialized: AtomicBool::default(),
+            uninitialized: Mutex::new(None),
+
             _marker: PhantomData,
         };
         let store = Self { inner: Arc::new(inner) };
@@ -298,22 +315,34 @@ where
             })
             .collect_vec();
 
+        let uninitialized = Uninitialized { flushers, reclaimers };
+        *store.inner.uninitialized.lock() = Some(uninitialized);
+
         let sequence = store.recover(config.recover_concurrency).await?;
         store.inner.sequence.store(sequence + 1, Ordering::Relaxed);
 
-        let flusher_handles = flushers
-            .into_iter()
-            .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
-            .collect_vec();
-        let reclaimer_handles = reclaimers
-            .into_iter()
-            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
-            .collect_vec();
-
-        *store.inner.flusher_handles.lock() = flusher_handles;
-        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
-
         Ok(store)
+    }
+
+    fn try_init(&self) {
+        // Init store exclusively.
+        if let Some(Uninitialized { flushers, reclaimers }) = self.inner.uninitialized.lock().take() {
+            assert!(!self.inner.initialized.load(Ordering::Acquire));
+
+            let flusher_handles = flushers
+                .into_iter()
+                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+                .collect_vec();
+            let reclaimer_handles = reclaimers
+                .into_iter()
+                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+                .collect_vec();
+
+            *self.inner.flusher_handles.lock() = flusher_handles;
+            *self.inner.reclaimer_handles.lock() = reclaimer_handles;
+
+            self.inner.initialized.store(true, Ordering::Release);
+        }
     }
 
     async fn close(&self) -> Result<()> {
@@ -541,6 +570,10 @@ where
         mut writer: GenericStoreWriter<K, V, D>,
         value: V,
     ) -> Result<Option<CachedEntry<K, V>>> {
+        if !self.inner.initialized.load(Ordering::Relaxed) {
+            self.try_init();
+        }
+
         debug_assert!(!writer.is_inserted);
 
         if !writer.judge() {
