@@ -298,10 +298,21 @@ pub fn analyze(
 pub async fn monitor(
     iostat_path: impl AsRef<Path>,
     interval: Duration,
-    total_secs: u64,
+    total_secs: Duration,
+    warm_up: Duration,
     metrics: Metrics,
     mut stop: broadcast::Receiver<()>,
 ) {
+    let start = Instant::now();
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        println!("warm up... [{}s/{}s]", start.elapsed().as_secs(), warm_up.as_secs());
+        if start.elapsed() > warm_up {
+            break;
+        }
+    }
+
     let mut stat = iostat(&iostat_path);
     let mut metrics_dump = metrics.dump();
 
@@ -325,7 +336,7 @@ pub async fn monitor(
             &metrics_dump,
             &new_metrics_dump,
         );
-        println!("[{}s/{}s]", start.elapsed().as_secs(), total_secs);
+        println!("[{}s/{}s]", start.elapsed().as_secs(), total_secs.as_secs());
         println!("{}", analysis);
         stat = new_stat;
         metrics_dump = new_metrics_dump;
