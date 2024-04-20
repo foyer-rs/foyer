@@ -14,14 +14,14 @@
 
 use std::{fmt::Debug, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, Value};
 
 use crate::{catalog::Catalog, metrics::Metrics};
 
 pub struct AdmissionContext<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     pub catalog: Arc<Catalog<K, V>>,
     pub metrics: Arc<Metrics>,
@@ -29,8 +29,8 @@ where
 
 impl<K, V> Debug for AdmissionContext<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdmissionContext").finish()
@@ -39,8 +39,8 @@ where
 
 impl<K, V> Clone for AdmissionContext<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn clone(&self) -> Self {
         Self {
@@ -51,8 +51,8 @@ where
 }
 
 pub trait AdmissionPolicy: Send + Sync + 'static {
-    type Key: StorageKey;
-    type Value: StorageValue;
+    type Key: Key;
+    type Value: Value;
 
     fn init(&self, context: AdmissionContext<Self::Key, Self::Value>);
 

@@ -29,7 +29,7 @@ use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{StorageKey, StorageValue},
+    code::{Key, StorageKey, StorageValue, Value},
 };
 
 use foyer_memory::EvictionConfig;
@@ -63,8 +63,8 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 
 pub struct GenericStoreConfig<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     /// For distinguish different foyer metrics.

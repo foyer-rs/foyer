@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, Value};
 
 use super::{ReinsertionContext, ReinsertionPolicy};
 use crate::catalog::Catalog;
@@ -22,16 +22,16 @@ use crate::catalog::Catalog;
 #[derive(Debug)]
 pub struct ExistReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     catalog: OnceLock<Arc<Catalog<K, V>>>,
 }
 
 impl<K, V> Default for ExistReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn default() -> Self {
         Self {
@@ -42,8 +42,8 @@ where
 
 impl<K, V> ReinsertionPolicy for ExistReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     type Key = K;
 

@@ -12,26 +12,22 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    OnceLock,
 };
 
 use foyer_common::{
-    code::{StorageKey, StorageValue},
+    code::{Key, Value},
     rated_ticket::RatedTicket,
 };
 
 use super::{ReinsertionContext, ReinsertionPolicy};
 
-#[derive(Debug)]
 pub struct RatedTicketReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     inner: RatedTicket,
 
@@ -42,8 +38,8 @@ where
 
 impl<K, V> RatedTicketReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     pub fn new(rate: usize) -> Self {
         Self {
@@ -56,8 +52,8 @@ where
 
 impl<K, V> ReinsertionPolicy for RatedTicketReinsertionPolicy<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     type Key = K;
     type Value = V;
