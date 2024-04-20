@@ -114,12 +114,17 @@ where
     #[must_use]
     fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
 
+    fn init(&self) -> impl Future<Output = Result<()>> + Send
+    where
+        K: StorageKey,
+        V: StorageValue;
+
     fn is_ready(&self) -> bool;
 
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: K) -> Self::Writer;
+    fn writer(&self, key: K) -> Result<Self::Writer>;
 
     fn exists<Q>(&self, key: &Q) -> Result<bool>
     where

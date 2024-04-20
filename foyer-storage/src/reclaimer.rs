@@ -18,7 +18,7 @@ use std::{
 };
 
 use bytes::BufMut;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, StorageKey, StorageValue, Value};
 
 use tokio::sync::broadcast;
 
@@ -34,8 +34,8 @@ use crate::{
 
 pub struct Reclaimer<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     threshold: usize,
@@ -51,8 +51,8 @@ where
 
 impl<K, V, D> Reclaimer<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     pub fn new(
@@ -70,7 +70,14 @@ where
             stop_rx,
         }
     }
+}
 
+impl<K, V, D> Reclaimer<K, V, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    D: Device,
+{
     pub async fn run(mut self) -> Result<()> {
         let mut watch = self.region_manager.clean_regions().watch();
         loop {
@@ -144,7 +151,7 @@ where
                         continue;
                     }
 
-                    let mut writer = self.store.writer(key);
+                    let mut writer = self.store.writer(key)?;
                     writer.set_skippable();
 
                     if !writer.judge() {

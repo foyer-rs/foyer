@@ -33,11 +33,14 @@ use foyer_common::{
 };
 
 use foyer_memory::EvictionConfig;
-use futures::future::try_join_all;
+use futures::{
+    future::{try_join_all, BoxFuture},
+    FutureExt,
+};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{
-    sync::{broadcast, mpsc, Semaphore},
+    sync::{broadcast, mpsc, Mutex as AsyncMutex, Semaphore},
     task::JoinHandle,
 };
 use twox_hash::XxHash64;
@@ -107,8 +110,8 @@ where
 
 impl<K, V, D> Debug for GenericStoreConfig<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -129,8 +132,8 @@ where
 
 impl<K, V, D> Clone for GenericStoreConfig<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn clone(&self) -> Self {
@@ -152,8 +155,8 @@ where
 
 pub struct GenericStore<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     inner: Arc<GenericStoreInner<K, V, D>>,
@@ -161,8 +164,8 @@ where
 
 impl<K, V, D> Clone for GenericStore<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn clone(&self) -> Self {
@@ -174,18 +177,19 @@ where
 
 struct Uninitialized<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
+    recovery_concurrency: usize,
     flushers: Vec<Flusher<K, V, D>>,
     reclaimers: Vec<Reclaimer<K, V, D>>,
 }
 
 pub struct GenericStoreInner<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     sequence: AtomicU64,
@@ -210,15 +214,15 @@ where
     compression: Compression,
 
     initialized: AtomicBool,
-    uninitialized: Mutex<Option<Uninitialized<K, V, D>>>,
+    uninitialized: AsyncMutex<Option<Uninitialized<K, V, D>>>,
 
     _marker: PhantomData<V>,
 }
 
 impl<K, V, D> GenericStore<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     async fn open(config: GenericStoreConfig<K, V, D>) -> Result<Self> {
@@ -265,7 +269,7 @@ where
             compression: config.compression,
 
             initialized: AtomicBool::default(),
-            uninitialized: Mutex::new(None),
+            uninitialized: AsyncMutex::new(None),
 
             _marker: PhantomData,
         };
@@ -315,37 +319,63 @@ where
             })
             .collect_vec();
 
-        let uninitialized = Uninitialized { flushers, reclaimers };
-        *store.inner.uninitialized.lock() = Some(uninitialized);
-
-        let sequence = store.recover(config.recover_concurrency).await?;
-        store.inner.sequence.store(sequence + 1, Ordering::Relaxed);
+        let uninitialized = Uninitialized {
+            flushers,
+            reclaimers,
+            recovery_concurrency: config.recover_concurrency,
+        };
+        *store.inner.uninitialized.lock().await = Some(uninitialized);
 
         Ok(store)
     }
 
-    fn try_init(&self) {
-        // Init store exclusively.
-        if let Some(Uninitialized { flushers, reclaimers }) = self.inner.uninitialized.lock().take() {
-            assert!(!self.inner.initialized.load(Ordering::Acquire));
-
-            let flusher_handles = flushers
-                .into_iter()
-                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
-                .collect_vec();
-            let reclaimer_handles = reclaimers
-                .into_iter()
-                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
-                .collect_vec();
-
-            *self.inner.flusher_handles.lock() = flusher_handles;
-            *self.inner.reclaimer_handles.lock() = reclaimer_handles;
-
-            self.inner.initialized.store(true, Ordering::Release);
+    fn assume_initialized(&self) -> Result<()> {
+        if !self.inner.initialized.load(Ordering::Relaxed) {
+            return Err(anyhow::anyhow!("store not initialized").into());
         }
+        Ok(())
+    }
+
+    fn init(&self) -> BoxFuture<Result<()>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        async {
+            // Init store exclusively.
+            if let Some(Uninitialized {
+                recovery_concurrency: recover_concurrency,
+                flushers,
+                reclaimers,
+            }) = self.inner.uninitialized.lock().await.take()
+            {
+                assert!(!self.inner.initialized.load(Ordering::Acquire));
+
+                let sequence = self.recover(recover_concurrency).await?;
+                self.inner.sequence.store(sequence + 1, Ordering::Relaxed);
+
+                let flusher_handles = flushers
+                    .into_iter()
+                    .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+                    .collect_vec();
+                let reclaimer_handles = reclaimers
+                    .into_iter()
+                    .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+                    .collect_vec();
+
+                *self.inner.flusher_handles.lock() = flusher_handles;
+                *self.inner.reclaimer_handles.lock() = reclaimer_handles;
+
+                self.inner.initialized.store(true, Ordering::Release);
+            }
+            Ok(())
+        }
+        .boxed()
     }
 
     async fn close(&self) -> Result<()> {
+        self.assume_initialized()?;
+
         // stop and wait for flushers
         let handles = self.inner.flusher_handles.lock().drain(..).collect_vec();
         if !handles.is_empty() {
@@ -369,8 +399,9 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip_all)]
-    fn writer(&self, key: K) -> GenericStoreWriter<K, V, D> {
-        GenericStoreWriter::new(self.clone(), key)
+    fn writer(&self, key: K) -> Result<GenericStoreWriter<K, V, D>> {
+        self.assume_initialized()?;
+        Ok(GenericStoreWriter::new(self.clone(), key))
     }
 
     #[tracing::instrument(skip_all)]
@@ -379,15 +410,19 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        self.assume_initialized()?;
         Ok(self.inner.catalog.lookup(key).is_some())
     }
 
     #[tracing::instrument(skip_all)]
     async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
-        K: Borrow<Q>,
+        K: StorageKey + Borrow<Q>,
+        V: StorageValue,
         Q: Hash + Eq + ?Sized,
     {
+        self.assume_initialized()?;
+
         let now = Instant::now();
 
         let (_sequence, index) = match self.inner.catalog.lookup(key) {
@@ -463,6 +498,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        self.assume_initialized()?;
+
         let _timer = self.inner.metrics.op_duration_remove.start_timer();
 
         let res = self.inner.catalog.remove(key).is_some();
@@ -472,6 +509,8 @@ where
 
     #[tracing::instrument(skip(self))]
     fn clear(&self) -> Result<()> {
+        self.assume_initialized()?;
+
         self.inner.catalog.clear();
 
         // TODO(MrCroxx): set all regions as clean?
@@ -488,7 +527,11 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    async fn recover(&self, concurrency: usize) -> Result<Sequence> {
+    async fn recover(&self, concurrency: usize) -> Result<Sequence>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         tracing::info!("start store recovery");
 
         let semaphore = Arc::new(Semaphore::new(concurrency));
@@ -539,7 +582,11 @@ where
         region_id: RegionId,
         region_manager: Arc<RegionManager<D>>,
         catalog: Arc<Catalog<K, V>>,
-    ) -> Result<Option<Sequence>> {
+    ) -> Result<Option<Sequence>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         let region = region_manager.region(&region_id).clone();
         let mut sequence = 0;
         let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
@@ -565,15 +612,11 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    async fn apply_writer(
-        &self,
-        mut writer: GenericStoreWriter<K, V, D>,
-        value: V,
-    ) -> Result<Option<CachedEntry<K, V>>> {
-        if !self.inner.initialized.load(Ordering::Relaxed) {
-            self.try_init();
-        }
-
+    async fn apply_writer(&self, mut writer: GenericStoreWriter<K, V, D>, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         debug_assert!(!writer.is_inserted);
 
         if !writer.judge() {
@@ -634,8 +677,8 @@ where
 
 pub struct GenericStoreWriter<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     store: GenericStore<K, V, D>,
@@ -657,8 +700,8 @@ where
 
 impl<K, V, D> GenericStoreWriter<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn new(store: GenericStore<K, V, D>, key: K) -> Self {
@@ -688,7 +731,11 @@ where
         self.judges.judge()
     }
 
-    pub async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    pub async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         let store = self.store.clone();
         store.apply_writer(self, value).await
     }
@@ -737,8 +784,8 @@ where
 
 impl<K, V, D> Drop for GenericStoreWriter<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     fn drop(&mut self) {
@@ -866,8 +913,8 @@ pub fn checksum(buf: &[u8]) -> u64 {
 
 pub struct RegionEntryIter<K, V, D>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     D: Device,
 {
     region: Region<D>,
@@ -1045,6 +1092,14 @@ where
         Self::open(config).await
     }
 
+    async fn init(&self) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        self.init().await
+    }
+
     fn is_ready(&self) -> bool {
         true
     }
@@ -1053,7 +1108,7 @@ where
         self.close().await
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
+    fn writer(&self, key: K) -> Result<Self::Writer> {
         self.writer(key)
     }
 

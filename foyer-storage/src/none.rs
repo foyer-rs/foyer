@@ -94,6 +94,14 @@ where
         Ok(NoneStore(PhantomData))
     }
 
+    async fn init(&self) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        Ok(())
+    }
+
     fn is_ready(&self) -> bool {
         true
     }
@@ -102,8 +110,8 @@ where
         Ok(())
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
-        NoneStoreWriter::new(key)
+    fn writer(&self, key: K) -> Result<Self::Writer> {
+        Ok(NoneStoreWriter::new(key))
     }
 
     fn exists<Q>(&self, _: &Q) -> Result<bool>

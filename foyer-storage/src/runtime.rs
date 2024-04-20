@@ -212,6 +212,15 @@ where
         })
     }
 
+    async fn init(&self) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        let store = self.store.clone();
+        self.runtime.spawn(async move { store.init().await }).await.unwrap()
+    }
+
     fn is_ready(&self) -> bool {
         self.store.is_ready()
     }
@@ -221,12 +230,12 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
-        let writer = self.store.writer(key);
-        RuntimeStoreWriter {
+    fn writer(&self, key: K) -> Result<Self::Writer> {
+        let writer = self.store.writer(key)?;
+        Ok(RuntimeStoreWriter {
             runtime: self.runtime.clone(),
             writer,
-        }
+        })
     }
 
     fn exists<Q>(&self, key: &Q) -> crate::error::Result<bool>

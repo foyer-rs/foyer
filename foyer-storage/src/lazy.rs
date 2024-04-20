@@ -167,6 +167,14 @@ where
         Ok(store)
     }
 
+    async fn init(&self) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        // self.init().await
+    }
+
     fn is_ready(&self) -> bool {
         self.once.get().is_some()
     }

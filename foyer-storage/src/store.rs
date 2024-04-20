@@ -488,6 +488,20 @@ where
         Ok(store)
     }
 
+    async fn init(&self) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        match self {
+            Store::None(store) => store.init().await,
+            Store::Fs(store) => store.init().await,
+            Store::LazyFs(store) => store.init().await,
+            Store::RuntimeFs(store) => store.init().await,
+            Store::RuntimeLazyFs(store) => store.init().await,
+        }
+    }
+
     fn is_ready(&self) -> bool {
         match self {
             Store::None(store) => store.is_ready(),
@@ -508,13 +522,13 @@ where
         }
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
+    fn writer(&self, key: K) -> Result<Self::Writer> {
         match self {
-            Store::None(store) => StoreWriter::None(store.writer(key)),
-            Store::Fs(store) => StoreWriter::Fs(store.writer(key)),
-            Store::LazyFs(store) => StoreWriter::LazyFs(store.writer(key)),
-            Store::RuntimeFs(store) => StoreWriter::RuntimeFs(store.writer(key)),
-            Store::RuntimeLazyFs(store) => StoreWriter::RuntimeLazyFs(store.writer(key)),
+            Store::None(store) => Ok(StoreWriter::None(store.writer(key)?)),
+            Store::Fs(store) => Ok(StoreWriter::Fs(store.writer(key)?)),
+            Store::LazyFs(store) => Ok(StoreWriter::LazyFs(store.writer(key)?)),
+            Store::RuntimeFs(store) => Ok(StoreWriter::RuntimeFs(store.writer(key)?)),
+            Store::RuntimeLazyFs(store) => Ok(StoreWriter::RuntimeLazyFs(store.writer(key)?)),
         }
     }
 
