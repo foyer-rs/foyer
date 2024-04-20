@@ -12,21 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    hash::{Hash, Hasher},
-    sync::Arc,
-    time::Instant,
-};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
 
+use ahash::RandomState;
 use foyer_common::{
     arc_key_hash_map::{ArcKeyHashMap, Entry},
     code::{StorageKey, StorageValue},
 };
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
-use twox_hash::XxHash64;
 
 use crate::{
     metrics::Metrics,
@@ -125,6 +119,8 @@ where
     /// Sharded by region id.
     regions: Vec<Mutex<ArcKeyHashMap<K, u64>>>,
 
+    hash_builder: RandomState,
+
     metrics: Arc<Metrics>,
 }
 
@@ -139,9 +135,13 @@ where
         let items = (0..shards).map(|_| RwLock::new(ArcKeyHashMap::new())).collect_vec();
         let regions = (0..regions).map(|_| Mutex::new(ArcKeyHashMap::new())).collect_vec();
 
+        let hash_builder = RandomState::default();
+
         Self {
             items,
             regions,
+
+            hash_builder,
 
             metrics,
         }
@@ -243,8 +243,6 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let mut hasher = XxHash64::default();
-        key.hash(&mut hasher);
-        hasher.finish()
+        self.hash_builder.hash_one(key)
     }
 }

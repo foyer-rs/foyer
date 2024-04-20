@@ -161,6 +161,10 @@ pub struct Args {
     /// For `--distribution zipf` only.
     #[arg(long, default_value_t = 0.5)]
     distribution_zipf_s: f64,
+
+    // (s)
+    #[arg(long, default_value_t = 2)]
+    warm_up: u64,
 }
 
 #[derive(Debug)]
@@ -204,7 +208,8 @@ struct Context {
     counts: Vec<AtomicU64>,
     entry_size_range: Range<usize>,
     lookup_range: u64,
-    time: u64,
+    time: Duration,
+    warm_up: Duration,
     distribution: TimeSeriesDistribution,
     metrics: Metrics,
 }
@@ -357,7 +362,6 @@ async fn main() {
 
     let iostat_start = iostat(&iostat_path);
     let metrics_dump_start = metrics.dump();
-    let time = Instant::now();
 
     let mut builder = StoreBuilder::new()
         .with_name("foyer-storage-bench")
@@ -413,11 +417,14 @@ async fn main() {
         monitor(
             iostat_path,
             Duration::from_secs(args.report_interval),
-            args.time,
+            Duration::from_secs(args.time),
+            Duration::from_secs(args.warm_up),
             metrics,
             stop_tx.subscribe(),
         )
     });
+
+    let time = Instant::now();
 
     let handle_bench = tokio::spawn(bench(args.clone(), store.clone(), metrics.clone(), stop_tx.clone()));
 
@@ -469,7 +476,8 @@ async fn bench(args: Args, store: impl Storage<u64, Value>, metrics: Metrics, st
         lookup_range: args.lookup_range,
         counts,
         entry_size_range: args.entry_size_min..args.entry_size_max + 1,
-        time: args.time,
+        time: Duration::from_secs(args.time),
+        warm_up: Duration::from_secs(args.warm_up),
         distribution,
         metrics: metrics.clone(),
     });
@@ -535,7 +543,7 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
             Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
-        if start.elapsed().as_secs() >= context.time {
+        if start.elapsed() >= context.time + context.warm_up {
             return;
         }
 
@@ -555,16 +563,21 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
         let time = Instant::now();
         let ctx = context.clone();
         let callback = move |res: Result<Option<CachedEntry<u64, Value>>>| async move {
+            let record = start.elapsed() > ctx.warm_up;
+
             let entry = res.unwrap();
             let lat = time.elapsed().as_micros() as u64;
             ctx.counts[id as usize].fetch_add(1, Ordering::Relaxed);
-            if let Err(e) = ctx.metrics.insert_lats.write().record(lat) {
-                tracing::error!("metrics error: {:?}, value: {}", e, lat);
-            }
 
-            if entry.is_some() {
-                ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-                ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
+            if record {
+                if let Err(e) = ctx.metrics.insert_lats.write().record(lat) {
+                    tracing::error!("metrics error: {:?}, value: {}", e, lat);
+                }
+
+                if entry.is_some() {
+                    ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+                    ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
+                }
             }
         };
 
@@ -609,7 +622,7 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
             Err(broadcast::error::TryRecvError::Empty) => {}
             _ => return,
         }
-        if start.elapsed().as_secs() >= context.time {
+        if start.elapsed() >= context.time + context.warm_up {
             return;
         }
 
@@ -626,13 +639,11 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
         let res = store.lookup(&idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
+        let record = start.elapsed() > context.warm_up;
+
         if let Some(buf) = res {
             let entry_size = buf.len();
             assert_eq!(text(idx as usize, entry_size), **buf.value());
-            if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
-                tracing::error!("metrics error: {:?}, value: {}", e, lat);
-            }
-            context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
             if let Some(limiter) = &mut limiter {
@@ -640,13 +651,24 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
                     tokio::time::sleep(wait).await;
                 }
             }
-        } else {
-            if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
-                tracing::error!("metrics error: {:?}, value: {}", e, lat);
+
+            if record {
+                if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {
+                    tracing::error!("metrics error: {:?}, value: {}", e, lat);
+                }
+                context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
-            context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
+        } else {
+            if record {
+                if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
+                    tracing::error!("metrics error: {:?}, value: {}", e, lat);
+                }
+                context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
+            }
         }
-        context.metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+        if record {
+            context.metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+        }
 
         tokio::task::consume_budget().await;
     }
