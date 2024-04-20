@@ -83,24 +83,25 @@ where
 
 intrusive_adapter! { LruHandleDlistAdapter<T> = NonNull<LruHandle<T>>: LruHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<T> Handle for LruHandle<T>
+impl<T> Default for LruHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    type Data = T;
-    type Context = LruContext;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
             link: DlistLink::default(),
             base: BaseHandle::new(),
             in_high_priority_pool: false,
         }
     }
+}
 
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context)
-    }
+impl<T> Handle for LruHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Data = T;
+    type Context = LruContext;
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -275,7 +276,7 @@ pub mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for Lru<T>
     where
@@ -294,7 +295,7 @@ pub mod tests {
     type TestLru = Lru<u64>;
 
     unsafe fn new_test_lru_handle_ptr(data: u64, context: LruContext) -> NonNull<TestLruHandle> {
-        let mut handle = Box::new(TestLruHandle::new());
+        let mut handle = Box::<TestLruHandle>::default();
         handle.init(0, data, 1, context);
         NonNull::new_unchecked(Box::into_raw(handle))
     }

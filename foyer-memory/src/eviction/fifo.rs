@@ -59,23 +59,24 @@ where
 
 intrusive_adapter! { FifoHandleDlistAdapter<T> = NonNull<FifoHandle<T>>: FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
+impl<T> Default for FifoHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self {
+            link: DlistLink::default(),
+            base: BaseHandle::new(),
+        }
+    }
+}
+
 impl<T> Handle for FifoHandle<T>
 where
     T: Send + Sync + 'static,
 {
     type Data = T;
     type Context = FifoContext;
-
-    fn new() -> Self {
-        Self {
-            link: DlistLink::default(),
-            base: BaseHandle::new(),
-        }
-    }
-
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context);
-    }
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -159,7 +160,7 @@ pub mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for Fifo<T>
     where
@@ -177,7 +178,7 @@ pub mod tests {
     type TestFifo = Fifo<u64>;
 
     unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<TestFifoHandle> {
-        let mut handle = Box::new(TestFifoHandle::new());
+        let mut handle = Box::<TestFifoHandle>::default();
         handle.init(0, data, 1, FifoContext);
         NonNull::new_unchecked(Box::into_raw(handle))
     }

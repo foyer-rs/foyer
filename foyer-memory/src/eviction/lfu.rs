@@ -88,24 +88,25 @@ where
 
 intrusive_adapter! { LfuHandleDlistAdapter<T> = NonNull<LfuHandle<T>>: LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<T> Handle for LfuHandle<T>
+impl<T> Default for LfuHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    type Data = T;
-    type Context = LfuContext;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
             link: DlistLink::default(),
             base: BaseHandle::new(),
             queue: Queue::None,
         }
     }
+}
 
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context)
-    }
+impl<T> Handle for LfuHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Data = T;
+    type Context = LfuContext;
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -401,7 +402,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for Lfu<T>
     where
@@ -449,7 +450,7 @@ mod tests {
         unsafe {
             let ptrs = (0..100)
                 .map(|i| {
-                    let mut handle = Box::new(TestLfuHandle::new());
+                    let mut handle = Box::<TestLfuHandle>::default();
                     handle.init(i, i, 1, LfuContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })

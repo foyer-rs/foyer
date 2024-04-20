@@ -15,8 +15,7 @@
 use std::{
     borrow::Borrow,
     future::Future,
-    hash::BuildHasher,
-    hash::Hash,
+    hash::{BuildHasher, Hash},
     ops::Deref,
     ptr::NonNull,
     sync::{
@@ -38,7 +37,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     eviction::Eviction,
-    handle::{Handle, KeyedHandle},
+    handle::{Handle, HandleExt, KeyedHandle},
     indexer::Indexer,
     listener::CacheEventListener,
     metrics::Metrics,
@@ -482,9 +481,7 @@ where
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
-            object_pool: ObjectPool::new_with_create(config.object_pool_capacity, || {
-                Box::new(<E::Handle as Handle>::new())
-            }),
+            object_pool: ObjectPool::new_with_create(config.object_pool_capacity, Box::default),
             listener: config.event_listener,
         });
 

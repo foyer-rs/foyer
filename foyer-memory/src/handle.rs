@@ -26,16 +26,20 @@ bitflags! {
     }
 }
 
-pub trait Handle: Send + Sync + 'static {
+pub trait Handle: Send + Sync + 'static + Default {
     type Data;
     type Context: Context;
-
-    fn new() -> Self;
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context);
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context>;
     fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context>;
 }
+
+pub trait HandleExt: Handle {
+    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
+        self.base_mut().init(hash, data, charge, context);
+    }
+}
+impl<H: Handle> HandleExt for H {}
 
 pub trait KeyedHandle: Handle {
     type Key;
@@ -93,6 +97,7 @@ impl<T, C> BaseHandle<T, C> {
     #[inline(always)]
     pub fn init(&mut self, hash: u64, data: T, charge: usize, context: C) {
         debug_assert!(self.entry.is_none());
+        assert_ne!(charge, 0);
         self.hash = hash;
         self.entry = Some((data, context));
         self.charge = charge;

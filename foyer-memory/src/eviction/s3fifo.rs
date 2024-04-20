@@ -87,14 +87,11 @@ where
     }
 }
 
-impl<T> Handle for S3FifoHandle<T>
+impl<T> Default for S3FifoHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    type Data = T;
-    type Context = S3FifoContext;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
             link: DlistLink::default(),
             freq: 0,
@@ -102,10 +99,14 @@ where
             queue: Queue::None,
         }
     }
+}
 
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context);
-    }
+impl<T> Handle for S3FifoHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Data = T;
+    type Context = S3FifoContext;
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -302,7 +303,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for S3Fifo<T>
     where
@@ -335,11 +336,11 @@ mod tests {
     }
 
     #[test]
-    fn test_lfu() {
+    fn test_s3fifo() {
         unsafe {
             let ptrs = (0..100)
                 .map(|i| {
-                    let mut handle = Box::new(TestS3FifoHandle::new());
+                    let mut handle = Box::<TestS3FifoHandle>::default();
                     handle.init(i, i, 1, S3FifoContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
