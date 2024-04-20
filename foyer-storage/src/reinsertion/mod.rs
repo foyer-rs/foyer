@@ -18,7 +18,6 @@ use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{catalog::Catalog, metrics::Metrics};
 
-#[derive(Debug)]
 pub struct ReinsertionContext<K, V>
 where
     K: StorageKey,
@@ -26,6 +25,16 @@ where
 {
     pub catalog: Arc<Catalog<K, V>>,
     pub metrics: Arc<Metrics>,
+}
+
+impl<K, V> Debug for ReinsertionContext<K, V>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReinsertionContext").finish()
+    }
 }
 
 impl<K, V> Clone for ReinsertionContext<K, V>
@@ -41,7 +50,7 @@ where
     }
 }
 
-pub trait ReinsertionPolicy: Send + Sync + 'static + Debug {
+pub trait ReinsertionPolicy: Send + Sync + 'static {
     type Key: StorageKey;
     type Value: StorageValue;
 

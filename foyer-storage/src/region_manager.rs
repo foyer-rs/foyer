@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
+
 use foyer_common::async_queue::AsyncQueue;
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig};
 
@@ -22,7 +24,6 @@ use crate::{
     region::{Region, RegionId},
 };
 
-#[derive(Debug)]
 pub struct RegionManager<D>
 where
     D: Device,
@@ -33,6 +34,19 @@ where
     regions: Vec<Region<D>>,
 
     eviction: Cache<RegionId, ()>,
+}
+
+impl<D> Debug for RegionManager<D>
+where
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionManager")
+            .field("clean_regions", &self.clean_regions)
+            .field("regions", &self.regions.len())
+            .field("eviction", &self.eviction)
+            .finish()
+    }
 }
 
 impl<D> RegionManager<D>

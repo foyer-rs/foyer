@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hash};
+use std::hash::Hash;
 
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -23,9 +23,9 @@ impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-pub trait StorageKey: Key + Debug + Serialize + DeserializeOwned {}
-impl<T> StorageKey for T where T: Key + Debug + Serialize + DeserializeOwned {}
+pub trait StorageKey: Key + Serialize + DeserializeOwned {}
+impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned {}
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-pub trait StorageValue: Value + 'static + Debug + Clone + Serialize + DeserializeOwned {}
-impl<T> StorageValue for T where T: Value + Debug + Clone + Serialize + DeserializeOwned {}
+pub trait StorageValue: Value + 'static + Clone + Serialize + DeserializeOwned {}
+impl<T> StorageValue for T where T: Value + Clone + Serialize + DeserializeOwned {}

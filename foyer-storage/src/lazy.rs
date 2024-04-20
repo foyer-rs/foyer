@@ -132,7 +132,9 @@ where
                         return Err(e);
                     }
                 };
-                once.set(store.clone()).unwrap();
+                if once.set(store.clone()).is_err() {
+                    panic!("Lazy store has been initialized before.");
+                }
                 Ok(store)
             }
         });
