@@ -35,8 +35,8 @@ pub trait Handle: Send + Sync + 'static + Default {
 }
 
 pub trait HandleExt: Handle {
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base_mut().init(hash, data, charge, context);
+    fn init(&mut self, hash: u64, data: Self::Data, weight: usize, context: Self::Context) {
+        self.base_mut().init(hash, data, weight, context);
     }
 }
 impl<H: Handle> HandleExt for H {}
@@ -66,8 +66,8 @@ pub struct BaseHandle<T, C> {
     entry: Option<(T, C)>,
     /// key hash
     hash: u64,
-    /// entry charge
-    charge: usize,
+    /// entry weight
+    weight: usize,
     /// external reference count
     refs: usize,
     /// flags that used by the general cache abstraction
@@ -87,7 +87,7 @@ impl<T, C> BaseHandle<T, C> {
         Self {
             entry: None,
             hash: 0,
-            charge: 0,
+            weight: 0,
             refs: 0,
             flags: BaseHandleFlags::empty(),
         }
@@ -95,12 +95,12 @@ impl<T, C> BaseHandle<T, C> {
 
     /// Init handle with args.
     #[inline(always)]
-    pub fn init(&mut self, hash: u64, data: T, charge: usize, context: C) {
+    pub fn init(&mut self, hash: u64, data: T, weight: usize, context: C) {
         debug_assert!(self.entry.is_none());
-        assert_ne!(charge, 0);
+        assert_ne!(weight, 0);
         self.hash = hash;
         self.entry = Some((data, context));
-        self.charge = charge;
+        self.weight = weight;
         self.refs = 0;
         self.flags = BaseHandleFlags::empty();
     }
@@ -112,7 +112,7 @@ impl<T, C> BaseHandle<T, C> {
         unsafe {
             self.entry
                 .take()
-                .map(|(data, context)| (data, context, self.charge))
+                .map(|(data, context)| (data, context, self.weight))
                 .unwrap_unchecked()
         }
     }
@@ -155,10 +155,10 @@ impl<T, C> BaseHandle<T, C> {
         unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
     }
 
-    /// Get the charge of the handle.
+    /// Get the weight of the handle.
     #[inline(always)]
-    pub fn charge(&self) -> usize {
-        self.charge
+    pub fn weight(&self) -> usize {
+        self.weight
     }
 
     /// Increase the external reference count of the handle, returns the new reference count.

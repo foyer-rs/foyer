@@ -140,12 +140,12 @@ where
     probation: Dlist<LfuHandleDlistAdapter<T>>,
     protected: Dlist<LfuHandleDlistAdapter<T>>,
 
-    window_charges: usize,
-    probation_charges: usize,
-    protected_charges: usize,
+    window_weight: usize,
+    probation_weight: usize,
+    protected_weight: usize,
 
-    window_charges_capacity: usize,
-    protected_charges_capacity: usize,
+    window_weight_capacity: usize,
+    protected_weight_capacity: usize,
 
     frequencies: CMSketchU16,
 
@@ -157,23 +157,23 @@ impl<T> Lfu<T>
 where
     T: Send + Sync + 'static,
 {
-    fn increase_queue_charges(&mut self, handle: &LfuHandle<T>) {
-        let charges = handle.base().charge();
+    fn increase_queue_weight(&mut self, handle: &LfuHandle<T>) {
+        let weight = handle.base().weight();
         match handle.queue {
             Queue::None => unreachable!(),
-            Queue::Window => self.window_charges += charges,
-            Queue::Probation => self.probation_charges += charges,
-            Queue::Protected => self.protected_charges += charges,
+            Queue::Window => self.window_weight += weight,
+            Queue::Probation => self.probation_weight += weight,
+            Queue::Protected => self.protected_weight += weight,
         }
     }
 
-    fn decrease_queue_charges(&mut self, handle: &LfuHandle<T>) {
-        let charges = handle.base().charge();
+    fn decrease_queue_weight(&mut self, handle: &LfuHandle<T>) {
+        let weight = handle.base().weight();
         match handle.queue {
             Queue::None => unreachable!(),
-            Queue::Window => self.window_charges -= charges,
-            Queue::Probation => self.probation_charges -= charges,
-            Queue::Protected => self.protected_charges -= charges,
+            Queue::Window => self.window_weight -= weight,
+            Queue::Probation => self.probation_weight -= weight,
+            Queue::Protected => self.protected_weight -= weight,
         }
     }
 
@@ -216,8 +216,8 @@ where
             config.window_capacity_ratio + config.protected_capacity_ratio
         );
 
-        let window_charges_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
-        let protected_charges_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
+        let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
+        let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
         let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
         let decay = frequencies.width();
 
@@ -225,11 +225,11 @@ where
             window: Dlist::new(),
             probation: Dlist::new(),
             protected: Dlist::new(),
-            window_charges: 0,
-            probation_charges: 0,
-            protected_charges: 0,
-            window_charges_capacity,
-            protected_charges_capacity,
+            window_weight: 0,
+            probation_weight: 0,
+            protected_weight: 0,
+            window_weight_capacity,
+            protected_weight_capacity,
             frequencies,
             step: 0,
             decay,
@@ -247,17 +247,17 @@ where
         handle.base_mut().set_in_eviction(true);
         handle.queue = Queue::Window;
 
-        self.increase_queue_charges(handle);
+        self.increase_queue_weight(handle);
         self.update_frequencies(handle.base().hash());
 
-        // If `window` charges exceeds the capacity, overflow entry from `window` to `probation`.
-        while self.window_charges > self.window_charges_capacity {
+        // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
+        while self.window_weight > self.window_weight_capacity {
             debug_assert!(!self.window.is_empty());
             let mut ptr = self.window.pop_front().unwrap_unchecked();
             let handle = ptr.as_mut();
-            self.decrease_queue_charges(handle);
+            self.decrease_queue_weight(handle);
             handle.queue = Queue::Probation;
-            self.increase_queue_charges(handle);
+            self.increase_queue_weight(handle);
             self.probation.push_back(ptr);
         }
     }
@@ -289,7 +289,7 @@ where
         debug_assert!(handle.base().is_in_eviction());
         debug_assert_ne!(handle.queue, Queue::None);
 
-        self.decrease_queue_charges(handle);
+        self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
         handle.base_mut().set_in_eviction(false);
 
@@ -319,19 +319,19 @@ where
                 debug_assert!(handle.link.is_linked());
                 debug_assert!(handle.base().is_in_eviction());
                 self.probation.remove_raw(handle.link.raw());
-                self.decrease_queue_charges(handle);
+                self.decrease_queue_weight(handle);
                 handle.queue = Queue::Protected;
-                self.increase_queue_charges(handle);
+                self.increase_queue_weight(handle);
                 self.protected.push_back(ptr);
 
-                // If `protected` charges exceeds the capacity, overflow entry from `protected` to `probation`.
-                while self.protected_charges > self.protected_charges_capacity {
+                // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
+                while self.protected_weight > self.protected_weight_capacity {
                     debug_assert!(!self.protected.is_empty());
                     let mut ptr = self.protected.pop_front().unwrap_unchecked();
                     let handle = ptr.as_mut();
-                    self.decrease_queue_charges(handle);
+                    self.decrease_queue_weight(handle);
                     handle.queue = Queue::Probation;
-                    self.increase_queue_charges(handle);
+                    self.increase_queue_weight(handle);
                     self.probation.push_back(ptr);
                 }
             }
@@ -365,7 +365,7 @@ where
 
         debug_assert!(!handle.link.is_linked());
 
-        self.decrease_queue_charges(handle);
+        self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
         handle.base_mut().set_in_eviction(false);
     }
@@ -433,9 +433,9 @@ mod tests {
         assert_eq!(lfu.window.len(), window);
         assert_eq!(lfu.probation.len(), probation);
         assert_eq!(lfu.protected.len(), protected);
-        assert_eq!(lfu.window_charges, window);
-        assert_eq!(lfu.probation_charges, probation);
-        assert_eq!(lfu.protected_charges, protected);
+        assert_eq!(lfu.window_weight, window);
+        assert_eq!(lfu.probation_weight, probation);
+        assert_eq!(lfu.protected_weight, protected);
         let es = lfu.dump().into_iter().collect_vec();
         assert_eq!(es, entries);
     }
@@ -465,8 +465,8 @@ mod tests {
             };
             let mut lfu = TestLfu::new(10, &config);
 
-            assert_eq!(lfu.window_charges_capacity, 2);
-            assert_eq!(lfu.protected_charges_capacity, 6);
+            assert_eq!(lfu.window_weight_capacity, 2);
+            assert_eq!(lfu.protected_weight_capacity, 6);
 
             lfu.push(ptrs[0]);
             lfu.push(ptrs[1]);

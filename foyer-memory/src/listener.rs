@@ -26,7 +26,7 @@ where
     /// The function is called when an entry is released by the cache and all external users.
     ///
     /// The arguments includes the key and value with ownership.
-    fn on_release(&self, key: K, value: V, context: CacheContext, charges: usize);
+    fn on_release(&self, key: K, value: V, context: CacheContext, weight: usize);
 }
 
 pub struct DefaultCacheEventListener<K, V>(PhantomData<(K, V)>)
@@ -49,5 +49,5 @@ where
     K: Key,
     V: Value,
 {
-    fn on_release(&self, _key: K, _value: V, _context: CacheContext, _charges: usize) {}
+    fn on_release(&self, _key: K, _value: V, _context: CacheContext, _weight: usize) {}
 }
