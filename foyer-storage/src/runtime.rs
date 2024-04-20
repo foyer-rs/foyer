@@ -15,7 +15,7 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
-    code::{StorageKey, StorageValue},
+    code::{Key, StorageKey, StorageValue, Value},
     runtime::BackgroundShutdownRuntime,
 };
 
@@ -70,8 +70,8 @@ pub struct RuntimeConfig {
 
 pub struct RuntimeStoreConfig<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     pub store_config: S::Config,
@@ -80,8 +80,8 @@ where
 
 impl<K, V, S> Debug for RuntimeStoreConfig<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -94,8 +94,8 @@ where
 
 impl<K, V, S> Clone for RuntimeStoreConfig<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn clone(&self) -> Self {
@@ -109,8 +109,8 @@ where
 #[derive(Debug)]
 pub struct RuntimeStoreWriter<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     runtime: Arc<BackgroundShutdownRuntime>,
@@ -119,8 +119,8 @@ where
 
 impl<K, V, S> StorageWriter<K, V> for RuntimeStoreWriter<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn key(&self) -> &K {
@@ -158,8 +158,8 @@ where
 #[derive(Debug)]
 pub struct Runtime<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     runtime: Arc<BackgroundShutdownRuntime>,
@@ -169,8 +169,8 @@ where
 
 impl<K, V, S> Clone for Runtime<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn clone(&self) -> Self {
@@ -184,8 +184,8 @@ where
 
 impl<K, V, S> Storage<K, V> for Runtime<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     type Config = RuntimeStoreConfig<K, V, S>;
@@ -239,7 +239,8 @@ where
 
     async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
-        K: Borrow<Q>,
+        K: StorageKey + Borrow<Q>,
+        V: StorageValue,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
     {
         let store = self.store.clone();

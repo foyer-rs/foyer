@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, StorageKey, StorageValue, Value};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -31,8 +31,8 @@ use crate::{
 #[derive(Debug)]
 pub enum LazyStoreWriter<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     Store { writer: S::Writer },
@@ -41,8 +41,8 @@ where
 
 impl<K, V, S> StorageWriter<K, V> for LazyStoreWriter<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn key(&self) -> &K {
@@ -95,8 +95,8 @@ where
 #[derive(Debug)]
 pub struct Lazy<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     once: Arc<OnceLock<S>>,
@@ -105,8 +105,8 @@ where
 
 impl<K, V, S> Clone for Lazy<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn clone(&self) -> Self {
@@ -119,8 +119,8 @@ where
 
 impl<K, V, S> Lazy<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     fn with_handle(config: S::Config) -> (Self, JoinHandle<Result<S>>) {
@@ -154,8 +154,8 @@ where
 
 impl<K, V, S> Storage<K, V> for Lazy<K, V, S>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
     S: Storage<K, V>,
 {
     type Config = S::Config;
@@ -202,7 +202,8 @@ where
 
     async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
-        K: Borrow<Q>,
+        K: StorageKey + Borrow<Q>,
+        V: StorageValue,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
     {
         match self.once.get() {
