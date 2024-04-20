@@ -658,14 +658,13 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
                 }
                 context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
-        } else {
-            if record {
-                if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
-                    tracing::error!("metrics error: {:?}, value: {}", e, lat);
-                }
-                context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
+        } else if record {
+            if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
+                tracing::error!("metrics error: {:?}, value: {}", e, lat);
             }
+            context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
+
         if record {
             context.metrics.get_ios.fetch_add(1, Ordering::Relaxed);
         }
