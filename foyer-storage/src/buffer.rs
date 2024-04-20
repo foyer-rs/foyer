@@ -55,7 +55,6 @@ where
     pub len: usize,
 }
 
-#[derive(Debug)]
 pub struct FlushBuffer<K, V, D>
 where
     K: StorageKey,
@@ -79,6 +78,21 @@ where
     device: D,
 
     default_buffer_capacity: usize,
+}
+
+impl<K, V, D> Debug for FlushBuffer<K, V, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlushBuffer")
+            .field("region", &self.region)
+            .field("offset", &self.offset)
+            .field("default_buffer_capacity", &self.default_buffer_capacity)
+            .finish()
+    }
 }
 
 impl<K, V, D> FlushBuffer<K, V, D>

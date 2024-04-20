@@ -345,11 +345,11 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None(writer) => f.debug_tuple("None").field(writer).finish(),
-            Self::Fs(writer) => f.debug_tuple("Fs").field(writer).finish(),
-            Self::LazyFs(writer) => f.debug_tuple("LazyFs").field(writer).finish(),
-            Self::RuntimeFs(writer) => f.debug_tuple("RuntimeFs").field(writer).finish(),
-            Self::RuntimeLazyFs(writer) => f.debug_tuple("RuntimeLazyFs").field(writer).finish(),
+            Self::None(_) => f.debug_tuple("None").finish(),
+            Self::Fs(_) => f.debug_tuple("Fs").finish(),
+            Self::LazyFs(_) => f.debug_tuple("LazyFs").finish(),
+            Self::RuntimeFs(_) => f.debug_tuple("RuntimeFs").finish(),
+            Self::RuntimeLazyFs(_) => f.debug_tuple("RuntimeLazyFs").finish(),
         }
     }
 }
@@ -374,11 +374,11 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None(store) => f.debug_tuple("None").field(store).finish(),
-            Self::Fs(store) => f.debug_tuple("Fs").field(store).finish(),
-            Self::LazyFs(store) => f.debug_tuple("LazyFs").field(store).finish(),
-            Self::RuntimeFs(store) => f.debug_tuple("RuntimeFs").field(store).finish(),
-            Self::RuntimeLazyFs(store) => f.debug_tuple("RuntimeLazyFs").field(store).finish(),
+            Self::None(_) => f.debug_tuple("None").finish(),
+            Self::Fs(_) => f.debug_tuple("Fs").finish(),
+            Self::LazyFs(_) => f.debug_tuple("LazyFs").finish(),
+            Self::RuntimeFs(_) => f.debug_tuple("RuntimeFs").finish(),
+            Self::RuntimeLazyFs(_) => f.debug_tuple("RuntimeLazyFs").finish(),
         }
     }
 }

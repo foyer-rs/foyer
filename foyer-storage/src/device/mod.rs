@@ -25,19 +25,19 @@ use crate::region::RegionId;
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 
-// pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static + Debug;
-// pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static + Debug;
-// pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug;
-// pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug;
+// pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static;
+// pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static;
+// pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static;
+// pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static;
 
-pub trait BufferAllocator: Allocator + Clone + Send + Sync + 'static + Debug {}
-impl<T: Allocator + Clone + Send + Sync + 'static + Debug> BufferAllocator for T {}
-pub trait IoBuf: AsRef<[u8]> + Send + Sync + 'static + Debug {}
-impl<T: AsRef<[u8]> + Send + Sync + 'static + Debug> IoBuf for T {}
-pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug {}
-impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static + Debug> IoBufMut for T {}
-pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug {}
-impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static + Debug> IoRange for T {}
+pub trait BufferAllocator: Allocator + Clone + Send + Sync + 'static {}
+impl<T: Allocator + Clone + Send + Sync + 'static> BufferAllocator for T {}
+pub trait IoBuf: AsRef<[u8]> + Send + Sync + 'static {}
+impl<T: AsRef<[u8]> + Send + Sync + 'static> IoBuf for T {}
+pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static {}
+impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static> IoBufMut for T {}
+pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static {}
+impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static> IoRange for T {}
 
 #[derive(thiserror::Error, Debug)]
 pub enum DeviceError {
@@ -51,7 +51,7 @@ pub enum DeviceError {
 
 pub type DeviceResult<T> = std::result::Result<T, DeviceError>;
 
-pub trait Device: Sized + Clone + Send + Sync + 'static + Debug {
+pub trait Device: Sized + Clone + Send + Sync + 'static {
     type IoBufferAllocator: BufferAllocator;
     type Config: Send + Debug + Clone;
 

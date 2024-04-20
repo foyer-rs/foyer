@@ -116,8 +116,8 @@ where
             .field("eviction_config", &self.eviction_config)
             .field("device_config", &self.device_config)
             .field("catalog_shards", &self.catalog_shards)
-            .field("admissions", &self.admissions)
-            .field("reinsertions", &self.reinsertions)
+            .field("admissions", &self.admissions.len())
+            .field("reinsertions", &self.reinsertions.len())
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("clean_region_threshold", &self.clean_region_threshold)
@@ -150,7 +150,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct GenericStore<K, V, D>
 where
     K: StorageKey,
@@ -173,7 +172,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct GenericStoreInner<K, V, D>
 where
     K: StorageKey,
@@ -341,7 +339,7 @@ where
     }
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     fn writer(&self, key: K) -> GenericStoreWriter<K, V, D> {
         GenericStoreWriter::new(self.clone(), key)
     }
@@ -537,7 +535,7 @@ where
         writer.is_judged = true;
     }
 
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     async fn apply_writer(
         &self,
         mut writer: GenericStoreWriter<K, V, D>,
@@ -689,7 +687,7 @@ where
 
 impl<K, V, D> Debug for GenericStoreWriter<K, V, D>
 where
-    K: StorageKey,
+    K: StorageKey + Debug,
     V: StorageValue,
     D: Device,
 {

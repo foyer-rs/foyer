@@ -32,7 +32,6 @@ use crate::{
     storage::Storage,
 };
 
-#[derive(Debug)]
 pub struct Reclaimer<K, V, D>
 where
     K: StorageKey,
@@ -176,7 +175,7 @@ where
                 Ok(false) => {
                     tracing::info!("[reclaimer] reinsertion skipped, region: {}", region_id)
                 }
-                Err(e) => tracing::warn!("reinsert region {:?} error: {:?}", region, e),
+                Err(e) => tracing::warn!("reinsert region {:?} error: {:?}", region_id, e),
             }
         }
 

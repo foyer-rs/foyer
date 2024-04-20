@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
@@ -68,7 +68,6 @@ pub struct RuntimeConfig {
     thread_name: String,
 }
 
-#[derive(Debug)]
 pub struct RuntimeStoreConfig<K, V, S>
 where
     K: StorageKey,
@@ -77,6 +76,20 @@ where
 {
     pub store_config: S::Config,
     pub runtime_config: RuntimeConfig,
+}
+
+impl<K, V, S> Debug for RuntimeStoreConfig<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: Storage<K, V>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeStoreConfig")
+            .field("store_config", &self.store_config)
+            .field("runtime_config", &self.runtime_config)
+            .finish()
+    }
 }
 
 impl<K, V, S> Clone for RuntimeStoreConfig<K, V, S>

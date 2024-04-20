@@ -60,7 +60,6 @@ where
     V: StorageValue,
 {
     type Key = K;
-
     type Value = V;
 
     fn init(&self, context: AdmissionContext<Self::Key, Self::Value>) {

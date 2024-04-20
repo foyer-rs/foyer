@@ -176,7 +176,7 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     async fn update_catalog(&self, entries: Vec<PositionedEntry<K, V>>) -> Result<()> {
         if entries.is_empty() {
             return Ok(());

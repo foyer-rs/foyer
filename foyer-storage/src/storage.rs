@@ -82,7 +82,7 @@ where
 pub trait FetchValueFuture<V>: Future<Output = anyhow::Result<V>> + Send + 'static {}
 impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture<V> for T {}
 
-pub trait StorageWriter<K, V>: Send + Sync + Debug
+pub trait StorageWriter<K, V>: Send + Sync
 where
     K: StorageKey,
     V: StorageValue,
@@ -100,7 +100,7 @@ where
     fn finish(self, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send;
 }
 
-pub trait Storage<K, V>: Send + Sync + Debug + Clone + 'static
+pub trait Storage<K, V>: Send + Sync + Clone + 'static
 where
     K: StorageKey,
     V: StorageValue,
@@ -143,13 +143,13 @@ where
     V: StorageValue,
 {
     #[must_use]
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     fn insert(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
         self.writer(key).finish(value)
     }
 
     #[must_use]
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     fn insert_if_not_exists(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
         async move {
             if self.exists(&key)? {
@@ -166,7 +166,7 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
-    #[tracing::instrument(skip(self, f))]
+    #[tracing::instrument(skip_all)]
     fn insert_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
@@ -189,17 +189,8 @@ where
 
     /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
     /// Then `f` will be called to fetch value, and entry will be inserted.
-    ///
-    /// # Safety
-    ///
-    /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
-    fn insert_with_future<F, FU>(
-        &self,
-        key: K,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    #[tracing::instrument(skip_all)]
+    fn insert_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
@@ -220,8 +211,8 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self, f))]
-    fn insert_if_not_exists_with<F>(&self, key: K, f: F, weight: usize) -> impl Future<Output = Result<bool>> + Send
+    #[tracing::instrument(skip_all)]
+    fn insert_if_not_exists_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
     {
@@ -233,13 +224,8 @@ where
         }
     }
 
-    #[tracing::instrument(skip(self, f))]
-    fn insert_if_not_exists_with_future<F, FU>(
-        &self,
-        key: K,
-        f: F,
-        weight: usize,
-    ) -> impl Future<Output = Result<bool>> + Send
+    #[tracing::instrument(skip_all)]
+    fn insert_if_not_exists_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
     where
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
@@ -248,7 +234,7 @@ where
             if self.exists(&key)? {
                 return Ok(false);
             }
-            self.insert_with_future(key, f, weight).await.map(|res| res.is_some())
+            self.insert_with_future(key, f).await.map(|res| res.is_some())
         }
     }
 }
@@ -266,7 +252,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     fn insert_async(&self, key: K, value: V) {
         let store = self.clone();
         tokio::spawn(async move {
@@ -276,7 +262,7 @@ where
         });
     }
 
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     fn insert_if_not_exists_async(&self, key: K, value: V) {
         let store = self.clone();
         tokio::spawn(async move {
@@ -326,7 +312,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    #[tracing::instrument(skip(self, value))]
+    #[tracing::instrument(skip_all)]
     fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
         let mut writer = self.writer(key);
         writer.force();
@@ -339,7 +325,7 @@ where
     /// # Safety
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
+    #[tracing::instrument(skip_all)]
     fn insert_force_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         F: FnOnce() -> anyhow::Result<V> + Send,
@@ -368,7 +354,7 @@ where
     /// # Safety
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
-    #[tracing::instrument(skip(self, f))]
+    #[tracing::instrument(skip_all)]
     fn insert_force_with_future<F, FU>(
         &self,
         key: K,
@@ -497,28 +483,28 @@ mod tests {
         assert!(storage.exists(&3).unwrap());
 
         assert!(storage
-            .insert_with_future(4, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .insert_with_future(4, || { async move { Ok(vec![b'x'; KB]) } })
             .await
             .unwrap()
             .is_some());
         assert!(storage.exists(&4).unwrap());
 
         assert!(!storage
-            .insert_if_not_exists_with(4, || { Ok(vec![b'x'; KB]) }, KB)
+            .insert_if_not_exists_with(4, || { Ok(vec![b'x'; KB]) })
             .await
             .unwrap());
         assert!(storage
-            .insert_if_not_exists_with(5, || { Ok(vec![b'x'; KB]) }, KB)
+            .insert_if_not_exists_with(5, || { Ok(vec![b'x'; KB]) })
             .await
             .unwrap());
         assert!(storage.exists(&5).unwrap());
 
         assert!(!storage
-            .insert_if_not_exists_with_future(5, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .insert_if_not_exists_with_future(5, || { async move { Ok(vec![b'x'; KB]) } })
             .await
             .unwrap());
         assert!(storage
-            .insert_if_not_exists_with_future(6, || { async move { Ok(vec![b'x'; KB]) } }, KB)
+            .insert_if_not_exists_with_future(6, || { async move { Ok(vec![b'x'; KB]) } })
             .await
             .unwrap());
         assert!(storage.exists(&6).unwrap());
