@@ -982,7 +982,11 @@ where
         self.force()
     }
 
-    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         self.finish(value).await
     }
 

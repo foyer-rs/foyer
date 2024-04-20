@@ -135,7 +135,11 @@ where
         self.writer.force()
     }
 
-    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         self.runtime
             .spawn(async move { self.writer.finish(value).await })
             .await

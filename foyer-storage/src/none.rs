@@ -60,7 +60,11 @@ where
 
     fn force(&mut self) {}
 
-    async fn finish(self, _: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish(self, _: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         Ok(None)
     }
 

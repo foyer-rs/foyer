@@ -454,7 +454,11 @@ where
         }
     }
 
-    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         match self {
             StoreWriter::None(writer) => writer.finish(value).await,
             StoreWriter::Fs(writer) => writer.finish(value).await,

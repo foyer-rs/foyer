@@ -14,7 +14,7 @@
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{Key, StorageKey, StorageValue, Value};
 use futures::Future;
 
 use crate::{compress::Compression, error::Result};
@@ -84,8 +84,8 @@ impl<V, T: Future<Output = anyhow::Result<V>> + Send + 'static> FetchValueFuture
 
 pub trait StorageWriter<K, V>: Send + Sync
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     fn key(&self) -> &K;
 
@@ -97,13 +97,16 @@ where
 
     fn set_compression(&mut self, compression: Compression);
 
-    fn finish(self, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send;
+    fn finish(self, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    where
+        K: StorageKey,
+        V: StorageValue;
 }
 
 pub trait Storage<K, V>: Send + Sync + Clone + 'static
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     type Config: Send + Clone + Debug;
     type Writer: StorageWriter<K, V>;
@@ -126,7 +129,8 @@ where
     #[must_use]
     fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
-        K: Borrow<Q>,
+        K: StorageKey + Borrow<Q>,
+        V: StorageValue,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static;
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>

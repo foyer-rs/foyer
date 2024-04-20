@@ -17,7 +17,7 @@ use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
 use ahash::RandomState;
 use foyer_common::{
     arc_key_hash_map::{ArcKeyHashMap, Entry},
-    code::{StorageKey, StorageValue},
+    code::{Key, Value},
 };
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
@@ -30,20 +30,12 @@ use crate::{
 pub type Sequence = u64;
 
 #[derive(Debug)]
-pub enum Index<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub enum Index<K, V> {
     Inflight { key: Arc<K>, value: Arc<V> },
     Region { view: RegionView },
 }
 
-impl<K, V> Clone for Index<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> Clone for Index<K, V> {
     fn clone(&self) -> Self {
         match self {
             Self::Inflight { key, value } => Self::Inflight {
@@ -56,22 +48,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct Item<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct Item<K, V> {
     sequence: Sequence,
     index: Index<K, V>,
 
     inserted: Option<Instant>,
 }
 
-impl<K, V> Clone for Item<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> Clone for Item<K, V> {
     fn clone(&self) -> Self {
         Self {
             sequence: self.sequence,
@@ -81,11 +65,7 @@ where
     }
 }
 
-impl<K, V> Item<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> Item<K, V> {
     pub fn new(sequence: Sequence, index: Index<K, V>) -> Self {
         Self {
             sequence,
@@ -108,11 +88,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct Catalog<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct Catalog<K, V> {
     /// Sharded by key hash.
     items: Vec<RwLock<ArcKeyHashMap<K, Item<K, V>>>>,
 
@@ -126,8 +102,8 @@ where
 
 impl<K, V> Catalog<K, V>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Key,
+    V: Value,
 {
     pub fn new(regions: usize, shards: usize, metrics: Arc<Metrics>) -> Self {
         assert!(shards > 0, "catalog shard count must be > 0, given: {}", shards);

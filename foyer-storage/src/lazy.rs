@@ -66,7 +66,11 @@ where
         }
     }
 
-    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         match self {
             LazyStoreWriter::Store { writer } => writer.finish(value).await,
             LazyStoreWriter::None { writer } => writer.finish(value).await,
