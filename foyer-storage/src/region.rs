@@ -15,7 +15,7 @@
 use std::{
     collections::btree_map::{BTreeMap, Entry},
     fmt::Debug,
-    ops::RangeBounds,
+    ops::Range,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -170,12 +170,7 @@ where
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip(self, range), fields(start, end))]
-    pub async fn load_range(
-        &self,
-        range: impl RangeBounds<usize>,
-    ) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
-        let range = range.bounds(0..self.device.region_size());
-
+    pub async fn load_range(&self, range: Range<usize>) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
         let rx = {
             let mut inner = self.inner.lock();
 

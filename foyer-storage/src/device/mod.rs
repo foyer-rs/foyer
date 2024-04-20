@@ -15,7 +15,7 @@
 pub mod allocator;
 pub mod fs;
 
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 use allocator_api2::{alloc::Allocator, vec::Vec as VecA};
 use foyer_common::range::RangeBoundsExt;
@@ -108,28 +108,17 @@ pub trait DeviceExt: Device {
     fn load(
         &self,
         region: RegionId,
-        range: impl IoRange,
+        range: Range<usize>,
     ) -> impl Future<Output = DeviceResult<VecA<u8, Self::IoBufferAllocator>>> + Send {
         async move {
-            let range = range.bounds(0..self.region_size());
             let size = range.size().unwrap();
             debug_assert_eq!(size & (self.align() - 1), 0);
 
-            let mut buf = self.io_buffer(size, size);
-            let mut offset = 0;
+            let buf = self.io_buffer(size, size);
+            let (res, mut buf) = self.read(buf, 0..size, region, range.start).await;
+            let bytes = res?;
 
-            while range.start + offset < range.end {
-                let len = std::cmp::min(self.io_size(), size - offset);
-                let (res, b) = self.read(buf, offset..offset + len, region, range.start + offset).await;
-                let bytes = res?;
-                offset += bytes;
-                buf = b;
-                if bytes != len {
-                    break;
-                }
-            }
-
-            unsafe { buf.set_len(offset) };
+            unsafe { buf.set_len(bytes) };
 
             Ok(buf)
         }
