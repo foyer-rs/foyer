@@ -45,6 +45,10 @@ use crate::{
     CacheContext, DefaultCacheEventListener,
 };
 
+// TODO(MrCroxx): Use `trait_alias` after stable.
+pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
+impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
+
 struct CacheSharedState<T, L> {
     metrics: Metrics,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
@@ -377,6 +381,7 @@ where
     pub object_pool_capacity: usize,
     pub hash_builder: S,
     pub event_listener: L,
+    pub weighter: Arc<dyn Weighter<K, V>>,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -460,6 +465,7 @@ where
     context: Arc<CacheSharedState<E::Handle, L>>,
 
     hash_builder: S,
+    weighter: Arc<dyn Weighter<K, V>>,
 }
 
 impl<K, V, E, I, L, S> GenericCache<K, V, E, I, L, S>
@@ -496,28 +502,29 @@ where
             usages,
             context,
             hash_builder: config.hash_builder,
+            weighter: config.weighter,
         }
     }
 
-    pub fn insert(self: &Arc<Self>, key: K, value: V, charge: usize) -> GenericCacheEntry<K, V, E, I, L, S> {
-        self.insert_with_context(key, value, charge, CacheContext::default())
+    pub fn insert(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, L, S> {
+        self.insert_with_context(key, value, CacheContext::default())
     }
 
     pub fn insert_with_context(
         self: &Arc<Self>,
         key: K,
         value: V,
-        charge: usize,
         context: CacheContext,
     ) -> GenericCacheEntry<K, V, E, I, L, S> {
         let hash = self.hash_builder.hash_one(&key);
+        let weight = (self.weighter)(&key, &value);
 
         let mut to_deallocate = vec![];
 
         let (entry, waiters) = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             let waiters = shard.waiters.remove(&key);
-            let mut ptr = shard.insert(hash, key, value, charge, context.into(), &mut to_deallocate);
+            let mut ptr = shard.insert(hash, key, value, weight, context.into(), &mut to_deallocate);
             if let Some(waiters) = waiters.as_ref() {
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
             }
@@ -700,7 +707,7 @@ where
     pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, usize, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
         ER: std::error::Error + Send + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
@@ -724,15 +731,15 @@ where
                     let cache = self.clone();
                     let future = f();
                     let join = tokio::spawn(async move {
-                        let (value, charge, context) = match future.await {
-                            Ok((value, charge, context)) => (value, charge, context),
+                        let (value, context) = match future.await {
+                            Ok((value, context)) => (value, context),
                             Err(e) => {
                                 let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
                                 shard.waiters.remove(&key);
                                 return Err(e);
                             }
                         };
-                        let entry = cache.insert_with_context(key, value, charge, context);
+                        let entry = cache.insert_with_context(key, value, context);
                         Ok(entry)
                     });
                     GenericEntry::Miss(join)
@@ -908,6 +915,7 @@ mod tests {
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             event_listener: DefaultCacheEventListener::default(),
+            weighter: Arc::new(|_, _| 1),
         };
         let cache = Arc::new(FifoCache::<u64, u64>::new(config));
 
@@ -919,7 +927,7 @@ mod tests {
                 drop(entry);
                 continue;
             }
-            cache.insert(key, key, 1);
+            cache.insert(key, key);
         }
         assert_eq!(cache.usage(), CAPACITY);
     }
@@ -932,6 +940,7 @@ mod tests {
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
             event_listener: DefaultCacheEventListener::default(),
+            weighter: Arc::new(|_, v: &String| v.len()),
         };
         Arc::new(FifoCache::<u64, String>::new(config))
     }
@@ -946,16 +955,17 @@ mod tests {
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
             event_listener: DefaultCacheEventListener::default(),
+            weighter: Arc::new(|_, v: &String| v.len()),
         };
         Arc::new(LruCache::<u64, String>::new(config))
     }
 
     fn insert_fifo(cache: &Arc<FifoCache<u64, String>>, key: u64, value: &str) -> FifoCacheEntry<u64, String> {
-        cache.insert(key, value.to_string(), value.len())
+        cache.insert(key, value.to_string())
     }
 
     fn insert_lru(cache: &Arc<LruCache<u64, String>>, key: u64, value: &str) -> LruCacheEntry<u64, String> {
-        cache.insert(key, value.to_string(), value.len())
+        cache.insert(key, value.to_string())
     }
 
     #[test]

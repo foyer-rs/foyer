@@ -16,7 +16,6 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     hash::{BuildHasher, Hash},
-    marker::PhantomData,
     ops::Deref,
     sync::Arc,
 };
@@ -35,7 +34,7 @@ use crate::{
         lru::{Lru, LruHandle},
         s3fifo::{S3Fifo, S3FifoHandle},
     },
-    generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry},
+    generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry, Weighter},
     indexer::HashTableIndexer,
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
@@ -262,10 +261,10 @@ where
     capacity: usize,
     shards: usize,
     eviction_config: EvictionConfig,
-    object_pool_capacity: Option<usize>,
+    object_pool_capacity: usize,
     event_listener: L,
     hash_builder: S,
-    _marker: PhantomData<(K, V)>,
+    weighter: Arc<dyn Weighter<K, V>>,
 }
 
 impl<K, V> CacheBuilder<K, V, DefaultCacheEventListener<K, V>, RandomState>
@@ -284,10 +283,10 @@ where
                 cmsketch_confidence: 0.9,
             }
             .into(),
-            object_pool_capacity: None,
+            object_pool_capacity: 1024,
             event_listener: DefaultCacheEventListener::default(),
             hash_builder: RandomState::default(),
-            _marker: PhantomData,
+            weighter: Arc::new(|_, _| 1),
         }
     }
 }
@@ -299,23 +298,32 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    const DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL: usize = 10;
-
+    /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
+    /// Operations on different shard can be parallelized.
     pub fn with_shards(mut self, shards: usize) -> Self {
         self.shards = shards;
         self
     }
 
+    /// Set in-memory cache eviction algorithm.
+    ///
+    /// The default value is a general-used w-TinyLFU algorithm.
     pub fn with_eviction_config(mut self, eviction_config: impl Into<EvictionConfig>) -> Self {
         self.eviction_config = eviction_config.into();
         self
     }
 
+    /// Set object pool for handles. The object pool is used to reduce handle allocation.
+    ///
+    /// The optimized value is supposed to be equal to the max cache entry count.
+    ///
+    /// The default value is 1024.
     pub fn with_object_pool_capacity(mut self, object_pool_capacity: usize) -> Self {
-        self.object_pool_capacity = Some(object_pool_capacity);
+        self.object_pool_capacity = object_pool_capacity;
         self
     }
 
+    /// Set in-memory cache event listener.
     pub fn with_event_listener<OL>(self, event_listener: OL) -> CacheBuilder<K, V, OL, S>
     where
         OL: CacheEventListener<K, V>,
@@ -327,10 +335,11 @@ where
             object_pool_capacity: self.object_pool_capacity,
             event_listener,
             hash_builder: self.hash_builder,
-            _marker: PhantomData,
+            weighter: self.weighter,
         }
     }
 
+    /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, L, OS>
     where
         OS: BuildHasher + Send + Sync + 'static,
@@ -342,47 +351,54 @@ where
             object_pool_capacity: self.object_pool_capacity,
             event_listener: self.event_listener,
             hash_builder,
-            _marker: PhantomData,
+            weighter: self.weighter,
         }
     }
 
-    pub fn build(self) -> Cache<K, V, L, S> {
-        let object_pool_capacity = self
-            .object_pool_capacity
-            .unwrap_or(self.capacity / Self::DEFAULT_OBJECT_POOL_CAPACITY_RATIO_RECIPROCAL);
+    /// Set in-memory cache weighter.
+    pub fn with_weighter(mut self, weighter: impl Weighter<K, V>) -> Self {
+        self.weighter = Arc::new(weighter);
+        self
+    }
 
+    /// Build in-memory cache with the given configuration.
+    pub fn build(self) -> Cache<K, V, L, S> {
         match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity,
+                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 event_listener: self.event_listener,
+                weighter: self.weighter,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity,
+                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 event_listener: self.event_listener,
+                weighter: self.weighter,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity,
+                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 event_listener: self.event_listener,
+                weighter: self.weighter,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity,
+                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 event_listener: self.event_listener,
+                weighter: self.weighter,
             }))),
         }
     }
@@ -442,27 +458,21 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn insert(&self, key: K, value: V, charge: usize) -> CacheEntry<K, V, L, S> {
+    pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, L, S> {
         match self {
-            Cache::Fifo(cache) => cache.insert(key, value, charge).into(),
-            Cache::Lru(cache) => cache.insert(key, value, charge).into(),
-            Cache::Lfu(cache) => cache.insert(key, value, charge).into(),
-            Cache::S3Fifo(cache) => cache.insert(key, value, charge).into(),
+            Cache::Fifo(cache) => cache.insert(key, value).into(),
+            Cache::Lru(cache) => cache.insert(key, value).into(),
+            Cache::Lfu(cache) => cache.insert(key, value).into(),
+            Cache::S3Fifo(cache) => cache.insert(key, value).into(),
         }
     }
 
-    pub fn insert_with_context(
-        &self,
-        key: K,
-        value: V,
-        charge: usize,
-        context: CacheContext,
-    ) -> CacheEntry<K, V, L, S> {
+    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, L, S> {
         match self {
-            Cache::Fifo(cache) => cache.insert_with_context(key, value, charge, context).into(),
-            Cache::Lru(cache) => cache.insert_with_context(key, value, charge, context).into(),
-            Cache::Lfu(cache) => cache.insert_with_context(key, value, charge, context).into(),
-            Cache::S3Fifo(cache) => cache.insert_with_context(key, value, charge, context).into(),
+            Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
+            Cache::Lru(cache) => cache.insert_with_context(key, value, context).into(),
+            Cache::Lfu(cache) => cache.insert_with_context(key, value, context).into(),
+            Cache::S3Fifo(cache) => cache.insert_with_context(key, value, context).into(),
         }
     }
 
@@ -706,7 +716,7 @@ where
     pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, L, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, usize, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
         ER: std::error::Error + Send + 'static,
     {
         match self {
@@ -781,7 +791,7 @@ mod tests {
         let mut v = RANGE.collect_vec();
         v.shuffle(rng);
         for i in v {
-            cache.insert(i, i, 1);
+            cache.insert(i, i);
         }
     }
 
@@ -789,7 +799,7 @@ mod tests {
         let i = rng.gen_range(RANGE);
         match rng.gen_range(0..=3) {
             0 => {
-                let entry = cache.insert(i, i, 1);
+                let entry = cache.insert(i, i);
                 assert_eq!(*entry.key(), i);
                 assert_eq!(entry.key(), entry.value());
             }
@@ -806,7 +816,7 @@ mod tests {
                 let entry = cache
                     .entry(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, tokio::sync::oneshot::error::RecvError>((i, 1, CacheContext::Default))
+                        Ok::<_, tokio::sync::oneshot::error::RecvError>((i, CacheContext::Default))
                     })
                     .await
                     .unwrap();

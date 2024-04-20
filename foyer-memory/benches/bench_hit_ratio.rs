@@ -63,7 +63,7 @@ fn cache_hit(cache: Cache<CacheKey, CacheValue>, keys: Arc<Vec<CacheKey>>) -> f6
         if value.is_some() {
             hit += 1;
         } else {
-            cache.insert(key.clone(), (), 1);
+            cache.insert(key.clone(), ());
         }
     }
     hit as f64 / ITERATIONS as f64
