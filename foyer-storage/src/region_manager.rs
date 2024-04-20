@@ -73,7 +73,7 @@ where
     }
 
     pub fn eviction_push(&self, region_id: RegionId) {
-        self.eviction.insert(region_id, (), 1);
+        self.eviction.insert(region_id, ());
     }
 
     pub fn eviction_pop(&self) -> Option<RegionId> {
