@@ -15,8 +15,7 @@
 use std::{
     borrow::Borrow,
     future::Future,
-    hash::BuildHasher,
-    hash::Hash,
+    hash::{BuildHasher, Hash},
     ops::Deref,
     ptr::NonNull,
     sync::{
@@ -38,7 +37,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     eviction::Eviction,
-    handle::{Handle, KeyedHandle},
+    handle::{Handle, HandleExt, KeyedHandle},
     indexer::Indexer,
     listener::CacheEventListener,
     metrics::Metrics,
@@ -114,15 +113,15 @@ where
         hash: u64,
         key: K,
         value: V,
-        charge: usize,
+        weight: usize,
         context: <E::Handle as Handle>::Context,
         last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle> {
         let mut handle = self.state.object_pool.acquire();
-        handle.init(hash, (key, value), charge, context);
+        handle.init(hash, (key, value), weight, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
-        self.evict(charge, last_reference_entries);
+        self.evict(weight, last_reference_entries);
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
@@ -145,7 +144,7 @@ where
         debug_assert!(ptr.as_ref().base().is_in_indexer());
         debug_assert!(ptr.as_ref().base().is_in_indexer());
 
-        self.usage.fetch_add(charge, Ordering::Relaxed);
+        self.usage.fetch_add(weight, Ordering::Relaxed);
         ptr.as_mut().base_mut().inc_refs();
 
         ptr
@@ -261,11 +260,11 @@ where
 
     unsafe fn evict(
         &mut self,
-        charge: usize,
+        weight: usize,
         last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        while self.usage.load(Ordering::Relaxed) + charge > self.capacity {
+        while self.usage.load(Ordering::Relaxed) + weight > self.capacity {
             let evicted = match self.eviction.pop() {
                 Some(evicted) => evicted,
                 None => break,
@@ -314,7 +313,7 @@ where
         // the eviction container.
         if handle.base().is_in_indexer() {
             // The usage is higher than the capacity means most handles are held externally,
-            // the cache shard cannot release enough charges for the new inserted entries.
+            // the cache shard cannot release enough weight for the new inserted entries.
             // In this case, the reinsertion should be given up.
             if reinsert && self.usage.load(Ordering::Relaxed) <= self.capacity {
                 let was_in_eviction = handle.base().is_in_eviction();
@@ -341,13 +340,13 @@ where
 
         self.state.metrics.release.fetch_add(1, Ordering::Relaxed);
 
-        self.usage.fetch_sub(handle.base().charge(), Ordering::Relaxed);
-        let ((key, value), context, charge) = handle.base_mut().take();
+        self.usage.fetch_sub(handle.base().weight(), Ordering::Relaxed);
+        let ((key, value), context, weight) = handle.base_mut().take();
 
         let handle = Box::from_raw(ptr.as_ptr());
         self.state.object_pool.release(handle);
 
-        Some((key, value, context, charge))
+        Some((key, value, context, weight))
     }
 }
 
@@ -482,9 +481,7 @@ where
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
-            object_pool: ObjectPool::new_with_create(config.object_pool_capacity, || {
-                Box::new(<E::Handle as Handle>::new())
-            }),
+            object_pool: ObjectPool::new_with_create(config.object_pool_capacity, Box::default),
             listener: config.event_listener,
         });
 
@@ -545,8 +542,8 @@ where
         }
 
         // Do not deallocate data within the lock section.
-        for (key, value, context, charges) in to_deallocate {
-            self.context.listener.on_release(key, value, context.into(), charges)
+        for (key, value, context, weight) in to_deallocate {
+            self.context.listener.on_release(key, value, context.into(), weight)
         }
 
         entry
@@ -687,8 +684,8 @@ where
         };
 
         // Do not deallocate data within the lock section.
-        if let Some((key, value, context, charges)) = entry {
-            self.context.listener.on_release(key, value, context.into(), charges);
+        if let Some((key, value, context, weight)) = entry {
+            self.context.listener.on_release(key, value, context.into(), weight);
         }
     }
 }
@@ -791,8 +788,8 @@ where
         unsafe { self.ptr.as_ref().base().context() }
     }
 
-    pub fn charge(&self) -> usize {
-        unsafe { self.ptr.as_ref().base().charge() }
+    pub fn weight(&self) -> usize {
+        unsafe { self.ptr.as_ref().base().weight() }
     }
 
     pub fn refs(&self) -> usize {

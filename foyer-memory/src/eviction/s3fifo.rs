@@ -87,14 +87,11 @@ where
     }
 }
 
-impl<T> Handle for S3FifoHandle<T>
+impl<T> Default for S3FifoHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    type Data = T;
-    type Context = S3FifoContext;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
             link: DlistLink::default(),
             freq: 0,
@@ -102,10 +99,14 @@ where
             queue: Queue::None,
         }
     }
+}
 
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context);
-    }
+impl<T> Handle for S3FifoHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Data = T;
+    type Context = S3FifoContext;
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -130,8 +131,8 @@ where
 
     small_capacity: usize,
 
-    small_charges: usize,
-    main_charges: usize,
+    small_weight: usize,
+    main_weight: usize,
 }
 
 impl<T> S3Fifo<T>
@@ -140,7 +141,7 @@ where
 {
     unsafe fn evict(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if self.small_charges > self.small_capacity {
+        if self.small_weight > self.small_capacity {
             if let Some(ptr) = self.evict_small() {
                 return Some(ptr);
             }
@@ -154,12 +155,12 @@ where
             if handle.freq > 1 {
                 self.main_queue.push_back(ptr);
                 handle.queue = Queue::Main;
-                self.small_charges -= handle.base().charge();
-                self.main_charges += handle.base().charge();
+                self.small_weight -= handle.base().weight();
+                self.main_weight += handle.base().weight();
             } else {
                 handle.queue = Queue::None;
                 handle.reset();
-                self.small_charges -= handle.base().charge();
+                self.small_weight -= handle.base().weight();
                 return Some(ptr);
             }
         }
@@ -174,7 +175,7 @@ where
                 handle.dec();
             } else {
                 handle.queue = Queue::None;
-                self.main_charges -= handle.base.charge();
+                self.main_weight -= handle.base.weight();
                 return Some(ptr);
             }
         }
@@ -198,8 +199,8 @@ where
             small_queue: Dlist::new(),
             main_queue: Dlist::new(),
             small_capacity,
-            small_charges: 0,
-            main_charges: 0,
+            small_weight: 0,
+            main_weight: 0,
         }
     }
 
@@ -208,7 +209,7 @@ where
 
         self.small_queue.push_back(ptr);
         handle.queue = Queue::Small;
-        self.small_charges += handle.base().charge();
+        self.small_weight += handle.base().weight();
 
         handle.base_mut().set_in_eviction(true);
     }
@@ -248,7 +249,7 @@ where
                 handle.queue = Queue::None;
                 handle.base_mut().set_in_eviction(false);
 
-                self.main_charges -= handle.base().charge();
+                self.main_weight -= handle.base().weight();
             }
             Queue::Small => {
                 let p = self
@@ -261,7 +262,7 @@ where
                 handle.queue = Queue::None;
                 handle.base_mut().set_in_eviction(false);
 
-                self.small_charges -= handle.base().charge();
+                self.small_weight -= handle.base().weight();
             }
         }
     }
@@ -302,7 +303,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for S3Fifo<T>
     where
@@ -325,7 +326,7 @@ mod tests {
         assert_eq!(s.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
         let m = s.split_off(s3fifo.small_queue.len());
         assert_eq!((&s, &m), (&small, &main));
-        assert_eq!(s3fifo.small_charges, s.len());
+        assert_eq!(s3fifo.small_weight, s.len());
     }
 
     fn assert_count(ptrs: &[NonNull<TestS3FifoHandle>], range: Range<usize>, count: u8) {
@@ -335,11 +336,11 @@ mod tests {
     }
 
     #[test]
-    fn test_lfu() {
+    fn test_s3fifo() {
         unsafe {
             let ptrs = (0..100)
                 .map(|i| {
-                    let mut handle = Box::new(TestS3FifoHandle::new());
+                    let mut handle = Box::<TestS3FifoHandle>::default();
                     handle.init(i, i, 1, S3FifoContext);
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })

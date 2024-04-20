@@ -200,12 +200,12 @@ where
         }
     }
 
-    pub fn charge(&self) -> usize {
+    pub fn weight(&self) -> usize {
         match self {
-            CacheEntry::Fifo(entry) => entry.charge(),
-            CacheEntry::Lru(entry) => entry.charge(),
-            CacheEntry::Lfu(entry) => entry.charge(),
-            CacheEntry::S3Fifo(entry) => entry.charge(),
+            CacheEntry::Fifo(entry) => entry.weight(),
+            CacheEntry::Lru(entry) => entry.weight(),
+            CacheEntry::Lfu(entry) => entry.weight(),
+            CacheEntry::S3Fifo(entry) => entry.weight(),
         }
     }
 

@@ -30,7 +30,7 @@ use crate::{
 pub struct LruConfig {
     /// The ratio of the high priority pool occupied.
     ///
-    /// [`Lru`] guarantees that the high priority charges are always as larger as
+    /// [`Lru`] guarantees that the high priority weight are always as larger as
     /// but no larger that the capacity * high priority pool ratio.
     ///
     /// # Panic
@@ -83,24 +83,25 @@ where
 
 intrusive_adapter! { LruHandleDlistAdapter<T> = NonNull<LruHandle<T>>: LruHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
-impl<T> Handle for LruHandle<T>
+impl<T> Default for LruHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    type Data = T;
-    type Context = LruContext;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
             link: DlistLink::default(),
             base: BaseHandle::new(),
             in_high_priority_pool: false,
         }
     }
+}
 
-    fn init(&mut self, hash: u64, data: Self::Data, charge: usize, context: Self::Context) {
-        self.base.init(hash, data, charge, context)
-    }
+impl<T> Handle for LruHandle<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Data = T;
+    type Context = LruContext;
 
     fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
         &self.base
@@ -121,8 +122,8 @@ where
     high_priority_list: Dlist<LruHandleDlistAdapter<T>>,
     list: Dlist<LruHandleDlistAdapter<T>>,
 
-    high_priority_charges: usize,
-    high_priority_charges_capacity: usize,
+    high_priority_weight: usize,
+    high_priority_weight_capacity: usize,
 }
 
 impl<T> Lru<T>
@@ -130,13 +131,13 @@ where
     T: Send + Sync + 'static,
 {
     unsafe fn may_overflow_high_priority_pool(&mut self) {
-        while self.high_priority_charges > self.high_priority_charges_capacity {
+        while self.high_priority_weight > self.high_priority_weight_capacity {
             debug_assert!(!self.high_priority_list.is_empty());
 
             // overflow last entry in high priority pool to low priority pool
             let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
             ptr.as_mut().in_high_priority_pool = false;
-            self.high_priority_charges -= ptr.as_ref().base().charge();
+            self.high_priority_weight -= ptr.as_ref().base().weight();
             self.list.push_back(ptr);
         }
     }
@@ -159,13 +160,13 @@ where
             config.high_priority_pool_ratio
         );
 
-        let high_priority_charges_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
+        let high_priority_weight_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
 
         Self {
             high_priority_list: Dlist::new(),
             list: Dlist::new(),
-            high_priority_charges: 0,
-            high_priority_charges_capacity,
+            high_priority_weight: 0,
+            high_priority_weight_capacity,
         }
     }
 
@@ -177,7 +178,7 @@ where
         match handle.base().context() {
             LruContext::HighPriority => {
                 handle.in_high_priority_pool = true;
-                self.high_priority_charges += handle.base().charge();
+                self.high_priority_weight += handle.base().weight();
                 self.high_priority_list.push_back(ptr);
 
                 self.may_overflow_high_priority_pool();
@@ -198,7 +199,7 @@ where
         debug_assert!(!handle.link.is_linked());
 
         if handle.in_high_priority_pool {
-            self.high_priority_charges -= handle.base().charge();
+            self.high_priority_weight -= handle.base().weight();
         }
 
         handle.base_mut().set_in_eviction(false);
@@ -226,7 +227,7 @@ where
         debug_assert!(handle.link.is_linked());
 
         if handle.in_high_priority_pool {
-            self.high_priority_charges -= handle.base.charge();
+            self.high_priority_weight -= handle.base.weight();
             self.high_priority_list.remove_raw(handle.link.raw());
         } else {
             self.list.remove_raw(handle.link.raw());
@@ -247,11 +248,11 @@ where
         while !self.high_priority_list.is_empty() {
             let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
             ptr.as_mut().base_mut().set_in_eviction(false);
-            self.high_priority_charges -= ptr.as_ref().base().charge();
+            self.high_priority_weight -= ptr.as_ref().base().weight();
             res.push(ptr);
         }
 
-        debug_assert_eq!(self.high_priority_charges, 0);
+        debug_assert_eq!(self.high_priority_weight, 0);
 
         res
     }
@@ -275,7 +276,7 @@ pub mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::eviction::test_utils::TestEviction;
+    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
 
     impl<T> TestEviction for Lru<T>
     where
@@ -294,7 +295,7 @@ pub mod tests {
     type TestLru = Lru<u64>;
 
     unsafe fn new_test_lru_handle_ptr(data: u64, context: LruContext) -> NonNull<TestLruHandle> {
-        let mut handle = Box::new(TestLruHandle::new());
+        let mut handle = Box::<TestLruHandle>::default();
         handle.init(0, data, 1, context);
         NonNull::new_unchecked(Box::into_raw(handle))
     }
@@ -337,7 +338,7 @@ pub mod tests {
             };
             let mut lru = TestLru::new(8, &config);
 
-            assert_eq!(lru.high_priority_charges_capacity, 4);
+            assert_eq!(lru.high_priority_weight_capacity, 4);
 
             // [0, 1, 2, 3]
             lru.push(ptrs[0]);
@@ -345,14 +346,14 @@ pub mod tests {
             lru.push(ptrs[2]);
             lru.push(ptrs[3]);
             assert_eq!(lru.len(), 4);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(dump_test_lru(&lru), (vec![], vec![ptrs[0], ptrs[1], ptrs[2], ptrs[3]]));
 
             // 0, [1, 2, 3, 4]
             lru.push(ptrs[4]);
             assert_eq!(lru.len(), 5);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
@@ -362,7 +363,7 @@ pub mod tests {
             // 0, 10, [1, 2, 3, 4]
             lru.push(ptrs[10]);
             assert_eq!(lru.len(), 6);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
@@ -373,7 +374,7 @@ pub mod tests {
             let p0 = lru.pop().unwrap();
             assert_eq!(ptrs[0], p0);
             assert_eq!(lru.len(), 5);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
@@ -383,14 +384,14 @@ pub mod tests {
             // 10, [1, 3, 4]
             lru.remove(ptrs[2]);
             assert_eq!(lru.len(), 4);
-            assert_eq!(lru.high_priority_charges, 3);
+            assert_eq!(lru.high_priority_weight, 3);
             assert_eq!(lru.high_priority_list.len(), 3);
             assert_eq!(dump_test_lru(&lru), (vec![ptrs[10]], vec![ptrs[1], ptrs[3], ptrs[4]]));
 
             // 10, 11, [1, 3, 4]
             lru.push(ptrs[11]);
             assert_eq!(lru.len(), 5);
-            assert_eq!(lru.high_priority_charges, 3);
+            assert_eq!(lru.high_priority_weight, 3);
             assert_eq!(lru.high_priority_list.len(), 3);
             assert_eq!(
                 dump_test_lru(&lru),
@@ -401,7 +402,7 @@ pub mod tests {
             lru.push(ptrs[5]);
             lru.push(ptrs[6]);
             assert_eq!(lru.len(), 7);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
@@ -414,7 +415,7 @@ pub mod tests {
             // 10, 11, 1, 3, [4, 5, 6, 0]
             lru.push(ptrs[0]);
             assert_eq!(lru.len(), 8);
-            assert_eq!(lru.high_priority_charges, 4);
+            assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
             assert_eq!(
                 dump_test_lru(&lru),
