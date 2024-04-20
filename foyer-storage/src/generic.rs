@@ -855,7 +855,7 @@ where
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
         let align = region.device().align();
 
-        let slice = match region.load_range(..align).await? {
+        let slice = match region.load_range(0..align).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
