@@ -27,5 +27,5 @@ pub trait StorageKey: Key + Serialize + DeserializeOwned {}
 impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned {}
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-pub trait StorageValue: Value + 'static + Clone + Serialize + DeserializeOwned {}
-impl<T> StorageValue for T where T: Value + Clone + Serialize + DeserializeOwned {}
+pub trait StorageValue: Value + 'static + Serialize + DeserializeOwned {}
+impl<T> StorageValue for T where T: Value + Serialize + DeserializeOwned {}

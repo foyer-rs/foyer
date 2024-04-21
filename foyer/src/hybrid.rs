@@ -394,6 +394,7 @@ where
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Borrow<Q> + Clone,
+        V: Clone,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         if let Some(entry) = self.cache.get(key) {
@@ -435,7 +436,7 @@ pub type HybridEntry<K, V, S> = Entry<K, V, anyhow::Error, HybridCacheEventListe
 impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey + Clone,
-    V: StorageValue,
+    V: StorageValue + Clone,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn entry<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
