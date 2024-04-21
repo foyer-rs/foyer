@@ -350,23 +350,23 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        Ok(self.inner.catalog.lookup(key).is_some())
+        Ok(self.inner.catalog.get(key).is_some())
     }
 
     #[tracing::instrument(skip_all)]
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let now = Instant::now();
 
-        let (_sequence, index) = match self.inner.catalog.lookup(key) {
+        let (_sequence, index) = match self.inner.catalog.get(key) {
             Some(item) => item.consume(),
             None => {
                 self.inner
                     .metrics
-                    .op_duration_lookup_miss
+                    .op_duration_get_miss
                     .observe(now.elapsed().as_secs_f64());
                 return Ok(None);
             }
@@ -378,7 +378,7 @@ where
 
                 self.inner
                     .metrics
-                    .op_duration_lookup_hit
+                    .op_duration_get_hit
                     .observe(now.elapsed().as_secs_f64());
 
                 Ok(Some(CachedEntry::Shared { key, value }))
@@ -393,11 +393,11 @@ where
                 let buf = match region.load(view).await? {
                     Some(buf) => buf,
                     None => {
-                        // Remove index if the storage layer fails to lookup it (because of region version mismatch).
+                        // Remove index if the storage layer fails to get it (because of region version mismatch).
                         self.inner.catalog.remove(key);
                         self.inner
                             .metrics
-                            .op_duration_lookup_miss
+                            .op_duration_get_miss
                             .observe(now.elapsed().as_secs_f64());
                         return Ok(None);
                     }
@@ -405,14 +405,14 @@ where
 
                 let res = match read_entry::<K, V>(buf.as_ref()) {
                     Ok((key, value)) => {
-                        self.inner.metrics.op_bytes_lookup.inc_by(buf.len() as u64);
+                        self.inner.metrics.op_bytes_get.inc_by(buf.len() as u64);
                         Ok(Some(CachedEntry::Owned {
                             key: Box::new(key),
                             value: Box::new(value),
                         }))
                     }
                     Err(e) => {
-                        // Remove index if the storage layer fails to lookup it (because of entry magic mismatch).
+                        // Remove index if the storage layer fails to get it (because of entry magic mismatch).
                         self.inner.catalog.remove(key);
                         Err(e)
                     }
@@ -420,7 +420,7 @@ where
 
                 self.inner
                     .metrics
-                    .op_duration_lookup_hit
+                    .op_duration_get_hit
                     .observe(now.elapsed().as_secs_f64());
 
                 res
@@ -1028,12 +1028,12 @@ where
         self.exists(key)
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.lookup(key).await
+        self.get(key).await
     }
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>
@@ -1116,9 +1116,9 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
             } else {
-                assert!(store.lookup(&i).await.unwrap().is_none());
+                assert!(store.get(&i).await.unwrap().is_none());
             }
         }
 
@@ -1147,9 +1147,9 @@ mod tests {
 
         for i in 0..21 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
             } else {
-                assert!(store.lookup(&i).await.unwrap().is_none());
+                assert!(store.get(&i).await.unwrap().is_none());
             }
         }
 

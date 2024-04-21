@@ -233,17 +233,14 @@ where
         self.store.exists(key)
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
     {
         let store = self.store.clone();
         let key = key.clone();
-        self.runtime
-            .spawn(async move { store.lookup(&key).await })
-            .await
-            .unwrap()
+        self.runtime.spawn(async move { store.get(&key).await }).await.unwrap()
     }
 
     fn remove<Q>(&self, key: &Q) -> crate::error::Result<bool>

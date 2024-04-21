@@ -124,7 +124,7 @@ where
         Q: Hash + Eq + ?Sized;
 
     #[must_use]
-    fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static;
@@ -451,7 +451,7 @@ mod tests {
         assert!(writer.finish(vec![b'x'; KB]).await.unwrap().is_some());
 
         assert!(storage.exists(&1).unwrap());
-        assert_eq!(storage.lookup(&1).await.unwrap().unwrap().value(), &vec![b'x'; KB]);
+        assert_eq!(storage.get(&1).await.unwrap().unwrap().value(), &vec![b'x'; KB]);
 
         assert!(storage.remove(&1).unwrap());
         assert!(!storage.exists(&1).unwrap());

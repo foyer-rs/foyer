@@ -394,7 +394,6 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
-    ER: std::error::Error,
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, L, S>),
@@ -411,7 +410,6 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
-    ER: std::error::Error,
 {
     fn default() -> Self {
         Self::Invalid
@@ -427,7 +425,7 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
-    ER: std::error::Error + From<oneshot::error::RecvError>,
+    ER: From<oneshot::error::RecvError>,
 {
     type Output = std::result::Result<GenericCacheEntry<K, V, E, I, L, S>, ER>;
 
@@ -705,7 +703,7 @@ where
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
-        ER: std::error::Error + Send + 'static,
+        ER: Send + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
 

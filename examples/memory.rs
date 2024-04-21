@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer::memory::CacheBuilder;
+use foyer::CacheBuilder;
 
 fn main() {
     let cache = CacheBuilder::new(16).build();

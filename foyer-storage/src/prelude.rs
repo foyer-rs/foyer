@@ -18,8 +18,11 @@ pub use crate::{
     device::fs::{FsDeviceConfig, FsDeviceConfigBuilder},
     error::{Error, Result},
     metrics::{get_metrics_registry, set_metrics_registry},
-    reinsertion::{rated_ticket::RatedTicketReinsertionPolicy, ReinsertionContext, ReinsertionPolicy},
+    reinsertion::{
+        exist::ExistReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy, ReinsertionContext,
+        ReinsertionPolicy,
+    },
     runtime::{RuntimeConfig, RuntimeConfigBuilder, RuntimeStoreConfig},
     storage::{AsyncStorageExt, CachedEntry, ForceStorageExt, Storage, StorageExt, StorageWriter},
-    store::{FsStoreConfig, Store, StoreBuilder, StoreConfig, StoreWriter},
+    store::{DeviceConfig, FsStoreConfig, Store, StoreBuilder, StoreConfig, StoreWriter},
 };

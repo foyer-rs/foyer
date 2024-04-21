@@ -12,8 +12,17 @@ readme = "../README.md"
 publish = false
 
 [dependencies]
+ahash = "0.8"
+anyhow = "1"
+chrono = "0.4"
 foyer = { version = "*", path = "../foyer" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt"] }
 
 [[example]]
 name = "memory"
 path = "memory.rs"
+
+[[example]]
+name = "hybrid"
+path = "hybrid.rs"

@@ -15,6 +15,7 @@ normal = ["foyer-workspace-hack"]
 
 [dependencies]
 ahash = "0.8"
+anyhow = "1"
 bitflags = "2"
 cmsketch = "0.2"
 foyer-common = { version = "0.5", path = "../foyer-common" }

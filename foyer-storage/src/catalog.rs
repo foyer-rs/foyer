@@ -173,7 +173,7 @@ where
         }
     }
 
-    pub fn lookup<Q>(&self, key: &Q) -> Option<Item<K, V>>
+    pub fn get<Q>(&self, key: &Q) -> Option<Item<K, V>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

@@ -196,14 +196,14 @@ where
         }
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
     {
         match self.once.get() {
-            Some(store) => store.lookup(key).await,
-            None => self.none.lookup(key).await,
+            Some(store) => store.get(key).await,
+            None => self.none.get(key).await,
         }
     }
 
@@ -273,7 +273,7 @@ mod tests {
         handle.await.unwrap().unwrap();
 
         assert!(store.insert(100, 100).await.unwrap().is_some());
-        assert_eq!(store.lookup(&100).await.unwrap().unwrap().value(), &100);
+        assert_eq!(store.get(&100).await.unwrap().unwrap().value(), &100);
 
         store.close().await.unwrap();
         drop(store);
@@ -300,11 +300,11 @@ mod tests {
 
         let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);
 
-        assert!(store.lookup(&100).await.unwrap().is_none());
+        assert!(store.get(&100).await.unwrap().is_none());
 
         handle.await.unwrap().unwrap();
 
-        assert_eq!(store.lookup(&100).await.unwrap().unwrap().value(), &100);
+        assert_eq!(store.get(&100).await.unwrap().unwrap().value(), &100);
         store.close().await.unwrap();
     }
 }

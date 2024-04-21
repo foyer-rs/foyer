@@ -79,7 +79,7 @@ where
         self.insert_inner(&mut inner, index)
     }
 
-    pub fn lookup(&self, key: &K) -> Option<Index<K>> {
+    pub fn get(&self, key: &K) -> Option<Index<K>> {
         let inner = self.inner.read();
         let slot = inner.slots.get(key)?;
         inner.regions[slot.region as usize]

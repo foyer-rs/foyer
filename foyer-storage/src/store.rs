@@ -528,17 +528,17 @@ where
         }
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
     {
         match self {
-            Store::None(store) => store.lookup(key).await,
-            Store::Fs(store) => store.lookup(key).await,
-            Store::LazyFs(store) => store.lookup(key).await,
-            Store::RuntimeFs(store) => store.lookup(key).await,
-            Store::RuntimeLazyFs(store) => store.lookup(key).await,
+            Store::None(store) => store.get(key).await,
+            Store::Fs(store) => store.get(key).await,
+            Store::LazyFs(store) => store.get(key).await,
+            Store::RuntimeFs(store) => store.get(key).await,
+            Store::RuntimeLazyFs(store) => store.get(key).await,
         }
     }
 

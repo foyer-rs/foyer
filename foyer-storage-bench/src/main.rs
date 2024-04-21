@@ -89,7 +89,7 @@ pub struct Args {
     entry_size_max: usize,
 
     #[arg(long, default_value_t = 10000)]
-    lookup_range: u64,
+    get_range: u64,
 
     /// (MiB)
     #[arg(long, default_value_t = 64)]
@@ -207,7 +207,7 @@ struct Context {
     r_rate: Option<f64>,
     counts: Vec<AtomicU64>,
     entry_size_range: Range<usize>,
-    lookup_range: u64,
+    get_range: u64,
     time: Duration,
     warm_up: Duration,
     distribution: TimeSeriesDistribution,
@@ -342,7 +342,7 @@ async fn main() {
 
     println!("{:#?}", args);
 
-    assert!(args.lookup_range > 0, "\"--lookup-range\" value must be greater than 0");
+    assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
     create_dir_all(&args.dir).unwrap();
 
@@ -473,7 +473,7 @@ async fn bench(args: Args, store: impl Storage<u64, Value>, metrics: Metrics, st
     let context = Arc::new(Context {
         w_rate,
         r_rate,
-        lookup_range: args.lookup_range,
+        get_range: args.get_range,
         counts,
         entry_size_range: args.entry_size_min..args.entry_size_max + 1,
         time: Duration::from_secs(args.time),
@@ -632,11 +632,11 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
             tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
-        let c = rng.gen_range(std::cmp::max(c_max, context.lookup_range) - context.lookup_range..c_max);
+        let c = rng.gen_range(std::cmp::max(c_max, context.get_range) - context.get_range..c_max);
         let idx = w + c * step;
 
         let time = Instant::now();
-        let res = store.lookup(&idx).await.unwrap();
+        let res = store.get(&idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
         let record = start.elapsed() > context.warm_up;

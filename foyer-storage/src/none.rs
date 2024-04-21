@@ -114,7 +114,7 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         Ok(false)
     }
 
-    async fn lookup<Q>(&self, _: &Q) -> Result<Option<CachedEntry<K, V>>>
+    async fn get<Q>(&self, _: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
