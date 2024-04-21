@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_io_size(16 * 1024)
                 .build(),
         )
+        .with_catalog_shards(4)
         .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(10 * 1024 * 1024)))
         .with_reinsertion_policy(Arc::new(RatedTicketReinsertionPolicy::new(10 * 1024 * 1024)))
         .with_flushers(2)
