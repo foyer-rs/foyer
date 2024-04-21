@@ -144,7 +144,7 @@ jobs:
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
-          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --file-size 16 --lookup-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
