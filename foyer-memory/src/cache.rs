@@ -587,7 +587,6 @@ pub enum Entry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -601,7 +600,6 @@ impl<K, V, ER, L, S> From<FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -614,7 +612,6 @@ impl<K, V, ER, L, S> From<LruEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -627,7 +624,6 @@ impl<K, V, ER, L, S> From<LfuEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -640,7 +636,6 @@ impl<K, V, ER, L, S> From<S3FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -653,7 +648,7 @@ impl<K, V, ER, L, S> Future for Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error + From<oneshot::error::RecvError>,
+    ER: From<oneshot::error::RecvError>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -680,7 +675,6 @@ impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
 where
     K: Key + Clone,
     V: Value,
-    ER: std::error::Error,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -717,7 +711,7 @@ where
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
-        ER: std::error::Error + Send + 'static,
+        ER: Send + 'static,
     {
         match self {
             Cache::Fifo(cache) => Entry::from(cache.entry(key, f)),

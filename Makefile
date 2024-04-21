@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example
 
 deps:
 	./scripts/install-deps.sh
@@ -46,9 +46,13 @@ madsim:
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo test --doc
 
-all: check-all test-all
+example:
+	cargo run --example memory
+	cargo run --example hybrid
 
-fast: check test
+all: check-all test-all example
+
+fast: check test example
 
 monitor:
 	./scripts/monitor.sh

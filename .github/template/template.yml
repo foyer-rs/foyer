@@ -98,6 +98,13 @@ jobs:
           CI: true
         run: |
           cargo llvm-cov --no-report nextest
+      - name: Run examples with coverage
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report run --example memory
+          cargo llvm-cov --no-report run --example hybrid
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info

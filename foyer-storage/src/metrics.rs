@@ -166,13 +166,13 @@ pub struct Metrics {
     pub op_duration_insert_inserted: Histogram,
     pub op_duration_insert_filtered: Histogram,
     pub op_duration_insert_dropped: Histogram,
-    pub op_duration_lookup_hit: Histogram,
-    pub op_duration_lookup_miss: Histogram,
+    pub op_duration_get_hit: Histogram,
+    pub op_duration_get_miss: Histogram,
     pub op_duration_remove: Histogram,
     pub slow_op_duration_reclaim: Histogram,
 
     pub op_bytes_insert: IntCounter,
-    pub op_bytes_lookup: IntCounter,
+    pub op_bytes_get: IntCounter,
     pub op_bytes_flush: IntCounter,
     pub op_bytes_reclaim: IntCounter,
     pub op_bytes_reinsert: IntCounter,
@@ -194,13 +194,13 @@ impl Metrics {
         let op_duration_insert_inserted = global.op_duration.with_label_values(&[foyer, "insert", "inserted"]);
         let op_duration_insert_filtered = global.op_duration.with_label_values(&[foyer, "insert", "filtered"]);
         let op_duration_insert_dropped = global.op_duration.with_label_values(&[foyer, "insert", "dropped"]);
-        let op_duration_lookup_hit = global.op_duration.with_label_values(&[foyer, "lookup", "hit"]);
-        let op_duration_lookup_miss = global.op_duration.with_label_values(&[foyer, "lookup", "miss"]);
+        let op_duration_get_hit = global.op_duration.with_label_values(&[foyer, "get", "hit"]);
+        let op_duration_get_miss = global.op_duration.with_label_values(&[foyer, "get", "miss"]);
         let op_duration_remove = global.op_duration.with_label_values(&[foyer, "remove", ""]);
         let slow_op_duration_reclaim = global.slow_op_duration.with_label_values(&[foyer, "reclaim", ""]);
 
         let op_bytes_insert = global.op_bytes.with_label_values(&[foyer, "insert", ""]);
-        let op_bytes_lookup = global.op_bytes.with_label_values(&[foyer, "lookup", ""]);
+        let op_bytes_get = global.op_bytes.with_label_values(&[foyer, "get", ""]);
         let op_bytes_flush = global.op_bytes.with_label_values(&[foyer, "flush", ""]);
         let op_bytes_reclaim = global.op_bytes.with_label_values(&[foyer, "reclaim", ""]);
         let op_bytes_reinsert = global.op_bytes.with_label_values(&[foyer, "reinsert", ""]);
@@ -235,13 +235,13 @@ impl Metrics {
             op_duration_insert_inserted,
             op_duration_insert_filtered,
             op_duration_insert_dropped,
-            op_duration_lookup_hit,
-            op_duration_lookup_miss,
+            op_duration_get_hit,
+            op_duration_get_miss,
             op_duration_remove,
             slow_op_duration_reclaim,
 
             op_bytes_insert,
-            op_bytes_lookup,
+            op_bytes_get,
             op_bytes_flush,
             op_bytes_reclaim,
             op_bytes_reinsert,

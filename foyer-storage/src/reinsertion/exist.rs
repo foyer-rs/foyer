@@ -55,6 +55,6 @@ where
 
     fn judge(&self, key: &Self::Key) -> bool {
         let indices = self.catalog.get().unwrap();
-        indices.lookup(key).is_some()
+        indices.get(key).is_some()
     }
 }

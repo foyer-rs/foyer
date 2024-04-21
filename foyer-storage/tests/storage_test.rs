@@ -48,9 +48,9 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
 
     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
         if remains.contains(&i) {
-            assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+            assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
         } else {
-            assert!(store.lookup(&i).await.unwrap().is_none());
+            assert!(store.get(&i).await.unwrap().is_none());
         }
     }
 
@@ -66,9 +66,9 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
             } else {
-                assert!(store.lookup(&i).await.unwrap().is_none());
+                assert!(store.get(&i).await.unwrap().is_none());
             }
         }
 
@@ -83,9 +83,9 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             if remains.contains(&i) {
-                assert_eq!(store.lookup(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
             } else {
-                assert!(store.lookup(&i).await.unwrap().is_none());
+                assert!(store.get(&i).await.unwrap().is_none());
             }
         }
 
