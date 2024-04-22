@@ -20,7 +20,10 @@ use std::{
 };
 
 use ahash::RandomState;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    arcable::Arcable,
+    code::{StorageKey, StorageValue},
+};
 use foyer_memory::{
     Cache, CacheBuilder, CacheContext, CacheEntry, CacheEventListener, Entry, EvictionConfig, Weighter,
 };
@@ -74,7 +77,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    fn on_release(&self, key: K, value: V, _context: CacheContext, _weight: usize) {
+    fn on_release(&self, key: Arc<K>, value: Arc<V>, _context: CacheContext, _weight: usize) {
         // TODO(MrCroxx): Return read handle to block following request of the key and clear with callback?
         unsafe { self.inner.store.get().unwrap_unchecked() }.insert_if_not_exists_async(key, value)
     }
@@ -383,11 +386,19 @@ where
         &self.store
     }
 
-    pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         self.cache.insert(key, value)
     }
 
-    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> HybridCacheEntry<K, V, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         self.cache.insert_with_context(key, value, context)
     }
 

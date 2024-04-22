@@ -26,6 +26,7 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::{
+    arcable::Arcable,
     code::{Key, Value},
     object_pool::ObjectPool,
 };
@@ -62,7 +63,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -73,7 +74,7 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
-    waiters: HashMap<K, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
+    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
 
     state: Arc<CacheSharedState<E::Handle, L>>,
 }
@@ -83,7 +84,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -108,23 +109,32 @@ where
     }
 
     /// Insert a new entry into the cache. The handle for the new entry is returned.
-    unsafe fn insert(
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
+    unsafe fn insert<AK, AV>(
         &mut self,
         hash: u64,
-        key: K,
-        value: V,
+        key: AK,
+        value: AV,
         weight: usize,
         context: <E::Handle as Handle>::Context,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
-    ) -> NonNull<E::Handle> {
+        last_reference_entries: &mut Vec<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)>,
+    ) -> NonNull<E::Handle>
+    where
+        AK: Into<Arcable<K>>,
+        AV: Into<Arcable<V>>,
+    {
+        let key = key.into().into_arc();
+        let value = value.into().into_arc();
+
         let mut handle = self.state.object_pool.acquire();
-        handle.init(hash, (key, value), weight, context);
+        handle.init(hash, (key.clone(), value), weight, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
         self.evict(weight, last_reference_entries);
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
-        if let Some(old) = self.indexer.insert(ptr) {
+        if let Some(old) = self.indexer.insert(key, ptr) {
             self.state.metrics.replace.fetch_add(1, Ordering::Relaxed);
 
             debug_assert!(!old.as_ref().base().is_in_indexer());
@@ -233,7 +243,12 @@ where
     }
 
     /// Clear all cache entries.
-    unsafe fn clear(&mut self, last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
+    unsafe fn clear(
+        &mut self,
+        last_reference_entries: &mut Vec<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)>,
+    ) {
         // TODO(MrCroxx): Avoid collecting here?
         let ptrs = self.indexer.drain().collect_vec();
         let eptrs = self.eviction.clear();
@@ -258,10 +273,12 @@ where
         }
     }
 
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     unsafe fn evict(
         &mut self,
         weight: usize,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
+        last_reference_entries: &mut Vec<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)>,
     ) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         while self.usage.load(Ordering::Relaxed) + weight > self.capacity {
@@ -282,10 +299,12 @@ where
     /// Release a handle used by an external user.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     unsafe fn try_release_external_handle(
         &mut self,
         mut ptr: NonNull<E::Handle>,
-    ) -> Option<(K, V, <E::Handle as Handle>::Context, usize)> {
+    ) -> Option<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)> {
         ptr.as_mut().base_mut().dec_refs();
         self.try_release_handle(ptr, true)
     }
@@ -295,11 +314,13 @@ where
     /// Return the entry if the handle is released.
     ///
     /// Recycle it if possible.
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     unsafe fn try_release_handle(
         &mut self,
         mut ptr: NonNull<E::Handle>,
         reinsert: bool,
-    ) -> Option<(K, V, <E::Handle as Handle>::Context, usize)> {
+    ) -> Option<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)> {
         let handle = ptr.as_mut();
 
         if handle.base().has_refs() {
@@ -355,7 +376,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -370,7 +391,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
@@ -390,7 +411,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -406,7 +427,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -421,7 +442,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -449,7 +470,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -470,7 +491,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -501,16 +522,26 @@ where
         }
     }
 
-    pub fn insert(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, L, S> {
+    pub fn insert<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         self.insert_with_context(key, value, CacheContext::default())
     }
 
-    pub fn insert_with_context(
+    pub fn insert_with_context<AK, AV>(
         self: &Arc<Self>,
-        key: K,
-        value: V,
+        key: AK,
+        value: AV,
         context: CacheContext,
-    ) -> GenericCacheEntry<K, V, E, I, L, S> {
+    ) -> GenericCacheEntry<K, V, E, I, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
+        let key = key.into().into_arc();
+        let value = value.into().into_arc();
         let hash = self.hash_builder.hash_one(&key);
         let weight = (self.weighter)(&key, &value);
 
@@ -691,20 +722,23 @@ where
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
 impl<K, V, E, I, L, S> GenericCache<K, V, E, I, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
+    pub fn entry<AK, AV, F, FU, ER>(self: &Arc<Self>, key: AK, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,
     {
+        let key = key.into().into_arc();
         let hash = self.hash_builder.hash_one(&key);
 
         unsafe {
@@ -755,7 +789,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -769,7 +803,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -800,7 +834,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -826,7 +860,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -841,7 +875,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -858,7 +892,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -869,7 +903,7 @@ where
     K: Key,
     V: Value,
     E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -967,7 +1001,7 @@ mod tests {
     fn test_reference_count() {
         let cache = fifo(100);
 
-        let refs = |ptr: NonNull<FifoHandle<(u64, String)>>| unsafe { ptr.as_ref().base().refs() };
+        let refs = |ptr: NonNull<FifoHandle<(Arc<u64>, Arc<String>)>>| unsafe { ptr.as_ref().base().refs() };
 
         let e1 = insert_fifo(&cache, 42, "the answer to life, the universe, and everything");
         let ptr = e1.ptr;
@@ -1004,7 +1038,10 @@ mod tests {
 
         assert_eq!(
             cache.shards[0].lock().eviction.dump(),
-            vec![(514, "QwQ".to_string()), (114, "(0.0)".to_string())],
+            vec![
+                (514.into(), "QwQ".to_string().into()),
+                (114.into(), "(0.0)".to_string().into())
+            ],
         );
     }
 
@@ -1056,7 +1093,10 @@ mod tests {
         assert_eq!(cache.usage(), 12);
 
         // `111`, `222` and `333` are evicted from the eviction container to make space for `444`.
-        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(4.into(), "444".to_string().into()),]
+        );
 
         // `e1` cannot be reinserted for the usage has already exceeds the capacity.
         drop(e1);
@@ -1067,7 +1107,11 @@ mod tests {
         drop(e3);
         assert_eq!(
             cache.shards[0].lock().eviction.dump(),
-            vec![(4, "444".to_string()), (2, "222".to_string()), (3, "333".to_string()),]
+            vec![
+                (4.into(), "444".to_string().into()),
+                (2.into(), "222".to_string().into()),
+                (3.into(), "333".to_string().into()),
+            ]
         );
         assert_eq!(cache.usage(), 9);
 
@@ -1075,7 +1119,11 @@ mod tests {
         drop(e4);
         assert_eq!(
             cache.shards[0].lock().eviction.dump(),
-            vec![(2, "222".to_string()), (3, "333".to_string()), (4, "444".to_string()),]
+            vec![
+                (2.into(), "222".to_string().into()),
+                (3.into(), "333".to_string().into()),
+                (4.into(), "444".to_string().into()),
+            ]
         );
         assert_eq!(cache.usage(), 9);
     }
@@ -1094,7 +1142,10 @@ mod tests {
         assert_eq!(cache.usage(), 12);
 
         // `111`, `222` and `333` are evicted from the eviction container to make space for `444`.
-        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(4.into(), "444".to_string().into()),]
+        );
 
         // `e1` cannot be reinserted for the usage has already exceeds the capacity.
         drop(e1);
@@ -1102,7 +1153,10 @@ mod tests {
 
         // `222` and `333` will be not reinserted because fifo will ignore reinsert operations.
         drop([e2, e3, e4]);
-        assert_eq!(cache.shards[0].lock().eviction.dump(), vec![(4, "444".to_string()),]);
+        assert_eq!(
+            cache.shards[0].lock().eviction.dump(),
+            vec![(4.into(), "444".to_string().into()),]
+        );
         assert_eq!(cache.usage(), 3);
 
         // Note:

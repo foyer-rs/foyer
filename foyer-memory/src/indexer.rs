@@ -12,20 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
+use std::{borrow::Borrow, hash::Hash, ptr::NonNull, sync::Arc};
 
-use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
-
-use foyer_common::code::Key;
+use foyer_common::{arc_key_hash_map::RawArcKeyHashMap, arcable::Arcable, code::Key};
 
 use crate::handle::KeyedHandle;
 
 pub trait Indexer: Send + Sync + 'static {
     type Key: Key;
-    type Handle: KeyedHandle<Key = Self::Key>;
+    type Handle: KeyedHandle<Key = Arc<Self::Key>>;
 
     fn new() -> Self;
-    unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
+    unsafe fn insert<AK>(&mut self, key: AK, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>
+    where
+        AK: Into<Arcable<Self::Key>>;
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
         Self::Key: Borrow<Q>,
@@ -37,64 +37,59 @@ pub trait Indexer: Send + Sync + 'static {
     unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
 }
 
-pub struct HashTableIndexer<K, H>
+pub struct ArcKeyHashMapIndexer<K, H>
 where
     K: Key,
-    H: KeyedHandle<Key = K>,
+    H: KeyedHandle<Key = Arc<K>>,
 {
-    table: HashTable<NonNull<H>>,
+    inner: RawArcKeyHashMap<K, NonNull<H>>,
 }
 
-unsafe impl<K, H> Send for HashTableIndexer<K, H>
+unsafe impl<K, H> Send for ArcKeyHashMapIndexer<K, H>
 where
     K: Key,
-    H: KeyedHandle<Key = K>,
-{
-}
-
-unsafe impl<K, H> Sync for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: KeyedHandle<Key = K>,
+    H: KeyedHandle<Key = Arc<K>>,
 {
 }
 
-impl<K, H> Indexer for HashTableIndexer<K, H>
+unsafe impl<K, H> Sync for ArcKeyHashMapIndexer<K, H>
 where
     K: Key,
-    H: KeyedHandle<Key = K>,
+    H: KeyedHandle<Key = Arc<K>>,
+{
+}
+
+impl<K, H> Indexer for ArcKeyHashMapIndexer<K, H>
+where
+    K: Key,
+    H: KeyedHandle<Key = Arc<K>>,
 {
     type Key = K;
     type Handle = H;
 
     fn new() -> Self {
         Self {
-            table: HashTable::new(),
+            inner: RawArcKeyHashMap::new(),
         }
     }
 
-    unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
+    unsafe fn insert<AK>(&mut self, key: AK, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>
+    where
+        AK: Into<Arcable<Self::Key>>,
+    {
         let handle = ptr.as_mut();
 
         debug_assert!(!handle.base().is_in_indexer());
         handle.base_mut().set_in_indexer(true);
 
-        match self.table.entry(
-            handle.base().hash(),
-            |p| p.as_ref().key() == handle.key(),
-            |p| p.as_ref().base().hash(),
-        ) {
-            HashTableEntry::Occupied(mut o) => {
-                std::mem::swap(o.get_mut(), &mut ptr);
-                let b = ptr.as_mut().base_mut();
+        match self.inner.insert_with_hash(handle.base().hash(), key, ptr) {
+            Some(mut old) => {
+                let b = old.as_mut().base_mut();
                 debug_assert!(b.is_in_indexer());
                 b.set_in_indexer(false);
-                Some(ptr)
+                Some(old)
             }
-            HashTableEntry::Vacant(v) => {
-                v.insert(ptr);
-                None
-            }
+            None => None,
         }
     }
 
@@ -103,7 +98,7 @@ where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.table.find(hash, |p| p.as_ref().key().borrow() == key).copied()
+        self.inner.get_with_hash(hash, key).copied()
     }
 
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
@@ -111,23 +106,14 @@ where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self
-            .table
-            .entry(hash, |p| p.as_ref().key().borrow() == key, |p| p.as_ref().base().hash())
-        {
-            HashTableEntry::Occupied(o) => {
-                let (mut p, _) = o.remove();
-                let b = p.as_mut().base_mut();
-                debug_assert!(b.is_in_indexer());
-                b.set_in_indexer(false);
-                Some(p)
-            }
-            HashTableEntry::Vacant(_) => None,
-        }
+        self.inner.remove_with_hash(hash, key).map(|mut ptr| {
+            ptr.as_mut().base_mut().set_in_indexer(false);
+            ptr
+        })
     }
 
     unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>> {
-        self.table.drain().map(|mut ptr| {
+        self.inner.drain().map(|(_, mut ptr)| {
             ptr.as_mut().base_mut().set_in_indexer(false);
             ptr
         })

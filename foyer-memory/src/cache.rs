@@ -24,7 +24,10 @@ use ahash::RandomState;
 use futures::{Future, FutureExt};
 use tokio::sync::oneshot;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    arcable::Arcable,
+    code::{Key, Value},
+};
 
 use crate::{
     context::CacheContext,
@@ -35,39 +38,39 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoHandle},
     },
     generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry, Weighter},
-    indexer::HashTableIndexer,
+    indexer::ArcKeyHashMapIndexer,
     listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
 pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, L, S>;
+    GenericCache<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, L, S>;
+    GenericCacheEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, L, S, ER>;
+    GenericEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
 
 pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, L, S>;
+    GenericCache<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, L, S>;
+    GenericCacheEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, L, S, ER>;
+    GenericEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
 
 pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, L, S>;
+    GenericCache<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, L, S>;
+    GenericCacheEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, L, S, ER>;
+    GenericEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
 
 pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, L, S>;
+    GenericCache<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, L, S>;
+    GenericCacheEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
 pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, L, S, ER>;
+    GenericEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
 
 pub enum CacheEntry<K, V, L, S = RandomState>
 where
@@ -458,7 +461,11 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, L, S> {
+    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
             Cache::Lru(cache) => cache.insert(key, value).into(),
@@ -467,7 +474,11 @@ where
         }
     }
 
-    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, L, S> {
+    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
             Cache::Lru(cache) => cache.insert_with_context(key, value, context).into(),
@@ -585,7 +596,7 @@ where
 
 pub enum Entry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -598,7 +609,7 @@ where
 
 impl<K, V, ER, L, S> From<FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -610,7 +621,7 @@ where
 
 impl<K, V, ER, L, S> From<LruEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -622,7 +633,7 @@ where
 
 impl<K, V, ER, L, S> From<LfuEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -634,7 +645,7 @@ where
 
 impl<K, V, ER, L, S> From<S3FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -646,7 +657,7 @@ where
 
 impl<K, V, ER, L, S> Future for Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     ER: From<oneshot::error::RecvError>,
     L: CacheEventListener<K, V>,
@@ -673,7 +684,7 @@ pub enum EntryState {
 
 impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
@@ -702,15 +713,17 @@ where
 
 impl<K, V, L, S> Cache<K, V, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, L, S>
+    pub fn entry<AK, AV, F, FU, ER>(&self, key: AK, f: F) -> Entry<K, V, ER, L, S>
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,
     {
         match self {
