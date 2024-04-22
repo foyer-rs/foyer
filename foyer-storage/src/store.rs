@@ -476,6 +476,7 @@ where
     }
 }
 
+// https://github.com/MrCroxx/foyer/pull/399
 enum GetFuture<F1, F2, F3, F4, F5> {
     None(F1),
     Fs(F2),
@@ -485,6 +486,8 @@ enum GetFuture<F1, F2, F3, F4, F5> {
 }
 
 impl<F1, F2, F3, F4, F5> GetFuture<F1, F2, F3, F4, F5> {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
     pub fn as_pin_mut(
         self: Pin<&mut Self>,
     ) -> GetFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>> {
@@ -592,15 +595,13 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let future = match &self {
+        match self {
             Store::None(store) => GetFuture::None(store.get(key)),
             Store::Fs(store) => GetFuture::Fs(store.get(key)),
             Store::LazyFs(store) => GetFuture::LazyFs(store.get(key)),
             Store::RuntimeFs(store) => GetFuture::RuntimeFs(store.get(key)),
             Store::RuntimeLazyFs(store) => GetFuture::RuntimeLazyFs(store.get(key)),
-        };
-
-        future
+        }
     }
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>

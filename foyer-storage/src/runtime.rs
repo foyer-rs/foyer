@@ -245,10 +245,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let fut = self.store.get(&key);
-
-        // FIXME: we should handle error here.
-        self.runtime.spawn(fut).map(|r| r.unwrap())
+        let future = self.store.get(key);
+        self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
     fn remove<Q>(&self, key: &Q) -> crate::error::Result<bool>

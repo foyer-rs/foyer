@@ -19,7 +19,7 @@ use std::{
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
-use futures::Future;
+use futures::{future::Either, Future};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -208,12 +208,9 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        // TODO: Implement a future that returns correct result.
-        // This should be simple.
         match self.once.get() {
-            Some(store) => store.get(key),
-            // TODO: Replace by NoneStore.
-            None => todo!("implement me"),
+            Some(store) => Either::Left(store.get(key)),
+            None => Either::Right(async { Ok(None) }),
         }
     }
 
