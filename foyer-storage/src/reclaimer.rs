@@ -134,6 +134,7 @@ where
                 };
 
                 while let Some((key, value, len)) = iter.next_kv().await? {
+                    let key = Arc::new(key);
                     // Judge by reinsertion policy.
                     let mut judges = Judges::new(reinsertions.len());
                     for (index, reinsertion) in reinsertions.iter().enumerate() {

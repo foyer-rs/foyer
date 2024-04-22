@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.s
 
-use std::{collections::HashSet, marker::PhantomData};
+use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use parking_lot::Mutex;
@@ -22,10 +22,19 @@ use crate::{
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
 };
 
-#[derive(Debug, Clone)]
-pub enum Record<K: StorageKey> {
-    Admit(K),
-    Evict(K),
+#[derive(Debug)]
+pub enum Record<K> {
+    Admit(Arc<K>),
+    Evict(Arc<K>),
+}
+
+impl<K> Clone for Record<K> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Admit(key) => Self::Admit(key.clone()),
+            Self::Evict(key) => Self::Evict(key.clone()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -40,14 +49,14 @@ where
 
 impl<K, V> JudgeRecorder<K, V>
 where
-    K: StorageKey + Clone,
-    V: StorageValue + Clone,
+    K: StorageKey,
+    V: StorageValue,
 {
     pub fn dump(&self) -> Vec<Record<K>> {
         self.records.lock().clone()
     }
 
-    pub fn remains(&self) -> HashSet<K> {
+    pub fn remains(&self) -> HashSet<Arc<K>> {
         let records = self.dump();
         let mut res = HashSet::default();
         for record in records {
@@ -79,8 +88,8 @@ where
 
 impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
 where
-    K: StorageKey + Clone,
-    V: StorageValue + Clone,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
 
@@ -88,7 +97,7 @@ where
 
     fn init(&self, _: AdmissionContext<Self::Key, Self::Value>) {}
 
-    fn judge(&self, key: &K) -> bool {
+    fn judge(&self, key: &Arc<K>) -> bool {
         self.records.lock().push(Record::Admit(key.clone()));
         true
     }
@@ -96,8 +105,8 @@ where
 
 impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
 where
-    K: StorageKey + Clone,
-    V: StorageValue + Clone,
+    K: StorageKey,
+    V: StorageValue,
 {
     type Key = K;
 
@@ -105,7 +114,7 @@ where
 
     fn init(&self, _: ReinsertionContext<Self::Key, Self::Value>) {}
 
-    fn judge(&self, key: &K) -> bool {
+    fn judge(&self, key: &Arc<K>) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));
         false
     }

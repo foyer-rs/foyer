@@ -53,7 +53,7 @@ where
         self.catalog.get_or_init(|| context.catalog.clone());
     }
 
-    fn judge(&self, key: &Self::Key) -> bool {
+    fn judge(&self, key: &Arc<Self::Key>) -> bool {
         let indices = self.catalog.get().unwrap();
         indices.get(key).is_some()
     }
