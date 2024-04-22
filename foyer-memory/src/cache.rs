@@ -24,10 +24,7 @@ use ahash::RandomState;
 use futures::{Future, FutureExt};
 use tokio::sync::oneshot;
 
-use foyer_common::{
-    arcable::Arcable,
-    code::{Key, Value},
-};
+use foyer_common::code::{Key, Value};
 
 use crate::{
     context::CacheContext,
@@ -463,8 +460,8 @@ where
 {
     pub fn insert<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, L, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
@@ -476,8 +473,8 @@ where
 
     pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, L, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
@@ -720,8 +717,8 @@ where
 {
     pub fn entry<AK, AV, F, FU, ER>(&self, key: AK, f: F) -> Entry<K, V, ER, L, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,

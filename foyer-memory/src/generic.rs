@@ -26,7 +26,6 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::{
-    arcable::Arcable,
     code::{Key, Value},
     object_pool::ObjectPool,
 };
@@ -121,11 +120,11 @@ where
         last_reference_entries: &mut Vec<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle>
     where
-        AK: Into<Arcable<K>>,
-        AV: Into<Arcable<V>>,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
-        let key = key.into().into_arc();
-        let value = value.into().into_arc();
+        let key = key.into();
+        let value = value.into();
 
         let mut handle = self.state.object_pool.acquire();
         handle.init(hash, (key.clone(), value), weight, context);
@@ -524,8 +523,8 @@ where
 
     pub fn insert<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, L, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         self.insert_with_context(key, value, CacheContext::default())
     }
@@ -537,11 +536,11 @@ where
         context: CacheContext,
     ) -> GenericCacheEntry<K, V, E, I, L, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
-        let key = key.into().into_arc();
-        let value = value.into().into_arc();
+        let key = key.into();
+        let value = value.into();
         let hash = self.hash_builder.hash_one(&key);
         let weight = (self.weighter)(&key, &value);
 
@@ -732,13 +731,13 @@ where
 {
     pub fn entry<AK, AV, F, FU, ER>(self: &Arc<Self>, key: AK, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,
     {
-        let key = key.into().into_arc();
+        let key = key.into();
         let hash = self.hash_builder.hash_one(&key);
 
         unsafe {

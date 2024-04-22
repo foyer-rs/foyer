@@ -25,8 +25,6 @@ use hashbrown::hash_table::{HashTable, IntoIter as HashTableIntoIter};
 
 pub use hashbrown::hash_table::Entry;
 
-use crate::arcable::Arcable;
-
 pub struct ArcKeyHashMapEntry<K, V> {
     key: Arc<K>,
     value: V,
@@ -36,10 +34,10 @@ pub struct ArcKeyHashMapEntry<K, V> {
 impl<K, V> ArcKeyHashMapEntry<K, V> {
     pub fn new<AK>(hash: u64, key: AK, value: V) -> Self
     where
-        AK: Into<Arcable<K>>,
+        AK: Into<Arc<K>>,
     {
         Self {
-            key: key.into().into_arc(),
+            key: key.into(),
             value,
             hash,
         }
@@ -110,9 +108,9 @@ where
 {
     pub fn insert_with_hash<AK>(&mut self, hash: u64, key: AK, value: V) -> Option<V>
     where
-        AK: Into<Arcable<K>>,
+        AK: Into<Arc<K>>,
     {
-        let key = key.into().into_arc();
+        let key = key.into();
 
         match self.inner.entry(
             hash,
@@ -160,9 +158,9 @@ where
 
     pub fn entry_with_hash<AK>(&mut self, hash: u64, key: AK) -> Entry<'_, ArcKeyHashMapEntry<K, V>>
     where
-        AK: Into<Arcable<K>>,
+        AK: Into<Arc<K>>,
     {
-        let key = key.into().into_arc();
+        let key = key.into();
 
         self.inner.entry(
             hash,
@@ -252,9 +250,9 @@ where
 {
     pub fn insert<AK>(&mut self, key: AK, value: V) -> Option<V>
     where
-        AK: Into<Arcable<K>>,
+        AK: Into<Arc<K>>,
     {
-        let key = key.into().into_arc();
+        let key = key.into();
         let hash = self.build_hasher.hash_one(key.as_ref());
         self.raw.insert_with_hash(hash, key, value)
     }
@@ -279,9 +277,9 @@ where
 
     pub fn entry<AK>(&mut self, key: AK) -> Entry<'_, ArcKeyHashMapEntry<K, V>>
     where
-        AK: Into<Arcable<K>>,
+        AK: Into<Arc<K>>,
     {
-        let key = key.into().into_arc();
+        let key = key.into();
         let hash = self.build_hasher.hash_one(key.as_ref());
         self.raw.entry_with_hash(hash, key)
     }

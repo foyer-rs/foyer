@@ -20,10 +20,7 @@ use std::{
 };
 
 use ahash::RandomState;
-use foyer_common::{
-    arcable::Arcable,
-    code::{StorageKey, StorageValue},
-};
+use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{
     Cache, CacheBuilder, CacheContext, CacheEntry, CacheEventListener, Entry, EvictionConfig, Weighter,
 };
@@ -388,16 +385,16 @@ where
 
     pub fn insert<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         self.cache.insert(key, value)
     }
 
     pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> HybridCacheEntry<K, V, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         self.cache.insert_with_context(key, value, context)
     }
@@ -411,7 +408,7 @@ where
             return Ok(Some(entry));
         }
         if let Some(entry) = self.store.get(key).await? {
-            let (key, value) = entry.to_arcable();
+            let (key, value) = entry.to_arc();
             return Ok(Some(self.cache.insert(key, value)));
         }
         Ok(None)
@@ -452,16 +449,16 @@ where
 {
     pub fn entry<AK, AV, F, FU>(&self, key: AK, f: F) -> HybridEntry<K, V, S>
     where
-        AK: Into<Arcable<K>> + Send + 'static,
-        AV: Into<Arcable<V>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
     {
-        let key: Arc<K> = key.into().into_arc();
+        let key: Arc<K> = key.into();
         let store = self.store.clone();
         self.cache.entry(key.clone(), || async move {
             if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                return Ok((entry.to_arcable().1, CacheContext::default()));
+                return Ok((entry.to_arc().1, CacheContext::default()));
             }
             f().await
                 .map(|(value, context)| (value.into(), context))

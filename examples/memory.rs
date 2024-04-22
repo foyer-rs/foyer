@@ -12,10 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer::CacheBuilder;
+use foyer::{Cache, CacheBuilder};
 
 fn main() {
-    let cache = CacheBuilder::new(16).build();
+    let cache: Cache<String, String> = CacheBuilder::new(16).build();
 
     let entry = cache.insert("hello".to_string(), "world".to_string());
     let e = cache.get("hello").unwrap();

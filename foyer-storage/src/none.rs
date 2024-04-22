@@ -14,10 +14,7 @@
 
 use std::{borrow::Borrow, hash::Hash, marker::PhantomData, sync::Arc};
 
-use foyer_common::{
-    arcable::Arcable,
-    code::{StorageKey, StorageValue},
-};
+use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{
     compress::Compression,
@@ -40,9 +37,9 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn new(key: impl Into<Arcable<K>>) -> Self {
+    pub fn new(key: impl Into<Arc<K>>) -> Self {
         Self {
-            key: key.into().into_arc(),
+            key: key.into(),
             _marker: PhantomData,
         }
     }
@@ -65,7 +62,7 @@ where
 
     async fn finish<AV>(self, _: AV) -> Result<Option<CachedEntry<K, V>>>
     where
-        AV: Into<Arcable<V>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         Ok(None)
     }
@@ -110,7 +107,7 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
 
     fn writer<AK>(&self, key: AK) -> Self::Writer
     where
-        AK: Into<Arcable<K>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
     {
         NoneStoreWriter::new(key)
     }

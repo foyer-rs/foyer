@@ -15,6 +15,7 @@
 use crate::memory;
 use crate::storage;
 
+use ahash::RandomState;
 pub use memory::{CacheContext, EvictionConfig, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 pub use storage::{
     AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy, FsDeviceConfig, FsDeviceConfigBuilder,
@@ -22,7 +23,7 @@ pub use storage::{
     RuntimeConfigBuilder, Storage, StorageExt,
 };
 
-pub type Cache<K, V, S> = memory::Cache<K, V, memory::DefaultCacheEventListener<K, V>, S>;
+pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, memory::DefaultCacheEventListener<K, V>, S>;
 pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, memory::DefaultCacheEventListener<K, V>, S>;
 
 pub use crate::hybrid::{

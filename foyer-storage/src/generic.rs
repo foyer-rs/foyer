@@ -28,7 +28,6 @@ use anyhow::anyhow;
 use bitmaps::Bitmap;
 use bytes::{Buf, BufMut};
 use foyer_common::{
-    arcable::Arcable,
     bits,
     code::{StorageKey, StorageValue},
 };
@@ -341,7 +340,7 @@ where
 
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip_all)]
-    fn writer(&self, key: impl Into<Arcable<K>>) -> GenericStoreWriter<K, V, D> {
+    fn writer(&self, key: impl Into<Arc<K>>) -> GenericStoreWriter<K, V, D> {
         GenericStoreWriter::new(self.clone(), key)
     }
 
@@ -540,7 +539,7 @@ where
     async fn apply_writer(
         &self,
         mut writer: GenericStoreWriter<K, V, D>,
-        value: impl Into<Arcable<V>>,
+        value: impl Into<Arc<V>>,
     ) -> Result<Option<CachedEntry<K, V>>> {
         debug_assert!(!writer.is_inserted);
 
@@ -558,7 +557,7 @@ where
 
         writer.is_inserted = true;
         let key = writer.key.take().unwrap();
-        let value = value.into().into_arc();
+        let value = value.into();
 
         // TODO(MrCroxx): FIX ME!!!
         // record aligned header + key + value size for metrics
@@ -629,12 +628,12 @@ where
     V: StorageValue,
     D: Device,
 {
-    fn new(store: GenericStore<K, V, D>, key: impl Into<Arcable<K>>) -> Self {
+    fn new(store: GenericStore<K, V, D>, key: impl Into<Arc<K>>) -> Self {
         let judges = Judges::new(store.inner.admissions.len());
         let compression = store.inner.compression;
         Self {
             store,
-            key: Some(key.into().into_arc()),
+            key: Some(key.into()),
             sequence: None,
             judges,
             is_judged: false,
@@ -656,7 +655,7 @@ where
         self.judges.judge()
     }
 
-    pub async fn finish(self, value: impl Into<Arcable<V>>) -> Result<Option<CachedEntry<K, V>>> {
+    pub async fn finish(self, value: impl Into<Arc<V>>) -> Result<Option<CachedEntry<K, V>>> {
         let store = self.store.clone();
         store.apply_writer(self, value).await
     }
@@ -985,7 +984,7 @@ where
 
     async fn finish<AV>(self, value: AV) -> Result<Option<CachedEntry<K, V>>>
     where
-        AV: Into<Arcable<V>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         self.finish(value).await
     }
@@ -1022,7 +1021,7 @@ where
 
     fn writer<AK>(&self, key: AK) -> Self::Writer
     where
-        AK: Into<Arcable<K>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
     {
         self.writer(key)
     }
