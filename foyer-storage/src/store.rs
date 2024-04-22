@@ -592,9 +592,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let store = self.clone();
-
-        let future = match store {
+        let future = match &self {
             Store::None(store) => GetFuture::None(store.get(key)),
             Store::Fs(store) => GetFuture::Fs(store.get(key)),
             Store::LazyFs(store) => GetFuture::LazyFs(store.get(key)),
