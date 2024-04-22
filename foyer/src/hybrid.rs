@@ -74,7 +74,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    fn on_release(&self, key: K, value: V, _context: CacheContext, _weight: usize) {
+    fn on_release(&self, key: Arc<K>, value: Arc<V>, _context: CacheContext, _weight: usize) {
         // TODO(MrCroxx): Return read handle to block following request of the key and clear with callback?
         unsafe { self.inner.store.get().unwrap_unchecked() }.insert_if_not_exists_async(key, value)
     }
