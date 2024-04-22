@@ -15,7 +15,14 @@
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{EvictionConfig, LfuConfig};
 use futures::Future;
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    hash::Hash,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use crate::{
     compress::Compression,
@@ -469,6 +476,51 @@ where
     }
 }
 
+enum GetFuture<F1, F2, F3, F4, F5> {
+    None(F1),
+    Fs(F2),
+    LazyFs(F3),
+    RuntimeFs(F4),
+    RuntimeLazyFs(F5),
+}
+
+impl<F1, F2, F3, F4, F5> GetFuture<F1, F2, F3, F4, F5> {
+    pub fn as_pin_mut(
+        self: Pin<&mut Self>,
+    ) -> GetFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>> {
+        unsafe {
+            match *Pin::get_unchecked_mut(self) {
+                GetFuture::None(ref mut inner) => GetFuture::None(Pin::new_unchecked(inner)),
+                GetFuture::Fs(ref mut inner) => GetFuture::Fs(Pin::new_unchecked(inner)),
+                GetFuture::LazyFs(ref mut inner) => GetFuture::LazyFs(Pin::new_unchecked(inner)),
+                GetFuture::RuntimeFs(ref mut inner) => GetFuture::RuntimeFs(Pin::new_unchecked(inner)),
+                GetFuture::RuntimeLazyFs(ref mut inner) => GetFuture::RuntimeLazyFs(Pin::new_unchecked(inner)),
+            }
+        }
+    }
+}
+
+impl<F1, F2, F3, F4, F5> Future for GetFuture<F1, F2, F3, F4, F5>
+where
+    F1: Future,
+    F2: Future<Output = F1::Output>,
+    F3: Future<Output = F1::Output>,
+    F4: Future<Output = F1::Output>,
+    F5: Future<Output = F1::Output>,
+{
+    type Output = F1::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_pin_mut() {
+            GetFuture::None(future) => future.poll(cx),
+            GetFuture::Fs(future) => future.poll(cx),
+            GetFuture::LazyFs(future) => future.poll(cx),
+            GetFuture::RuntimeFs(future) => future.poll(cx),
+            GetFuture::RuntimeLazyFs(future) => future.poll(cx),
+        }
+    }
+}
+
 impl<K, V> Storage<K, V> for Store<K, V>
 where
     K: StorageKey,
@@ -540,47 +592,17 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let this = self.clone();
-        // async move {
-        //     match this {
-        //         Store::None(store) => store.get(key).await,
-        //         _ => todo!(),
-        //     }
-        // }
+        let store = self.clone();
 
-        // error: lifetime may not live long enough
-        //     --> foyer-storage/src/store.rs:544:9
-        //      |
-        //  538 |       fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
-        //      |                             - let's call the lifetime of this reference `'1`
-        //  ...
-        //  544 | /         async move {
-        //  545 | |             match this {
-        //  546 | |                 Store::None(store) => store.get(key).await,
-        //  547 | |                 _ => todo!(),
-        //  548 | |             }
-        //  549 | |         }
-        //      | |_________^ returning this value requires that `'1` must outlive `'static`
-        //      |
-        //  help: consider changing `impl futures::Future<Output = std::result::Result<Option<CachedEntry<K, V>>, error::Error>> + 'static`'s explicit `'static` bound to the lifetime of argument `key`
-        //      |
-        //  538 |     fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + '_
-        //      |                                                                                            ~~
-        //  help: alternatively, add an explicit `'static` bound to this reference
-        //      |
-        //  538 |     fn get<Q>(&self, key: &'static Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
+        let future = match store {
+            Store::None(store) => GetFuture::None(store.get(key)),
+            Store::Fs(store) => GetFuture::Fs(store.get(key)),
+            Store::LazyFs(store) => GetFuture::LazyFs(store.get(key)),
+            Store::RuntimeFs(store) => GetFuture::RuntimeFs(store.get(key)),
+            Store::RuntimeLazyFs(store) => GetFuture::RuntimeLazyFs(store.get(key)),
+        };
 
-        async { todo!() }
-
-        // async move {
-        //     match this {
-        //         Store::None(store) => store.get(key).await,
-        //         Store::Fs(store) => store.get(key).await,
-        //         Store::LazyFs(store) => store.get(key).await,
-        //         Store::RuntimeFs(store) => store.get(key).await,
-        //         Store::RuntimeLazyFs(store) => store.get(key).await,
-        //     }
-        // }
+        future
     }
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>
