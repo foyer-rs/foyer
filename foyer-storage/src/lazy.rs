@@ -14,6 +14,7 @@
 
 use std::{
     borrow::Borrow,
+    future::ready,
     hash::Hash,
     sync::{Arc, OnceLock},
 };
@@ -210,7 +211,7 @@ where
     {
         match self.once.get() {
             Some(store) => Either::Left(store.get(key)),
-            None => Either::Right(async { Ok(None) }),
+            None => Either::Right(ready(Ok(None))),
         }
     }
 
