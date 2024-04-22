@@ -14,7 +14,7 @@
 
 use std::{borrow::Borrow, hash::Hash, ptr::NonNull, sync::Arc};
 
-use foyer_common::{arc_key_hash_map::RawArcKeyHashMap, arcable::Arcable, code::Key};
+use foyer_common::{arc_key_hash_map::RawArcKeyHashMap, code::Key};
 
 use crate::handle::KeyedHandle;
 
@@ -25,7 +25,7 @@ pub trait Indexer: Send + Sync + 'static {
     fn new() -> Self;
     unsafe fn insert<AK>(&mut self, key: AK, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>
     where
-        AK: Into<Arcable<Self::Key>>;
+        AK: Into<Arc<Self::Key>>;
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
         Self::Key: Borrow<Q>,
@@ -75,7 +75,7 @@ where
 
     unsafe fn insert<AK>(&mut self, key: AK, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>
     where
-        AK: Into<Arcable<Self::Key>>,
+        AK: Into<Arc<Self::Key>>,
     {
         let handle = ptr.as_mut();
 

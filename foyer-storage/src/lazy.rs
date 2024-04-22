@@ -18,10 +18,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use foyer_common::{
-    arcable::Arcable,
-    code::{StorageKey, StorageValue},
-};
+use foyer_common::code::{StorageKey, StorageValue};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -71,7 +68,7 @@ where
 
     async fn finish<AV>(self, value: AV) -> Result<Option<CachedEntry<K, V>>>
     where
-        AV: Into<Arcable<V>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         match self {
             LazyStoreWriter::Store { writer } => writer.finish(value).await,
@@ -182,7 +179,7 @@ where
 
     fn writer<AK>(&self, key: AK) -> Self::Writer
     where
-        AK: Into<Arcable<K>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
     {
         match self.once.get() {
             Some(store) => LazyStoreWriter::Store {
@@ -208,7 +205,7 @@ where
     async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         match self.once.get() {
             Some(store) => store.get(key).await,

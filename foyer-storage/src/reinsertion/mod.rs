@@ -56,7 +56,7 @@ pub trait ReinsertionPolicy: Send + Sync + 'static {
 
     fn init(&self, context: ReinsertionContext<Self::Key, Self::Value>);
 
-    fn judge(&self, key: &Self::Key) -> bool;
+    fn judge(&self, key: &Arc<Self::Key>) -> bool;
 }
 
 pub mod exist;

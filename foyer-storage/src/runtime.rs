@@ -15,7 +15,6 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
-    arcable::Arcable,
     code::{StorageKey, StorageValue},
     runtime::BackgroundShutdownRuntime,
 };
@@ -138,7 +137,7 @@ where
 
     async fn finish<AV>(self, value: AV) -> Result<Option<CachedEntry<K, V>>>
     where
-        AV: Into<Arcable<V>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
     {
         self.runtime
             .spawn(async move { self.writer.finish(value).await })
@@ -223,7 +222,7 @@ where
 
     fn writer<AK>(&self, key: AK) -> Self::Writer
     where
-        AK: Into<Arcable<K>> + Send + 'static,
+        AK: Into<Arc<K>> + Send + 'static,
     {
         let writer = self.store.writer(key);
         RuntimeStoreWriter {
@@ -243,7 +242,7 @@ where
     async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         let store = self.store.clone();
         let key = key.clone();

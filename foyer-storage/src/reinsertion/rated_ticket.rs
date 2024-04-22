@@ -16,7 +16,7 @@ use std::{
     fmt::Debug,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        OnceLock,
+        Arc, OnceLock,
     },
 };
 
@@ -66,7 +66,7 @@ where
         self.context.set(context).unwrap();
     }
 
-    fn judge(&self, _key: &Self::Key) -> bool {
+    fn judge(&self, _key: &Arc<Self::Key>) -> bool {
         let res = self.inner.probe();
 
         let metrics = self.context.get().unwrap().metrics.as_ref();

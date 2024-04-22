@@ -15,7 +15,6 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod arc_key_hash_map;
-pub mod arcable;
 pub mod async_queue;
 pub mod batch;
 pub mod bits;
