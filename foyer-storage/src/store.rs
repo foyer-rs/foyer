@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    arcable::Arcable,
+    code::{StorageKey, StorageValue},
+};
 use foyer_memory::{EvictionConfig, LfuConfig};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
@@ -454,7 +457,10 @@ where
         }
     }
 
-    async fn finish(self, value: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish<AV>(self, value: AV) -> Result<Option<CachedEntry<K, V>>>
+    where
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         match self {
             StoreWriter::None(writer) => writer.finish(value).await,
             StoreWriter::Fs(writer) => writer.finish(value).await,
@@ -504,7 +510,10 @@ where
         }
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
+    fn writer<AK>(&self, key: AK) -> Self::Writer
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+    {
         match self {
             Store::None(store) => StoreWriter::None(store.writer(key)),
             Store::Fs(store) => StoreWriter::Fs(store.writer(key)),

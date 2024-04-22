@@ -14,7 +14,10 @@
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    arcable::Arcable,
+    code::{StorageKey, StorageValue},
+};
 use futures::Future;
 
 use crate::{compress::Compression, error::Result};
@@ -97,7 +100,9 @@ where
 
     fn set_compression(&mut self, compression: Compression);
 
-    fn finish(self, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send;
+    fn finish<AV>(self, value: AV) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    where
+        AV: Into<Arcable<V>> + Send + 'static;
 }
 
 pub trait Storage<K, V>: Send + Sync + Clone + 'static
@@ -116,7 +121,9 @@ where
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn writer(&self, key: K) -> Self::Writer;
+    fn writer<AK>(&self, key: AK) -> Self::Writer
+    where
+        AK: Into<Arcable<K>> + Send + 'static;
 
     fn exists<Q>(&self, key: &Q) -> Result<bool>
     where

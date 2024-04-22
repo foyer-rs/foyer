@@ -12,9 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, marker::PhantomData};
+use std::{borrow::Borrow, hash::Hash, marker::PhantomData, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    arcable::Arcable,
+    code::{StorageKey, StorageValue},
+};
 
 use crate::{
     compress::Compression,
@@ -28,7 +31,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    key: K,
+    key: Arc<K>,
     _marker: PhantomData<V>,
 }
 
@@ -37,9 +40,9 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn new(key: K) -> Self {
+    pub fn new(key: impl Into<Arcable<K>>) -> Self {
         Self {
-            key,
+            key: key.into().into_arc(),
             _marker: PhantomData,
         }
     }
@@ -60,7 +63,10 @@ where
 
     fn force(&mut self) {}
 
-    async fn finish(self, _: V) -> Result<Option<CachedEntry<K, V>>> {
+    async fn finish<AV>(self, _: AV) -> Result<Option<CachedEntry<K, V>>>
+    where
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         Ok(None)
     }
 
@@ -102,7 +108,10 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         Ok(())
     }
 
-    fn writer(&self, key: K) -> Self::Writer {
+    fn writer<AK>(&self, key: AK) -> Self::Writer
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+    {
         NoneStoreWriter::new(key)
     }
 
