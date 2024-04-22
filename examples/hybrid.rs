@@ -25,7 +25,7 @@ use tempfile::tempdir;
 async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
 
-    let hybrid: HybridCache<u64, Arc<String>> = HybridCacheBuilder::new()
+    let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(1024)
         .with_shards(4)
         .with_eviction_config(LruConfig {
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .with_object_pool_capacity(1024)
         .with_hash_builder(ahash::RandomState::default())
-        .with_weighter(|_key, value: &Arc<String>| value.len())
+        .with_weighter(|_key, value: &String| value.len())
         .storage()
         .with_name("foyer")
         .with_eviction_config(LfuConfig {
@@ -68,13 +68,10 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    hybrid.insert(
-        42,
-        Arc::new("The answer to life, the universe, and everything.".to_string()),
-    );
+    hybrid.insert(42, "The answer to life, the universe, and everything.".to_string());
 
     assert_eq!(
-        hybrid.get(&42).await?.unwrap().value().as_ref(),
+        hybrid.get(&42).await?.unwrap().value(),
         "The answer to life, the universe, and everything."
     );
 
@@ -88,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
             Ok("Hello, foyer.".to_string())
         };
 
-        let value = Arc::new(future.await?);
+        let value = future.await?;
         Ok((value, CacheContext::default()))
     });
 
