@@ -74,7 +74,7 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
-    waiters: HashMap<K, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
+    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
 
     state: Arc<CacheSharedState<E::Handle, L>>,
 }
@@ -522,16 +522,26 @@ where
         }
     }
 
-    pub fn insert(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, L, S> {
+    pub fn insert<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         self.insert_with_context(key, value, CacheContext::default())
     }
 
-    pub fn insert_with_context(
+    pub fn insert_with_context<AK, AV>(
         self: &Arc<Self>,
-        key: K,
-        value: V,
+        key: AK,
+        value: AV,
         context: CacheContext,
-    ) -> GenericCacheEntry<K, V, E, I, L, S> {
+    ) -> GenericCacheEntry<K, V, E, I, L, S>
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
+        let key = key.into().into_arc();
+        let value = value.into().into_arc();
         let hash = self.hash_builder.hash_one(&key);
         let weight = (self.weighter)(&key, &value);
 
@@ -712,7 +722,7 @@ where
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
 impl<K, V, E, I, L, S> GenericCache<K, V, E, I, L, S>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
@@ -720,12 +730,15 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
+    pub fn entry<AK, AV, F, FU, ER>(self: &Arc<Self>, key: AK, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,
     {
+        let key = key.into().into_arc();
         let hash = self.hash_builder.hash_one(&key);
 
         unsafe {
