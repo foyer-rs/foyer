@@ -443,7 +443,7 @@ pub type HybridEntry<K, V, S> = Entry<K, V, anyhow::Error, HybridCacheEventListe
 
 impl<K, V, S> HybridCache<K, V, S>
 where
-    K: StorageKey + Clone,
+    K: StorageKey,
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {

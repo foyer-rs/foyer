@@ -14,11 +14,13 @@
 
 use std::{
     borrow::Borrow,
+    future::ready,
     hash::Hash,
     sync::{Arc, OnceLock},
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
+use futures::{future::Either, Future};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -202,14 +204,14 @@ where
         }
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         match self.once.get() {
-            Some(store) => store.get(key).await,
-            None => self.none.get(key).await,
+            Some(store) => Either::Left(store.get(key)),
+            None => Either::Right(ready(Ok(None))),
         }
     }
 

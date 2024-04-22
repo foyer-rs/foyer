@@ -36,7 +36,7 @@ where
     V: StorageValue,
 {
     Inflight { key: Arc<K>, value: Arc<V> },
-    Region { view: RegionView },
+    Region { key: Arc<K>, view: RegionView },
 }
 
 impl<K, V> Clone for Index<K, V>
@@ -50,7 +50,10 @@ where
                 key: key.clone(),
                 value: value.clone(),
             },
-            Self::Region { view } => Self::Region { view: view.clone() },
+            Self::Region { key, view } => Self::Region {
+                key: key.clone(),
+                view: view.clone(),
+            },
         }
     }
 }
@@ -150,7 +153,7 @@ where
     pub fn insert(&self, key: Arc<K>, mut item: Item<K, V>) {
         // TODO(MrCroxx): compare sequence.
 
-        if let Index::Region { view } = &item.index {
+        if let Index::Region { key: _, view } = &item.index {
             self.regions[*view.id() as usize]
                 .lock()
                 .insert(key.clone(), item.sequence);
@@ -191,7 +194,7 @@ where
         let info: Option<Item<K, V>> = self.items[shard].write().remove(key);
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if let Some(info) = &info {
-            if let Index::Region { view } = &info.index {
+            if let Index::Region { key: _, view } = &info.index {
                 self.regions[*view.id() as usize].lock().remove(key);
             }
         }

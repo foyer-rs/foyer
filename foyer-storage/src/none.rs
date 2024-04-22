@@ -12,9 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{borrow::Borrow, future::ready, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::code::{StorageKey, StorageValue};
+use futures::Future;
 
 use crate::{
     compress::Compression,
@@ -120,12 +121,12 @@ impl<K: StorageKey, V: StorageValue> Storage<K, V> for NoneStore<K, V> {
         Ok(false)
     }
 
-    async fn get<Q>(&self, _: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, _: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        Ok(None)
+        ready(Ok(None))
     }
 
     fn remove<Q>(&self, _: &Q) -> Result<bool>

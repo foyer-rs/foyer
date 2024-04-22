@@ -14,7 +14,15 @@
 
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{EvictionConfig, LfuConfig};
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use futures::Future;
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    hash::Hash,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use crate::{
     compress::Compression,
@@ -468,6 +476,54 @@ where
     }
 }
 
+// https://github.com/MrCroxx/foyer/pull/399
+enum GetFuture<F1, F2, F3, F4, F5> {
+    None(F1),
+    Fs(F2),
+    LazyFs(F3),
+    RuntimeFs(F4),
+    RuntimeLazyFs(F5),
+}
+
+impl<F1, F2, F3, F4, F5> GetFuture<F1, F2, F3, F4, F5> {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
+    pub fn as_pin_mut(
+        self: Pin<&mut Self>,
+    ) -> GetFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>> {
+        unsafe {
+            match *Pin::get_unchecked_mut(self) {
+                GetFuture::None(ref mut inner) => GetFuture::None(Pin::new_unchecked(inner)),
+                GetFuture::Fs(ref mut inner) => GetFuture::Fs(Pin::new_unchecked(inner)),
+                GetFuture::LazyFs(ref mut inner) => GetFuture::LazyFs(Pin::new_unchecked(inner)),
+                GetFuture::RuntimeFs(ref mut inner) => GetFuture::RuntimeFs(Pin::new_unchecked(inner)),
+                GetFuture::RuntimeLazyFs(ref mut inner) => GetFuture::RuntimeLazyFs(Pin::new_unchecked(inner)),
+            }
+        }
+    }
+}
+
+impl<F1, F2, F3, F4, F5> Future for GetFuture<F1, F2, F3, F4, F5>
+where
+    F1: Future,
+    F2: Future<Output = F1::Output>,
+    F3: Future<Output = F1::Output>,
+    F4: Future<Output = F1::Output>,
+    F5: Future<Output = F1::Output>,
+{
+    type Output = F1::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_pin_mut() {
+            GetFuture::None(future) => future.poll(cx),
+            GetFuture::Fs(future) => future.poll(cx),
+            GetFuture::LazyFs(future) => future.poll(cx),
+            GetFuture::RuntimeFs(future) => future.poll(cx),
+            GetFuture::RuntimeLazyFs(future) => future.poll(cx),
+        }
+    }
+}
+
 impl<K, V> Storage<K, V> for Store<K, V>
 where
     K: StorageKey,
@@ -534,17 +590,17 @@ where
         }
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         match self {
-            Store::None(store) => store.get(key).await,
-            Store::Fs(store) => store.get(key).await,
-            Store::LazyFs(store) => store.get(key).await,
-            Store::RuntimeFs(store) => store.get(key).await,
-            Store::RuntimeLazyFs(store) => store.get(key).await,
+            Store::None(store) => GetFuture::None(store.get(key)),
+            Store::Fs(store) => GetFuture::Fs(store.get(key)),
+            Store::LazyFs(store) => GetFuture::LazyFs(store.get(key)),
+            Store::RuntimeFs(store) => GetFuture::RuntimeFs(store.get(key)),
+            Store::RuntimeLazyFs(store) => GetFuture::RuntimeLazyFs(store.get(key)),
         }
     }
 

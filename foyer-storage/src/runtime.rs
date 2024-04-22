@@ -18,6 +18,7 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     runtime::BackgroundShutdownRuntime,
 };
+use futures::{Future, FutureExt};
 
 use crate::{
     compress::Compression,
@@ -239,14 +240,13 @@ where
         self.store.exists(key)
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let store = self.store.clone();
-        let key = key.clone();
-        self.runtime.spawn(async move { store.get(&key).await }).await.unwrap()
+        let future = self.store.get(key);
+        self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
     fn remove<Q>(&self, key: &Q) -> crate::error::Result<bool>
