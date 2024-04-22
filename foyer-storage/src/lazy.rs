@@ -19,7 +19,7 @@ use std::{
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
-use futures::{future::OptionFuture, Future, FutureExt};
+use futures::Future;
 use tokio::task::JoinHandle;
 
 use crate::{

@@ -14,7 +14,7 @@
 
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{EvictionConfig, LfuConfig};
-use futures::{future::pending, Future};
+use futures::Future;
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
 use crate::{
@@ -540,11 +540,38 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        // Is this cheap?
         let this = self.clone();
+        // async move {
+        //     match this {
+        //         Store::None(store) => store.get(key).await,
+        //         _ => todo!(),
+        //     }
+        // }
 
-        // TODO: return an enum here instead.
-        pending()
+        // error: lifetime may not live long enough
+        //     --> foyer-storage/src/store.rs:544:9
+        //      |
+        //  538 |       fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
+        //      |                             - let's call the lifetime of this reference `'1`
+        //  ...
+        //  544 | /         async move {
+        //  545 | |             match this {
+        //  546 | |                 Store::None(store) => store.get(key).await,
+        //  547 | |                 _ => todo!(),
+        //  548 | |             }
+        //  549 | |         }
+        //      | |_________^ returning this value requires that `'1` must outlive `'static`
+        //      |
+        //  help: consider changing `impl futures::Future<Output = std::result::Result<Option<CachedEntry<K, V>>, error::Error>> + 'static`'s explicit `'static` bound to the lifetime of argument `key`
+        //      |
+        //  538 |     fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + '_
+        //      |                                                                                            ~~
+        //  help: alternatively, add an explicit `'static` bound to this reference
+        //      |
+        //  538 |     fn get<Q>(&self, key: &'static Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
+
+        async { todo!() }
+
         // async move {
         //     match this {
         //         Store::None(store) => store.get(key).await,
