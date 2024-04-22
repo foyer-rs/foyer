@@ -461,10 +461,10 @@ where
         let store = self.store.clone();
         self.cache.entry(key.clone(), || async move {
             if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                return Ok((entry.to_arcable().1.into_arc(), CacheContext::default()));
+                return Ok((entry.to_arcable().1, CacheContext::default()));
             }
             f().await
-                .map(|(value, context)| (value.into().into_arc(), context))
+                .map(|(value, context)| (value.into(), context))
                 .map_err(anyhow::Error::from)
         })
     }
