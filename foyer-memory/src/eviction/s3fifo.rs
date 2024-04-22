@@ -12,7 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, ptr::NonNull};
+use std::{
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    fmt::Debug,
+    ptr::NonNull,
+};
 
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
@@ -24,6 +28,8 @@ use crate::{
     handle::{BaseHandle, Handle},
     CacheContext,
 };
+
+const MAX_FREQ: u8 = 3;
 
 #[derive(Debug, Clone)]
 pub struct S3FifoContext;
@@ -40,6 +46,7 @@ impl From<S3FifoContext> for CacheContext {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Queue {
     None,
     Main,
@@ -72,18 +79,13 @@ where
     T: Send + Sync + 'static,
 {
     #[inline(always)]
-    pub fn inc(&mut self) {
-        self.freq = std::cmp::min(self.freq + 1, 3);
+    pub fn freq_inc(&mut self) {
+        self.freq = std::cmp::min(self.freq + 1, MAX_FREQ);
     }
 
     #[inline(always)]
-    pub fn dec(&mut self) {
+    pub fn freq_dec(&mut self) {
         self.freq = self.freq.saturating_sub(1);
-    }
-
-    #[inline(always)]
-    pub fn reset(&mut self) {
-        self.freq = 0;
     }
 }
 
@@ -120,19 +122,24 @@ where
 #[derive(Debug, Clone)]
 pub struct S3FifoConfig {
     pub small_queue_capacity_ratio: f64,
+    pub ghost_queue_capacity_ratio: f64,
+    pub small_to_main_freq_threshold: u8,
 }
 
 pub struct S3Fifo<T>
 where
     T: Send + Sync + 'static,
 {
+    ghost_queue: GhostQueue,
     small_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
     main_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
 
-    small_capacity: usize,
+    small_weight_capacity: usize,
 
     small_weight: usize,
     main_weight: usize,
+
+    small_to_main_freq_threshold: u8,
 }
 
 impl<T> S3Fifo<T>
@@ -141,26 +148,45 @@ where
 {
     unsafe fn evict(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if self.small_weight > self.small_capacity {
+        if self.small_weight > self.small_weight_capacity {
             if let Some(ptr) = self.evict_small() {
                 return Some(ptr);
             }
         }
-        self.evict_main()
+        if let Some(ptr) = self.evict_main() {
+            return Some(ptr);
+        }
+        self.evict_small_force()
+    }
+
+    // TODO(MrCroxx): FIX ME!!! clippy false positive
+    #[allow(clippy::never_loop)]
+    unsafe fn evict_small_force(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
+        while let Some(mut ptr) = self.small_queue.pop_front() {
+            let handle = ptr.as_mut();
+            handle.queue = Queue::None;
+            handle.freq = 0;
+            self.small_weight -= handle.base().weight();
+            return Some(ptr);
+        }
+        None
     }
 
     unsafe fn evict_small(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
-            if handle.freq > 1 {
-                self.main_queue.push_back(ptr);
+            if handle.freq >= self.small_to_main_freq_threshold {
                 handle.queue = Queue::Main;
+                self.main_queue.push_back(ptr);
                 self.small_weight -= handle.base().weight();
                 self.main_weight += handle.base().weight();
             } else {
                 handle.queue = Queue::None;
-                handle.reset();
+                handle.freq = 0;
                 self.small_weight -= handle.base().weight();
+
+                self.ghost_queue.push(handle.base().hash(), handle.base().weight());
+
                 return Some(ptr);
             }
         }
@@ -171,8 +197,8 @@ where
         while let Some(mut ptr) = self.main_queue.pop_front() {
             let handle = ptr.as_mut();
             if handle.freq > 0 {
+                handle.freq_dec();
                 self.main_queue.push_back(ptr);
-                handle.dec();
             } else {
                 handle.queue = Queue::None;
                 self.main_weight -= handle.base.weight();
@@ -194,26 +220,40 @@ where
     where
         Self: Sized,
     {
-        let small_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
+        let ghost_queue = GhostQueue::new((capacity as f64 * config.ghost_queue_capacity_ratio) as usize);
+        let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
         Self {
+            ghost_queue,
             small_queue: Dlist::new(),
             main_queue: Dlist::new(),
-            small_capacity,
+            small_weight_capacity,
             small_weight: 0,
             main_weight: 0,
+            small_to_main_freq_threshold: config.small_to_main_freq_threshold.min(MAX_FREQ),
         }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        self.small_queue.push_back(ptr);
-        handle.queue = Queue::Small;
-        self.small_weight += handle.base().weight();
+        debug_assert_eq!(handle.freq, 0);
+        debug_assert_eq!(handle.queue, Queue::None);
+
+        if self.ghost_queue.contains(handle.base().hash()) {
+            handle.queue = Queue::Main;
+            self.main_queue.push_back(ptr);
+            self.main_weight += handle.base().weight();
+        } else {
+            handle.queue = Queue::Small;
+            self.small_queue.push_back(ptr);
+            self.small_weight += handle.base().weight();
+        }
 
         handle.base_mut().set_in_eviction(true);
     }
 
+    // TODO: FIX ME! clippy false positive
+    // #[allow(clippy::never_loop)]
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         if let Some(mut ptr) = self.evict() {
             let handle = ptr.as_mut();
@@ -221,7 +261,8 @@ where
             handle.base_mut().set_in_eviction(false);
             Some(ptr)
         } else {
-            debug_assert!(self.is_empty());
+            debug_assert!(self.small_queue.is_empty());
+            debug_assert!(self.main_queue.is_empty());
             None
         }
     }
@@ -230,7 +271,7 @@ where
 
     unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>) {
         let mut ptr = ptr;
-        ptr.as_mut().inc();
+        ptr.as_mut().freq_inc();
     }
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
@@ -247,6 +288,7 @@ where
                 debug_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;
+                handle.freq = 0;
                 handle.base_mut().set_in_eviction(false);
 
                 self.main_weight -= handle.base().weight();
@@ -260,6 +302,7 @@ where
                 debug_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;
+                handle.freq = 0;
                 handle.base_mut().set_in_eviction(false);
 
                 self.small_weight -= handle.base().weight();
@@ -269,16 +312,7 @@ where
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
-        while let Some(mut ptr) = self.small_queue.pop_front() {
-            let handle = ptr.as_mut();
-            handle.base_mut().set_in_eviction(false);
-            handle.queue = Queue::None;
-            res.push(ptr);
-        }
-        while let Some(mut ptr) = self.main_queue.pop_front() {
-            let handle = ptr.as_mut();
-            handle.base_mut().set_in_eviction(false);
-            handle.queue = Queue::None;
+        while let Some(ptr) = self.pop() {
             res.push(ptr);
         }
         res
@@ -295,6 +329,56 @@ where
 
 unsafe impl<T> Send for S3Fifo<T> where T: Send + Sync + 'static {}
 unsafe impl<T> Sync for S3Fifo<T> where T: Send + Sync + 'static {}
+
+struct GhostQueue {
+    counts: HashMap<u64, usize>,
+    queue: VecDeque<(u64, usize)>,
+    capacity: usize,
+    weight: usize,
+}
+
+impl GhostQueue {
+    fn new(capacity: usize) -> Self {
+        Self {
+            counts: HashMap::default(),
+            queue: VecDeque::new(),
+            capacity,
+            weight: 0,
+        }
+    }
+
+    fn push(&mut self, hash: u64, weight: usize) {
+        if self.capacity == 0 {
+            return;
+        }
+
+        while self.weight + weight > self.capacity && self.weight > 0 {
+            self.pop();
+        }
+        *self.counts.entry(hash).or_default() += 1;
+        self.queue.push_back((hash, weight));
+    }
+
+    fn pop(&mut self) {
+        if let Some((hash, weight)) = self.queue.pop_front() {
+            self.weight -= weight;
+            match self.counts.entry(hash) {
+                Entry::Vacant(_) => unreachable!(),
+                Entry::Occupied(mut o) => {
+                    let count = o.get_mut();
+                    *count -= 1;
+                    if *count == 0 {
+                        o.remove();
+                    }
+                }
+            }
+        }
+    }
+
+    fn contains(&self, hash: u64) -> bool {
+        self.counts.contains_key(&hash)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -327,6 +411,8 @@ mod tests {
         let m = s.split_off(s3fifo.small_queue.len());
         assert_eq!((&s, &m), (&small, &main));
         assert_eq!(s3fifo.small_weight, s.len());
+        assert_eq!(s3fifo.main_weight, m.len());
+        assert_eq!(s3fifo.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
     }
 
     fn assert_count(ptrs: &[NonNull<TestS3FifoHandle>], range: Range<usize>, count: u8) {
@@ -346,13 +432,15 @@ mod tests {
                 })
                 .collect_vec();
 
-            // window: 2, probation: 2, protected: 6
+            // capacity: 8, small: 2, ghost: 80
             let config = S3FifoConfig {
                 small_queue_capacity_ratio: 0.25,
+                ghost_queue_capacity_ratio: 10.0,
+                small_to_main_freq_threshold: 2,
             };
             let mut s3fifo = TestS3Fifo::new(8, &config);
 
-            assert_eq!(s3fifo.small_capacity, 2);
+            assert_eq!(s3fifo.small_weight_capacity, 2);
 
             s3fifo.push(ptrs[0]);
             s3fifo.push(ptrs[1]);

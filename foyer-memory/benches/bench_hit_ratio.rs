@@ -29,32 +29,32 @@ const OBJECT_POOL_CAPACITY: usize = 16;
 inspired by pingora/tinyufo/benches/bench_hit_ratio.rs
 cargo bench --bench bench_hit_ratio
 
-zif_exp, cache_size             fifo            lru             lfu             s3fifo          moka
-0.90, 0.005                     16.24%          19.22%          32.37%          32.39%          33.50%
-0.90, 0.01                      22.55%          26.20%          38.54%          39.20%          37.92%
-0.90, 0.05                      41.05%          45.56%          55.37%          56.63%          55.25%
-0.90,  0.1                      51.06%          55.68%          63.82%          65.06%          64.20%
-0.90, 0.25                      66.81%          71.17%          76.21%          77.26%          77.12%
-1.00, 0.005                     26.62%          31.10%          44.16%          44.15%          45.62%
-1.00, 0.01                      34.38%          39.17%          50.63%          51.29%          50.72%
-1.00, 0.05                      54.04%          58.76%          66.79%          67.85%          66.89%
-1.00,  0.1                      63.15%          67.60%          73.93%          74.92%          74.38%
-1.00, 0.25                      76.18%          79.95%          83.63%          84.39%          84.38%
-1.05, 0.005                     32.67%          37.71%          50.26%          50.21%          51.85%
-1.05, 0.01                      40.97%          46.10%          56.74%          57.40%          57.09%
-1.05, 0.05                      60.44%          65.03%          72.04%          73.02%          72.28%
-1.05,  0.1                      68.93%          73.12%          78.49%          79.37%          79.00%
-1.05, 0.25                      80.38%          83.73%          86.78%          87.42%          87.41%
-1.10, 0.005                     39.02%          44.50%          56.26%          56.20%          57.90%
-1.10, 0.01                      47.60%          52.93%          62.61%          63.24%          63.05%
-1.10, 0.05                      66.59%          70.95%          76.92%          77.76%          77.27%
-1.10,  0.1                      74.24%          78.07%          82.54%          83.28%          83.00%
-1.10, 0.25                      84.18%          87.10%          89.57%          90.06%          90.08%
-1.50, 0.005                     81.17%          85.27%          88.90%          89.10%          89.89%
-1.50, 0.01                      86.91%          89.87%          92.25%          92.56%          92.79%
-1.50, 0.05                      94.77%          96.04%          96.96%          97.10%          97.07%
-1.50,  0.1                      96.65%          97.50%          98.06%          98.14%          98.15%
-1.50, 0.25                      98.36%          98.81%          99.04%          99.06%          99.09%
+zif_exp, cache_size           fifo            lru             lfu             s3fifo (0g)     s3fifo (10g)    moka
+  0.90,  0.005                16.22%          19.19%          32.34%          32.60%          20.92%          33.37%
+  0.90,   0.01                22.55%          26.22%          38.54%          39.01%          27.99%          37.86%
+  0.90,   0.05                41.10%          45.60%          55.45%          56.65%          47.43%          55.23%
+  0.90,    0.1                51.09%          55.72%          63.84%          65.10%          57.58%          64.21%
+  0.90,   0.25                66.81%          71.19%          76.21%          77.55%          73.29%          77.11%
+  1.00,  0.005                26.62%          31.08%          44.19%          44.29%          33.11%          45.66%
+  1.00,   0.01                34.39%          39.17%          50.65%          51.24%          41.03%          50.73%
+  1.00,   0.05                54.03%          58.75%          66.77%          67.89%          60.54%          66.95%
+  1.00,    0.1                63.12%          67.58%          73.90%          74.96%          69.30%          74.36%
+  1.00,   0.25                76.17%          79.94%          83.62%          84.50%          81.46%          84.30%
+  1.05,  0.005                32.66%          37.70%          50.24%          50.14%          39.77%          51.85%
+  1.05,   0.01                40.96%          46.09%          56.74%          57.45%          48.13%          57.08%
+  1.05,   0.05                60.48%          65.09%          72.08%          73.16%          66.79%          72.39%
+  1.05,    0.1                68.93%          73.11%          78.48%          79.40%          74.70%          78.93%
+  1.05,   0.25                80.38%          83.76%          86.80%          87.50%          85.04%          87.43%
+  1.10,  0.005                38.98%          44.46%          56.23%          56.56%          46.54%          57.86%
+  1.10,   0.01                47.62%          52.95%          62.62%          63.38%          54.95%          63.18%
+  1.10,   0.05                66.58%          70.94%          76.92%          77.86%          72.50%          77.24%
+  1.10,    0.1                74.28%          78.09%          82.57%          83.34%          79.40%          83.04%
+  1.10,   0.25                84.18%          87.09%          89.57%          90.07%          88.16%          90.11%
+  1.50,  0.005                81.15%          85.24%          88.87%          89.27%          85.99%          89.88%
+  1.50,   0.01                86.91%          89.87%          92.25%          92.65%          90.40%          92.79%
+  1.50,   0.05                94.77%          96.05%          96.96%          97.07%          96.29%          97.08%
+  1.50,    0.1                96.66%          97.51%          98.07%          98.09%          97.68%          98.16%
+  1.50,   0.25                98.36%          98.81%          99.04%          99.02%          98.91%          99.10%
 */
 fn cache_hit(cache: Cache<CacheKey, CacheValue>, keys: Arc<Vec<CacheKey>>) -> f64 {
     let mut hit = 0;
@@ -113,18 +113,32 @@ fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
         .build()
 }
 
-fn new_s3fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
+fn new_s3fifo_cache_wo_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
         .with_eviction_config(S3FifoConfig {
             small_queue_capacity_ratio: 0.1,
+            ghost_queue_capacity_ratio: 0.0,
+            small_to_main_freq_threshold: 2,
+        })
+        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
+        .build()
+}
+
+fn new_s3fifo_cache_w_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
+    CacheBuilder::new(capacity)
+        .with_shards(SHARDS)
+        .with_eviction_config(S3FifoConfig {
+            small_queue_capacity_ratio: 0.1,
+            ghost_queue_capacity_ratio: 10.0,
+            small_to_main_freq_threshold: 2,
         })
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
 fn bench_one(zif_exp: f64, cache_size_percent: f64) {
-    print!("{zif_exp:.2}, {cache_size_percent:4}\t\t\t");
+    print!("{zif_exp:6.2}, {cache_size_percent:6}{:6}", "");
     let mut rng = thread_rng();
     let zipf = zipf::ZipfDistribution::new(ITEMS, zif_exp).unwrap();
 
@@ -133,7 +147,8 @@ fn bench_one(zif_exp: f64, cache_size_percent: f64) {
     let fifo_cache = new_fifo_cache(cache_size);
     let lru_cache = new_lru_cache(cache_size);
     let lfu_cache = new_lfu_cache(cache_size);
-    let s3fifo_cache = new_s3fifo_cache(cache_size);
+    let s3fifo_cache_wo_ghost = new_s3fifo_cache_wo_ghost(cache_size);
+    let s3fifo_cache_w_ghost = new_s3fifo_cache_w_ghost(cache_size);
     let moka_cache = moka::sync::Cache::new(cache_size as u64);
 
     let mut keys = Vec::with_capacity(ITERATIONS);
@@ -163,8 +178,14 @@ fn bench_one(zif_exp: f64, cache_size_percent: f64) {
         move || cache_hit(cache, keys)
     });
 
-    let s3fifo_cache_hit_handle = std::thread::spawn({
-        let cache = s3fifo_cache.clone();
+    let s3fifo_cache_wo_ghost_hit_handle = std::thread::spawn({
+        let cache = s3fifo_cache_wo_ghost.clone();
+        let keys = keys.clone();
+        move || cache_hit(cache, keys)
+    });
+
+    let s3fifo_cache_w_ghost_hit_handle = std::thread::spawn({
+        let cache = s3fifo_cache_w_ghost.clone();
         let keys = keys.clone();
         move || cache_hit(cache, keys)
     });
@@ -178,18 +199,24 @@ fn bench_one(zif_exp: f64, cache_size_percent: f64) {
     let fifo_hit_ratio = fifo_cache_hit_handle.join().unwrap();
     let lru_hit_ratio = lru_cache_hit_handle.join().unwrap();
     let lfu_hit_ratio = lfu_cache_hit_handle.join().unwrap();
-    let s3fifo_hit_ratio = s3fifo_cache_hit_handle.join().unwrap();
+    let s3fifo_wo_ghost_hit_ratio = s3fifo_cache_wo_ghost_hit_handle.join().unwrap();
+    let s3fifo_w_ghost_hit_ratio = s3fifo_cache_w_ghost_hit_handle.join().unwrap();
     let moka_hit_ratio = moka_cache_hit_handle.join().unwrap();
 
-    print!("{:.2}%\t\t", fifo_hit_ratio * 100.0);
-    print!("{:.2}%\t\t", lru_hit_ratio * 100.0);
-    print!("{:.2}%\t\t", lfu_hit_ratio * 100.0);
-    print!("{:.2}%\t\t", s3fifo_hit_ratio * 100.0);
-    println!("{:.2}%", moka_hit_ratio * 100.0);
+    print!("{:15.2}%", fifo_hit_ratio * 100.0);
+    print!("{:15.2}%", lru_hit_ratio * 100.0);
+    print!("{:15.2}%", lfu_hit_ratio * 100.0);
+    print!("{:15.2}%", s3fifo_wo_ghost_hit_ratio * 100.0);
+    print!("{:15.2}%", s3fifo_w_ghost_hit_ratio * 100.0);
+    print!("{:15.2}%", moka_hit_ratio * 100.0);
+    println!();
 }
 
 fn bench_zipf_hit() {
-    println!("zif_exp, cache_size\t\tfifo\t\tlru\t\tlfu\t\ts3fifo\t\tmoka");
+    println!(
+        "{:30}{:16}{:16}{:16}{:16}{:16}{:16}",
+        "zif_exp, cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (10g)", "moka"
+    );
     for zif_exp in [0.9, 1.0, 1.05, 1.1, 1.5] {
         for cache_capacity in [0.005, 0.01, 0.05, 0.1, 0.25] {
             bench_one(zif_exp, cache_capacity);

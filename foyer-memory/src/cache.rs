@@ -786,6 +786,8 @@ mod tests {
             .with_shards(SHARDS)
             .with_eviction_config(S3FifoConfig {
                 small_queue_capacity_ratio: 0.1,
+                ghost_queue_capacity_ratio: 10.0,
+                small_to_main_freq_threshold: 2,
             })
             .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
