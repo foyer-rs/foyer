@@ -33,7 +33,7 @@ use foyer_common::{
 };
 
 use foyer_memory::EvictionConfig;
-use futures::future::try_join_all;
+use futures::{future::try_join_all, Future};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use tokio::{
@@ -353,77 +353,69 @@ where
         Ok(self.inner.catalog.get(key).is_some())
     }
 
-    #[tracing::instrument(skip_all)]
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        let inner = self.inner.clone();
         let now = Instant::now();
 
-        let (_sequence, index) = match self.inner.catalog.get(key) {
-            Some(item) => item.consume(),
-            None => {
-                self.inner
-                    .metrics
-                    .op_duration_get_miss
-                    .observe(now.elapsed().as_secs_f64());
-                return Ok(None);
-            }
-        };
+        let index_value = inner.catalog.get(key);
 
-        match index {
-            crate::catalog::Index::Inflight { key, value } => {
-                let value = value.clone();
+        async move {
+            let (_sequence, index) = match index_value {
+                Some(item) => item.consume(),
+                None => {
+                    inner.metrics.op_duration_get_miss.observe(now.elapsed().as_secs_f64());
+                    return Ok(None);
+                }
+            };
 
-                self.inner
-                    .metrics
-                    .op_duration_get_hit
-                    .observe(now.elapsed().as_secs_f64());
+            match index {
+                crate::catalog::Index::Inflight { key, value } => {
+                    let value = value.clone();
 
-                Ok(Some(CachedEntry::Shared { key, value }))
-            }
-            crate::catalog::Index::Region { view } => {
-                let region = view.id();
+                    inner.metrics.op_duration_get_hit.observe(now.elapsed().as_secs_f64());
 
-                self.inner.region_manager.record_access(region);
-                let region = self.inner.region_manager.region(region);
+                    Ok(Some(CachedEntry::Shared { key, value }))
+                }
+                crate::catalog::Index::Region { view } => {
+                    let region = view.id();
 
-                // TODO(MrCroxx): read value only
-                let buf = match region.load(view).await? {
-                    Some(buf) => buf,
-                    None => {
-                        // Remove index if the storage layer fails to get it (because of region version mismatch).
-                        self.inner.catalog.remove(key);
-                        self.inner
-                            .metrics
-                            .op_duration_get_miss
-                            .observe(now.elapsed().as_secs_f64());
-                        return Ok(None);
-                    }
-                };
+                    inner.region_manager.record_access(region);
+                    let region = inner.region_manager.region(region);
 
-                let res = match read_entry::<K, V>(buf.as_ref()) {
-                    Ok((key, value)) => {
-                        self.inner.metrics.op_bytes_get.inc_by(buf.len() as u64);
-                        Ok(Some(CachedEntry::Owned {
-                            key: Box::new(key),
-                            value: Box::new(value),
-                        }))
-                    }
-                    Err(e) => {
-                        // Remove index if the storage layer fails to get it (because of entry magic mismatch).
-                        self.inner.catalog.remove(key);
-                        Err(e)
-                    }
-                };
+                    // TODO(MrCroxx): read value only
+                    let buf = match region.load(view).await? {
+                        Some(buf) => buf,
+                        None => {
+                            // Remove index if the storage layer fails to get it (because of region version mismatch).
+                            // inner.catalog.remove(index.key());
+                            inner.metrics.op_duration_get_miss.observe(now.elapsed().as_secs_f64());
+                            return Ok(None);
+                        }
+                    };
 
-                self.inner
-                    .metrics
-                    .op_duration_get_hit
-                    .observe(now.elapsed().as_secs_f64());
+                    let res = match read_entry::<K, V>(buf.as_ref()) {
+                        Ok((key, value)) => {
+                            inner.metrics.op_bytes_get.inc_by(buf.len() as u64);
+                            Ok(Some(CachedEntry::Owned {
+                                key: Box::new(key),
+                                value: Box::new(value),
+                            }))
+                        }
+                        Err(e) => {
+                            // Remove index if the storage layer fails to get it (because of entry magic mismatch).
+                            // inner.catalog.remove(key);
+                            Err(e)
+                        }
+                    };
 
-                res
+                    inner.metrics.op_duration_get_hit.observe(now.elapsed().as_secs_f64());
+
+                    res
+                }
             }
         }
     }
@@ -1034,12 +1026,12 @@ where
         self.exists(key)
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.get(key).await
+        self.get(key)
     }
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>

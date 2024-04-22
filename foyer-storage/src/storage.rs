@@ -135,10 +135,10 @@ where
         Q: Hash + Eq + ?Sized;
 
     #[must_use]
-    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone;
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static;
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>
     where

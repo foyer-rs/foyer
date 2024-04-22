@@ -14,6 +14,7 @@
 
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{EvictionConfig, LfuConfig};
+use futures::{future::pending, Future};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
 use crate::{
@@ -534,18 +535,25 @@ where
         }
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        match self {
-            Store::None(store) => store.get(key).await,
-            Store::Fs(store) => store.get(key).await,
-            Store::LazyFs(store) => store.get(key).await,
-            Store::RuntimeFs(store) => store.get(key).await,
-            Store::RuntimeLazyFs(store) => store.get(key).await,
-        }
+        // Is this cheap?
+        let this = self.clone();
+
+        // TODO: return an enum here instead.
+        pending()
+        // async move {
+        //     match this {
+        //         Store::None(store) => store.get(key).await,
+        //         Store::Fs(store) => store.get(key).await,
+        //         Store::LazyFs(store) => store.get(key).await,
+        //         Store::RuntimeFs(store) => store.get(key).await,
+        //         Store::RuntimeLazyFs(store) => store.get(key).await,
+        //     }
+        // }
     }
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>

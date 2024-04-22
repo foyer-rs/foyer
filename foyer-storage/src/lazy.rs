@@ -19,6 +19,7 @@ use std::{
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
+use futures::{future::OptionFuture, Future, FutureExt};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -202,14 +203,17 @@ where
         }
     }
 
-    async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
+    fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + 'static
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        // TODO: Implement a future that returns correct result.
+        // This should be simple.
         match self.once.get() {
-            Some(store) => store.get(key).await,
-            None => self.none.get(key).await,
+            Some(store) => store.get(key),
+            // TODO: Replace by NoneStore.
+            None => todo!("implement me"),
         }
     }
 
