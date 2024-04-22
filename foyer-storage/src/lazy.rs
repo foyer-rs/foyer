@@ -208,7 +208,7 @@ where
     async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         match self.once.get() {
             Some(store) => store.get(key).await,

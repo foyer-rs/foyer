@@ -243,7 +243,7 @@ where
     async fn get<Q>(&self, key: &Q) -> Result<Option<CachedEntry<K, V>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         let store = self.store.clone();
         let key = key.clone();

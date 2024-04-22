@@ -404,15 +404,15 @@ where
 
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        K: Borrow<Q> + Clone,
-        V: Clone,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
         if let Some(entry) = self.cache.get(key) {
             return Ok(Some(entry));
         }
         if let Some(entry) = self.store.get(key).await? {
-            return Ok(Some(self.cache.insert(entry.key().clone(), entry.value().clone())));
+            let (key, value) = entry.to_arcable();
+            return Ok(Some(self.cache.insert(key, value)));
         }
         Ok(None)
     }
@@ -447,21 +447,25 @@ pub type HybridEntry<K, V, S> = Entry<K, V, anyhow::Error, HybridCacheEventListe
 impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey + Clone,
-    V: StorageValue + Clone,
+    V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
+    pub fn entry<AK, AV, F, FU>(&self, key: AK, f: F) -> HybridEntry<K, V, S>
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU + Send + 'static,
-        FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
     {
+        let key: Arc<K> = key.into().into_arc();
         let store = self.store.clone();
         self.cache.entry(key.clone(), || async move {
-            let key = key;
-            if let Some(value) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                return Ok((value.to_owned().1, CacheContext::default()));
+            if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
+                return Ok((entry.to_arcable().1.into_arc(), CacheContext::default()));
             }
-            f().await.map_err(anyhow::Error::from)
+            f().await
+                .map(|(value, context)| (value.into().into_arc(), context))
+                .map_err(anyhow::Error::from)
         })
     }
 }

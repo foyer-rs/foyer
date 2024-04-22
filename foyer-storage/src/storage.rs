@@ -62,6 +62,13 @@ where
             CachedEntry::Owned { key: _, value } => value,
         }
     }
+
+    pub fn to_arcable(self) -> (Arcable<K>, Arcable<V>) {
+        match self {
+            CachedEntry::Shared { key, value } => (Arcable::from(key), Arcable::from(value)),
+            CachedEntry::Owned { key, value } => (Arcable::from(*key), Arcable::from(*value)),
+        }
+    }
 }
 
 impl<K, V> CachedEntry<K, V>
@@ -134,7 +141,7 @@ where
     fn get<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + Clone + 'static;
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone;
 
     fn remove<Q>(&self, key: &Q) -> Result<bool>
     where
