@@ -151,13 +151,22 @@ where
 {
     #[must_use]
     #[tracing::instrument(skip_all)]
-    fn insert(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
+    fn insert<AK, AV>(&self, key: AK, value: AV) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         self.writer(key).finish(value)
     }
 
     #[must_use]
     #[tracing::instrument(skip_all)]
-    fn insert_if_not_exists(&self, key: K, value: V) -> impl Future<Output = Result<bool>> + Send {
+    fn insert_if_not_exists<AK, AV>(&self, key: AK, value: AV) -> impl Future<Output = Result<bool>> + Send
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
+        let key = key.into().into_arc();
         async move {
             if self.exists(&key)? {
                 return Ok(false);
@@ -174,9 +183,11 @@ where
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[must_use]
     #[tracing::instrument(skip_all)]
-    fn insert_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    fn insert_with<AK, AV, F>(&self, key: AK, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
-        F: FnOnce() -> anyhow::Result<V> + Send,
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+        F: FnOnce() -> anyhow::Result<AV> + Send,
     {
         async move {
             let mut writer = self.writer(key);
@@ -197,10 +208,16 @@ where
     /// First judge if the entry will be admitted with `key` and `weight` by admission policies.
     /// Then `f` will be called to fetch value, and entry will be inserted.
     #[tracing::instrument(skip_all)]
-    fn insert_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    fn insert_with_future<AV, AK, F, FU>(
+        &self,
+        key: AK,
+        f: F,
+    ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU + Send,
-        FU: FetchValueFuture<V>,
+        FU: FetchValueFuture<AV>,
     {
         async move {
             let mut writer = self.writer(key);
@@ -219,10 +236,13 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    fn insert_if_not_exists_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
+    fn insert_if_not_exists_with<AV, AK, F>(&self, key: AK, f: F) -> impl Future<Output = Result<bool>> + Send
     where
-        F: FnOnce() -> anyhow::Result<V> + Send,
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+        F: FnOnce() -> anyhow::Result<AV> + Send,
     {
+        let key = key.into().into_arc();
         async move {
             if self.exists(&key)? {
                 return Ok(false);
@@ -232,11 +252,18 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    fn insert_if_not_exists_with_future<F, FU>(&self, key: K, f: F) -> impl Future<Output = Result<bool>> + Send
+    fn insert_if_not_exists_with_future<AK, AV, F, FU>(
+        &self,
+        key: AK,
+        f: F,
+    ) -> impl Future<Output = Result<bool>> + Send
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU + Send,
-        FU: FetchValueFuture<V>,
+        FU: FetchValueFuture<AV>,
     {
+        let key = key.into().into_arc();
         async move {
             if self.exists(&key)? {
                 return Ok(false);
@@ -260,7 +287,11 @@ where
     V: StorageValue,
 {
     #[tracing::instrument(skip_all)]
-    fn insert_async(&self, key: K, value: V) {
+    fn insert_async<AK, AV>(&self, key: AK, value: AV)
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         let store = self.clone();
         tokio::spawn(async move {
             if let Err(e) = store.insert(key, value).await {
@@ -270,7 +301,11 @@ where
     }
 
     #[tracing::instrument(skip_all)]
-    fn insert_if_not_exists_async(&self, key: K, value: V) {
+    fn insert_if_not_exists_async<AK, AV>(&self, key: AK, value: AV)
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         let store = self.clone();
         tokio::spawn(async move {
             if let Err(e) = store.insert_if_not_exists(key, value).await {
@@ -279,8 +314,10 @@ where
         });
     }
 
-    fn insert_async_with_callback<F, FU>(&self, key: K, value: V, f: F)
+    fn insert_async_with_callback<AK, AV, F, FU>(&self, key: AK, value: AV, f: F)
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce(Result<Option<CachedEntry<K, V>>>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
     {
@@ -292,8 +329,10 @@ where
         });
     }
 
-    fn insert_if_not_exists_async_with_callback<F, FU>(&self, key: K, value: V, f: F)
+    fn insert_if_not_exists_async_with_callback<AK, AV, F, FU>(&self, key: AK, value: AV, f: F)
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce(Result<bool>) -> FU + Send + 'static,
         FU: Future<Output = ()> + Send + 'static,
     {
@@ -320,7 +359,11 @@ where
     V: StorageValue,
 {
     #[tracing::instrument(skip_all)]
-    fn insert_force(&self, key: K, value: V) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send {
+    fn insert_force<AK, AV>(&self, key: AK, value: AV) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+    {
         let mut writer = self.writer(key);
         writer.force();
         writer.finish(value)
@@ -333,9 +376,15 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip_all)]
-    fn insert_force_with<F>(&self, key: K, f: F) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
+    fn insert_force_with<AK, AV, F>(
+        &self,
+        key: AK,
+        f: F,
+    ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
-        F: FnOnce() -> anyhow::Result<V> + Send,
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
+        F: FnOnce() -> anyhow::Result<AV> + Send,
     {
         async move {
             let mut writer = self.writer(key);
@@ -362,12 +411,14 @@ where
     ///
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip_all)]
-    fn insert_force_with_future<F, FU>(
+    fn insert_force_with_future<AK, AV, F, FU>(
         &self,
-        key: K,
+        key: AK,
         f: F,
     ) -> impl Future<Output = Result<Option<CachedEntry<K, V>>>> + Send
     where
+        AK: Into<Arcable<K>> + Send + 'static,
+        AV: Into<Arcable<V>> + Send + 'static,
         F: FnOnce() -> FU + Send,
         FU: FetchValueFuture<V>,
     {
