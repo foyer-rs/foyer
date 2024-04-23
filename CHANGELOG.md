@@ -1,3 +1,30 @@
+## 2024-04-23
+
+| crate | version |
+| - | - |
+| foyer | 0.8.0 |
+| foyer-common | 0.6.0 |
+| foyer-intrusive | 0.5.0 |
+| foyer-memory | 0.3.0 |
+| foyer-storage | 0.7.0 |
+| foyer-storage-bench | 0.7.0 |
+| foyer-workspace-hack | 0.5.0 |
+
+<details>
+
+### Changes
+
+- Combine in-memory cache and disk cache into `HybridCache`.
+- Refine APIs, make them more user-friendly.
+- Refine `Key`, `Value`, `StorageKey`, `StorageValue` traits.
+- Support `serde` for storage key and value serialization and deserialization.
+- Loose trait bounds for key and value.
+- Add configurable ghost queue for S3FIFO.
+- Fix S3FIFO eviction bugs.
+- Add more examples.
+
+</details>
+
 ## 2024-04-11
 
 | crate | version |
