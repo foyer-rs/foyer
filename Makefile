@@ -49,6 +49,7 @@ madsim:
 example:
 	cargo run --example memory
 	cargo run --example hybrid
+	cargo run --example hybrid_full
 
 all: check-all test-all example
 
