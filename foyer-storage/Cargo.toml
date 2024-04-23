@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine for foyer - the hybrid cache for Rust"
@@ -23,9 +23,9 @@ bitflags = "2.3.1"
 bitmaps = "3.2"
 bytes = "1"
 either = "1"
-foyer-common = { version = "0.5", path = "../foyer-common" }
-foyer-memory = { version = "0.2", path = "../foyer-memory" }
-foyer-workspace-hack = { version = "0.4", path = "../foyer-workspace-hack" }
+foyer-common = { version = "0.6", path = "../foyer-common" }
+foyer-memory = { version = "0.3", path = "../foyer-memory" }
+foyer-workspace-hack = { version = "0.5", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.12"
 lazy_static = "1"
