@@ -111,6 +111,7 @@ jobs:
         run: |
           cargo llvm-cov --no-report run --example memory
           cargo llvm-cov --no-report run --example hybrid
+          cargo llvm-cov --no-report run --example hybrid_full
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info

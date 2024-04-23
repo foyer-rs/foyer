@@ -37,11 +37,42 @@ fn main() {
 }
 ```
 
+### Easy-to-use Hybrid Cache
+
+```rust
+use foyer::{FsDeviceConfigBuilder, HybridCache, HybridCacheBuilder};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+
+    let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
+        .memory(64 * 1024 * 1024)
+        .storage()
+        .with_device_config(
+            FsDeviceConfigBuilder::new(dir.path())
+                .with_capacity(256 * 1024 * 1024)
+                .build(),
+        )
+        .build()
+        .await?;
+
+    hybrid.insert(42, "The answer to life, the universe, and everything.".to_string());
+    assert_eq!(
+        hybrid.get(&42).await?.unwrap().value(),
+        "The answer to life, the universe, and everything."
+    );
+
+    Ok(())
+}
+```
+
 ### Fully Configured Hybrid Cache
 
 ```rust
 use std::sync::Arc;
 
+use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     CacheContext, FsDeviceConfigBuilder, HybridCache, HybridCacheBuilder, LfuConfig, LruConfig,
@@ -50,7 +81,7 @@ use foyer::{
 use tempfile::tempdir;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
@@ -97,28 +128,31 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     hybrid.insert(42, "The answer to life, the universe, and everything.".to_string());
-
     assert_eq!(
         hybrid.get(&42).await?.unwrap().value(),
         "The answer to life, the universe, and everything."
     );
 
-    hybrid.entry(20230512, || async {
-        // fetch a value from a remote service
-        let future = async {
-            let now = chrono::Utc::now();
-            if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
-                return Err(anyhow::anyhow!("Hi, time traveler!"));
-            }
-            Ok("Hello, foyer.".to_string())
-        };
-
-        let value = future.await?;
-        Ok((value, CacheContext::default()))
-    });
+    let e = hybrid
+        .entry(20230512, || async {
+            let value = fetch().await?;
+            Ok((value, CacheContext::default()))
+        })
+        .await?;
+    assert_eq!(e.key(), &20230512);
+    assert_eq!(e.value(), "Hello, foyer.");
 
     Ok(())
 }
+
+async fn fetch() -> Result<String> {
+    let now = chrono::Utc::now();
+    if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
+        return Err(anyhow::anyhow!("Hi, time traveler!"));
+    }
+    Ok("Hello, foyer.".to_string())
+}
+
 ```
 
 ### Other Cases

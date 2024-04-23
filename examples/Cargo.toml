@@ -26,3 +26,7 @@ path = "memory.rs"
 [[example]]
 name = "hybrid"
 path = "hybrid.rs"
+
+[[example]]
+name = "hybrid_full"
+path = "hybrid_full.rs"

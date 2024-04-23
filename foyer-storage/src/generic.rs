@@ -208,11 +208,21 @@ where
     V: StorageValue,
     D: Device,
 {
-    async fn open(config: GenericStoreConfig<K, V, D>) -> Result<Self> {
+    async fn open(mut config: GenericStoreConfig<K, V, D>) -> Result<Self> {
         let metrics = Arc::new(METRICS.foyer(&config.name));
 
         let device = D::open(config.device_config).await?;
-        assert!(device.regions() >= config.flushers * 2);
+        assert!(device.regions() > 1);
+        while config.flushers >= device.regions() {
+            tracing::warn!(
+                "flushers: {} >= device regions: {}, reduce to: {}",
+                config.flushers,
+                device.regions(),
+                config.flushers >> 1
+            );
+            config.flushers >>= 1;
+        }
+        assert!(config.flushers > 0);
 
         let region_manager = Arc::new(RegionManager::new(
             device.regions(),
