@@ -161,7 +161,7 @@ More examples and details can be found [here](https://github.com/MrCroxx/foyer/t
 
 ## Supported Rust Versions
 
-*foyer* is built against the latest stable release. The minimum supported version is 1.77.2. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+*foyer* is built against the latest stable release. The minimum supported version is 1.76. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
 ## Development state & Roadmap
 

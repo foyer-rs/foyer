@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/mrcroxx/foyer"
 homepage = "https://github.com/mrcroxx/foyer"
 readme = "../README.md"
-rust-version = "1.77.2"
+rust-version = "1.76"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-udeps.ignore]
