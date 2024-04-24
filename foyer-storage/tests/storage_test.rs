@@ -57,19 +57,37 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
     drop(store);
 
     for _ in 0..LOOPS {
+        {
+            let mut config = config.clone();
+            match &mut config {
+                StoreConfig::None => {}
+                StoreConfig::Fs(config) => config.readonly = true,
+                StoreConfig::LazyFs(config) => config.readonly = true,
+                StoreConfig::RuntimeFs(config) => config.store_config.readonly = true,
+                StoreConfig::RuntimeLazyFs(config) => config.store_config.readonly = true,
+            }
+
+            let store = Store::open(config.clone()).await.unwrap();
+            while !store.is_ready() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+
+            let remains = recorder.remains();
+
+            for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
+                if remains.contains(&i) {
+                    assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+                } else {
+                    assert!(store.get(&i).await.unwrap().is_none());
+                }
+            }
+
+            store.close().await.unwrap();
+        }
+
         let store = Store::open(config.clone()).await.unwrap();
         while !store.is_ready() {
             tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
-        let remains = recorder.remains();
-
-        for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-            if remains.contains(&i) {
-                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
-            } else {
-                assert!(store.get(&i).await.unwrap().is_none());
-            }
         }
 
         for _ in 0..INSERTS as u64 {
@@ -115,6 +133,7 @@ async fn test_fs_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
+        readonly: false,
     });
 
     test_store(config, recorder).await;
@@ -142,6 +161,7 @@ async fn test_fs_store_zstd() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Zstd,
+        readonly: false,
     });
 
     test_store(config, recorder).await;
@@ -169,6 +189,7 @@ async fn test_fs_store_lz4() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Lz4,
+        readonly: false,
     });
 
     test_store(config, recorder).await;
@@ -196,6 +217,7 @@ async fn test_lazy_fs_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
+        readonly: false,
     });
 
     test_store(config, recorder).await;
@@ -224,6 +246,7 @@ async fn test_runtime_fs_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
+            readonly: false,
         },
         runtime_config: RuntimeConfigBuilder::new().build(),
     });
@@ -254,6 +277,7 @@ async fn test_runtime_lazy_fs_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
+            readonly: false,
         },
         runtime_config: RuntimeConfigBuilder::new().build(),
     });

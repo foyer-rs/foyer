@@ -69,6 +69,7 @@ where
     recover_concurrency: usize,
     compression: Compression,
     lazy: bool,
+    readonly: bool,
     runtime_config: Option<RuntimeConfig>,
 }
 
@@ -108,6 +109,7 @@ where
             compression: Compression::None,
             runtime_config: None,
             lazy: false,
+            readonly: false,
         }
     }
 }
@@ -209,6 +211,11 @@ where
         self
     }
 
+    pub fn with_readonly(mut self, readonly: bool) -> Self {
+        self.readonly = readonly;
+        self
+    }
+
     /// Build and return the [`StoreConfig`] only.
     pub fn build_config(self) -> StoreConfig<K, V> {
         let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
@@ -227,6 +234,7 @@ where
                 clean_region_threshold,
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
+                readonly: self.readonly,
             }),
             (DeviceConfig::Fs(device_config), None, true) => StoreConfig::LazyFs(FsStoreConfig {
                 name: self.name,
@@ -240,6 +248,7 @@ where
                 clean_region_threshold,
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
+                readonly: self.readonly,
             }),
             (DeviceConfig::Fs(device_config), Some(runtime_config), true) => {
                 StoreConfig::RuntimeFs(RuntimeStoreConfig {
@@ -255,6 +264,7 @@ where
                         clean_region_threshold,
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
+                        readonly: self.readonly,
                     },
                     runtime_config,
                 })
@@ -273,6 +283,7 @@ where
                         clean_region_threshold,
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
+                        readonly: self.readonly,
                     },
                     runtime_config,
                 })

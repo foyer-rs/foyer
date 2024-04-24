@@ -347,6 +347,18 @@ where
         }
     }
 
+    /// Decide if open with readonly mode.
+    ///
+    /// If enabled, the store cannot be write after opened, and no flushers or reclaimers will run.
+    pub fn with_readonly(self, readonly: bool) -> Self {
+        let builder = self.builder.with_readonly(readonly);
+        Self {
+            listener: self.listener,
+            cache: self.cache,
+            builder,
+        }
+    }
+
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let store = self.builder.build().await?;
         self.listener.inner.store.set(store.clone()).unwrap();

@@ -103,6 +103,9 @@ where
 
     /// Compression algorithm.
     pub compression: Compression,
+
+    /// Open with read-only mode.
+    pub readonly: bool,
 }
 
 impl<K, V, D> Debug for GenericStoreConfig<K, V, D>
@@ -146,6 +149,7 @@ where
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
+            readonly: self.readonly,
         }
     }
 }
@@ -198,6 +202,8 @@ where
     metrics: Arc<Metrics>,
 
     compression: Compression,
+
+    readonly: bool,
 
     _marker: PhantomData<V>,
 }
@@ -260,6 +266,7 @@ where
             reclaimers_stop_tx,
             metrics: metrics.clone(),
             compression: config.compression,
+            readonly: config.readonly,
             _marker: PhantomData,
         };
         let store = Self { inner: Arc::new(inner) };
@@ -311,17 +318,19 @@ where
         let sequence = store.recover(config.recover_concurrency).await?;
         store.inner.sequence.store(sequence + 1, Ordering::Relaxed);
 
-        let flusher_handles = flushers
-            .into_iter()
-            .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
-            .collect_vec();
-        let reclaimer_handles = reclaimers
-            .into_iter()
-            .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
-            .collect_vec();
+        if !store.inner.readonly {
+            let flusher_handles = flushers
+                .into_iter()
+                .map(|flusher| tokio::spawn(async move { flusher.run().await.unwrap() }))
+                .collect_vec();
+            let reclaimer_handles = reclaimers
+                .into_iter()
+                .map(|reclaimer| tokio::spawn(async move { reclaimer.run().await.unwrap() }))
+                .collect_vec();
 
-        *store.inner.flusher_handles.lock() = flusher_handles;
-        *store.inner.reclaimer_handles.lock() = reclaimer_handles;
+            *store.inner.flusher_handles.lock() = flusher_handles;
+            *store.inner.reclaimer_handles.lock() = reclaimer_handles;
+        }
 
         Ok(store)
     }
@@ -353,6 +362,10 @@ where
     /// `weight` MUST be equal to `key.serialized_len() + value.serialized_len()`
     #[tracing::instrument(skip_all)]
     fn writer(&self, key: impl Into<Arc<K>>) -> GenericStoreWriter<K, V, D> {
+        // TODO(MrCroxx): Return error if readonly, instead of panicking.
+        if self.inner.readonly {
+            panic!("Cannot create store writer with readonly mode.");
+        }
         GenericStoreWriter::new(self.clone(), key)
     }
 
@@ -1107,6 +1120,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
+            readonly: false,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -1153,6 +1167,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
+            readonly: false,
         };
         let store = TestStore::open(config).await.unwrap();
 

@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
                 .build(),
         )
         .with_lazy(true)
+        .with_readonly(false)
         .build()
         .await?;
 
