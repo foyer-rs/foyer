@@ -2,6 +2,26 @@
 
 | crate | version |
 | - | - |
+| foyer | 0.8.2 |
+| foyer-common | 0.6.2 |
+| foyer-intrusive | 0.5.2 |
+| foyer-memory | 0.3.2 |
+| foyer-storage | 0.7.2 |
+| foyer-storage-bench | 0.7.2 |
+| foyer-workspace-hack | 0.5.2 |
+
+<details>
+
+### Changes
+
+- Add `nightly` feature to make it compatiable with night toolchain.
+
+</details>
+
+## 2024-04-24
+
+| crate | version |
+| - | - |
 | foyer | 0.8.1 |
 | foyer-common | 0.6.1 |
 | foyer-intrusive | 0.5.1 |
