@@ -19,8 +19,19 @@
 - **Thread Safety**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
 - **User-Friendly Interface**: Offers a simple and intuitive API, making cache integration effortless and accessible for developers of all levels.
 
-## Examples
+## Usage
 
+To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
+
+```toml
+foyer = "0.8"
+```
+
+If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
+
+```toml
+foyer = { version = "0.8", features = ["nightly"] }
+```
 
 ### Out-of-the-box In-memory Cache
 

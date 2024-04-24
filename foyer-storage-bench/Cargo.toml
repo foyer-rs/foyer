@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage-bench"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine bench tool for foyer - the hybrid cache for Rust"
