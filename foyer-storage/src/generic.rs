@@ -897,10 +897,12 @@ where
         }
 
         let Some(slice) = self.region.load_range(self.cursor..self.cursor + align).await? else {
+            println!("unexpected: 1");
             return Ok(None);
         };
 
         let Ok(header) = EntryHeader::read(slice.as_ref()) else {
+            println!("unexpected: 2");
             return Ok(None);
         };
 
@@ -914,6 +916,7 @@ where
 
         if abs_start >= abs_end || abs_end > region_size {
             // Double check wrong entry.
+            println!("unexpected: 3");
             return Ok(None);
         }
 
@@ -926,6 +929,7 @@ where
             let rel_end = rel_start + header.key_len as usize;
 
             let Ok(key) = bincode::deserialize_from::<_, K>(&slice.as_ref()[rel_start..rel_end]) else {
+                println!("unexpected: 4");
                 return Ok(None);
             };
             drop(slice);
@@ -933,12 +937,14 @@ where
         } else {
             drop(slice);
             let Some(s) = self.region.load_range(align_start..align_end).await? else {
+                println!("unexpected: 5");
                 return Ok(None);
             };
             let rel_start = abs_start - align_start;
             let rel_end = abs_end - align_start;
 
             let Ok(key) = bincode::deserialize_from(&s.as_ref()[rel_start..rel_end]) else {
+                println!("unexpected: 6");
                 return Ok(None);
             };
             drop(s);
