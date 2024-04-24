@@ -90,6 +90,8 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
+        let remains = recorder.remains();
+
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             if remains.contains(&i) {
                 assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
