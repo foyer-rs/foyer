@@ -51,4 +51,6 @@ rand_mt = "4.2.1"
 tempfile = "3"
 
 [features]
+default = []
 deadlock = ["parking_lot/deadlock_detection"]
+nightly = ["allocator-api2/nightly"]
