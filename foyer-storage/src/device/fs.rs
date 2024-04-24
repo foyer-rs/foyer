@@ -276,7 +276,7 @@ impl FsDevice {
 
                     opts.create(true).write(true).read(true);
 
-                    #[cfg(target_family = "unix")]
+                    #[cfg(target_os = "linux")]
                     {
                         use std::os::unix::fs::OpenOptionsExt;
                         opts.custom_flags(libc::O_DIRECT);
