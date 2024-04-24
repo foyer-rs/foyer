@@ -206,6 +206,11 @@ where
                 return Err(e.into());
             }
             Ok(buf) if buf.len() != range.size().unwrap() => {
+                println!(
+                    "size not match, expected: {}, get: {}",
+                    range.size().unwrap(),
+                    buf.len()
+                );
                 self.cleanup(range.start, range.end)?;
                 return Ok(None);
             }

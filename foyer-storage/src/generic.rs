@@ -898,7 +898,7 @@ where
         }
 
         let Some(slice) = self.region.load_range(self.cursor..self.cursor + align).await? else {
-            println!("unexpected: 1");
+            println!("expected: 1");
             return Ok(None);
         };
 
