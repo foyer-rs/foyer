@@ -27,4 +27,5 @@ platforms = [
 workspace-members = ["examples"]
 third-party = [
     { name = "miniz_oxide" },
+    { name = "allocator-api2" },
 ]

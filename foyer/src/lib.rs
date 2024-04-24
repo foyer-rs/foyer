@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
+
 use foyer_memory as memory;
 use foyer_storage as storage;
 
