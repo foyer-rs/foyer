@@ -1,3 +1,25 @@
+## 2024-04-24
+
+| crate | version |
+| - | - |
+| foyer | 0.8.1 |
+| foyer-common | 0.6.1 |
+| foyer-intrusive | 0.5.1 |
+| foyer-memory | 0.3.1 |
+| foyer-storage | 0.7.1 |
+| foyer-storage-bench | 0.7.1 |
+| foyer-workspace-hack | 0.5.1 |
+
+<details>
+
+### Changes
+
+- Add `with_flush` to enable flush for each io.
+- Loose MSRV to 1.76 .
+- Flush the device on store close.
+
+</details>
+
 ## 2024-04-23
 
 | crate | version |
