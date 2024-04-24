@@ -103,6 +103,9 @@ where
 
     /// Compression algorithm.
     pub compression: Compression,
+
+    /// Flush device for each io.
+    pub flush: bool,
 }
 
 impl<K, V, D> Debug for GenericStoreConfig<K, V, D>
@@ -123,6 +126,7 @@ where
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("compression", &self.compression)
+            .field("flush", &self.flush)
             .finish()
     }
 }
@@ -146,6 +150,7 @@ where
             clean_region_threshold: self.clean_region_threshold,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
+            flush: self.flush,
         }
     }
 }
@@ -198,6 +203,7 @@ where
     metrics: Arc<Metrics>,
 
     compression: Compression,
+    flush: bool,
 
     _marker: PhantomData<V>,
 }
@@ -260,6 +266,7 @@ where
             reclaimers_stop_tx,
             metrics: metrics.clone(),
             compression: config.compression,
+            flush: config.flush,
             _marker: PhantomData,
         };
         let store = Self { inner: Arc::new(inner) };
@@ -288,6 +295,7 @@ where
                     region_manager.clone(),
                     catalog.clone(),
                     device.clone(),
+                    config.flush,
                     entry_rx,
                     metrics.clone(),
                     stop_rx,
@@ -345,7 +353,9 @@ where
             handle.await.unwrap();
         }
 
-        self.inner.device.flush().await?;
+        if self.inner.flush {
+            self.inner.device.flush().await?;
+        }
 
         Ok(())
     }
@@ -1107,6 +1117,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
+            flush: false,
         };
 
         let store = TestStore::open(config).await.unwrap();
@@ -1153,6 +1164,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
+            flush: false,
         };
         let store = TestStore::open(config).await.unwrap();
 

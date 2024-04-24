@@ -32,7 +32,7 @@ futures-util = { version = "0.3", default-features = false, features = ["async-a
 getrandom = { version = "0.2", default-features = false, features = ["std"] }
 hashbrown = { version = "0.14", features = ["raw"] }
 itertools = { version = "0.12" }
-nix = { version = "0.28", features = ["fs", "mman", "uio"] }
+nix = { version = "0.28", features = ["fs", "mman"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 rand = { version = "0.8", features = ["small_rng"] }

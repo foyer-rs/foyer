@@ -98,11 +98,12 @@ where
         region_manager: Arc<RegionManager<D>>,
         catalog: Arc<Catalog<K, V>>,
         device: D,
+        flush: bool,
         entry_rx: mpsc::UnboundedReceiver<Entry<K, V>>,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
-        let buffer = FlushBuffer::new(device.clone());
+        let buffer = FlushBuffer::new(device.clone(), flush);
         Self {
             region_manager,
             catalog,

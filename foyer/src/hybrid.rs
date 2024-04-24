@@ -323,6 +323,16 @@ where
         }
     }
 
+    /// Flush device for each io.
+    pub fn with_flush(self, flush: bool) -> Self {
+        let builder = self.builder.with_flush(flush);
+        Self {
+            listener: self.listener,
+            cache: self.cache,
+            builder,
+        }
+    }
+
     /// Enable a dedicated tokio runtime for the store with a runtime config.
     ///
     /// If not given, the store will use the user's runtime.

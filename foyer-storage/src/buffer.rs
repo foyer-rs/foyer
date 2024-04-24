@@ -78,6 +78,8 @@ where
     device: D,
 
     default_buffer_capacity: usize,
+
+    flush: bool,
 }
 
 impl<K, V, D> Debug for FlushBuffer<K, V, D>
@@ -91,6 +93,7 @@ where
             .field("region", &self.region)
             .field("offset", &self.offset)
             .field("default_buffer_capacity", &self.default_buffer_capacity)
+            .field("flush", &self.flush)
             .finish()
     }
 }
@@ -101,7 +104,7 @@ where
     V: StorageValue,
     D: Device,
 {
-    pub fn new(device: D) -> Self {
+    pub fn new(device: D, flush: bool) -> Self {
         let default_buffer_capacity = align_up(device.align(), device.io_size() + device.io_size() / 2);
         let buffer = device.io_buffer(0, default_buffer_capacity);
         Self {
@@ -111,6 +114,7 @@ where
             entries: vec![],
             device,
             default_buffer_capacity,
+            flush,
         }
     }
 
@@ -175,12 +179,17 @@ where
 
         // advance io buffer
         self.offset += len;
-        if self.offset == self.device.region_size() {
+        if self.offset >= self.device.region_size() {
             self.region = None;
         }
 
         let mut entries = vec![];
         std::mem::swap(&mut self.entries, &mut entries);
+
+        if self.flush {
+            self.device.flush_region(region).await?;
+        }
+
         Ok(entries)
     }
 
@@ -362,7 +371,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mut buffer = FlushBuffer::new(device.clone());
+        let mut buffer = FlushBuffer::new(device.clone(), false);
         assert_eq!(buffer.region(), None);
 
         {
