@@ -14,7 +14,6 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::fd::{AsRawFd, BorrowedFd, RawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -130,11 +129,9 @@ impl FsDeviceConfig {
 struct FsDeviceInner {
     config: FsDeviceConfig,
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    dir: File,
+    _dir: File,
 
-    files: Vec<File>,
+    files: Vec<Arc<File>>,
 
     io_buffer_allocator: AlignedAllocator,
 }
@@ -166,11 +163,17 @@ impl Device for FsDevice {
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
         );
 
-        let fd = self.fd(region);
-
+        let file = self.file(region).clone();
         asyncify(move || {
-            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pwrite(fd, &buf.as_ref()[range], offset as i64).map_err(DeviceError::from);
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let res = file
+                .write_at(&buf.as_ref()[range], offset as u64)
+                .map_err(DeviceError::from);
             (res, buf)
         })
         .await
@@ -196,37 +199,30 @@ impl Device for FsDevice {
             "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
         );
 
-        let fd = self.fd(region);
-
+        let file = self.file(region).clone();
         asyncify(move || {
-            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
-            let res = nix::sys::uio::pread(fd, &mut buf.as_mut()[range], offset as i64).map_err(DeviceError::from);
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let res = file
+                .read_at(&mut buf.as_mut()[range], offset as u64)
+                .map_err(DeviceError::from);
             (res, buf)
         })
         .await
     }
 
-    #[cfg(target_os = "linux")]
-    async fn flush(&self) -> DeviceResult<()> {
-        let fd = self.inner.dir.as_raw_fd();
-        // Commit fs cache to disk. Linux waits for I/O completions.
-        //
-        // See also [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html)
-        asyncify(move || nix::unistd::syncfs(fd).map_err(DeviceError::from)).await?;
-        Ok(())
+    async fn flush_region(&self, region: RegionId) -> DeviceResult<()> {
+        let file = self.file(region).clone();
+        asyncify(move || file.sync_all().map_err(DeviceError::from)).await
     }
 
-    #[cfg(target_os = "macos")]
     async fn flush(&self) -> DeviceResult<()> {
-        // Use `nix` aftre https://github.com/nix-rust/nix/issues/2376 is closed.
-        asyncify(move || unsafe { libc::sync() }).await;
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    async fn flush(&self) -> DeviceResult<()> {
-        // TODO(MrCroxx): track dirty files and call fsync(2) on them on other target os.
-        Ok(())
+        let futures = (0..self.regions() as RegionId).map(|region| self.flush_region(region));
+        try_join_all(futures).await.map(|_| ())
     }
 
     fn capacity(&self) -> usize {
@@ -276,17 +272,18 @@ impl FsDevice {
             .map(|i| {
                 let path = config.dir.clone().join(Self::filename(i as RegionId));
                 async move {
-                    #[cfg(target_os = "linux")]
-                    use std::os::unix::prelude::OpenOptionsExt;
-
                     let mut opts = OpenOptions::new();
-                    opts.create(true);
-                    opts.write(true);
-                    opts.read(true);
-                    #[cfg(target_os = "linux")]
-                    opts.custom_flags(libc::O_DIRECT);
+
+                    opts.create(true).write(true).read(true);
+
+                    #[cfg(target_family = "unix")]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opts.custom_flags(libc::O_DIRECT);
+                    }
 
                     let file = opts.open(path)?;
+                    let file = Arc::new(file);
 
                     Ok::<_, DeviceError>(file)
                 }
@@ -298,7 +295,7 @@ impl FsDevice {
 
         let inner = FsDeviceInner {
             config,
-            dir,
+            _dir: dir,
             files,
             io_buffer_allocator,
         };
@@ -306,8 +303,8 @@ impl FsDevice {
         Ok(Self { inner: Arc::new(inner) })
     }
 
-    fn fd(&self, region: RegionId) -> RawFd {
-        self.inner.files[region as usize].as_raw_fd()
+    fn file(&self, region: RegionId) -> &Arc<File> {
+        &self.inner.files[region as usize]
     }
 
     fn filename(region: RegionId) -> String {

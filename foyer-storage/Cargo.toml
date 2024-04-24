@@ -32,7 +32,6 @@ lazy_static = "1"
 libc = "0.2"
 lz4 = "1.24"
 memoffset = "0.9"
-nix = { version = "0.28", features = ["fs", "mman", "uio"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 prometheus = "0.13"

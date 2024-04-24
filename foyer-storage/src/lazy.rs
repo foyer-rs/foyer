@@ -272,6 +272,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
+            flush: false,
         };
 
         let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);
@@ -304,6 +305,7 @@ mod tests {
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
+            flush: false,
         };
 
         let (store, handle) = Lazy::<u64, u64, FsStore<_, _>>::with_handle(config);

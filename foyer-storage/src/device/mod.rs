@@ -43,8 +43,6 @@ impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static> IoRange for T {}
 pub enum DeviceError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("nix error: {0}")]
-    Nix(#[from] nix::errno::Errno),
     #[error("other error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
@@ -79,6 +77,9 @@ pub trait Device: Sized + Clone + Send + Sync + 'static {
     ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
     where
         B: IoBufMut;
+
+    #[must_use]
+    fn flush_region(&self, region: RegionId) -> impl Future<Output = DeviceResult<()>> + Send;
 
     #[must_use]
     fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
@@ -192,6 +193,10 @@ pub mod tests {
             B: IoBufMut,
         {
             (Ok(0), buf)
+        }
+
+        async fn flush_region(&self, _: RegionId) -> DeviceResult<()> {
+            Ok(())
         }
 
         async fn flush(&self) -> DeviceResult<()> {

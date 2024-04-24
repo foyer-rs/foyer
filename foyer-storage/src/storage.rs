@@ -490,6 +490,7 @@ mod tests {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
+            flush: false,
         }
     }
 

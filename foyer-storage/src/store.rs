@@ -69,6 +69,7 @@ where
     recover_concurrency: usize,
     compression: Compression,
     lazy: bool,
+    flush: bool,
     runtime_config: Option<RuntimeConfig>,
 }
 
@@ -106,6 +107,7 @@ where
             clean_region_threshold: None,
             recover_concurrency: 8,
             compression: Compression::None,
+            flush: false,
             runtime_config: None,
             lazy: false,
         }
@@ -193,6 +195,12 @@ where
         self
     }
 
+    /// Flush device for each io.
+    pub fn with_flush(mut self, flush: bool) -> Self {
+        self.flush = flush;
+        self
+    }
+
     /// Enable a dedicated tokio runtime for the store with a runtime config.
     ///
     /// If not given, the store will use the user's runtime.
@@ -227,6 +235,7 @@ where
                 clean_region_threshold,
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
+                flush: self.flush,
             }),
             (DeviceConfig::Fs(device_config), None, true) => StoreConfig::LazyFs(FsStoreConfig {
                 name: self.name,
@@ -240,6 +249,7 @@ where
                 clean_region_threshold,
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
+                flush: self.flush,
             }),
             (DeviceConfig::Fs(device_config), Some(runtime_config), true) => {
                 StoreConfig::RuntimeFs(RuntimeStoreConfig {
@@ -255,6 +265,7 @@ where
                         clean_region_threshold,
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
+                        flush: self.flush,
                     },
                     runtime_config,
                 })
@@ -273,6 +284,7 @@ where
                         clean_region_threshold,
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
+                        flush: self.flush,
                     },
                     runtime_config,
                 })

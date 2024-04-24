@@ -115,6 +115,7 @@ async fn test_fs_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
+        flush: true,
     });
 
     test_store(config, recorder).await;
@@ -142,6 +143,7 @@ async fn test_fs_store_zstd() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Zstd,
+        flush: true,
     });
 
     test_store(config, recorder).await;
@@ -169,6 +171,7 @@ async fn test_fs_store_lz4() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::Lz4,
+        flush: true,
     });
 
     test_store(config, recorder).await;
@@ -196,6 +199,7 @@ async fn test_lazy_fs_store() {
         clean_region_threshold: 1,
         recover_concurrency: 2,
         compression: Compression::None,
+        flush: true,
     });
 
     test_store(config, recorder).await;
@@ -224,6 +228,7 @@ async fn test_runtime_fs_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
+            flush: true,
         },
         runtime_config: RuntimeConfigBuilder::new().build(),
     });
@@ -254,6 +259,7 @@ async fn test_runtime_lazy_fs_store() {
             clean_region_threshold: 1,
             recover_concurrency: 2,
             compression: Compression::None,
+            flush: true,
         },
         runtime_config: RuntimeConfigBuilder::new().build(),
     });
