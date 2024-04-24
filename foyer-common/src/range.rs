@@ -103,12 +103,13 @@ pub trait RangeBoundsExt<
         self.start_bound() == Bound::Unbounded && self.end_bound() == Bound::Unbounded
     }
 
-    fn map<F, R>(&self, f: F) -> (Bound<R>, Bound<R>)
-    where
-        F: Fn(&T) -> R,
-    {
-        (self.start_bound().map(&f), self.end_bound().map(&f))
-    }
+    // TODO(Mrcroxx): Restore me after increase MSRV to 1.77.2
+    // fn map<F, R>(&self, f: F) -> (Bound<R>, Bound<R>)
+    // where
+    //     F: Fn(&T) -> R,
+    // {
+    //     (self.start_bound().map(&f), self.end_bound().map(&f))
+    // }
 }
 
 impl<

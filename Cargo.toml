@@ -25,4 +25,4 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
 ] }
 
 [profile.release]
-debug = "full"
+debug = true
