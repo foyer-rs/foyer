@@ -893,6 +893,7 @@ where
         let align = self.region.device().align();
 
         if self.cursor + align >= region_size {
+            println!("expected: 0");
             return Ok(None);
         }
 
