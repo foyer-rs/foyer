@@ -152,7 +152,7 @@ mod tests {
                 if start.elapsed() >= DURATION {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(rng.gen_range(1..100)));
+                std::thread::sleep(Duration::from_millis(rng.gen_range(1..10)));
                 f(rate, &v, &limiter)
             }
         };
