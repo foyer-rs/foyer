@@ -14,7 +14,7 @@
 
 ### Changes
 
-- Add `nightly` feature to make it compatiable with night toolchain.
+- Add `nightly` feature to make it compatible with night toolchain.
 
 </details>
 
