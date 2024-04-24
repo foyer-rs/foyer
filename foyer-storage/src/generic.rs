@@ -345,6 +345,8 @@ where
             handle.await.unwrap();
         }
 
+        self.inner.device.flush().await?;
+
         Ok(())
     }
 

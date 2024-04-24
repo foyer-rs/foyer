@@ -13,7 +13,7 @@ on:
 env:
   RUST_TOOLCHAIN_NIGHTLY: nightly-2024-03-17
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20240424
+  CACHE_KEY_SUFFIX: 20240424-5
 jobs:
   misc-check:
     name: misc check
