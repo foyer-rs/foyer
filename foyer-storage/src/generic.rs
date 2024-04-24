@@ -500,6 +500,8 @@ where
 
         let results = try_join_all(handles).await.map_err(anyhow::Error::from)?;
 
+        println!("results: {:?}", results);
+
         for (region_id, result) in results.into_iter().enumerate() {
             if let Some(seq) = result? {
                 tracing::debug!("region {} is recovered", region_id);
