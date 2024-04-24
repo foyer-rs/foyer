@@ -117,6 +117,7 @@ async fn main() -> Result<()> {
         .with_clean_region_threshold(2)
         .with_recover_concurrency(4)
         .with_compression(foyer::Compression::Lz4)
+        .with_lazy(true)
         .with_runtime_config(
             RuntimeConfigBuilder::new()
                 .with_thread_name("foyer")
