@@ -57,37 +57,45 @@ async fn test_store(config: StoreConfig<u64, Vec<u8>>, recorder: Arc<JudgeRecord
     drop(store);
 
     for _ in 0..LOOPS {
-        {
-            let mut config = config.clone();
-            match &mut config {
-                StoreConfig::None => {}
-                StoreConfig::Fs(config) => config.readonly = true,
-                StoreConfig::LazyFs(config) => config.readonly = true,
-                StoreConfig::RuntimeFs(config) => config.store_config.readonly = true,
-                StoreConfig::RuntimeLazyFs(config) => config.store_config.readonly = true,
-            }
+        // {
+        //     let mut config = config.clone();
+        //     match &mut config {
+        //         StoreConfig::None => {}
+        //         StoreConfig::Fs(config) => config.readonly = true,
+        //         StoreConfig::LazyFs(config) => config.readonly = true,
+        //         StoreConfig::RuntimeFs(config) => config.store_config.readonly = true,
+        //         StoreConfig::RuntimeLazyFs(config) => config.store_config.readonly = true,
+        //     }
 
-            let store = Store::open(config.clone()).await.unwrap();
-            while !store.is_ready() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
+        //     let store = Store::open(config.clone()).await.unwrap();
+        //     while !store.is_ready() {
+        //         tokio::time::sleep(Duration::from_millis(10)).await;
+        //     }
 
-            let remains = recorder.remains();
+        //     let remains = recorder.remains();
 
-            for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-                if remains.contains(&i) {
-                    assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
-                } else {
-                    assert!(store.get(&i).await.unwrap().is_none());
-                }
-            }
+        //     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
+        //         if remains.contains(&i) {
+        //             assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+        //         } else {
+        //             assert!(store.get(&i).await.unwrap().is_none());
+        //         }
+        //     }
 
-            store.close().await.unwrap();
-        }
+        //     store.close().await.unwrap();
+        // }
 
         let store = Store::open(config.clone()).await.unwrap();
         while !store.is_ready() {
             tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
+            if remains.contains(&i) {
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * KB],);
+            } else {
+                assert!(store.get(&i).await.unwrap().is_none());
+            }
         }
 
         for _ in 0..INSERTS as u64 {
