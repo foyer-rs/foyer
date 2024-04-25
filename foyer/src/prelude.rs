@@ -31,4 +31,5 @@ pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, memory::DefaultCache
 
 pub use crate::hybrid::{
     HybridCache, HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage, HybridCacheEntry,
+    HybridEntry,
 };

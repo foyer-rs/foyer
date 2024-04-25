@@ -449,7 +449,7 @@ where
     }
 }
 
-pub type HybridEntry<K, V, S> = Entry<K, V, anyhow::Error, HybridCacheEventListener<K, V>, S>;
+pub type HybridEntry<K, V, S = RandomState> = Entry<K, V, anyhow::Error, HybridCacheEventListener<K, V>, S>;
 
 impl<K, V, S> HybridCache<K, V, S>
 where
