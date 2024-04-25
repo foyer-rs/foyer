@@ -459,20 +459,24 @@ where
 {
     pub fn entry<AK, AV, F, FU>(&self, key: AK, f: F) -> HybridEntry<K, V, S>
     where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-        F: FnOnce() -> FU + Send + 'static,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
+        F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
     {
         let key: Arc<K> = key.into();
         let store = self.store.clone();
-        self.cache.entry(key.clone(), || async move {
-            if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                return Ok((entry.to_arc().1, CacheContext::default()));
+        self.cache.entry(key.clone(), || {
+            let future = f();
+            async move {
+                if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
+                    return Ok((entry.to_arc().1, CacheContext::default()));
+                }
+                future
+                    .await
+                    .map(|(value, context)| (value.into(), context))
+                    .map_err(anyhow::Error::from)
             }
-            f().await
-                .map(|(value, context)| (value.into(), context))
-                .map_err(anyhow::Error::from)
         })
     }
 }
