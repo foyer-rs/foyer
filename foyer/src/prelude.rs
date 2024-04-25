@@ -19,11 +19,11 @@ use crate::storage;
 use ahash::RandomState;
 
 pub use common::code::{Key, StorageKey, StorageValue, Value};
-pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
+pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
 pub use storage::{
-    AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy, FsDeviceConfig, FsDeviceConfigBuilder,
-    RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, ReinsertionContext, ReinsertionPolicy,
-    RuntimeConfigBuilder, Storage, StorageExt, StorageWriter,
+    get_metrics_registry, set_metrics_registry, AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy,
+    FsDeviceConfig, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy,
+    ReinsertionContext, ReinsertionPolicy, RuntimeConfigBuilder, Storage, StorageExt, StorageWriter,
 };
 
 pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, memory::DefaultCacheEventListener<K, V>, S>;
