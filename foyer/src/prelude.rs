@@ -30,5 +30,5 @@ pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, memory::DefaultCache
 pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, memory::DefaultCacheEventListener<K, V>, S>;
 
 pub use crate::hybrid::{
-    HybridCache, HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage,
+    HybridCache, HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage, HybridCacheEntry,
 };
