@@ -12,10 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use crate::common;
 use crate::memory;
 use crate::storage;
 
 use ahash::RandomState;
+
+pub use common::code::{Key, StorageKey, StorageValue, Value};
 pub use memory::{CacheContext, EvictionConfig, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 pub use storage::{
     AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy, FsDeviceConfig, FsDeviceConfigBuilder,

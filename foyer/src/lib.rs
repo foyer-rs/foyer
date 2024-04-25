@@ -14,6 +14,7 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 
+use foyer_common as common;
 use foyer_memory as memory;
 use foyer_storage as storage;
 
