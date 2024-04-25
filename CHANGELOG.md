@@ -1,3 +1,17 @@
+## 2024-04-25
+
+| crate | version |
+| - | - |
+| foyer | 0.8.3 |
+
+<details>
+
+### Changes
+
+- Expose `Key`, `Value`, `StorageKey`, `StorageValue` traits.
+
+</details>
+
 ## 2024-04-24
 
 | crate | version |
