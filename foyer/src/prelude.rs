@@ -18,7 +18,11 @@ use crate::storage;
 
 use ahash::RandomState;
 
-pub use common::code::{Key, StorageKey, StorageValue, Value};
+pub use common::{
+    buf::{BufExt, BufMutExt},
+    code::{Key, StorageKey, StorageValue, Value},
+    range::RangeBoundsExt,
+};
 pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
 pub use storage::{
     get_metrics_registry, set_metrics_registry, AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy,
