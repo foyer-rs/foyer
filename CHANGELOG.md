@@ -1,3 +1,21 @@
+## 2024-04-26
+
+| crate | version |
+| - | - |
+| foyer | 0.8.5 |
+
+<details>
+
+### Changes
+
+- Expose `EntryState`, `HybridEntry`.
+- Expose `StorageWriter`, `Metrics`, `get_metrics_registry`, `set_metrics_registry`.
+- Expose `RangeBoundsExt`, `BufExt`, `BufMutExt`.
+- Re-export `ahash::RandomState`.
+- Loose `entry()` args trait bounds.
+
+</details>
+
 ## 2024-04-25
 
 | crate | version |
