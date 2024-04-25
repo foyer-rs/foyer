@@ -2,6 +2,20 @@
 
 | crate | version |
 | - | - |
+| foyer | 0.8.4 |
+
+<details>
+
+### Changes
+
+- Expose `HybridCacheEntry`.
+
+</details>
+
+## 2024-04-25
+
+| crate | version |
+| - | - |
 | foyer | 0.8.3 |
 
 <details>
