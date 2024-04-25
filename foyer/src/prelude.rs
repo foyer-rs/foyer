@@ -19,7 +19,7 @@ use crate::storage;
 use ahash::RandomState;
 
 pub use common::code::{Key, StorageKey, StorageValue, Value};
-pub use memory::{CacheContext, EvictionConfig, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
+pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 pub use storage::{
     AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy, FsDeviceConfig, FsDeviceConfigBuilder,
     RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, ReinsertionContext, ReinsertionPolicy,
