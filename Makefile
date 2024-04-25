@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv
 
 deps:
 	./scripts/install-deps.sh
@@ -54,6 +54,22 @@ example:
 all: check-all test-all example
 
 fast: check test example
+
+msrv:
+	shellcheck ./scripts/*
+	./.github/template/generate.sh
+	./scripts/minimize-dashboards.sh
+	cargo +1.76 hakari generate
+	cargo +1.76 hakari manage-deps
+	cargo +1.76 sort -w
+	cargo +1.76 fmt --all
+	cargo +1.76 clippy --all-targets --features deadlock
+	cargo +1.76 clippy --all-targets --features tokio-console
+	cargo +1.76 clippy --all-targets --features trace
+	cargo +1.76 clippy --all-targets
+	RUST_BACKTRACE=1 cargo +1.76 nextest run --all
+	RUST_BACKTRACE=1 cargo +1.76 test --doc
+	RUST_BACKTRACE=1 cargo +1.76 nextest run --run-ignored ignored-only --no-capture --workspace
 
 monitor:
 	./scripts/monitor.sh
