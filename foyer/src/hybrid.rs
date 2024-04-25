@@ -367,7 +367,7 @@ where
     }
 }
 
-pub type HybridCacheEntry<K, V, S> = CacheEntry<K, V, HybridCacheEventListener<K, V>, S>;
+pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, HybridCacheEventListener<K, V>, S>;
 
 pub struct HybridCache<K, V, S = RandomState>
 where
