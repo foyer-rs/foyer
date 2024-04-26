@@ -11,9 +11,6 @@ readme = "../README.md"
 publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-udeps.ignore]
-normal = ["foyer-workspace-hack"]
-
 [dependencies]
 anyhow = "1.0"
 bytes = "1"
@@ -29,13 +26,7 @@ tokio = { workspace = true }
 tracing = "0.1"
 
 [dev-dependencies]
-bytesize = "1"
-clap = { version = "4", features = ["derive"] }
-hdrhistogram = "7"
 itertools = "0.12"
-rand = "0.8.5"
-rand_mt = "4.2.1"
-tempfile = "3"
 
 [features]
 deadlock = ["parking_lot/deadlock_detection"]

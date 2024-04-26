@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps
 
 deps:
 	./scripts/install-deps.sh
@@ -12,8 +12,6 @@ check:
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets
-	# TODO(MrCroxx): Restore udeps check after it doesn't requires nightly anymore.
-	# cargo udeps --workspace --exclude foyer-workspace-hack
 
 check-all:
 	shellcheck ./scripts/*
@@ -25,8 +23,6 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets
-	# TODO(MrCroxx): Restore udeps check after it doesn't requires nightly anymore.
-	# cargo udeps --workspace --exclude foyer-workspace-hack
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all
@@ -64,6 +60,9 @@ msrv:
 	RUST_BACKTRACE=1 cargo +1.76 nextest run --all
 	RUST_BACKTRACE=1 cargo +1.76 test --doc
 	RUST_BACKTRACE=1 cargo +1.76 nextest run --run-ignored ignored-only --no-capture --workspace
+
+udeps:
+	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-03-17 udeps --all-targets
 
 monitor:
 	./scripts/monitor.sh

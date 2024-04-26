@@ -10,9 +10,6 @@ homepage = "https://github.com/mrcroxx/foyer"
 readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-udeps.ignore]
-normal = ["foyer-workspace-hack"]
-
 [dependencies]
 ahash = "0.8"
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
@@ -43,10 +40,6 @@ twox-hash = "1"
 zstd = "0.13"
 
 [dev-dependencies]
-bytesize = "1"
-clap = { version = "4", features = ["derive"] }
-hdrhistogram = "7"
-rand_mt = "4.2.1"
 tempfile = "3"
 
 [features]
