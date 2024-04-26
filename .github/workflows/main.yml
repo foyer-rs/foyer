@@ -40,6 +40,27 @@ jobs:
           ./scripts/minimize-dashboards.sh --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
+  rust-udeps:
+    name: rust udeps test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - name: Install cargo-udeps
+        run: |
+          cargo install cargo-udeps --locked
+      - name: Unused Dependencies Check
+        env:
+          RUSTFLAGS: "--cfg tokio_unstable -Awarning"
+        run: "cargo udeps --all-targets  \n"
   rust-test:
     name: rust test with codecov
     strategy:

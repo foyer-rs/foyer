@@ -11,9 +11,6 @@ readme = "../README.md"
 rust-version = "1.76"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-udeps.ignore]
-normal = ["foyer-workspace-hack"]
-
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
