@@ -138,6 +138,7 @@ impl<H: HashValue> Clone for TombstoneLog<H> {
 }
 
 impl<H: HashValue> TombstoneLog<H> {
+    #[rustversion::attr(since(1.77.0), allow(clippy::suspicious_open_options))]
     pub async fn open(config: TombstoneLogConfig) -> Result<Self> {
         let mut path = config.dir;
 
