@@ -1,6 +1,6 @@
 [package]
 name = "foyer-memory"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "memory cache for foyer - the hybrid cache for Rust"
