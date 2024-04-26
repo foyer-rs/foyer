@@ -67,7 +67,7 @@ jobs:
           cargo binstall -y cargo-udeps --locked
       - name: Unused Dependencies Check
         env:
-          RUSTFLAGS: "--cfg tokio_unstable -Awarning"
+          RUSTFLAGS: "--cfg tokio_unstable -Awarnings"
         run: |
           cargo udeps --all-targets  
   rust-test:
