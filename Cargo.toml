@@ -10,7 +10,6 @@ members = [
     "foyer-memory",
     "foyer-storage",
     "foyer-storage-bench",
-    "foyer-workspace-hack",
 ]
 
 [workspace.dependencies]

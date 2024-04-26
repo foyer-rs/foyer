@@ -186,5 +186,3 @@ The development state and the roadmap can be found [here](https://github.com/use
 Contributions for *foyer* are warmly welcomed! 🥰
 
 Don't forget to pass `make check` and `make test` locally before submitting a PR. 🚀
-
-If the `hakari` check failed on CI, please remove the local `Cargo.lock` file and run `make fast` again. 🙏
