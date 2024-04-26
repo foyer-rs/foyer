@@ -57,10 +57,14 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-rust-udeps
+      - name: Install cargo-binstall
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
       - name: Install cargo-udeps
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-udeps --locked
+          cargo binstall cargo-udeps --locked
       - name: Unused Dependencies Check
         env:
           RUSTFLAGS: "--cfg tokio_unstable -Awarning"
