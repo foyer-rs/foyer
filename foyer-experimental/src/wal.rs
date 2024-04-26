@@ -138,13 +138,12 @@ impl<H: HashValue> Clone for TombstoneLog<H> {
 }
 
 impl<H: HashValue> TombstoneLog<H> {
+    #[rustversion::attr(since(1.77.0), allow(clippy::suspicious_open_options))]
     pub async fn open(config: TombstoneLogConfig) -> Result<Self> {
         let mut path = config.dir;
 
         path.push(format!("tombstone-{:08X}", config.id));
 
-        // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-        #[allow(clippy::suspicious_open_options)]
         let file = OpenOptions::new().write(true).read(true).create(true).open(path)?;
 
         let inner = Arc::new(TombstoneLogInner {
