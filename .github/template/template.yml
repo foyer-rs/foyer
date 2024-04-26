@@ -64,7 +64,7 @@ jobs:
       - name: Install cargo-udeps
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo binstall cargo-udeps --locked
+          cargo binstall -y cargo-udeps --locked
       - name: Unused Dependencies Check
         env:
           RUSTFLAGS: "--cfg tokio_unstable -Awarning"
