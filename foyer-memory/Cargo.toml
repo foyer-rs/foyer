@@ -14,6 +14,7 @@ readme = "../README.md"
 ahash = "0.8"
 bitflags = "2"
 cmsketch = "0.2"
+csv = "1.3.0"
 foyer-common = { version = "0.6", path = "../foyer-common" }
 foyer-intrusive = { version = "0.5", path = "../foyer-intrusive" }
 futures = "0.3"
@@ -21,7 +22,6 @@ hashbrown = "0.14"
 itertools = "0.12"
 libc = "0.2"
 parking_lot = "0.12"
-csv = "1.3.0"
 tokio = { workspace = true }
 
 [dev-dependencies]

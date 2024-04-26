@@ -12,11 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    fmt::Debug,
-    ptr::NonNull,
-};
+use std::{collections::VecDeque, fmt::Debug, ptr::NonNull};
 
 use ahash::HashSet;
 use foyer_intrusive::{

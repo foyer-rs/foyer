@@ -243,14 +243,21 @@ fn read_twitter_trace(path: &str, limit: usize) -> Vec<String> {
 }
 
 fn main() {
-    let limit = usize::MAX;
-    let capacity = 50_000;
-    println!(
-        "{:30}{:16}{:16}{:16}{:16}{:16}{:16}",
-        "  cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (1g)", "moka"
-    );
-    print!("{capacity}\t\t");
-    let keys = read_twitter_trace("/home/susun/datasets/cluster.csv", limit);
-    bench_workload(keys, capacity);
+    // Try to read the csv file path by environment variable.
+    let path = std::env::var("TWITTER_TRACE_PATH").ok();
+    if let Some(path) = path {
+        // Limit the number of keys to read.
+        // MAX means read all keys, which may take a really long time.
+        let limit = 100;
+        let capacity = 50_000;
+        let keys = read_twitter_trace(&path, limit);
+        println!(
+            "{:30}{:16}{:16}{:16}{:16}{:16}{:16}",
+            "cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (1g)", "moka"
+        );
+        print!("{capacity:10}");
+        print!("{:9}", " ");
+        bench_workload(keys, capacity);
+    }
     bench_zipf_hit();
 }
