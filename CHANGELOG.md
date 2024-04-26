@@ -2,6 +2,18 @@
 
 | crate | version |
 | - | - |
+| foyer-storage | 0.7.4 |
+
+<details>
+
+### Changes
+
+- Fix `FsDeviceBuilder` on a non-exist directory without cacpacity given.
+
+## 2024-04-26
+
+| crate | version |
+| - | - |
 | foyer | 0.8.6 |
 | foyer-common | 0.6.3 |
 | foyer-intrusive | 0.5.3 |

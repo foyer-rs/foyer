@@ -78,7 +78,11 @@ impl FsDeviceConfigBuilder {
 
         let align = self.align.unwrap_or(Self::DEFAULT_ALIGN);
 
-        let capacity = self.capacity.unwrap_or(freespace(&dir).unwrap() / 10 * 8);
+        let capacity = self.capacity.unwrap_or({
+            // Create an empty directory before to get freespace.
+            create_dir_all(&dir).unwrap();
+            freespace(&dir).unwrap() / 10 * 8
+        });
         let capacity = align_v(capacity, align);
 
         let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).clamp(align, capacity);
@@ -314,9 +318,6 @@ impl FsDevice {
 
 #[cfg(test)]
 mod tests {
-
-    use std::env::current_dir;
-
     use bytes::BufMut;
 
     use super::*;
@@ -356,8 +357,20 @@ mod tests {
 
     #[test]
     fn test_config_builder() {
-        let dir = current_dir().unwrap();
-        let config = FsDeviceConfigBuilder::new(dir).build();
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = FsDeviceConfigBuilder::new(dir.path()).build();
+
+        println!("{config:?}");
+
+        config.assert();
+    }
+
+    #[test]
+    fn test_config_builder_noent() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = FsDeviceConfigBuilder::new(dir.path().join("noent")).build();
 
         println!("{config:?}");
 
