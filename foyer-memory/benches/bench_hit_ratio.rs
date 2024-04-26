@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use csv::Reader;
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 use rand::{distributions::Distribution, thread_rng};
 
@@ -66,7 +67,7 @@ fn cache_hit(cache: Cache<CacheKey, CacheValue>, keys: Arc<Vec<CacheKey>>) -> f6
             cache.insert(key.clone(), ());
         }
     }
-    hit as f64 / ITERATIONS as f64
+    (hit as f64) / (keys.len() as f64)
 }
 
 fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &[String]) -> f64 {
@@ -79,7 +80,7 @@ fn moka_cache_hit(cache: &moka::sync::Cache<CacheKey, CacheValue>, keys: &[Strin
             cache.insert(key.clone(), ());
         }
     }
-    hit as f64 / ITERATIONS as f64
+    hit as f64 / (keys.len() as f64)
 }
 
 fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
@@ -130,32 +131,20 @@ fn new_s3fifo_cache_w_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
         .with_shards(SHARDS)
         .with_eviction_config(S3FifoConfig {
             small_queue_capacity_ratio: 0.1,
-            ghost_queue_capacity_ratio: 10.0,
+            ghost_queue_capacity_ratio: 1.0,
             small_to_main_freq_threshold: 2,
         })
         .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
-fn bench_one(zif_exp: f64, cache_size_percent: f64) {
-    print!("{zif_exp:6.2}, {cache_size_percent:6}{:6}", "");
-    let mut rng = thread_rng();
-    let zipf = zipf::ZipfDistribution::new(ITEMS, zif_exp).unwrap();
-
-    let cache_size = (ITEMS as f64 * cache_size_percent) as usize;
-
+fn bench_workload(keys: Vec<String>, cache_size: usize) {
     let fifo_cache = new_fifo_cache(cache_size);
     let lru_cache = new_lru_cache(cache_size);
     let lfu_cache = new_lfu_cache(cache_size);
     let s3fifo_cache_wo_ghost = new_s3fifo_cache_wo_ghost(cache_size);
     let s3fifo_cache_w_ghost = new_s3fifo_cache_w_ghost(cache_size);
     let moka_cache = moka::sync::Cache::new(cache_size as u64);
-
-    let mut keys = Vec::with_capacity(ITERATIONS);
-    for _ in 0..ITERATIONS {
-        let key = zipf.sample(&mut rng).to_string();
-        keys.push(key.clone());
-    }
 
     let keys = Arc::new(keys);
 
@@ -212,10 +201,24 @@ fn bench_one(zif_exp: f64, cache_size_percent: f64) {
     println!();
 }
 
+fn bench_one(zif_exp: f64, cache_size_percent: f64) {
+    print!("{zif_exp:6.2}, {cache_size_percent:6}{:6}", "");
+    let mut rng = thread_rng();
+    let zipf = zipf::ZipfDistribution::new(ITEMS, zif_exp).unwrap();
+
+    let cache_size = (ITEMS as f64 * cache_size_percent) as usize;
+    let mut keys = Vec::with_capacity(ITERATIONS);
+    for _ in 0..ITERATIONS {
+        let key = zipf.sample(&mut rng).to_string();
+        keys.push(key.clone());
+    }
+    bench_workload(keys, cache_size);
+}
+
 fn bench_zipf_hit() {
     println!(
         "{:30}{:16}{:16}{:16}{:16}{:16}{:16}",
-        "zif_exp, cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (10g)", "moka"
+        "zif_exp, cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (1g)", "moka"
     );
     for zif_exp in [0.9, 1.0, 1.05, 1.1, 1.5] {
         for cache_capacity in [0.005, 0.01, 0.05, 0.1, 0.25] {
@@ -224,6 +227,30 @@ fn bench_zipf_hit() {
     }
 }
 
+fn read_twitter_trace(path: &str, limit: usize) -> Vec<String> {
+    let file = std::fs::File::open(path).unwrap();
+    let mut reader = Reader::from_reader(file);
+    let mut keys = Vec::new();
+    for result in reader.records() {
+        let record = result.unwrap();
+        let key = record.get(1).unwrap().to_string();
+        keys.push(key);
+        if keys.len() >= limit {
+            break;
+        }
+    }
+    keys
+}
+
 fn main() {
+    let limit = usize::MAX;
+    let capacity = 50_000;
+    println!(
+        "{:30}{:16}{:16}{:16}{:16}{:16}{:16}",
+        "  cache_size", "fifo", "lru", "lfu", "s3fifo (0g)", "s3fifo (1g)", "moka"
+    );
+    print!("{capacity}\t\t");
+    let keys = read_twitter_trace("/home/susun/datasets/cluster.csv", limit);
+    bench_workload(keys, capacity);
     bench_zipf_hit();
 }
