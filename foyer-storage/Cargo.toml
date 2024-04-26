@@ -25,7 +25,6 @@ bytes = "1"
 either = "1"
 foyer-common = { version = "0.6", path = "../foyer-common" }
 foyer-memory = { version = "0.3", path = "../foyer-memory" }
-foyer-workspace-hack = { version = "0.5", path = "../foyer-workspace-hack" }
 futures = "0.3"
 itertools = "0.12"
 lazy_static = "1"

@@ -9,8 +9,6 @@ check:
 	shellcheck ./scripts/*
 	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
-	cargo hakari generate
-	cargo hakari manage-deps
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets
@@ -21,8 +19,6 @@ check-all:
 	shellcheck ./scripts/*
 	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
-	cargo hakari generate
-	cargo hakari manage-deps
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets --features deadlock
@@ -59,8 +55,6 @@ msrv:
 	shellcheck ./scripts/*
 	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
-	cargo +1.76 hakari generate
-	cargo +1.76 hakari manage-deps
 	cargo +1.76 sort -w
 	cargo +1.76 fmt --all
 	cargo +1.76 clippy --all-targets --features deadlock

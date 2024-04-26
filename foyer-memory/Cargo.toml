@@ -20,7 +20,6 @@ bitflags = "2"
 cmsketch = "0.2"
 foyer-common = { version = "0.6", path = "../foyer-common" }
 foyer-intrusive = { version = "0.5", path = "../foyer-intrusive" }
-foyer-workspace-hack = { version = "0.5", path = "../foyer-workspace-hack" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = "0.12"
@@ -33,7 +32,7 @@ bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 hdrhistogram = "7"
 moka = { version = "0", features = ["sync"] }
-rand = "0.8"
+rand = { version = "0.8", features = ["small_rng"] }
 rand_mt = "4.2.1"
 tempfile = "3"
 zipf = "7.0.1"
