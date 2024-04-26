@@ -18,6 +18,7 @@ use std::{
     ptr::NonNull,
 };
 
+use ahash::HashSet;
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
@@ -331,7 +332,7 @@ unsafe impl<T> Send for S3Fifo<T> where T: Send + Sync + 'static {}
 unsafe impl<T> Sync for S3Fifo<T> where T: Send + Sync + 'static {}
 
 struct GhostQueue {
-    counts: HashMap<u64, usize>,
+    counts: HashSet<u64>,
     queue: VecDeque<(u64, usize)>,
     capacity: usize,
     weight: usize,
@@ -340,7 +341,7 @@ struct GhostQueue {
 impl GhostQueue {
     fn new(capacity: usize) -> Self {
         Self {
-            counts: HashMap::default(),
+            counts: HashSet::default(),
             queue: VecDeque::new(),
             capacity,
             weight: 0,
@@ -351,32 +352,27 @@ impl GhostQueue {
         if self.capacity == 0 {
             return;
         }
-
+        // println!(
+        //     "self.weight: {}, weight: {}, self.capacity: {}",
+        //     self.weight, weight, self.capacity
+        // );
         while self.weight + weight > self.capacity && self.weight > 0 {
             self.pop();
         }
-        *self.counts.entry(hash).or_default() += 1;
         self.queue.push_back((hash, weight));
+        self.counts.insert(hash);
+        self.weight += weight;
     }
 
     fn pop(&mut self) {
         if let Some((hash, weight)) = self.queue.pop_front() {
             self.weight -= weight;
-            match self.counts.entry(hash) {
-                Entry::Vacant(_) => unreachable!(),
-                Entry::Occupied(mut o) => {
-                    let count = o.get_mut();
-                    *count -= 1;
-                    if *count == 0 {
-                        o.remove();
-                    }
-                }
-            }
+            self.counts.remove(&hash);
         }
     }
 
     fn contains(&self, hash: u64) -> bool {
-        self.counts.contains_key(&hash)
+        self.counts.contains(&hash)
     }
 }
 
