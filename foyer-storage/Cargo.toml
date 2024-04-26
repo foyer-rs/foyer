@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage"
-version = "0.7.2"
+version = "0.7.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine for foyer - the hybrid cache for Rust"
@@ -32,7 +32,7 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1.0"
 prometheus = "0.13"
 rand = "0.8.5"
-serde = "1"
+serde = { version = "1", features = ["rc"] }
 thiserror = "1"
 tokio = { workspace = true }
 tracing = "0.1"

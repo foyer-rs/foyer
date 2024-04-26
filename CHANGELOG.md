@@ -2,6 +2,26 @@
 
 | crate | version |
 | - | - |
+| foyer | 0.8.6 |
+| foyer-common | 0.6.3 |
+| foyer-intrusive | 0.5.3 |
+| foyer-memory | 0.3.3 |
+| foyer-storage | 0.7.3 |
+| foyer-storage-bench | 0.7.3 |
+
+<details>
+
+### Changes
+
+- Remove unused dependencies.
+- Remove hakari workspace hack.
+
+</details>
+
+## 2024-04-26
+
+| crate | version |
+| - | - |
 | foyer | 0.8.5 |
 
 <details>

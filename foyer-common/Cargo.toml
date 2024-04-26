@@ -1,6 +1,6 @@
 [package]
 name = "foyer-common"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "common utils for foyer - the hybrid cache for Rust"
