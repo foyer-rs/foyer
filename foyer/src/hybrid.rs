@@ -379,6 +379,20 @@ where
     store: Store<K, V>,
 }
 
+impl<K, V, S> Clone for HybridCache<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            cache: self.cache.clone(),
+            store: self.store.clone(),
+        }
+    }
+}
+
 impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey,
