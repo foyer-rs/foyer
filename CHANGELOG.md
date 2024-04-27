@@ -1,3 +1,17 @@
+## 2024-04-27
+
+| crate | version |
+| - | - |
+| foyer-memory | 0.3.4 |
+
+<details>
+
+### Changes
+
+- Fix S3FIFO ghost queue.
+
+</details>
+
 ## 2024-04-26
 
 | crate | version |
@@ -9,6 +23,8 @@
 ### Changes
 
 - Fix `FsDeviceBuilder` on a non-exist directory without cacpacity given.
+
+</details>
 
 ## 2024-04-26
 
