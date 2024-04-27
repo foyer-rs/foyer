@@ -2,6 +2,21 @@
 
 | crate | version |
 | - | - |
+| foyer | 0.8.7 |
+
+<details>
+
+### Changes
+
+- Make `HybridCache` clonable.
+
+</details>
+
+
+## 2024-04-27
+
+| crate | version |
+| - | - |
 | foyer-memory | 0.3.4 |
 
 <details>
