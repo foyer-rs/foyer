@@ -12,9 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::VecDeque, fmt::Debug, ptr::NonNull};
+use std::{
+    collections::{HashSet, VecDeque},
+    fmt::Debug,
+    ptr::NonNull,
+};
 
-use ahash::HashSet;
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
@@ -232,7 +235,6 @@ where
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
-
         debug_assert_eq!(handle.freq, 0);
         debug_assert_eq!(handle.queue, Queue::None);
 
@@ -348,10 +350,6 @@ impl GhostQueue {
         if self.capacity == 0 {
             return;
         }
-        // println!(
-        //     "self.weight: {}, weight: {}, self.capacity: {}",
-        //     self.weight, weight, self.capacity
-        // );
         while self.weight + weight > self.capacity && self.weight > 0 {
             self.pop();
         }
