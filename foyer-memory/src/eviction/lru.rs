@@ -19,6 +19,7 @@ use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     eviction::Eviction,
@@ -26,7 +27,7 @@ use crate::{
     CacheContext,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LruConfig {
     /// The ratio of the high priority pool occupied.
     ///
@@ -37,6 +38,14 @@ pub struct LruConfig {
     ///
     /// Panics if the value is not in [0, 1.0].
     pub high_priority_pool_ratio: f64,
+}
+
+impl Default for LruConfig {
+    fn default() -> Self {
+        Self {
+            high_priority_pool_ratio: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

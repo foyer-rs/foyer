@@ -19,7 +19,7 @@ hashbrown = "0.14"
 itertools = "0.12"
 nix = { version = "0.28", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-serde = "1"
+serde = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]

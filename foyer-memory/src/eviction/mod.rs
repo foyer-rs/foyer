@@ -14,12 +14,17 @@
 
 use std::ptr::NonNull;
 
+use serde::{de::DeserializeOwned, Serialize};
+
+pub trait EvictionConfig: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
+impl<T> EvictionConfig for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
+
 /// The lifetime of `handle: Self::H` is managed by [`Indexer`].
 ///
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
     type Handle;
-    type Config;
+    type Config: EvictionConfig;
 
     /// Create a new empty eviction container.
     ///

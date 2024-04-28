@@ -22,6 +22,7 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "signal",
     "fs",
 ] }
+serde = { version = "1", features = ["derive", "rc"] }
 
 [profile.release]
 debug = true

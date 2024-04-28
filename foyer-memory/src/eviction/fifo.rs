@@ -18,6 +18,7 @@ use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     eviction::Eviction,
@@ -87,7 +88,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FifoConfig {}
 
 pub struct Fifo<T>
