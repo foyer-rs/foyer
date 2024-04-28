@@ -1,3 +1,22 @@
+## 2024-04-28
+
+| crate | version |
+| - | - |
+| foyer | 0.8.8 |
+| foyer-memory | 0.3.5 |
+| foyer-storage | 0.7.5 |
+| foyer-storage-bench | 0.7.4 |
+
+<details>
+
+### Changes
+
+- feat: Impl `Debug` for `HybirdCache`.
+- feat: Impl `serde`, `Default` for eviction configs.
+- refactor: Add internal trait `EvictionConfig` to bound eviction algorithm configs.
+
+</details>
+
 ## 2024-04-27
 
 | crate | version |
@@ -11,7 +30,6 @@
 - Make `HybridCache` clonable.
 
 </details>
-
 
 ## 2024-04-27
 
