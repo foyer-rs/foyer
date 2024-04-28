@@ -21,6 +21,7 @@ hashbrown = "0.14"
 itertools = "0.12"
 libc = "0.2"
 parking_lot = "0.12"
+serde = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]

@@ -42,7 +42,7 @@ opentelemetry_sdk = { version = "0.22", features = [
 parking_lot = "0.12"
 prometheus = "0.13"
 rand = "0.8.5"
-serde ={ version = "1", features = ["derive", "rc"] }
+serde = { workspace = true }
 serde_bytes = "0.11.14"
 tokio = { workspace = true }
 tracing = "0.1"

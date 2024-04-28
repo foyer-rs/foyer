@@ -22,6 +22,7 @@ use std::{
 
 use ahash::RandomState;
 use futures::{Future, FutureExt};
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use foyer_common::code::{Key, Value};
@@ -219,7 +220,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EvictionConfig {
     Fifo(FifoConfig),
     Lru(LruConfig),

@@ -14,6 +14,7 @@
 
 use std::{
     borrow::Borrow,
+    fmt::Debug,
     future::Future,
     hash::{BuildHasher, Hash},
     sync::{Arc, OnceLock},
@@ -377,6 +378,20 @@ where
 {
     cache: Cache<K, V, HybridCacheEventListener<K, V>, S>,
     store: Store<K, V>,
+}
+
+impl<K, V, S> Debug for HybridCache<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridCache")
+            .field("cache", &self.cache)
+            .field("store", &self.store)
+            .finish()
+    }
 }
 
 impl<K, V, S> Clone for HybridCache<K, V, S>

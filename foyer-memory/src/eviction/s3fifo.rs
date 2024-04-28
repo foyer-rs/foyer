@@ -22,6 +22,7 @@ use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     eviction::Eviction,
@@ -119,11 +120,21 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3FifoConfig {
     pub small_queue_capacity_ratio: f64,
     pub ghost_queue_capacity_ratio: f64,
     pub small_to_main_freq_threshold: u8,
+}
+
+impl Default for S3FifoConfig {
+    fn default() -> Self {
+        Self {
+            small_queue_capacity_ratio: 0.1,
+            ghost_queue_capacity_ratio: 1.0,
+            small_to_main_freq_threshold: 1,
+        }
+    }
 }
 
 pub struct S3Fifo<T>

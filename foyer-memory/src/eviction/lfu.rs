@@ -20,6 +20,7 @@ use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     eviction::Eviction,
@@ -27,7 +28,7 @@ use crate::{
     CacheContext,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LfuConfig {
     /// `window` capacity ratio of the total cache capacity.
     ///
@@ -45,6 +46,18 @@ pub struct LfuConfig {
     pub cmsketch_eps: f64,
     pub cmsketch_confidence: f64,
 }
+
+impl Default for LfuConfig {
+    fn default() -> Self {
+        Self {
+            window_capacity_ratio: 0.1,
+            protected_capacity_ratio: 0.8,
+            cmsketch_eps: 0.001,
+            cmsketch_confidence: 0.9,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LfuContext;
 
