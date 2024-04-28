@@ -33,6 +33,7 @@ pub struct FsDeviceConfigBuilder {
     pub file_size: Option<usize>,
     pub align: Option<usize>,
     pub io_size: Option<usize>,
+    pub direct: bool,
 }
 
 impl FsDeviceConfigBuilder {
@@ -48,6 +49,7 @@ impl FsDeviceConfigBuilder {
             file_size: None,
             align: None,
             io_size: None,
+            direct: true,
         }
     }
 
@@ -71,12 +73,20 @@ impl FsDeviceConfigBuilder {
         self
     }
 
+    pub fn with_direct(mut self, direct: bool) -> Self {
+        self.direct = direct;
+        self
+    }
+
     pub fn build(self) -> FsDeviceConfig {
         let align_v = |value: usize, align: usize| value - value % align;
 
         let dir = self.dir;
 
-        let align = self.align.unwrap_or(Self::DEFAULT_ALIGN);
+        let mut align = self.align.unwrap_or(Self::DEFAULT_ALIGN);
+        if !self.direct {
+            align = 1;
+        }
 
         let capacity = self.capacity.unwrap_or({
             // Create an empty directory before to get freespace.
@@ -99,6 +109,7 @@ impl FsDeviceConfigBuilder {
             file_size,
             align,
             io_size,
+            direct: self.direct,
         }
     }
 }
@@ -119,6 +130,9 @@ pub struct FsDeviceConfig {
 
     /// recommended optimized io block size
     pub io_size: usize,
+
+    /// enable direct i/o
+    pub direct: bool,
 }
 
 impl FsDeviceConfig {
@@ -286,7 +300,9 @@ impl FsDevice {
                     #[cfg(target_os = "linux")]
                     {
                         use std::os::unix::fs::OpenOptionsExt;
-                        opts.custom_flags(libc::O_DIRECT);
+                        if config.direct {
+                            opts.custom_flags(libc::O_DIRECT);
+                        }
                     }
 
                     let file = opts.open(path)?;
@@ -339,6 +355,7 @@ mod tests {
             file_size: FILE_CAPACITY,
             align: ALIGN,
             io_size: ALIGN,
+            direct: true,
         };
         let dev = FsDevice::open(config).await.unwrap();
 
@@ -376,6 +393,19 @@ mod tests {
         let config = FsDeviceConfigBuilder::new(dir.path().join("noent")).build();
 
         println!("{config:?}");
+
+        config.assert();
+    }
+
+    #[test]
+    fn test_config_wo_direct() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = FsDeviceConfigBuilder::new(dir.path()).with_direct(false).build();
+
+        println!("{config:?}");
+
+        assert_eq!(config.align, 1);
 
         config.assert();
     }

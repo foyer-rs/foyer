@@ -334,6 +334,7 @@ where
                     config.clean_region_threshold,
                     store.clone(),
                     region_manager.clone(),
+                    config.flush,
                     metrics.clone(),
                     stop_rx,
                 )
@@ -920,9 +921,9 @@ where
     D: Device,
 {
     pub async fn open(region: Region<D>) -> Result<Option<Self>> {
-        let align = region.device().align();
+        let cursor = std::cmp::max(region.device().align(), RegionHeader::serialized_len());
 
-        let slice = match region.load_range(0..align).await? {
+        let slice = match region.load_range(0..cursor).await? {
             Some(slice) => slice,
             None => return Ok(None),
         };
@@ -933,7 +934,7 @@ where
 
         Ok(Some(Self {
             region,
-            cursor: align,
+            cursor,
             _marker: PhantomData,
         }))
     }
@@ -941,12 +942,13 @@ where
     pub async fn next(&mut self) -> Result<Option<(Arc<K>, Item<K, V>)>> {
         let region_size = self.region.device().region_size();
         let align = self.region.device().align();
+        let step = std::cmp::max(align, EntryHeader::serialized_len());
 
-        if self.cursor + align >= region_size {
+        if self.cursor + step >= region_size {
             return Ok(None);
         }
 
-        let Some(slice) = self.region.load_range(self.cursor..self.cursor + align).await? else {
+        let Some(slice) = self.region.load_range(self.cursor..self.cursor + step).await? else {
             return Ok(None);
         };
 
@@ -1127,26 +1129,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Range, path::PathBuf};
+    use std::ops::Range;
 
     use foyer_common::{bits::align_up, range::RangeBoundsExt};
     use foyer_memory::FifoConfig;
 
     use super::*;
-    use crate::{
-        device::fs::{FsDevice, FsDeviceConfig},
-        storage::StorageExt,
-        test_utils::JudgeRecorder,
-    };
+    use crate::{device::fs::FsDevice, storage::StorageExt, test_utils::JudgeRecorder, FsDeviceConfigBuilder};
 
     type TestStore = GenericStore<u64, Vec<u8>, FsDevice>;
     type TestStoreConfig = GenericStoreConfig<u64, Vec<u8>, FsDevice>;
 
-    #[tokio::test]
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::identity_op)]
-    async fn test_recovery() {
-        const KB: usize = 1024;
+    async fn case_recovery(direct: bool) {
         const MB: usize = 1024 * 1024;
 
         let tempdir = tempfile::tempdir().unwrap();
@@ -1158,13 +1154,11 @@ mod tests {
         let config = TestStoreConfig {
             name: "".to_string(),
             eviction_config: FifoConfig {}.into(),
-            device_config: FsDeviceConfig {
-                dir: PathBuf::from(tempdir.path()),
-                capacity: 16 * MB,
-                file_size: 4 * MB,
-                align: 4 * KB,
-                io_size: 4 * KB,
-            },
+            device_config: FsDeviceConfigBuilder::new(tempdir.path())
+                .with_capacity(16 * MB)
+                .with_file_size(4 * MB)
+                .with_direct(direct)
+                .build(),
             catalog_shards: 1,
             admissions,
             reinsertions,
@@ -1206,13 +1200,11 @@ mod tests {
         let config = TestStoreConfig {
             name: "".to_string(),
             eviction_config: FifoConfig {}.into(),
-            device_config: FsDeviceConfig {
-                dir: PathBuf::from(tempdir.path()),
-                capacity: 16 * MB,
-                file_size: 4 * MB,
-                align: 4096,
-                io_size: 4096 * KB,
-            },
+            device_config: FsDeviceConfigBuilder::new(tempdir.path())
+                .with_capacity(16 * MB)
+                .with_file_size(4 * MB)
+                .with_direct(direct)
+                .build(),
             catalog_shards: 1,
             admissions: vec![],
             reinsertions: vec![],
@@ -1241,8 +1233,7 @@ mod tests {
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::identity_op)]
-    async fn case_corrupt(recover_mode: RecoverMode) {
-        const KB: usize = 1024;
+    async fn case_corrupt(recover_mode: RecoverMode, direct: bool) {
         const MB: usize = 1024 * 1024;
         const RANGE: Range<u64> = 0..21;
 
@@ -1255,13 +1246,11 @@ mod tests {
         let config = TestStoreConfig {
             name: "".to_string(),
             eviction_config: FifoConfig {}.into(),
-            device_config: FsDeviceConfig {
-                dir: PathBuf::from(tempdir.path()),
-                capacity: 16 * MB,
-                file_size: 4 * MB,
-                align: 4 * KB,
-                io_size: 4 * KB,
-            },
+            device_config: FsDeviceConfigBuilder::new(tempdir.path())
+                .with_capacity(16 * MB)
+                .with_file_size(4 * MB)
+                .with_direct(direct)
+                .build(),
             catalog_shards: 1,
             admissions,
             reinsertions,
@@ -1336,13 +1325,11 @@ mod tests {
         let config = TestStoreConfig {
             name: "".to_string(),
             eviction_config: FifoConfig {}.into(),
-            device_config: FsDeviceConfig {
-                dir: PathBuf::from(tempdir.path()),
-                capacity: 16 * MB,
-                file_size: 4 * MB,
-                align: 4096,
-                io_size: 4096 * KB,
-            },
+            device_config: FsDeviceConfigBuilder::new(tempdir.path())
+                .with_capacity(16 * MB)
+                .with_file_size(4 * MB)
+                .with_direct(direct)
+                .build(),
             catalog_shards: 1,
             admissions: vec![],
             reinsertions: vec![],
@@ -1382,18 +1369,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_recovery() {
+        case_recovery(true).await
+    }
+
+    #[tokio::test]
+    async fn test_recovery_wo_direct() {
+        case_recovery(false).await
+    }
+
+    #[tokio::test]
     async fn test_recovery_corrupt_no_recovery() {
-        case_corrupt(RecoverMode::NoRecovery).await
+        case_corrupt(RecoverMode::NoRecovery, true).await
     }
 
     #[tokio::test]
     async fn test_recovery_corrupt_quiet_recovery() {
-        case_corrupt(RecoverMode::QuietRecovery).await
+        case_corrupt(RecoverMode::QuietRecovery, true).await
     }
 
     #[tokio::test]
     #[should_panic]
     async fn test_recovery_corrupt_strict_recovery() {
-        case_corrupt(RecoverMode::StrictRecovery).await
+        case_corrupt(RecoverMode::StrictRecovery, true).await
+    }
+
+    #[tokio::test]
+    async fn test_recovery_corrupt_no_recovery_wo_direct() {
+        case_corrupt(RecoverMode::NoRecovery, false).await
+    }
+
+    #[tokio::test]
+    async fn test_recovery_corrupt_quiet_recovery_wo_direct() {
+        case_corrupt(RecoverMode::QuietRecovery, false).await
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_recovery_corrupt_strict_recovery_wo_direct() {
+        case_corrupt(RecoverMode::StrictRecovery, false).await
     }
 }

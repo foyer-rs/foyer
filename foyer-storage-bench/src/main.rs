@@ -101,6 +101,9 @@ pub struct Args {
     #[arg(long, default_value_t = 4)]
     reclaimers: usize,
 
+    #[arg(long, default_value_t = false)]
+    disable_direct: bool,
+
     #[arg(long, default_value_t = 4096)]
     align: usize,
 
@@ -369,6 +372,7 @@ async fn main() {
             FsDeviceConfigBuilder::new(&args.dir)
                 .with_capacity(args.capacity * 1024 * 1024)
                 .with_file_size(args.file_size * 1024 * 1024)
+                .with_direct(!args.disable_direct)
                 .with_align(args.align)
                 .with_io_size(args.io_size)
                 .build(),

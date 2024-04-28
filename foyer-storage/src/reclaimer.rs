@@ -28,6 +28,7 @@ use crate::{
     generic::{GenericStore, RegionEntryIter},
     judge::Judges,
     metrics::Metrics,
+    region::RegionHeader,
     region_manager::RegionManager,
     storage::Storage,
 };
@@ -44,6 +45,8 @@ where
 
     region_manager: Arc<RegionManager<D>>,
 
+    flush: bool,
+
     metrics: Arc<Metrics>,
 
     stop_rx: broadcast::Receiver<()>,
@@ -59,6 +62,7 @@ where
         threshold: usize,
         store: GenericStore<K, V, D>,
         region_manager: Arc<RegionManager<D>>,
+        flush: bool,
         metrics: Arc<Metrics>,
         stop_rx: broadcast::Receiver<()>,
     ) -> Self {
@@ -66,6 +70,7 @@ where
             threshold,
             store,
             region_manager,
+            flush,
             metrics,
             stop_rx,
         }
@@ -181,11 +186,14 @@ where
         }
 
         // step 3: wipe region header
-        let align = region.device().align();
-        let mut buf = region.device().io_buffer(align, align);
-        (&mut buf[..]).put_slice(&vec![0; align]);
+        let step = std::cmp::max(region.device().align(), RegionHeader::serialized_len());
+        let mut buf = region.device().io_buffer(step, step);
+        (&mut buf[..]).put_slice(&vec![0; RegionHeader::serialized_len()]);
         let (res, _buf) = region.device().write(buf, .., region_id, 0).await;
         res?;
+        if self.flush {
+            region.device().flush_region(region_id).await?;
+        }
 
         // step 4: send clean region
         self.region_manager.clean_regions().release(region_id);

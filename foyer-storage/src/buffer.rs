@@ -142,13 +142,14 @@ where
         self.offset = 0;
 
         // write region header
-        unsafe { self.buffer.set_len(self.device.align()) };
+        let len = std::cmp::max(self.device.align(), RegionHeader::serialized_len());
+        unsafe { self.buffer.set_len(len) };
         let header = RegionHeader {
             magic: REGION_MAGIC,
             version: Version::latest(),
         };
         header.write(&mut self.buffer[..]);
-        debug_assert_eq!(self.buffer.len(), self.device.align());
+        debug_assert_eq!(self.buffer.len(), len);
 
         Ok(entries)
     }
@@ -367,6 +368,7 @@ mod tests {
             file_size: 64 * 1024, // 64 KiB
             align: 4 * 1024,      // 4 KiB
             io_size: 16 * 1024,   // 16 KiB
+            direct: true,
         })
         .await
         .unwrap();
