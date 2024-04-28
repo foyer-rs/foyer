@@ -26,7 +26,7 @@ pub use common::{
 pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
 pub use storage::{
     get_metrics_registry, set_metrics_registry, AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy,
-    FsDeviceConfig, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy,
+    FsDeviceConfig, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, RecoverMode,
     ReinsertionContext, ReinsertionPolicy, RuntimeConfigBuilder, Storage, StorageExt, StorageWriter,
 };
 

@@ -14,6 +14,7 @@
 
 use std::{
     borrow::Borrow,
+    collections::HashSet,
     fmt::Debug,
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -36,6 +37,7 @@ use foyer_memory::EvictionConfig;
 use futures::{future::try_join_all, Future};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{broadcast, mpsc, Semaphore},
     task::JoinHandle,
@@ -45,7 +47,7 @@ use twox_hash::XxHash64;
 use crate::{
     admission::{AdmissionContext, AdmissionPolicy},
     buffer::BufferError,
-    catalog::{Catalog, Index, Item, Sequence},
+    catalog::{AtomicSequence, Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
     error::Result,
@@ -57,9 +59,26 @@ use crate::{
     region_manager::RegionManager,
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
     storage::{CachedEntry, Storage, StorageWriter},
+    Error,
 };
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoverMode {
+    /// Do not recover disk cache.
+    NoRecovery,
+    /// Recover disk cache and skip errors.
+    QuietRecovery,
+    /// Recover disk cache and panic on errors.
+    StrictRecovery,
+}
+
+impl Default for RecoverMode {
+    fn default() -> Self {
+        Self::QuietRecovery
+    }
+}
 
 pub struct GenericStoreConfig<K, V, D>
 where
@@ -98,6 +117,9 @@ where
     /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
     pub clean_region_threshold: usize,
 
+    // Recover mode.
+    pub recover_mode: RecoverMode,
+
     /// Concurrency of recovery.
     pub recover_concurrency: usize,
 
@@ -124,6 +146,7 @@ where
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("clean_region_threshold", &self.clean_region_threshold)
+            .field("recover_mode", &self.recover_mode)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
@@ -148,6 +171,7 @@ where
             flushers: self.flushers,
             reclaimers: self.reclaimers,
             clean_region_threshold: self.clean_region_threshold,
+            recover_mode: self.recover_mode,
             recover_concurrency: self.recover_concurrency,
             compression: self.compression,
             flush: self.flush,
@@ -316,7 +340,7 @@ where
             })
             .collect_vec();
 
-        let sequence = store.recover(config.recover_concurrency).await?;
+        let sequence = store.recover(config.recover_mode, config.recover_concurrency).await?;
         store.inner.sequence.store(sequence + 1, Ordering::Relaxed);
 
         let flusher_handles = flushers
@@ -473,19 +497,31 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    async fn recover(&self, concurrency: usize) -> Result<Sequence> {
+    async fn recover(&self, mode: RecoverMode, concurrency: usize) -> Result<Sequence> {
+        if mode == RecoverMode::NoRecovery {
+            for region_id in 0..self.inner.device.regions() as RegionId {
+                self.inner.region_manager.clean_regions().release(region_id);
+            }
+
+            tracing::info!("recovery is skipped as configured");
+
+            return Ok(0);
+        }
+
         tracing::info!("start store recovery");
 
         let semaphore = Arc::new(Semaphore::new(concurrency));
+        let sequence = Arc::new(AtomicSequence::default());
 
         let mut handles = vec![];
         for region_id in 0..self.inner.device.regions() as RegionId {
+            let region = self.inner.region_manager.region(&region_id).clone();
             let semaphore = semaphore.clone();
-            let region_manager = self.inner.region_manager.clone();
+            let sequence = sequence.clone();
             let indices = self.inner.catalog.clone();
             let handle = tokio::spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = Self::recover_region(region_id, region_manager, indices).await;
+                let res = Self::recover_region(region, indices, sequence).await;
                 drop(permit);
                 res
             });
@@ -493,16 +529,40 @@ where
         }
 
         let mut recovered = 0;
-        let mut sequence = 0;
 
-        let results = try_join_all(handles).await.map_err(anyhow::Error::from)?;
+        let results = match (try_join_all(handles).await, mode) {
+            (Ok(results), _) => results,
+            (Err(e), RecoverMode::QuietRecovery) => {
+                tracing::warn!("error raised while quiet recovery, recovery skipped, error: {e}");
+                vec![]
+            }
+            (Err(e), RecoverMode::StrictRecovery) => return Err(Error::Other(e.into())),
+            (Err(_), RecoverMode::NoRecovery) => unreachable!(),
+        };
+
+        let mut clean_region_ids: HashSet<RegionId> = (0..self.inner.device.regions() as RegionId).collect();
 
         for (region_id, result) in results.into_iter().enumerate() {
-            if let Some(seq) = result? {
+            let region_id = region_id as RegionId;
+            if match (result, mode) {
+                (Ok(result), _) => result,
+                (Err(_), RecoverMode::NoRecovery) => unreachable!(),
+                (Err(e), RecoverMode::QuietRecovery) => {
+                    tracing::warn!("error raised while quiet recovery on region {region_id}, entries after error are skipped, error: {e}");
+                    continue;
+                }
+                (Err(e), RecoverMode::StrictRecovery) => return Err(e),
+            } {
+                let res = clean_region_ids.remove(&region_id);
+                debug_assert!(res);
+                self.inner.region_manager.eviction_push(region_id);
                 tracing::debug!("region {} is recovered", region_id);
                 recovered += 1;
-                sequence = std::cmp::max(sequence, seq);
             }
+        }
+
+        for region_id in clean_region_ids {
+            self.inner.region_manager.clean_regions().release(region_id);
         }
 
         tracing::info!("finish store recovery, {} region recovered", recovered);
@@ -516,29 +576,24 @@ where
             self.inner.region_manager.clean_regions().flash();
         }
 
-        Ok(sequence)
+        Ok(sequence.load(Ordering::Relaxed))
     }
 
     /// Return `Some(max sequence)` if region is valid, otherwise `None`
     async fn recover_region(
-        region_id: RegionId,
-        region_manager: Arc<RegionManager<D>>,
+        region: Region<D>,
         catalog: Arc<Catalog<K, V>>,
-    ) -> Result<Option<Sequence>> {
-        let region = region_manager.region(&region_id).clone();
-        let mut sequence = 0;
-        let res = if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
+        sequence: Arc<AtomicSequence>,
+    ) -> Result<bool> {
+        if let Some(mut iter) = RegionEntryIter::<K, V, D>::open(region).await? {
             while let Some((key, item)) = iter.next().await? {
-                sequence = std::cmp::max(sequence, *item.sequence());
+                sequence.fetch_max(*item.sequence(), Ordering::Relaxed);
                 catalog.insert(key, item);
             }
-            region_manager.eviction_push(region_id);
-            Some(sequence)
+            Ok(true)
         } else {
-            region_manager.clean_regions().release(region_id);
-            None
-        };
-        Ok(res)
+            Ok(false)
+        }
     }
 
     fn judge_inner(&self, writer: &mut GenericStoreWriter<K, V, D>) {
@@ -1072,8 +1127,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{ops::Range, path::PathBuf};
 
+    use foyer_common::{bits::align_up, range::RangeBoundsExt};
     use foyer_memory::FifoConfig;
 
     use super::*;
@@ -1114,6 +1170,7 @@ mod tests {
             reinsertions,
             flushers: 1,
             reclaimers: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
@@ -1161,6 +1218,7 @@ mod tests {
             reinsertions: vec![],
             flushers: 1,
             reclaimers: 0,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: Compression::None,
@@ -1179,5 +1237,163 @@ mod tests {
         store.close().await.unwrap();
 
         drop(store);
+    }
+
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::identity_op)]
+    async fn case_corrupt(recover_mode: RecoverMode) {
+        const KB: usize = 1024;
+        const MB: usize = 1024 * 1024;
+        const RANGE: Range<u64> = 0..21;
+
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let recorder = Arc::new(JudgeRecorder::default());
+        let admissions: Vec<Arc<dyn AdmissionPolicy<Key = u64, Value = Vec<u8>>>> = vec![recorder.clone()];
+        let reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = u64, Value = Vec<u8>>>> = vec![recorder.clone()];
+
+        let config = TestStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig {}.into(),
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_size: 4 * MB,
+                align: 4 * KB,
+                io_size: 4 * KB,
+            },
+            catalog_shards: 1,
+            admissions,
+            reinsertions,
+            flushers: 1,
+            reclaimers: 1,
+            recover_mode,
+            recover_concurrency: 2,
+            clean_region_threshold: 1,
+            compression: Compression::None,
+            flush: false,
+        };
+
+        let store = TestStore::open(config).await.unwrap();
+
+        // files:
+        // [0, 1, 2]
+        // [3, 4, 5]
+        // [6, 7, 8]
+        // [9, 10, 11]
+        // ... ...
+        for i in RANGE {
+            store.insert(i, vec![i as u8; 1 * MB]).await.unwrap();
+        }
+
+        store.close().await.unwrap();
+
+        let remains = recorder.remains();
+
+        for i in RANGE {
+            if remains.contains(&i) {
+                assert_eq!(store.get(&i).await.unwrap().unwrap().value(), &vec![i as u8; 1 * MB],);
+            } else {
+                assert!(store.get(&i).await.unwrap().is_none());
+            }
+        }
+
+        // Corrupt the last entry of each region.
+        let mut corrupts = 0;
+        for region_id in 0..store.inner.device.regions() as RegionId {
+            let region = store.inner.region_manager.region(&region_id).clone();
+            let mut last = None;
+            if let Some(mut iter) = RegionEntryIter::<u64, Vec<u8>, _>::open(region).await.unwrap() {
+                while let Some((_, item)) = iter.next().await.unwrap() {
+                    let view = match item.index() {
+                        Index::Inflight { key: _, value: _ } => unreachable!(),
+                        Index::Region { key: _, view } => view,
+                    };
+                    let start = align_up(
+                        store.inner.device.align(),
+                        *view.offset() as usize + EntryHeader::serialized_len(),
+                    );
+                    let end = align_up(
+                        store.inner.device.align(),
+                        *view.offset() as usize + *view.len() as usize,
+                    );
+                    last = Some(start..end);
+                }
+            } else {
+                continue;
+            };
+            if let Some(last) = last {
+                let mut buf = store.inner.device.io_buffer(last.size().unwrap(), last.size().unwrap());
+                (&mut buf[..]).put_slice(&vec![b'*'; last.size().unwrap()]);
+                let (res, _) = store.inner.device.write(buf, .., region_id, last.start).await;
+                res.unwrap();
+                corrupts += 1;
+            }
+        }
+
+        drop(store);
+
+        let config = TestStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig {}.into(),
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 16 * MB,
+                file_size: 4 * MB,
+                align: 4096,
+                io_size: 4096 * KB,
+            },
+            catalog_shards: 1,
+            admissions: vec![],
+            reinsertions: vec![],
+            flushers: 1,
+            reclaimers: 0,
+            recover_mode,
+            recover_concurrency: 2,
+            clean_region_threshold: 1,
+            compression: Compression::None,
+            flush: false,
+        };
+
+        let store = TestStore::open(config).await.unwrap();
+
+        match recover_mode {
+            RecoverMode::NoRecovery => {
+                for i in RANGE {
+                    assert!(!store.exists(&i).unwrap())
+                }
+            }
+            RecoverMode::QuietRecovery => {
+                let mut cnt = 0;
+                for i in RANGE {
+                    if let Some(entry) = store.get(&i).await.unwrap() {
+                        assert_eq!(entry.value(), &vec![i as u8; 1 * MB]);
+                        cnt += 1;
+                    }
+                }
+                assert_eq!(cnt + corrupts, remains.len());
+            }
+            RecoverMode::StrictRecovery => unreachable!(),
+        }
+
+        store.close().await.unwrap();
+
+        drop(store);
+    }
+
+    #[tokio::test]
+    async fn test_recovery_corrupt_no_recovery() {
+        case_corrupt(RecoverMode::NoRecovery).await
+    }
+
+    #[tokio::test]
+    async fn test_recovery_corrupt_quiet_recovery() {
+        case_corrupt(RecoverMode::QuietRecovery).await
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_recovery_corrupt_strict_recovery() {
+        case_corrupt(RecoverMode::StrictRecovery).await
     }
 }

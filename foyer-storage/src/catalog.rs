@@ -12,7 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    hash::Hash,
+    sync::{atomic::AtomicU64, Arc},
+    time::Instant,
+};
 
 use ahash::RandomState;
 use foyer_common::{
@@ -28,6 +34,7 @@ use crate::{
 };
 
 pub type Sequence = u64;
+pub type AtomicSequence = AtomicU64;
 
 #[derive(Debug)]
 pub enum Index<K, V>

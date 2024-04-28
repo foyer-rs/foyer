@@ -243,6 +243,7 @@ mod tests {
     use super::*;
     use crate::{
         device::fs::FsDeviceConfig,
+        generic::RecoverMode,
         storage::StorageExt,
         store::{FsStore, FsStoreConfig},
     };
@@ -269,6 +270,7 @@ mod tests {
             reinsertions: vec![],
             flushers: 1,
             reclaimers: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
@@ -302,6 +304,7 @@ mod tests {
             reinsertions: vec![],
             flushers: 1,
             reclaimers: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             clean_region_threshold: 1,
             compression: crate::compress::Compression::None,
