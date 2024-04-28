@@ -33,7 +33,7 @@ use crate::{
     none::{NoneStore, NoneStoreWriter},
     runtime::{Runtime, RuntimeStoreConfig, RuntimeStoreWriter},
     storage::{CachedEntry, Storage, StorageWriter},
-    AdmissionPolicy, FsDeviceConfig, ReinsertionPolicy, RuntimeConfig,
+    AdmissionPolicy, FsDeviceConfig, RecoverMode, ReinsertionPolicy, RuntimeConfig,
 };
 
 pub type FsStore<K, V> = GenericStore<K, V, FsDevice>;
@@ -66,6 +66,7 @@ where
     flushers: usize,
     reclaimers: usize,
     clean_region_threshold: Option<usize>,
+    recover_mode: RecoverMode,
     recover_concurrency: usize,
     compression: Compression,
     lazy: bool,
@@ -91,13 +92,7 @@ where
     pub fn new() -> Self {
         Self {
             name: "foyer".to_string(),
-            eviction_config: LfuConfig {
-                window_capacity_ratio: 0.1,
-                protected_capacity_ratio: 0.8,
-                cmsketch_eps: 0.001,
-                cmsketch_confidence: 0.9,
-            }
-            .into(),
+            eviction_config: LfuConfig::default().into(),
             device_config: DeviceConfig::None,
             catalog_shards: 64,
             admissions: vec![],
@@ -105,6 +100,7 @@ where
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: None,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 8,
             compression: Compression::None,
             flush: false,
@@ -183,6 +179,14 @@ where
         self
     }
 
+    /// Set recover mode.
+    ///
+    /// See [`RecoverMode`].
+    pub fn with_recover_mode(mut self, recover_mode: RecoverMode) -> Self {
+        self.recover_mode = recover_mode;
+        self
+    }
+
     /// Concurrency of recovery.
     pub fn with_recover_concurrency(mut self, recover_concurrency: usize) -> Self {
         self.recover_concurrency = recover_concurrency;
@@ -233,6 +237,7 @@ where
                 flushers: self.flushers,
                 reclaimers: self.reclaimers,
                 clean_region_threshold,
+                recover_mode: RecoverMode::default(),
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
                 flush: self.flush,
@@ -247,6 +252,7 @@ where
                 flushers: self.flushers,
                 reclaimers: self.reclaimers,
                 clean_region_threshold,
+                recover_mode: RecoverMode::default(),
                 recover_concurrency: self.recover_concurrency,
                 compression: self.compression,
                 flush: self.flush,
@@ -263,6 +269,7 @@ where
                         flushers: self.flushers,
                         reclaimers: self.reclaimers,
                         clean_region_threshold,
+                        recover_mode: RecoverMode::default(),
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
                         flush: self.flush,
@@ -282,6 +289,7 @@ where
                         flushers: self.flushers,
                         reclaimers: self.reclaimers,
                         clean_region_threshold,
+                        recover_mode: RecoverMode::default(),
                         recover_concurrency: self.recover_concurrency,
                         compression: self.compression,
                         flush: self.flush,
