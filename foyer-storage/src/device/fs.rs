@@ -164,7 +164,8 @@ impl Device for FsDevice {
 
         assert!(
             offset + len <= file_capacity,
-            "offset ({offset}) + len ({len}) <= file capacity ({file_capacity})"
+            "offset ({offset}) + len ({len}) = {} <= file capacity ({file_capacity})",
+            offset + len
         );
 
         let file = self.file(region).clone();
@@ -258,6 +259,8 @@ impl Device for FsDevice {
 }
 
 impl FsDevice {
+    pub const PREFIX: &'static str = "foyer-cache-";
+
     pub async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
         config.assert();
 
@@ -312,7 +315,7 @@ impl FsDevice {
     }
 
     fn filename(region: RegionId) -> String {
-        format!("foyer-cache-{:08}", region)
+        format!("{}{:08}", Self::PREFIX, region)
     }
 }
 
