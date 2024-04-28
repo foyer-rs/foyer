@@ -26,8 +26,8 @@ use foyer_memory::{
     Cache, CacheBuilder, CacheContext, CacheEntry, CacheEventListener, Entry, EvictionConfig, Weighter,
 };
 use foyer_storage::{
-    AdmissionPolicy, AsyncStorageExt, Compression, DeviceConfig, ReinsertionPolicy, RuntimeConfig, Storage, Store,
-    StoreBuilder,
+    AdmissionPolicy, AsyncStorageExt, Compression, DeviceConfig, RecoverMode, ReinsertionPolicy, RuntimeConfig,
+    Storage, Store, StoreBuilder,
 };
 
 struct HybridCacheEventListenerInner<K, V>
@@ -297,6 +297,18 @@ where
     /// The default clean region thrshold is the reclaimer count.
     pub fn with_clean_region_threshold(self, clean_region_threshold: usize) -> Self {
         let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
+        Self {
+            listener: self.listener,
+            cache: self.cache,
+            builder,
+        }
+    }
+
+    /// Set recover mode.
+    ///
+    /// See [`RecoverMode`].
+    pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
+        let builder = self.builder.with_recover_mode(recover_mode);
         Self {
             listener: self.listener,
             cache: self.cache,

@@ -466,6 +466,7 @@ mod tests {
     use crate::{
         device::fs::FsDeviceConfig,
         store::{FsStore, FsStoreConfig},
+        RecoverMode,
     };
 
     const KB: usize = 1024;
@@ -488,6 +489,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             compression: Compression::None,
             flush: false,

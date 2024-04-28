@@ -17,6 +17,7 @@ pub use crate::{
     compress::Compression,
     device::fs::{FsDeviceConfig, FsDeviceConfigBuilder},
     error::{Error, Result},
+    generic::RecoverMode,
     metrics::{get_metrics_registry, set_metrics_registry},
     reinsertion::{
         exist::ExistReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy, ReinsertionContext,

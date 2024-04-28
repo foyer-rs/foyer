@@ -19,8 +19,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use foyer_memory::FifoConfig;
 use foyer_storage::{
-    test_utils::JudgeRecorder, Compression, FsDeviceConfig, FsStoreConfig, RuntimeConfigBuilder, RuntimeStoreConfig,
-    Storage, StorageExt, Store, StoreConfig,
+    test_utils::JudgeRecorder, Compression, FsDeviceConfig, FsStoreConfig, RecoverMode, RuntimeConfigBuilder,
+    RuntimeStoreConfig, Storage, StorageExt, Store, StoreConfig,
 };
 
 const KB: usize = 1024;
@@ -113,6 +113,7 @@ async fn test_fs_store() {
         flushers: 1,
         reclaimers: 1,
         clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
         recover_concurrency: 2,
         compression: Compression::None,
         flush: true,
@@ -141,6 +142,7 @@ async fn test_fs_store_zstd() {
         flushers: 1,
         reclaimers: 1,
         clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
         recover_concurrency: 2,
         compression: Compression::Zstd,
         flush: true,
@@ -169,6 +171,7 @@ async fn test_fs_store_lz4() {
         flushers: 1,
         reclaimers: 1,
         clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
         recover_concurrency: 2,
         compression: Compression::Lz4,
         flush: true,
@@ -197,6 +200,7 @@ async fn test_lazy_fs_store() {
         flushers: 1,
         reclaimers: 1,
         clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
         recover_concurrency: 2,
         compression: Compression::None,
         flush: true,
@@ -226,6 +230,7 @@ async fn test_runtime_fs_store() {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             compression: Compression::None,
             flush: true,
@@ -257,6 +262,7 @@ async fn test_runtime_lazy_fs_store() {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
+            recover_mode: RecoverMode::default(),
             recover_concurrency: 2,
             compression: Compression::None,
             flush: true,
