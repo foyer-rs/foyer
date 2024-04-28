@@ -118,6 +118,7 @@ async fn main() -> Result<()> {
                 .with_file_size(4 * 1024 * 1024)
                 .with_align(4 * 1024)
                 .with_io_size(16 * 1024)
+                .with_direct(true)
                 .build(),
         )
         .with_catalog_shards(4)

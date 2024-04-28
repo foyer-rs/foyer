@@ -106,6 +106,7 @@ async fn test_fs_store() {
             file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
+            direct: true,
         },
         catalog_shards: 1,
         admissions: vec![recorder.clone()],
@@ -135,6 +136,7 @@ async fn test_fs_store_zstd() {
             file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
+            direct: true,
         },
         catalog_shards: 1,
         admissions: vec![recorder.clone()],
@@ -164,6 +166,7 @@ async fn test_fs_store_lz4() {
             file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
+            direct: true,
         },
         catalog_shards: 1,
         admissions: vec![recorder.clone()],
@@ -193,6 +196,7 @@ async fn test_lazy_fs_store() {
             file_size: 1 * MB,
             align: 4 * KB,
             io_size: 4 * KB,
+            direct: true,
         },
         catalog_shards: 1,
         admissions: vec![recorder.clone()],
@@ -223,6 +227,7 @@ async fn test_runtime_fs_store() {
                 file_size: 1 * MB,
                 align: 4 * KB,
                 io_size: 4 * KB,
+                direct: true,
             },
             catalog_shards: 1,
             admissions: vec![recorder.clone()],
@@ -255,6 +260,193 @@ async fn test_runtime_lazy_fs_store() {
                 file_size: 1 * MB,
                 align: 4 * KB,
                 io_size: 4 * KB,
+                direct: true,
+            },
+            catalog_shards: 1,
+            admissions: vec![recorder.clone()],
+            reinsertions: vec![recorder.clone()],
+            flushers: 1,
+            reclaimers: 1,
+            clean_region_threshold: 1,
+            recover_mode: RecoverMode::default(),
+            recover_concurrency: 2,
+            compression: Compression::None,
+            flush: true,
+        },
+        runtime_config: RuntimeConfigBuilder::new().build(),
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_fs_store_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::Fs(FsStoreConfig {
+        name: "".to_string(),
+        eviction_config: FifoConfig {}.into(),
+        device_config: FsDeviceConfig {
+            dir: PathBuf::from(tempdir.path()),
+            capacity: 4 * MB,
+            file_size: 1 * MB,
+            align: 4 * KB,
+            io_size: 4 * KB,
+            direct: false,
+        },
+        catalog_shards: 1,
+        admissions: vec![recorder.clone()],
+        reinsertions: vec![recorder.clone()],
+        flushers: 1,
+        reclaimers: 1,
+        clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
+        recover_concurrency: 2,
+        compression: Compression::None,
+        flush: true,
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_fs_store_zstd_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::Fs(FsStoreConfig {
+        name: "".to_string(),
+        eviction_config: FifoConfig {}.into(),
+        device_config: FsDeviceConfig {
+            dir: PathBuf::from(tempdir.path()),
+            capacity: 4 * MB,
+            file_size: 1 * MB,
+            align: 4 * KB,
+            io_size: 4 * KB,
+            direct: false,
+        },
+        catalog_shards: 1,
+        admissions: vec![recorder.clone()],
+        reinsertions: vec![recorder.clone()],
+        flushers: 1,
+        reclaimers: 1,
+        clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
+        recover_concurrency: 2,
+        compression: Compression::Zstd,
+        flush: true,
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_fs_store_lz4_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::Fs(FsStoreConfig {
+        name: "".to_string(),
+        eviction_config: FifoConfig {}.into(),
+        device_config: FsDeviceConfig {
+            dir: PathBuf::from(tempdir.path()),
+            capacity: 4 * MB,
+            file_size: 1 * MB,
+            align: 4 * KB,
+            io_size: 4 * KB,
+            direct: false,
+        },
+        catalog_shards: 1,
+        admissions: vec![recorder.clone()],
+        reinsertions: vec![recorder.clone()],
+        flushers: 1,
+        reclaimers: 1,
+        clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
+        recover_concurrency: 2,
+        compression: Compression::Lz4,
+        flush: true,
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_lazy_fs_store_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::LazyFs(FsStoreConfig {
+        name: "".to_string(),
+        eviction_config: FifoConfig {}.into(),
+        device_config: FsDeviceConfig {
+            dir: PathBuf::from(tempdir.path()),
+            capacity: 4 * MB,
+            file_size: 1 * MB,
+            align: 4 * KB,
+            io_size: 4 * KB,
+            direct: false,
+        },
+        catalog_shards: 1,
+        admissions: vec![recorder.clone()],
+        reinsertions: vec![recorder.clone()],
+        flushers: 1,
+        reclaimers: 1,
+        clean_region_threshold: 1,
+        recover_mode: RecoverMode::default(),
+        recover_concurrency: 2,
+        compression: Compression::None,
+        flush: true,
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_runtime_fs_store_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::RuntimeFs(RuntimeStoreConfig {
+        store_config: FsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig {}.into(),
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 4 * MB,
+                file_size: 1 * MB,
+                align: 4 * KB,
+                io_size: 4 * KB,
+                direct: false,
+            },
+            catalog_shards: 1,
+            admissions: vec![recorder.clone()],
+            reinsertions: vec![recorder.clone()],
+            flushers: 1,
+            reclaimers: 1,
+            clean_region_threshold: 1,
+            recover_mode: RecoverMode::default(),
+            recover_concurrency: 2,
+            compression: Compression::None,
+            flush: true,
+        },
+        runtime_config: RuntimeConfigBuilder::new().build(),
+    });
+
+    test_store(config, recorder).await;
+}
+
+#[tokio::test]
+async fn test_runtime_lazy_fs_store_wo_direct() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(JudgeRecorder::default());
+    let config = StoreConfig::RuntimeLazyFs(RuntimeStoreConfig {
+        store_config: FsStoreConfig {
+            name: "".to_string(),
+            eviction_config: FifoConfig {}.into(),
+            device_config: FsDeviceConfig {
+                dir: PathBuf::from(tempdir.path()),
+                capacity: 4 * MB,
+                file_size: 1 * MB,
+                align: 4 * KB,
+                io_size: 4 * KB,
+                direct: false,
             },
             catalog_shards: 1,
             admissions: vec![recorder.clone()],

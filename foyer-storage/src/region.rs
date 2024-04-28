@@ -99,6 +99,10 @@ impl RegionHeader {
         let version = buf.get_u64().try_into()?;
         Ok(Self { magic, version })
     }
+
+    pub fn serialized_len() -> usize {
+        16
+    }
 }
 
 #[derive(Debug)]
