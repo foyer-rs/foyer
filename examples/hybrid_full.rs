@@ -18,7 +18,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     CacheContext, FsDeviceConfigBuilder, HybridCache, HybridCacheBuilder, LfuConfig, LruConfig,
-    RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, RuntimeConfigBuilder,
+    RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, RecoverMode, RuntimeConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
         .with_flushers(2)
         .with_reclaimers(2)
         .with_clean_region_threshold(2)
+        .with_recover_mode(RecoverMode::QuietRecovery)
         .with_recover_concurrency(4)
         .with_compression(foyer::Compression::Lz4)
         .with_flush(false)
