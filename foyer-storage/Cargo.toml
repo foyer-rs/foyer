@@ -25,13 +25,10 @@ foyer-memory = { version = "0.3", path = "../foyer-memory" }
 futures = "0.3"
 itertools = "0.12"
 lazy_static = "1"
-libc = "0.2"
 lz4 = "1.24"
 memoffset = "0.9"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-paste = "1.0"
 prometheus = "0.13"
-rand = "0.8.5"
 serde = { workspace = true }
 thiserror = "1"
 tokio = { workspace = true }
