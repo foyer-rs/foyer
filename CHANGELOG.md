@@ -2,6 +2,25 @@
 
 | crate | version |
 | - | - |
+| foyer | 0.8.9 |
+| foyer-common | 0.6.4 |
+| foyer-memory | 0.3.6 |
+| foyer-storage | 0.7.6 |
+| foyer-storage-bench | 0.7.5 |
+
+<details>
+
+### Changes
+
+- feat: Add config to control the recover mode.
+- feat: Add config to enable/disable direct i/o. (Enabled by default for large entries optimization.)
+
+</details>
+
+## 2024-04-28
+
+| crate | version |
+| - | - |
 | foyer | 0.8.8 |
 | foyer-memory | 0.3.5 |
 | foyer-storage | 0.7.5 |
