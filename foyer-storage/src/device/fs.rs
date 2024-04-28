@@ -26,6 +26,9 @@ use itertools::Itertools;
 use super::{allocator::AlignedAllocator, asyncify, Device, DeviceError, DeviceResult, IoBuf, IoBufMut, IoRange};
 use crate::region::RegionId;
 
+#[cfg(target_os = "linux")]
+const O_DIRECT: i32 = 0x4000;
+
 #[derive(Debug)]
 pub struct FsDeviceConfigBuilder {
     pub dir: PathBuf,
@@ -301,7 +304,7 @@ impl FsDevice {
                     {
                         use std::os::unix::fs::OpenOptionsExt;
                         if config.direct {
-                            opts.custom_flags(libc::O_DIRECT);
+                            opts.custom_flags(O_DIRECT);
                         }
                     }
 
