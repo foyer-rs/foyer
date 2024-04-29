@@ -15,11 +15,7 @@
 use std::{fmt::Debug, ptr::NonNull};
 
 use cmsketch::CMSketchU16;
-use foyer_intrusive::{
-    core::adapter::Link,
-    dlist::{Dlist, DlistLink},
-    intrusive_adapter,
-};
+use foyer_common::slab::{slab_linked_list::SlabLinkedList, Token};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -85,7 +81,7 @@ pub struct LfuHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    link: DlistLink,
+    token: Option<Token>,
     base: BaseHandle<T, LfuContext>,
     queue: Queue,
 }
@@ -99,15 +95,13 @@ where
     }
 }
 
-intrusive_adapter! { LfuHandleDlistAdapter<T> = NonNull<LfuHandle<T>>: LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
-
 impl<T> Default for LfuHandle<T>
 where
     T: Send + Sync + 'static,
 {
     fn default() -> Self {
         Self {
-            link: DlistLink::default(),
+            token: None,
             base: BaseHandle::new(),
             queue: Queue::None,
         }
@@ -149,9 +143,9 @@ pub struct Lfu<T>
 where
     T: Send + Sync + 'static,
 {
-    window: Dlist<LfuHandleDlistAdapter<T>>,
-    probation: Dlist<LfuHandleDlistAdapter<T>>,
-    protected: Dlist<LfuHandleDlistAdapter<T>>,
+    window: SlabLinkedList<NonNull<LfuHandle<T>>>,
+    probation: SlabLinkedList<NonNull<LfuHandle<T>>>,
+    protected: SlabLinkedList<NonNull<LfuHandle<T>>>,
 
     window_weight: usize,
     probation_weight: usize,
@@ -235,9 +229,9 @@ where
         let decay = frequencies.width();
 
         Self {
-            window: Dlist::new(),
-            probation: Dlist::new(),
-            protected: Dlist::new(),
+            window: SlabLinkedList::new(),
+            probation: SlabLinkedList::new(),
+            protected: SlabLinkedList::new(),
             window_weight: 0,
             probation_weight: 0,
             protected_weight: 0,
@@ -252,12 +246,13 @@ where
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.link.is_linked());
+        debug_assert!(handle.token.is_none());
         debug_assert!(!handle.base().is_in_eviction());
         debug_assert_eq!(handle.queue, Queue::None);
 
-        self.window.push_back(ptr);
+        let token = self.window.push_back(ptr);
         handle.base_mut().set_in_eviction(true);
+        handle.token = Some(token);
         handle.queue = Queue::Window;
 
         self.increase_queue_weight(handle);
@@ -271,7 +266,8 @@ where
             self.decrease_queue_weight(handle);
             handle.queue = Queue::Probation;
             self.increase_queue_weight(handle);
-            self.probation.push_back(ptr);
+            let token = self.probation.push_back(ptr);
+            handle.token = Some(token);
         }
     }
 
@@ -283,7 +279,8 @@ where
             (None, Some(_)) => self.probation.pop_front(),
             (Some(_), None) => self.window.pop_front(),
             (Some(window), Some(probation)) => {
-                if self.frequencies.estimate(window.base().hash()) < self.frequencies.estimate(probation.base().hash())
+                if self.frequencies.estimate(window.as_ref().base().hash())
+                    < self.frequencies.estimate(probation.as_ref().base().hash())
                 {
                     self.window.pop_front()
 
@@ -298,13 +295,14 @@ where
 
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.link.is_linked());
+        debug_assert!(handle.token.is_some());
         debug_assert!(handle.base().is_in_eviction());
         debug_assert_ne!(handle.queue, Queue::None);
 
         self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
         handle.base_mut().set_in_eviction(false);
+        handle.token = None;
 
         Some(ptr)
     }
@@ -314,28 +312,30 @@ where
 
         match handle.queue {
             Queue::None => {
-                debug_assert!(!handle.link.is_linked());
+                debug_assert!(handle.token.is_none());
                 debug_assert!(!handle.base().is_in_eviction());
                 self.push(ptr);
-                debug_assert!(handle.link.is_linked());
+                debug_assert!(handle.token.is_some());
                 debug_assert!(handle.base().is_in_eviction());
             }
             Queue::Window => {
                 // Move to MRU position of `window`.
-                debug_assert!(handle.link.is_linked());
+                debug_assert!(handle.token.is_some());
                 debug_assert!(handle.base().is_in_eviction());
-                self.window.remove_raw(handle.link.raw());
-                self.window.push_back(ptr);
+                self.window.remove_with_token(handle.token.unwrap_unchecked());
+                let token = self.window.push_back(ptr);
+                handle.token = Some(token);
             }
             Queue::Probation => {
                 // Promote to MRU position of `protected`.
-                debug_assert!(handle.link.is_linked());
+                debug_assert!(handle.token.is_some());
                 debug_assert!(handle.base().is_in_eviction());
-                self.probation.remove_raw(handle.link.raw());
+                self.probation.remove_with_token(handle.token.unwrap_unchecked());
                 self.decrease_queue_weight(handle);
                 handle.queue = Queue::Protected;
                 self.increase_queue_weight(handle);
-                self.protected.push_back(ptr);
+                let token = self.protected.push_back(ptr);
+                handle.token = Some(token);
 
                 // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
                 while self.protected_weight > self.protected_weight_capacity {
@@ -345,15 +345,17 @@ where
                     self.decrease_queue_weight(handle);
                     handle.queue = Queue::Probation;
                     self.increase_queue_weight(handle);
-                    self.probation.push_back(ptr);
+                    let token = self.probation.push_back(ptr);
+                    handle.token = Some(token);
                 }
             }
             Queue::Protected => {
                 // Move to MRU position of `protected`.
-                debug_assert!(handle.link.is_linked());
+                debug_assert!(handle.token.is_some());
                 debug_assert!(handle.base().is_in_eviction());
-                self.protected.remove_raw(handle.link.raw());
-                self.protected.push_back(ptr);
+                self.protected.remove_with_token(handle.token.unwrap_unchecked());
+                let token = self.protected.push_back(ptr);
+                handle.token = Some(token);
             }
         }
     }
@@ -365,22 +367,23 @@ where
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        debug_assert!(handle.link.is_linked());
+        debug_assert!(handle.token.is_some());
         debug_assert!(handle.base().is_in_eviction());
         debug_assert_ne!(handle.queue, Queue::None);
 
         match handle.queue {
             Queue::None => unreachable!(),
-            Queue::Window => self.window.remove_raw(handle.link.raw()),
-            Queue::Probation => self.probation.remove_raw(handle.link.raw()),
-            Queue::Protected => self.protected.remove_raw(handle.link.raw()),
+            Queue::Window => self.window.remove_with_token(handle.token.unwrap_unchecked()),
+            Queue::Probation => self.probation.remove_with_token(handle.token.unwrap_unchecked()),
+            Queue::Protected => self.protected.remove_with_token(handle.token.unwrap_unchecked()),
         };
 
-        debug_assert!(!handle.link.is_linked());
+        debug_assert!(handle.token.is_none());
 
         self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
         handle.base_mut().set_in_eviction(false);
+        handle.token = None;
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
@@ -389,7 +392,7 @@ where
         while !self.is_empty() {
             let ptr = self.pop().unwrap_unchecked();
             debug_assert!(!ptr.as_ref().base().is_in_eviction());
-            debug_assert!(!ptr.as_ref().link.is_linked());
+            debug_assert!(ptr.as_ref().token.is_none());
             debug_assert_eq!(ptr.as_ref().queue, Queue::None);
             res.push(ptr);
         }
@@ -422,12 +425,14 @@ mod tests {
         T: Send + Sync + 'static + Clone,
     {
         fn dump(&self) -> Vec<T> {
-            self.window
-                .iter()
-                .chain(self.probation.iter())
-                .chain(self.protected.iter())
-                .map(|handle| handle.base().data_unwrap_unchecked().clone())
-                .collect_vec()
+            unsafe {
+                self.window
+                    .iter()
+                    .chain(self.probation.iter())
+                    .chain(self.protected.iter())
+                    .map(|handle| handle.as_ref().base().data_unwrap_unchecked().clone())
+                    .collect_vec()
+            }
         }
     }
 
