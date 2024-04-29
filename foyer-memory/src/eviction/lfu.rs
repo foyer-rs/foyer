@@ -229,9 +229,9 @@ where
         let decay = frequencies.width();
 
         Self {
-            window: SlabLinkedList::new(),
-            probation: SlabLinkedList::new(),
-            protected: SlabLinkedList::new(),
+            window: SlabLinkedList::with_capacity(capacity),
+            probation: SlabLinkedList::with_capacity(capacity),
+            protected: SlabLinkedList::with_capacity(capacity),
             window_weight: 0,
             probation_weight: 0,
             protected_weight: 0,
