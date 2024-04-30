@@ -12,13 +12,30 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::ops::{Deref, DerefMut};
+
 use allocator_api2::{
     alloc::{AllocError, Allocator, Global},
     vec::Vec as VecA,
 };
 use foyer_common::bits;
 
+#[derive(Debug)]
 pub struct WritableVecA<'a, T, A: Allocator>(pub &'a mut VecA<T, A>);
+
+impl<'a, T, A: Allocator> Deref for WritableVecA<'a, T, A> {
+    type Target = VecA<T, A>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a, T, A: Allocator> DerefMut for WritableVecA<'a, T, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
 
 impl<'a, A: Allocator> std::io::Write for WritableVecA<'a, u8, A> {
     #[inline]

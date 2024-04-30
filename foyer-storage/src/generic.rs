@@ -16,7 +16,7 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     fmt::Debug,
-    hash::{Hash, Hasher},
+    hash::Hash,
     marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -25,9 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::anyhow;
 use bitmaps::Bitmap;
-use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
@@ -42,11 +40,9 @@ use tokio::{
     sync::{broadcast, mpsc, Semaphore},
     task::JoinHandle,
 };
-use twox_hash::XxHash64;
 
 use crate::{
     admission::{AdmissionContext, AdmissionPolicy},
-    buffer::BufferError,
     catalog::{AtomicSequence, Catalog, Index, Item, Sequence},
     compress::Compression,
     device::Device,
@@ -58,6 +54,7 @@ use crate::{
     region::{Region, RegionHeader, RegionId},
     region_manager::RegionManager,
     reinsertion::{ReinsertionContext, ReinsertionPolicy},
+    serde::{EntryDeserializer, EntryHeader},
     storage::{CachedEntry, Storage, StorageWriter},
     Error,
 };
@@ -444,8 +441,8 @@ where
                         }
                     };
 
-                    let res = match read_entry::<K, V>(buf.as_ref()) {
-                        Ok((key, value)) => {
+                    let res = match EntryDeserializer::deserialize(buf.as_ref()) {
+                        Ok((_header, key, value)) => {
                             inner.metrics.op_bytes_get.inc_by(buf.len() as u64);
                             Ok(Some(CachedEntry::Owned {
                                 key: Box::new(key),
@@ -455,7 +452,7 @@ where
                         Err(e) => {
                             // Remove index if the storage layer fails to get it (because of entry magic mismatch).
                             inner.catalog.remove::<K>(key.as_ref());
-                            Err(e)
+                            Err(Error::Serde(e))
                         }
                     };
 
@@ -801,106 +798,6 @@ where
     }
 }
 
-const ENTRY_MAGIC: u32 = 0x97_03_27_00;
-const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
-
-#[derive(Debug)]
-pub struct EntryHeader {
-    pub key_len: u32,
-    pub value_len: u32,
-    pub sequence: Sequence,
-    pub checksum: u64,
-    pub compression: Compression,
-}
-
-impl EntryHeader {
-    pub const fn serialized_len() -> usize {
-        4 + 4 + 8 + 8 + 4 /* magic & compression */
-    }
-
-    pub fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u32(self.key_len);
-        buf.put_u32(self.value_len);
-        buf.put_u64(self.sequence);
-        buf.put_u64(self.checksum);
-
-        let v = ENTRY_MAGIC | self.compression.to_u8() as u32;
-        buf.put_u32(v);
-    }
-
-    pub fn read(mut buf: &[u8]) -> Result<Self> {
-        let key_len = buf.get_u32();
-        let value_len = buf.get_u32();
-        let sequence = buf.get_u64();
-        let checksum = buf.get_u64();
-
-        let v = buf.get_u32();
-        let magic = v & ENTRY_MAGIC_MASK;
-        if magic != ENTRY_MAGIC {
-            return Err(anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into());
-        }
-        let compression = Compression::try_from(v as u8)?;
-
-        Ok(Self {
-            key_len,
-            value_len,
-            sequence,
-            compression,
-            checksum,
-        })
-    }
-}
-
-/// | header | value (compressed) | key | <padding> |
-///
-/// # Safety
-///
-/// `buf.len()` must exactly fit entry size
-fn read_entry<K, V>(buf: &[u8]) -> Result<(K, V)>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    // read entry header
-    let header = EntryHeader::read(buf)?;
-
-    // TODO(MrCroxx): optimize buffer copy here.
-
-    // read value
-    let mut offset = EntryHeader::serialized_len();
-    let compressed = &buf[offset..offset + header.value_len as usize];
-    offset += header.value_len as usize;
-    let value = match header.compression {
-        Compression::None => bincode::deserialize_from(compressed).map_err(BufferError::from)?,
-        Compression::Zstd => {
-            let decoder = zstd::Decoder::new(compressed).map_err(BufferError::from)?;
-            bincode::deserialize_from(decoder).map_err(BufferError::from)?
-        }
-        Compression::Lz4 => {
-            let decoder = lz4::Decoder::new(compressed).map_err(BufferError::from)?;
-            bincode::deserialize_from(decoder).map_err(BufferError::from)?
-        }
-    };
-
-    // read key
-    let compressed = &buf[offset..offset + header.key_len as usize];
-    let key = bincode::deserialize_from(compressed).map_err(BufferError::from)?;
-    offset += header.key_len as usize;
-
-    let checksum = checksum(&buf[EntryHeader::serialized_len()..offset]);
-    if checksum != header.checksum {
-        return Err(anyhow!("magic mismatch, expected: {}, got: {}", header.checksum, checksum).into());
-    }
-
-    Ok((key, value))
-}
-
-pub fn checksum(buf: &[u8]) -> u64 {
-    let mut hasher = XxHash64::with_seed(0);
-    hasher.write(buf);
-    hasher.finish()
-}
-
 pub struct RegionEntryIter<K, V, D>
 where
     K: StorageKey,
@@ -1027,9 +924,9 @@ where
         let Some(slice) = self.region.load_range(start..end).await? else {
             return Ok(None);
         };
-        let res = read_entry::<K, V>(slice.as_ref())
+        let res = EntryDeserializer::deserialize(slice.as_ref())
             .ok()
-            .map(|(k, v)| (k, v, slice.len()));
+            .map(|(_header, k, v)| (k, v, slice.len()));
         drop(slice);
 
         Ok(res)
@@ -1131,6 +1028,7 @@ where
 mod tests {
     use std::ops::Range;
 
+    use bytes::BufMut;
     use foyer_common::{bits::align_up, range::RangeBoundsExt};
     use foyer_memory::FifoConfig;
 
