@@ -21,7 +21,7 @@ use allocator_api2::{alloc::Allocator, vec::Vec as VecA};
 use foyer_common::range::RangeBoundsExt;
 use futures::Future;
 
-use crate::region::RegionId;
+use crate::{error::Result, region::RegionId};
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 
@@ -39,22 +39,12 @@ impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static> IoBufMut for T {}
 pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static {}
 impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static> IoRange for T {}
 
-#[derive(thiserror::Error, Debug)]
-pub enum DeviceError {
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("other error: {0}")]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-pub type DeviceResult<T> = std::result::Result<T, DeviceError>;
-
 pub trait Device: Sized + Clone + Send + Sync + 'static {
     type IoBufferAllocator: BufferAllocator;
     type Config: Send + Debug + Clone;
 
     #[must_use]
-    fn open(config: Self::Config) -> impl Future<Output = DeviceResult<Self>> + Send;
+    fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
 
     #[must_use]
     fn write<B>(
@@ -63,7 +53,7 @@ pub trait Device: Sized + Clone + Send + Sync + 'static {
         range: impl IoRange,
         region: RegionId,
         offset: usize,
-    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    ) -> impl Future<Output = (Result<usize>, B)> + Send
     where
         B: IoBuf;
 
@@ -74,15 +64,15 @@ pub trait Device: Sized + Clone + Send + Sync + 'static {
         range: impl IoRange,
         region: RegionId,
         offset: usize,
-    ) -> impl Future<Output = (DeviceResult<usize>, B)> + Send
+    ) -> impl Future<Output = (Result<usize>, B)> + Send
     where
         B: IoBufMut;
 
     #[must_use]
-    fn flush_region(&self, region: RegionId) -> impl Future<Output = DeviceResult<()>> + Send;
+    fn flush_region(&self, region: RegionId) -> impl Future<Output = Result<()>> + Send;
 
     #[must_use]
-    fn flush(&self) -> impl Future<Output = DeviceResult<()>> + Send;
+    fn flush(&self) -> impl Future<Output = Result<()>> + Send;
 
     fn capacity(&self) -> usize;
 
@@ -110,7 +100,7 @@ pub trait DeviceExt: Device {
         &self,
         region: RegionId,
         range: Range<usize>,
-    ) -> impl Future<Output = DeviceResult<VecA<u8, Self::IoBufferAllocator>>> + Send {
+    ) -> impl Future<Output = Result<VecA<u8, Self::IoBufferAllocator>>> + Send {
         async move {
             let size = range.size().unwrap();
             debug_assert_eq!(size & (self.align() - 1), 0);
@@ -165,41 +155,29 @@ pub mod tests {
         type Config = usize;
         type IoBufferAllocator = AlignedAllocator;
 
-        async fn open(config: usize) -> DeviceResult<Self> {
+        async fn open(config: usize) -> Result<Self> {
             Ok(Self::new(config))
         }
 
-        async fn write<B>(
-            &self,
-            buf: B,
-            _range: impl IoRange,
-            _region: RegionId,
-            _offset: usize,
-        ) -> (DeviceResult<usize>, B)
+        async fn write<B>(&self, buf: B, _range: impl IoRange, _region: RegionId, _offset: usize) -> (Result<usize>, B)
         where
             B: IoBuf,
         {
             (Ok(0), buf)
         }
 
-        async fn read<B>(
-            &self,
-            buf: B,
-            _range: impl IoRange,
-            _region: RegionId,
-            _offset: usize,
-        ) -> (DeviceResult<usize>, B)
+        async fn read<B>(&self, buf: B, _range: impl IoRange, _region: RegionId, _offset: usize) -> (Result<usize>, B)
         where
             B: IoBufMut,
         {
             (Ok(0), buf)
         }
 
-        async fn flush_region(&self, _: RegionId) -> DeviceResult<()> {
+        async fn flush_region(&self, _: RegionId) -> Result<()> {
             Ok(())
         }
 
-        async fn flush(&self) -> DeviceResult<()> {
+        async fn flush(&self) -> Result<()> {
             Ok(())
         }
 

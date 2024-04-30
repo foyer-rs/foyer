@@ -452,7 +452,7 @@ where
                         Err(e) => {
                             // Remove index if the storage layer fails to get it (because of entry magic mismatch).
                             inner.catalog.remove::<K>(key.as_ref());
-                            Err(Error::Serde(e))
+                            Err(e)
                         }
                     };
 

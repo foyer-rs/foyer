@@ -22,27 +22,12 @@ use foyer_common::{
 };
 
 use crate::{
-    device::{allocator::WritableVecA, Device, DeviceError},
+    device::{allocator::WritableVecA, Device},
+    error::Result,
     flusher::Entry,
     region::{RegionHeader, RegionId, Version, REGION_MAGIC},
-    serde::{EntrySerializer, SerdeError},
+    serde::EntrySerializer,
 };
-
-#[derive(thiserror::Error, Debug)]
-pub enum BufferError {
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("device error: {0}")]
-    Device(#[from] DeviceError),
-    #[error("bincode error: {0}")]
-    Bincode(#[from] bincode::Error),
-    #[error("serde error: {0}")]
-    Serde(#[from] SerdeError),
-    #[error("other error: {0}")]
-    Other(#[from] anyhow::Error),
-}
-
-pub type BufferResult<T> = core::result::Result<T, BufferError>;
 
 #[derive(Debug)]
 pub struct PositionedEntry<K, V>
@@ -136,7 +121,7 @@ where
     /// Flush io buffer if necessary, and reset io buffer to a new region.
     ///
     /// Returns fully flushed entries.
-    pub async fn rotate(&mut self, region: RegionId) -> BufferResult<Vec<PositionedEntry<K, V>>> {
+    pub async fn rotate(&mut self, region: RegionId) -> Result<Vec<PositionedEntry<K, V>>> {
         let entries = self.flush().await?;
         debug_assert!(self.buffer.is_empty());
         self.region = Some(region);
@@ -160,7 +145,7 @@ where
     /// The io buffer will be cleared after flush.
     ///
     /// Returns fully flushed entries.
-    pub async fn flush(&mut self) -> BufferResult<Vec<PositionedEntry<K, V>>> {
+    pub async fn flush(&mut self) -> Result<Vec<PositionedEntry<K, V>>> {
         let Some(region) = self.region else {
             debug_assert!(self.entries.is_empty());
             return Ok(vec![]);
@@ -215,7 +200,7 @@ where
             sequence,
             compression,
         }: Entry<K, V>,
-    ) -> BufferResult<Either<Vec<PositionedEntry<K, V>>, Entry<K, V>>> {
+    ) -> Result<Either<Vec<PositionedEntry<K, V>>, Entry<K, V>>> {
         // Notify caller to rotate buffer if there is not enough space for the entry.
         //
         // NOTICE:
