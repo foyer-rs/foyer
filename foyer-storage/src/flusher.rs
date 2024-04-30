@@ -29,22 +29,14 @@ use crate::{
     region_manager::RegionManager,
 };
 
-pub struct Entry<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct Entry<K, V> {
     pub key: Arc<K>,
     pub value: Arc<V>,
     pub sequence: Sequence,
     pub compression: Compression,
 }
 
-impl<K, V> Debug for Entry<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> Debug for Entry<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry")
             .field("sequence", &self.sequence)
@@ -53,11 +45,7 @@ where
     }
 }
 
-impl<K, V> Clone for Entry<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl<K, V> Clone for Entry<K, V> {
     fn clone(&self) -> Self {
         Self {
             key: self.key.clone(),

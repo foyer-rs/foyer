@@ -31,6 +31,7 @@ mod region;
 mod region_manager;
 mod reinsertion;
 mod runtime;
+mod serde;
 mod storage;
 mod store;
 

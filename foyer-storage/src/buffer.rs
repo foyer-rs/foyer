@@ -22,11 +22,10 @@ use foyer_common::{
 };
 
 use crate::{
-    compress::Compression,
     device::{allocator::WritableVecA, Device, DeviceError},
     flusher::Entry,
-    generic::{checksum, EntryHeader},
     region::{RegionHeader, RegionId, Version, REGION_MAGIC},
+    serde::{EntrySerializer, SerdeError},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -37,6 +36,8 @@ pub enum BufferError {
     Device(#[from] DeviceError),
     #[error("bincode error: {0}")]
     Bincode(#[from] bincode::Error),
+    #[error("serde error: {0}")]
+    Serde(#[from] SerdeError),
     #[error("other error: {0}")]
     Other(#[from] anyhow::Error),
 }
@@ -236,58 +237,7 @@ where
         let old = self.buffer.len();
         debug_assert!(is_aligned(self.device.align(), old));
 
-        let mut cursor = old;
-
-        // TODO(MrCroxx): reserve buffer capacity for entry
-
-        // reserve space for header, header will be filled after the serialized len is known
-        cursor += EntryHeader::serialized_len();
-        unsafe { self.buffer.set_len(cursor) };
-
-        // write value
-        match compression {
-            Compression::None => {
-                bincode::serialize_into(WritableVecA(&mut self.buffer), &value).map_err(BufferError::from)?;
-            }
-            Compression::Zstd => {
-                let encoder = zstd::Encoder::new(WritableVecA(&mut self.buffer), 0)
-                    .map_err(BufferError::from)?
-                    .auto_finish();
-                bincode::serialize_into(encoder, &value).map_err(BufferError::from)?;
-            }
-
-            Compression::Lz4 => {
-                let encoder = lz4::EncoderBuilder::new()
-                    .checksum(lz4::ContentChecksum::NoChecksum)
-                    .auto_flush(true)
-                    .build(WritableVecA(&mut self.buffer))
-                    .map_err(BufferError::from)?;
-                bincode::serialize_into(encoder, &value).map_err(BufferError::from)?;
-            }
-        }
-
-        let compressed_value_len = self.buffer.len() - cursor;
-        cursor = self.buffer.len();
-
-        // write key
-        bincode::serialize_into(WritableVecA(&mut self.buffer), &key).map_err(BufferError::from)?;
-        let encoded_key_len = self.buffer.len() - cursor;
-        cursor = self.buffer.len();
-
-        // calculate checksum
-        cursor -= compressed_value_len + encoded_key_len;
-        let checksum = checksum(&self.buffer[cursor..cursor + compressed_value_len + encoded_key_len]);
-
-        // write entry header
-        cursor -= EntryHeader::serialized_len();
-        let header = EntryHeader {
-            key_len: encoded_key_len as u32,
-            value_len: compressed_value_len as u32,
-            sequence,
-            compression,
-            checksum,
-        };
-        header.write(&mut self.buffer[cursor..cursor + EntryHeader::serialized_len()]);
+        EntrySerializer::serialize(&key, &value, &sequence, &compression, WritableVecA(&mut self.buffer))?;
 
         // (*) if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
@@ -335,7 +285,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::device::fs::{FsDevice, FsDeviceConfig};
+    use crate::{
+        device::fs::{FsDevice, FsDeviceConfig},
+        serde::EntryHeader,
+        Compression,
+    };
 
     fn ent(size: usize) -> Entry<(), Vec<u8>> {
         Entry {
