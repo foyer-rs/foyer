@@ -143,13 +143,12 @@ where
         }
     }
 
-    pub fn view(&self, offset: u32, len: u32) -> RegionView {
+    pub fn view(&self, offset: u32, len: u32) -> RegionAddress {
         self.refs.fetch_add(1, Ordering::SeqCst);
-        RegionView {
+        RegionAddress {
             id: self.id,
             offset,
             len,
-            refs: Arc::clone(&self.refs),
         }
     }
 
@@ -160,14 +159,10 @@ where
     /// Load region data by view from device.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip(self, view))]
-    pub async fn load(&self, view: RegionView) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
-        let res = self
-            .load_range(view.offset as usize..view.offset as usize + view.len as usize)
-            .await;
-        // drop view after load finish
-        drop(view);
-        res
+    #[tracing::instrument(skip(self, address))]
+    pub async fn load(&self, address: RegionAddress) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
+        self.load_range(address.offset as usize..address.offset as usize + address.len as usize)
+            .await
     }
 
     /// Load region data with given `range` from device.
@@ -242,46 +237,9 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct RegionView {
-    id: RegionId,
-    offset: u32,
-    len: u32,
-    refs: Arc<AtomicUsize>,
-}
-
-impl Clone for RegionView {
-    fn clone(&self) -> Self {
-        self.refs.fetch_add(1, Ordering::SeqCst);
-        Self {
-            id: self.id,
-            offset: self.offset,
-            len: self.len,
-            refs: Arc::clone(&self.refs),
-        }
-    }
-}
-
-impl Drop for RegionView {
-    fn drop(&mut self) {
-        self.refs.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-impl RegionView {
-    pub fn id(&self) -> &RegionId {
-        &self.id
-    }
-
-    pub fn offset(&self) -> &u32 {
-        &self.offset
-    }
-
-    pub fn len(&self) -> &u32 {
-        &self.len
-    }
-
-    pub fn refs(&self) -> &Arc<AtomicUsize> {
-        &self.refs
-    }
+#[derive(Debug, Clone)]
+pub struct RegionAddress {
+    pub id: RegionId,
+    pub offset: u32,
+    pub len: u32,
 }

@@ -185,7 +185,7 @@ where
             bytes += len;
             let index = Index::Region {
                 key: key.clone(),
-                view: self.region_manager.region(&region).view(offset as u32, len as u32),
+                address: self.region_manager.region(&region).view(offset as u32, len as u32),
             };
             let item = Item::new(sequence, index);
             self.catalog.insert(key, item);

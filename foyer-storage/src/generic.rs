@@ -424,11 +424,11 @@ where
 
                     Ok(Some(CachedEntry::Shared { key, value }))
                 }
-                crate::catalog::Index::Region { key, view } => {
-                    let region = view.id();
+                crate::catalog::Index::Region { key, address: view } => {
+                    let region = view.id;
 
-                    inner.region_manager.record_access(region);
-                    let region = inner.region_manager.region(region);
+                    inner.region_manager.record_access(&region);
+                    let region = inner.region_manager.region(&region);
 
                     // TODO(MrCroxx): read value only
                     let buf = match region.load(view).await? {
@@ -898,7 +898,7 @@ where
             header.sequence,
             Index::Region {
                 key: key.clone(),
-                view: self.region.view(self.cursor as u32, entry_len as u32),
+                address: self.region.view(self.cursor as u32, entry_len as u32),
             },
         );
 
@@ -914,13 +914,13 @@ where
             Err(e) => return Err(e),
         };
 
-        let Index::Region { key: _, view } = item.index() else {
+        let Index::Region { key: _, address: view } = item.index() else {
             unreachable!("kv loaded from region must have index of region")
         };
 
         // TODO(MrCroxx): Optimize if all key, value and footer are in the same read block.
-        let start = *view.offset() as usize;
-        let end = start + *view.len() as usize;
+        let start = view.offset as usize;
+        let end = start + view.len as usize;
         let Some(slice) = self.region.load_range(start..end).await? else {
             return Ok(None);
         };
@@ -1194,16 +1194,13 @@ mod tests {
                 while let Some((_, item)) = iter.next().await.unwrap() {
                     let view = match item.index() {
                         Index::Inflight { key: _, value: _ } => unreachable!(),
-                        Index::Region { key: _, view } => view,
+                        Index::Region { key: _, address: view } => view,
                     };
                     let start = align_up(
                         store.inner.device.align(),
-                        *view.offset() as usize + EntryHeader::serialized_len(),
+                        view.offset as usize + EntryHeader::serialized_len(),
                     );
-                    let end = align_up(
-                        store.inner.device.align(),
-                        *view.offset() as usize + *view.len() as usize,
-                    );
+                    let end = align_up(store.inner.device.align(), view.offset as usize + view.len as usize);
                     last = Some(start..end);
                 }
             } else {
