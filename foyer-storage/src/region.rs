@@ -207,7 +207,7 @@ where
         let buf = match self.device.load(region, range.start..range.end).await {
             Err(e) => {
                 self.cleanup(range.start, range.end)?;
-                return Err(e.into());
+                return Err(e);
             }
             Ok(buf) if buf.len() != range.size().unwrap() => {
                 self.cleanup(range.start, range.end)?;

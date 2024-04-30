@@ -23,8 +23,11 @@ use foyer_common::{fs::freespace, range::RangeBoundsExt};
 use futures::future::try_join_all;
 use itertools::Itertools;
 
-use super::{allocator::AlignedAllocator, asyncify, Device, DeviceError, DeviceResult, IoBuf, IoBufMut, IoRange};
-use crate::region::RegionId;
+use super::{allocator::AlignedAllocator, asyncify, Device, IoBuf, IoBufMut, IoRange};
+use crate::{
+    error::{Error, Result},
+    region::RegionId,
+};
 
 #[cfg(target_os = "linux")]
 const O_DIRECT: i32 = 0x4000;
@@ -166,11 +169,11 @@ impl Device for FsDevice {
     type Config = FsDeviceConfig;
     type IoBufferAllocator = AlignedAllocator;
 
-    async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
+    async fn open(config: FsDeviceConfig) -> Result<Self> {
         Self::open(config).await
     }
 
-    async fn write<B>(&self, buf: B, range: impl IoRange, region: RegionId, offset: usize) -> (DeviceResult<usize>, B)
+    async fn write<B>(&self, buf: B, range: impl IoRange, region: RegionId, offset: usize) -> (Result<usize>, B)
     where
         B: IoBuf,
     {
@@ -193,21 +196,13 @@ impl Device for FsDevice {
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let res = file
-                .write_at(&buf.as_ref()[range], offset as u64)
-                .map_err(DeviceError::from);
+            let res = file.write_at(&buf.as_ref()[range], offset as u64).map_err(Error::from);
             (res, buf)
         })
         .await
     }
 
-    async fn read<B>(
-        &self,
-        mut buf: B,
-        range: impl IoRange,
-        region: RegionId,
-        offset: usize,
-    ) -> (DeviceResult<usize>, B)
+    async fn read<B>(&self, mut buf: B, range: impl IoRange, region: RegionId, offset: usize) -> (Result<usize>, B)
     where
         B: IoBufMut,
     {
@@ -231,18 +226,18 @@ impl Device for FsDevice {
 
             let res = file
                 .read_at(&mut buf.as_mut()[range], offset as u64)
-                .map_err(DeviceError::from);
+                .map_err(Error::from);
             (res, buf)
         })
         .await
     }
 
-    async fn flush_region(&self, region: RegionId) -> DeviceResult<()> {
+    async fn flush_region(&self, region: RegionId) -> Result<()> {
         let file = self.file(region).clone();
-        asyncify(move || file.sync_all().map_err(DeviceError::from)).await
+        asyncify(move || file.sync_all().map_err(Error::from)).await
     }
 
-    async fn flush(&self) -> DeviceResult<()> {
+    async fn flush(&self) -> Result<()> {
         let futures = (0..self.regions() as RegionId).map(|region| self.flush_region(region));
         try_join_all(futures).await.map(|_| ())
     }
@@ -278,7 +273,7 @@ impl Device for FsDevice {
 impl FsDevice {
     pub const PREFIX: &'static str = "foyer-cache-";
 
-    pub async fn open(config: FsDeviceConfig) -> DeviceResult<Self> {
+    pub async fn open(config: FsDeviceConfig) -> Result<Self> {
         config.assert();
 
         // TODO(MrCroxx): write and read config to a manifest file for pinning
@@ -288,7 +283,7 @@ impl FsDevice {
         let path = config.dir.clone();
         let dir = asyncify(move || {
             create_dir_all(&path)?;
-            File::open(&path).map_err(DeviceError::from)
+            File::open(&path).map_err(Error::from)
         })
         .await?;
 
@@ -311,7 +306,7 @@ impl FsDevice {
                     let file = opts.open(path)?;
                     let file = Arc::new(file);
 
-                    Ok::<_, DeviceError>(file)
+                    Ok::<_, Error>(file)
                 }
             })
             .collect_vec();

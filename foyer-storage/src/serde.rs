@@ -22,23 +22,10 @@ use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{
     catalog::Sequence,
-    device::{allocator::WritableVecA, DeviceError},
+    device::allocator::WritableVecA,
+    error::{Error, Result},
     Compression,
 };
-
-#[derive(thiserror::Error, Debug)]
-pub enum SerdeError {
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("device error: {0}")]
-    Device(#[from] DeviceError),
-    #[error("bincode error: {0}")]
-    Bincode(#[from] bincode::Error),
-    #[error("other error: {0}")]
-    Other(#[from] anyhow::Error),
-}
-
-pub type SerdeResult<T> = core::result::Result<T, SerdeError>;
 
 pub fn checksum(buf: &[u8]) -> u64 {
     let mut hasher = XxHash64::with_seed(0);
@@ -73,7 +60,7 @@ impl EntryHeader {
         buf.put_u32(v);
     }
 
-    pub fn read(mut buf: &[u8]) -> SerdeResult<Self> {
+    pub fn read(mut buf: &[u8]) -> Result<Self> {
         let key_len = buf.get_u32();
         let value_len = buf.get_u32();
         let sequence = buf.get_u64();
@@ -106,7 +93,7 @@ impl EntrySerializer {
         sequence: &'a Sequence,
         compression: &'a Compression,
         mut buffer: WritableVecA<'a, u8, A>,
-    ) -> SerdeResult<()>
+    ) -> Result<()>
     where
         K: StorageKey,
         V: StorageValue,
@@ -121,13 +108,11 @@ impl EntrySerializer {
         // serialize value
         match compression {
             Compression::None => {
-                bincode::serialize_into(&mut buffer, &value).map_err(SerdeError::from)?;
+                bincode::serialize_into(&mut buffer, &value).map_err(Error::from)?;
             }
             Compression::Zstd => {
-                let encoder = zstd::Encoder::new(&mut buffer, 0)
-                    .map_err(SerdeError::from)?
-                    .auto_finish();
-                bincode::serialize_into(encoder, &value).map_err(SerdeError::from)?;
+                let encoder = zstd::Encoder::new(&mut buffer, 0).map_err(Error::from)?.auto_finish();
+                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
             }
 
             Compression::Lz4 => {
@@ -135,8 +120,8 @@ impl EntrySerializer {
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .auto_flush(true)
                     .build(&mut buffer)
-                    .map_err(SerdeError::from)?;
-                bincode::serialize_into(encoder, &value).map_err(SerdeError::from)?;
+                    .map_err(Error::from)?;
+                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
             }
         }
 
@@ -144,7 +129,7 @@ impl EntrySerializer {
         cursor = buffer.len();
 
         // serialize key
-        bincode::serialize_into(WritableVecA(&mut buffer), &key).map_err(SerdeError::from)?;
+        bincode::serialize_into(WritableVecA(&mut buffer), &key).map_err(Error::from)?;
         let key_len = buffer.len() - cursor;
         cursor = buffer.len();
 
@@ -171,33 +156,33 @@ impl EntrySerializer {
 pub struct EntryDeserializer;
 
 impl EntryDeserializer {
-    pub fn deserialize<K, V>(buffer: &[u8]) -> SerdeResult<(EntryHeader, K, V)>
+    pub fn deserialize<K, V>(buffer: &[u8]) -> Result<(EntryHeader, K, V)>
     where
         K: StorageKey,
         V: StorageValue,
     {
         // deserialize entry header
-        let header = EntryHeader::read(buffer).map_err(SerdeError::from)?;
+        let header = EntryHeader::read(buffer).map_err(Error::from)?;
 
         // deserialize value
         let mut offset = EntryHeader::serialized_len();
         let compressed = &buffer[offset..offset + header.value_len as usize];
         offset += header.value_len as usize;
         let value = match header.compression {
-            Compression::None => bincode::deserialize_from(compressed).map_err(SerdeError::from)?,
+            Compression::None => bincode::deserialize_from(compressed).map_err(Error::from)?,
             Compression::Zstd => {
-                let decoder = zstd::Decoder::new(compressed).map_err(SerdeError::from)?;
-                bincode::deserialize_from(decoder).map_err(SerdeError::from)?
+                let decoder = zstd::Decoder::new(compressed).map_err(Error::from)?;
+                bincode::deserialize_from(decoder).map_err(Error::from)?
             }
             Compression::Lz4 => {
-                let decoder = lz4::Decoder::new(compressed).map_err(SerdeError::from)?;
-                bincode::deserialize_from(decoder).map_err(SerdeError::from)?
+                let decoder = lz4::Decoder::new(compressed).map_err(Error::from)?;
+                bincode::deserialize_from(decoder).map_err(Error::from)?
             }
         };
 
         // deserialize key
         let compressed = &buffer[offset..offset + header.key_len as usize];
-        let key = bincode::deserialize_from(compressed).map_err(SerdeError::from)?;
+        let key = bincode::deserialize_from(compressed).map_err(Error::from)?;
         offset += header.key_len as usize;
 
         let checksum = checksum(&buffer[EntryHeader::serialized_len()..offset]);
