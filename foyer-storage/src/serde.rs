@@ -40,6 +40,7 @@ const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
 pub struct EntryHeader {
     pub key_len: u32,
     pub value_len: u32,
+    pub hash: u64,
     pub sequence: Sequence,
     pub checksum: u64,
     pub compression: Compression,
@@ -47,12 +48,17 @@ pub struct EntryHeader {
 
 impl EntryHeader {
     pub const fn serialized_len() -> usize {
-        4 + 4 + 8 + 8 + 4 /* magic & compression */
+        4 + 4 + 8 + 8 + 8 + 4 /* magic & compression */
+    }
+
+    pub fn entry_len(&self) -> usize {
+        Self::serialized_len() + self.key_len as usize + self.value_len as usize
     }
 
     pub fn write(&self, mut buf: &mut [u8]) {
         buf.put_u32(self.key_len);
         buf.put_u32(self.value_len);
+        buf.put_u64(self.hash);
         buf.put_u64(self.sequence);
         buf.put_u64(self.checksum);
 
@@ -63,23 +69,30 @@ impl EntryHeader {
     pub fn read(mut buf: &[u8]) -> Result<Self> {
         let key_len = buf.get_u32();
         let value_len = buf.get_u32();
+        let hash = buf.get_u64();
         let sequence = buf.get_u64();
         let checksum = buf.get_u64();
 
         let v = buf.get_u32();
+        let compression = Compression::try_from(v as u8)?;
+
+        let this = Self {
+            key_len,
+            value_len,
+            hash,
+            sequence,
+            compression,
+            checksum,
+        };
+
+        tracing::trace!("{this:#?}");
+
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
             return Err(anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into());
         }
-        let compression = Compression::try_from(v as u8)?;
 
-        Ok(Self {
-            key_len,
-            value_len,
-            sequence,
-            compression,
-            checksum,
-        })
+        Ok(this)
     }
 }
 
@@ -90,6 +103,7 @@ impl EntrySerializer {
     pub fn serialize<'a, K, V, A>(
         key: &'a K,
         value: &'a V,
+        hash: u64,
         sequence: &'a Sequence,
         compression: &'a Compression,
         mut buffer: WritableVecA<'a, u8, A>,
@@ -142,6 +156,7 @@ impl EntrySerializer {
         let header = EntryHeader {
             key_len: key_len as u32,
             value_len: value_len as u32,
+            hash,
             sequence: *sequence,
             compression: *compression,
             checksum,
@@ -181,8 +196,8 @@ impl EntryDeserializer {
         };
 
         // deserialize key
-        let compressed = &buffer[offset..offset + header.key_len as usize];
-        let key = bincode::deserialize_from(compressed).map_err(Error::from)?;
+        let buf = &buffer[offset..offset + header.key_len as usize];
+        let key = bincode::deserialize_from(buf).map_err(Error::from)?;
         offset += header.key_len as usize;
 
         let checksum = checksum(&buffer[EntryHeader::serialized_len()..offset]);
@@ -191,5 +206,12 @@ impl EntryDeserializer {
         }
 
         Ok((header, key, value))
+    }
+
+    pub fn header(buf: &[u8]) -> Option<EntryHeader> {
+        if buf.len() < EntryHeader::serialized_len() {
+            return None;
+        }
+        EntryHeader::read(buf).ok()
     }
 }

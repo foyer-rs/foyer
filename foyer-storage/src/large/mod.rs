@@ -12,34 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-
-mod admission;
-mod buffer;
-mod catalog;
-mod compress;
-mod device;
-mod error;
-mod flusher;
-mod generic;
-mod judge;
-mod lazy;
-mod metrics;
-mod none;
-mod reclaimer;
-mod region;
-mod region_manager;
-mod reinsertion;
-mod runtime;
-mod serde;
-mod storage;
-mod store;
-
-// TODO(MrCroxx): Remove me after the mod is stable.
-#[doc(hidden)]
-pub mod large;
-
-mod prelude;
-pub use prelude::*;
-
-pub mod test_utils;
+pub mod device;
+pub mod flusher;
+pub mod generic;
+pub mod indexer;
+pub mod reclaimer;
+pub mod recover;
+pub mod region;
+pub mod storage;

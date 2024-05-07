@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -20,8 +20,33 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("bincode error: {0}")]
     Bincode(#[from] bincode::Error),
-    #[error("other error: {0}")]
+    #[error(transparent)]
+    Multiple(MultipleError),
+    #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+impl Error {
+    pub fn multiple(errs: Vec<Error>) -> Self {
+        Self::Multiple(MultipleError(errs))
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub struct MultipleError(Vec<Error>);
+
+impl Display for MultipleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "multiple errors: [")?;
+        if let Some((last, errs)) = self.0.as_slice().split_last() {
+            for err in errs {
+                write!(f, "{}, ", err)?;
+            }
+            write!(f, "{}", last)?;
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

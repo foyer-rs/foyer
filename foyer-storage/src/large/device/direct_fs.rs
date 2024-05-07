@@ -1,0 +1,217 @@
+//  Copyright 2024 Foyer Project Authors
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//  http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
+use std::{
+    fs::{create_dir_all, File, OpenOptions},
+    path::PathBuf,
+    sync::Arc,
+};
+
+use foyer_common::{asyncify::asyncify, bits};
+use futures::future::try_join_all;
+use itertools::Itertools;
+
+use super::{Device, DeviceConfig, DeviceExt, RegionId};
+use crate::{
+    error::{Error, Result},
+    large::device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
+};
+
+#[derive(Debug)]
+pub struct DirectFsDeviceConfig {
+    pub dir: PathBuf,
+    pub capacity: usize,
+    pub file_size: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectFsDevice {
+    inner: Arc<DirectFsDeviceInner>,
+}
+
+#[derive(Debug)]
+struct DirectFsDeviceInner {
+    files: Vec<Arc<File>>,
+
+    capacity: usize,
+    file_size: usize,
+}
+
+impl DeviceConfig for DirectFsDeviceConfig {
+    fn verify(&self) -> Result<()> {
+        if self.file_size == 0 || self.file_size % ALIGN != 0 {
+            return Err(anyhow::anyhow!(
+                "file size ({file_size}) must be a multiplier of ALIGN ({ALIGN})",
+                file_size = self.file_size
+            )
+            .into());
+        }
+
+        if self.capacity == 0 || self.capacity % self.file_size != 0 {
+            return Err(anyhow::anyhow!(
+                "capacity ({capacity}) must be a multiplier of file size ({file_size})",
+                capacity = self.capacity,
+                file_size = self.file_size
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+}
+
+impl DirectFsDevice {
+    pub const PREFIX: &'static str = "foyer-storage-direct-fs-";
+
+    #[cfg(target_os = "linux")]
+    pub const O_DIRECT: i32 = 0x4000;
+
+    fn filename(region: RegionId) -> String {
+        format!("{}{:08}", Self::PREFIX, region)
+    }
+
+    fn file(&self, region: RegionId) -> &Arc<File> {
+        &self.inner.files[region as usize]
+    }
+}
+
+impl Device for DirectFsDevice {
+    type Config = DirectFsDeviceConfig;
+
+    fn capacity(&self) -> usize {
+        self.inner.capacity
+    }
+
+    fn region_size(&self) -> usize {
+        self.inner.file_size
+    }
+
+    async fn open(config: &Self::Config) -> Result<Self> {
+        config.verify()?;
+
+        // TODO(MrCroxx): write and read config to a manifest file for pinning
+
+        let regions = config.capacity / config.file_size;
+
+        let path = config.dir.clone();
+        asyncify(move || create_dir_all(path)).await?;
+
+        let futures = (0..regions)
+            .map(|i| {
+                let path = config.dir.clone().join(Self::filename(i as RegionId));
+                async move {
+                    let mut opts = OpenOptions::new();
+
+                    opts.create(true).write(true).read(true);
+
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opts.custom_flags(Self::O_DIRECT);
+                    }
+
+                    let file = opts.open(path)?;
+                    file.set_len(config.file_size as _)?;
+                    let file = Arc::new(file);
+
+                    Ok::<_, Error>(file)
+                }
+            })
+            .collect_vec();
+        let files = try_join_all(futures).await?;
+
+        Ok(Self {
+            inner: Arc::new(DirectFsDeviceInner {
+                files,
+                capacity: config.capacity,
+                file_size: config.file_size,
+            }),
+        })
+    }
+
+    async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+        let aligned = bits::align_up(self.align(), buf.len());
+        buf.reserve(aligned - buf.len());
+        unsafe { buf.set_len(aligned) };
+
+        assert!(
+            offset as usize + aligned <= self.region_size(),
+            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= region size ({region_size})",
+            total = offset as usize + aligned,
+            region_size = self.region_size(),
+        );
+
+        let file = self.file(region).clone();
+        asyncify(move || {
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let written = file.write_at(buf.as_ref(), offset)?;
+            if written != aligned {
+                return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
+            }
+
+            Ok(())
+        })
+        .await
+    }
+
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+        let aligned = bits::align_up(self.align(), len);
+
+        let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
+        unsafe {
+            buf.set_len(aligned);
+        }
+
+        let file = self.file(region).clone();
+        let mut buffer = asyncify(move || {
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let read = file.read_at(buf.as_mut(), offset)?;
+            if read != aligned {
+                return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
+            }
+
+            Ok::<_, Error>(buf)
+        })
+        .await?;
+
+        buffer.truncate(len);
+
+        Ok(buffer)
+    }
+
+    async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
+        let flush = |region: RegionId| {
+            let file = self.file(region).clone();
+            asyncify(move || file.sync_all().map_err(Error::from))
+        };
+
+        if let Some(region) = region {
+            flush(region).await
+        } else {
+            try_join_all((0..self.regions() as RegionId).map(flush))
+                .await
+                .map(|_| ())
+        }
+    }
+}

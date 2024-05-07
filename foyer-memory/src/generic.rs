@@ -14,6 +14,7 @@
 
 use std::{
     borrow::Borrow,
+    fmt::Debug,
     future::Future,
     hash::{BuildHasher, Hash},
     ops::Deref,
@@ -704,6 +705,10 @@ where
         &self.context.metrics
     }
 
+    pub fn hash_builder(&self) -> &S {
+        &self.hash_builder
+    }
+
     unsafe fn try_release_external_handle(&self, ptr: NonNull<E::Handle>) {
         let entry = {
             let base = ptr.as_ref().base();
@@ -797,6 +802,21 @@ where
     ptr: NonNull<E::Handle>,
 }
 
+impl<K, V, E, I, L, S> Debug for GenericCacheEntry<K, V, E, I, L, S>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    L: CacheEventListener<K, V>,
+    S: BuildHasher + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenericCacheEntry").finish()
+    }
+}
+
 impl<K, V, E, I, L, S> GenericCacheEntry<K, V, E, I, L, S>
 where
     K: Key,
@@ -807,6 +827,10 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
+    pub fn hash(&self) -> u64 {
+        unsafe { self.ptr.as_ref().base().hash() }
+    }
+
     pub fn key(&self) -> &K {
         unsafe { &self.ptr.as_ref().base().data_unwrap_unchecked().0 }
     }
@@ -825,6 +849,10 @@ where
 
     pub fn refs(&self) -> usize {
         unsafe { self.ptr.as_ref().base().refs() }
+    }
+
+    pub fn is_updated(&self) -> bool {
+        unsafe { self.ptr.as_ref().base().is_in_indexer() }
     }
 }
 

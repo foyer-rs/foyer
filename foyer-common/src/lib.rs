@@ -15,7 +15,9 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod arc_key_hash_map;
+pub mod async_batch_pipeline;
 pub mod async_queue;
+pub mod asyncify;
 pub mod batch;
 pub mod bits;
 pub mod buf;

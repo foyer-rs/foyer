@@ -222,7 +222,7 @@ where
         let old = self.buffer.len();
         debug_assert!(is_aligned(self.device.align(), old));
 
-        EntrySerializer::serialize(&key, &value, &sequence, &compression, WritableVecA(&mut self.buffer))?;
+        EntrySerializer::serialize(&key, &value, 0, &sequence, &compression, WritableVecA(&mut self.buffer))?;
 
         // (*) if size exceeds region limit, rollback write and return
         if self.offset + self.buffer.len() > self.device.region_size() {
