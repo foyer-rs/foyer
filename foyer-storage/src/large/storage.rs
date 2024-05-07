@@ -31,17 +31,17 @@ use crate::error::Result;
 #[pin_project]
 pub struct EnqueueHandle {
     #[pin]
-    rx: oneshot::Receiver<Result<()>>,
+    rx: oneshot::Receiver<Result<bool>>,
 }
 
 impl EnqueueHandle {
-    pub(crate) fn new(rx: oneshot::Receiver<Result<()>>) -> Self {
+    pub(crate) fn new(rx: oneshot::Receiver<Result<bool>>) -> Self {
         Self { rx }
     }
 }
 
 impl Future for EnqueueHandle {
-    type Output = Result<()>;
+    type Output = Result<bool>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.project().rx.poll(cx));
@@ -73,4 +73,17 @@ pub trait Storage: Send + Sync + 'static + Clone {
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;
+
+    fn remove<Q>(&self, key: &Q)
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static;
+
+    #[must_use]
+    fn delete<Q>(&self, key: &Q) -> impl Future<Output = Result<()>> + Send
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static;
+
+    // TODO(MrCroxx): clear & destroy
 }

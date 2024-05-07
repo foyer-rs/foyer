@@ -78,7 +78,7 @@ where
 
     buffer: IoBuffer,
     indices: Vec<(u64, EntryAddress)>,
-    txs: Vec<oneshot::Sender<Result<()>>>,
+    txs: Vec<oneshot::Sender<Result<bool>>>,
     // hold the entries to avoid memory cache lookup miss?
     entries: Vec<CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>>,
 }
@@ -183,11 +183,16 @@ where
         &self,
         entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>,
         sequence: Sequence,
-    ) -> oneshot::Receiver<Result<()>> {
+    ) -> oneshot::Receiver<Result<bool>> {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let (tx, rx) = oneshot::channel();
         let append = |state: &mut BatchState<K, V, S, D>| {
+            if entry.is_updated() {
+                let _ = tx.send(Ok(false));
+                return;
+            }
+
             let hash = entry.hash();
 
             // Attempt to get a clean region for the new group.
@@ -350,7 +355,7 @@ where
                                 indexer.insert_batch(indices);
 
                                 for tx in group.txs {
-                                    let _ = tx.send(Ok(()));
+                                    let _ = tx.send(Ok(true));
                                 }
                             }
 

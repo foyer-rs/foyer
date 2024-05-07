@@ -33,7 +33,7 @@ use crate::{error::Result, serde::EntryDeserializer, Compression};
 use crate::catalog::AtomicSequence;
 
 use super::{
-    device::Device,
+    device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
     flusher::Flusher,
     indexer::Indexer,
     picker::EvictionPicker,
@@ -171,6 +171,13 @@ where
         })
     }
 
+    async fn close(&self) -> Result<()> {
+        self.inner.active.store(false, Ordering::Relaxed);
+        try_join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await?;
+        join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
+        Ok(())
+    }
+
     fn enqueue(&self, entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>) -> EnqueueHandle {
         if !self.inner.active.load(Ordering::Relaxed) {
             let (tx, rx) = oneshot::channel();
@@ -210,10 +217,27 @@ where
         Ok(Some(v))
     }
 
-    async fn close(&self) -> Result<()> {
-        self.inner.active.store(false, Ordering::Relaxed);
-        try_join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await?;
-        join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
+    fn remove<Q>(&self, key: &Q)
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+    {
+        let hash = self.inner.hash_builder.hash_one(key);
+        self.inner.indexer.remove(hash);
+    }
+
+    async fn delete<Q>(&self, key: &Q) -> Result<()>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+    {
+        let hash = self.inner.hash_builder.hash_one(key);
+        if let Some(addr) = self.inner.indexer.remove(hash) {
+            let align = self.inner.device.align();
+            let mut buf = IoBuffer::with_capacity_in(align, &IO_BUFFER_ALLOCATOR);
+            buf.resize(align, 0);
+            self.inner.device.write(buf, addr.region, addr.offset as _).await?;
+        }
         Ok(())
     }
 }
@@ -251,6 +275,22 @@ where
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         self.lookup(key).await
+    }
+
+    fn remove<Q>(&self, key: &Q)
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+    {
+        self.remove(key)
+    }
+
+    async fn delete<Q>(&self, key: &Q) -> Result<()>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+    {
+        self.delete(key).await
     }
 }
 

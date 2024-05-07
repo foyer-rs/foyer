@@ -852,7 +852,7 @@ where
     }
 
     pub fn is_updated(&self) -> bool {
-        unsafe { self.ptr.as_ref().base().is_in_indexer() }
+        unsafe { !self.ptr.as_ref().base().is_in_indexer() }
     }
 }
 
