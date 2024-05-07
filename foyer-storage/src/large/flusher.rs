@@ -33,7 +33,6 @@ use super::generic::GenericStoreConfig;
 use super::indexer::{EntryAddress, Indexer};
 use super::region::{GetCleanRegionHandle, RegionManager};
 
-#[derive(Debug)]
 struct BatchState<K, V, S, D>
 where
     K: StorageKey,
@@ -42,6 +41,18 @@ where
     D: Device,
 {
     groups: Vec<WriteGroup<K, V, S, D>>,
+}
+
+impl<K, V, S, D> Debug for BatchState<K, V, S, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchState").field("groups", &self.groups).finish()
+    }
 }
 
 impl<K, V, S, D> Default for BatchState<K, V, S, D>
@@ -56,7 +67,6 @@ where
     }
 }
 
-#[derive(Debug)]
 struct WriteGroup<K, V, S, D>
 where
     K: StorageKey,
@@ -73,7 +83,22 @@ where
     entries: Vec<CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>>,
 }
 
-#[derive(Debug)]
+impl<K, V, S, D> Debug for WriteGroup<K, V, S, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static,
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteGroup")
+            .field("writer", &self.writer)
+            .field("buffer_len", &self.buffer.len())
+            .field("indices", &self.indices)
+            .finish()
+    }
+}
+
 struct RegionHandle<D>
 where
     D: Device,
@@ -82,6 +107,19 @@ where
     offset: u64,
     size: usize,
     is_full: bool,
+}
+
+impl<D> Debug for RegionHandle<D>
+where
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionHandle")
+            .field("offset", &self.offset)
+            .field("size", &self.size)
+            .field("is_full", &self.is_full)
+            .finish()
+    }
 }
 
 impl<D> Clone for RegionHandle<D>
@@ -197,12 +235,19 @@ where
 
             // Split the latest group if it exceeds the current region.
             if group.writer.size + group.buffer.len() > self.device.region_size() {
+                tracing::trace!("[flusher]: split group at size: {size}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}", 
+                    size = group.writer.size,
+                    buf_len = group.buffer.len(),
+                    total = group.writer.size + group.buffer.len() ,
+                    region_size = self.device.region_size(),
+                );
+
                 group.writer.is_full = true;
 
-                let split = group.buffer.split_off(boffset);
+                let buffer = group.buffer.split_off(boffset);
 
                 bits::debug_assert_aligned(self.device.align(), group.buffer.len());
-                bits::debug_assert_aligned(self.device.align(), split.len());
+                bits::debug_assert_aligned(self.device.align(), buffer.len());
 
                 let handle = self.region_manager.get_clean_region();
                 state.groups.push(WriteGroup {
@@ -212,7 +257,7 @@ where
                         size: 0,
                         is_full: false,
                     },
-                    buffer: IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
+                    buffer,
                     indices: vec![],
                     txs: vec![],
                     entries: vec![],
@@ -243,6 +288,8 @@ where
             let region_manager = self.region_manager.clone();
             token.pipeline(
                 |state| {
+                    tracing::trace!("[flusher]: create new state based on old state: {state:?}");
+
                     let mut s = BatchState::default();
                     if let Some(group) = state.groups.last() {
                         let mut writer = group.writer.clone();
@@ -286,27 +333,31 @@ where
                                 buf_len = group.buffer.len(),
                             );
 
-                            // Write buffet to device.
-                            region
-                                .device()
-                                .write(group.buffer, region.id(), group.writer.offset)
-                                .await?;
-                            if flush {
-                                region.device().flush(Some(region.id())).await?;
-                            }
+                            println!("write region {}", region.id());
 
-                            let mut indices = group.indices;
-                            for (_, addr) in indices.iter_mut() {
-                                addr.region = region.id();
+                            // Write buffet to device.
+                            if !group.buffer.is_empty() {
+                                region
+                                    .device()
+                                    .write(group.buffer, region.id(), group.writer.offset)
+                                    .await?;
+                                if flush {
+                                    region.device().flush(Some(region.id())).await?;
+                                }
+
+                                let mut indices = group.indices;
+                                for (_, addr) in indices.iter_mut() {
+                                    addr.region = region.id();
+                                }
+                                indexer.insert_batch(indices);
+
+                                for tx in group.txs {
+                                    let _ = tx.send(Ok(()));
+                                }
                             }
-                            indexer.insert_batch(indices);
 
                             if group.writer.is_full {
                                 region_manager.mark_evictable(region.id());
-                            }
-
-                            for tx in group.txs {
-                                let _ = tx.send(Ok(()));
                             }
 
                             tracing::trace!("[flusher]: write region {id} finish.", id = region.id());

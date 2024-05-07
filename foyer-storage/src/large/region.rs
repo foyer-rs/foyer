@@ -16,13 +16,13 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     future::Future,
-    ops::Deref,
     pin::Pin,
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
 
 use async_channel::{Receiver, Sender};
+use foyer_common::countdown::Countdown;
 use futures::{
     future::{BoxFuture, Shared},
     FutureExt,
@@ -33,12 +33,11 @@ use pin_project::pin_project;
 use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
-use super::device::{Device, DeviceExt};
+use super::{
+    device::{Device, DeviceExt},
+    picker::EvictionPicker,
+};
 use crate::large::device::RegionId;
-
-pub trait EvictionPicker: Send + Sync + 'static + Debug {
-    fn pick(&self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId>;
-}
 
 #[derive(Debug, Default)]
 pub struct RegionStats {
@@ -81,20 +80,24 @@ where
     inner: Arc<RegionManagerInner<D>>,
 }
 
+struct Eviction {
+    evictable: HashMap<RegionId, Arc<RegionStats>>,
+    pickers: Vec<Box<dyn EvictionPicker>>,
+}
+
 struct RegionManagerInner<D>
 where
     D: Device,
 {
     regions: Vec<Region<D>>,
 
-    evictable: Mutex<HashMap<RegionId, Arc<RegionStats>>>,
-
-    pickers: Vec<Box<dyn EvictionPicker>>,
+    eviction: Mutex<Eviction>,
 
     clean_region_tx: Sender<Region<D>>,
     clean_region_rx: Receiver<Region<D>>,
 
     reclaim_semaphore: Arc<Semaphore>,
+    reclaim_semaphore_countdown: Arc<Countdown>,
 }
 
 impl<D> Debug for RegionManager<D>
@@ -119,45 +122,89 @@ where
             })
             .collect_vec();
         let (clean_region_tx, clean_region_rx) = async_channel::unbounded();
-        let evictable = Mutex::new(HashMap::new());
 
         Self {
             inner: Arc::new(RegionManagerInner {
                 regions,
-                evictable,
-                pickers,
+                eviction: Mutex::new(Eviction {
+                    evictable: HashMap::new(),
+                    pickers,
+                }),
                 clean_region_tx,
                 clean_region_rx,
                 reclaim_semaphore,
+                reclaim_semaphore_countdown: Arc::new(Countdown::new(0)),
             }),
         }
     }
 
     pub fn mark_evictable(&self, region: RegionId) {
-        let mut evictable = self.inner.evictable.lock();
-        let res = evictable.insert(region, self.inner.regions[region as usize].stats.clone());
+        let mut eviction = self.inner.eviction.lock();
+
+        // Update evictable map.
+        let res = eviction
+            .evictable
+            .insert(region, self.inner.regions[region as usize].stats.clone());
         assert!(res.is_none());
+
+        // Temporarily take pickers to make borrow checker happy.
+        let mut pickers = std::mem::take(&mut eviction.pickers);
+
+        // Noitfy pickers.
+        for picker in pickers.iter_mut() {
+            picker.on_region_evictable(&eviction.evictable, region);
+        }
+
+        // Restore taken pickers after operations.
+
+        std::mem::swap(&mut eviction.pickers, &mut pickers);
+        assert!(pickers.is_empty());
+
         tracing::debug!("[region manager]: Region {region} is marked evictable.");
     }
 
     pub fn evict(&self) -> Option<Region<D>> {
         let mut picked = None;
 
-        let mut evictable = self.inner.evictable.lock();
-        if evictable.is_empty() {
+        let mut eviction = self.inner.eviction.lock();
+
+        if eviction.evictable.is_empty() {
+            // No evictable region now.
             return None;
         }
 
-        for picker in self.inner.pickers.iter() {
-            if let Some(region) = picker.pick(evictable.deref()) {
+        // Temporarily take pickers to make borrow checker happy.
+        let mut pickers = std::mem::take(&mut eviction.pickers);
+
+        // Pick a region to evict with pickers.
+        for picker in pickers.iter_mut() {
+            if let Some(region) = picker.pick(&eviction.evictable) {
                 picked = Some(region);
                 break;
             }
         }
 
-        let picked = picked.unwrap_or_else(|| evictable.keys().choose(&mut rand::thread_rng()).copied().unwrap());
+        // If no region is selected, just ramdomly pick one.
+        let picked = picked.unwrap_or_else(|| {
+            eviction
+                .evictable
+                .keys()
+                .choose(&mut rand::thread_rng())
+                .copied()
+                .unwrap()
+        });
 
-        evictable.remove(&picked).unwrap();
+        // Update evictable map.
+        eviction.evictable.remove(&picked).unwrap();
+
+        // Noitfy pickers.
+        for picker in pickers.iter_mut() {
+            picker.on_region_evict(&eviction.evictable, picked);
+        }
+
+        // Restore taken pickers after operations.
+        std::mem::swap(&mut eviction.pickers, &mut pickers);
+        assert!(pickers.is_empty());
 
         let region = self.region(picked).clone();
         tracing::debug!("[region manager]: Region {picked} is evicted.");
@@ -176,13 +223,17 @@ where
     pub fn get_clean_region(&self) -> GetCleanRegionHandle<D> {
         let clean_region_rx = self.inner.clean_region_rx.clone();
         let reclaim_semaphore = self.inner.reclaim_semaphore.clone();
+        let reclaim_semaphore_countdown = self.inner.reclaim_semaphore_countdown.clone();
         GetCleanRegionHandle::new(
             async move {
                 let region = clean_region_rx.recv().await.unwrap();
                 // The only place to increase the permit.
                 //
-                // See comments in `ReclaimRunner::handle`.
-                reclaim_semaphore.add_permits(1);
+                // See comments in `ReclaimRunner::handle()` and `RecoverRunner::run()`.
+                if reclaim_semaphore_countdown.countdown() {
+                    reclaim_semaphore.add_permits(1);
+                }
+                println!("get clean region: {}", region.id());
                 region
             }
             .boxed(),
@@ -194,7 +245,7 @@ where
     }
 
     pub fn evictable_regions(&self) -> usize {
-        self.inner.evictable.lock().len()
+        self.inner.eviction.lock().evictable.len()
     }
 
     pub fn clean_regions(&self) -> usize {
@@ -203,6 +254,14 @@ where
 
     pub fn region(&self, id: RegionId) -> &Region<D> {
         &self.inner.regions[id as usize]
+    }
+
+    pub fn reclaim_semaphore(&self) -> &Arc<Semaphore> {
+        &self.inner.reclaim_semaphore
+    }
+
+    pub fn reclaim_semaphore_countdown(&self) -> &Countdown {
+        &self.inner.reclaim_semaphore_countdown
     }
 }
 

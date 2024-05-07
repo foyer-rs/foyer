@@ -36,9 +36,10 @@ use super::{
     device::Device,
     flusher::Flusher,
     indexer::Indexer,
+    picker::EvictionPicker,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
-    region::{EvictionPicker, RegionManager},
+    region::RegionManager,
     storage::{EnqueueHandle, Storage},
 };
 
@@ -142,15 +143,7 @@ where
         let region_manager = RegionManager::new(device.clone(), pickers, reclaim_semaphore.clone());
         let sequence = AtomicSequence::default();
 
-        RecoverRunner::run(
-            &config,
-            device.clone(),
-            &sequence,
-            &indexer,
-            &region_manager,
-            &reclaim_semaphore,
-        )
-        .await?;
+        RecoverRunner::run(&config, device.clone(), &sequence, &indexer, &region_manager).await?;
 
         let flushers =
             try_join_all((0..config.flushers).map(|_| async {
@@ -265,14 +258,16 @@ where
 mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 
-    use crate::large::device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig};
+    use crate::large::{
+        device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
+        picker::FifoPicker,
+    };
 
     use super::*;
 
     const KB: usize = 1024;
-    const MB: usize = 1024 * KB;
-    const CAPACITY: usize = 4 * MB;
-    const FILE_SIZE: usize = MB;
+    const CAPACITY: usize = 64 * KB;
+    const FILE_SIZE: usize = 16 * KB;
 
     #[test_log::test(tokio::test)]
     async fn test_store() {
@@ -297,7 +292,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
-            eviction_pickers: vec![],
+            eviction_pickers: vec![Box::<FifoPicker>::default()],
         })
         .await
         .unwrap();
@@ -312,5 +307,20 @@ mod tests {
         assert_eq!(v1, vec![1; 7 * KB]);
         let v2 = store.lookup(&2).await.unwrap().unwrap();
         assert_eq!(v2, vec![2; 7 * KB]);
+
+        let e3 = memory.insert(3, vec![3; 7 * KB]);
+        let e4 = memory.insert(4, vec![4; 7 * KB]);
+
+        store.enqueue(e3).await.unwrap();
+        store.enqueue(e4).await.unwrap();
+
+        let v1 = store.lookup(&1).await.unwrap().unwrap();
+        assert_eq!(v1, vec![1; 7 * KB]);
+        let v2 = store.lookup(&2).await.unwrap().unwrap();
+        assert_eq!(v2, vec![2; 7 * KB]);
+        let v3 = store.lookup(&3).await.unwrap().unwrap();
+        assert_eq!(v3, vec![3; 7 * KB]);
+        let v4 = store.lookup(&4).await.unwrap().unwrap();
+        assert_eq!(v4, vec![4; 7 * KB]);
     }
 }

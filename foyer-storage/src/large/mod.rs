@@ -16,6 +16,7 @@ pub mod device;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;
+pub mod picker;
 pub mod reclaimer;
 pub mod recover;
 pub mod region;

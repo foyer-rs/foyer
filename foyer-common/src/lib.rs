@@ -23,6 +23,7 @@ pub mod bits;
 pub mod buf;
 pub mod code;
 pub mod continuum;
+pub mod countdown;
 pub mod erwlock;
 pub mod object_pool;
 pub mod range;

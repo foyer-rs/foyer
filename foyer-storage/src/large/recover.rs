@@ -60,7 +60,6 @@ impl RecoverRunner {
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager<D>,
-        reclaim_semaphore: &Arc<Semaphore>,
     ) -> Result<()>
     where
         D: Device,
@@ -118,9 +117,18 @@ impl RecoverRunner {
         }
         let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
         let permits = config.clean_region_threshold.saturating_sub(clean_regions.len());
+        let countdown = clean_regions.len().saturating_sub(config.clean_region_threshold);
 
         // Log recovery.
         tracing::info!(
+            "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}, initial reclaim permits is {p}.",
+            e = evictable_regions.len(),
+            c = clean_regions.len(),
+            t = indices.len(),
+            s = seq,
+            p = permits,
+        );
+        println!(
             "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}, initial reclaim permits is {p}.",
             e = evictable_regions.len(),
             c = clean_regions.len(),
@@ -138,7 +146,22 @@ impl RecoverRunner {
         for region in evictable_regions {
             region_manager.mark_evictable(region);
         }
-        reclaim_semaphore.add_permits(permits);
+        region_manager.reclaim_semaphore().add_permits(permits);
+        region_manager.reclaim_semaphore_countdown().reset(countdown);
+
+        // Note: About reclaim semaphore permits and countdown:
+        //
+        // ```
+        // permits = clean region threshold - clean region - reclaiming region
+        // ```
+        //
+        // When recovery, `reclaiming region` is always `0`.
+        //
+        // If `clean region threshold >= clean region`, permits is simply `clean region threshold - clean region`.
+        //
+        // If `clean region threshold < clean region`, for permits must be NON-NEGATIVE, we can temporarily set permits
+        // to `0`, and skip first `clean region - clean region threshold` permits increments. It is implemented by
+        // `Countdown`.
 
         Ok(())
     }
