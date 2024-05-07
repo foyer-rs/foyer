@@ -141,6 +141,8 @@ impl Device for DirectFsDevice {
     }
 
     async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+        bits::assert_aligned(self.align() as u64, offset);
+
         let aligned = bits::align_up(self.align(), buf.len());
         buf.reserve(aligned - buf.len());
         unsafe { buf.set_len(aligned) };
@@ -171,6 +173,8 @@ impl Device for DirectFsDevice {
     }
 
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+        bits::assert_aligned(self.align() as u64, offset);
+
         let aligned = bits::align_up(self.align(), len);
 
         let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
@@ -288,6 +292,8 @@ impl DirectFsDeviceConfigBuilder {
 
 #[cfg(test)]
 mod tests {
+    use itertools::repeat_n;
+
     use super::*;
 
     #[test_log::test]
@@ -311,5 +317,36 @@ mod tests {
         tracing::debug!("{config:?}");
 
         config.verify().unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_direct_fd_device_io() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = DirectFsDeviceConfigBuilder::new(dir.path())
+            .with_capacity(4 * 1024 * 1024)
+            .with_file_size(1024 * 1024)
+            .build();
+
+        tracing::debug!("{config:?}");
+
+        let device = DirectFsDevice::open(&config).await.unwrap();
+
+        let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
+        buf.extend(repeat_n(b'x', 64 * 1024 - 100));
+
+        device.write(buf.clone(), 0, 4096).await.unwrap();
+
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        assert_eq!(buf, b);
+
+        device.flush(None).await.unwrap();
+
+        drop(device);
+
+        let device = DirectFsDevice::open(&config).await.unwrap();
+
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        assert_eq!(buf, b);
     }
 }
