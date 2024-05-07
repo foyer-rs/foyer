@@ -20,6 +20,12 @@ pub struct SlabLinkedList<T> {
     tail: Option<Token>,
 }
 
+impl<T> Default for SlabLinkedList<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> SlabLinkedList<T> {
     pub const fn new() -> Self {
         Self {

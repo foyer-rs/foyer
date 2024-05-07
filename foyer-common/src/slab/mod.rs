@@ -37,6 +37,12 @@ pub struct Slab<T> {
     next: usize,
 }
 
+impl<T> Default for Slab<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Slab<T> {
     pub const fn new() -> Self {
         Self {
