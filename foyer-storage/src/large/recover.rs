@@ -128,14 +128,6 @@ impl RecoverRunner {
             s = seq,
             p = permits,
         );
-        println!(
-            "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}, initial reclaim permits is {p}.",
-            e = evictable_regions.len(),
-            c = clean_regions.len(),
-            t = indices.len(),
-            s = seq,
-            p = permits,
-        );
 
         // Update components.
         indexer.insert_batch(indices);

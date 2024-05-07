@@ -37,19 +37,16 @@ impl EvictionPicker for FifoPicker {
     fn pick(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
         let res = self.queue.front().copied();
         tracing::trace!("[fifo picker]: pick {res:?}");
-        println!("[fifo picker]: pick {res:?}");
         res
     }
 
     fn on_region_evictable(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
         tracing::trace!("[fifo picker]: {region} is evictable");
-        println!("[fifo picker]: {region} is evictable");
         self.queue.push_back(region);
     }
 
     fn on_region_evict(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
         tracing::trace!("[fifo picker]: {region} is evicted");
-        println!("[fifo picker]: {region} is evicted");
         let index = self.queue.iter().position(|r| r == &region).unwrap();
         self.queue.remove(index);
     }

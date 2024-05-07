@@ -333,8 +333,6 @@ where
                                 buf_len = group.buffer.len(),
                             );
 
-                            println!("write region {}", region.id());
-
                             // Write buffet to device.
                             if !group.buffer.is_empty() {
                                 region

@@ -233,7 +233,6 @@ where
                 if reclaim_semaphore_countdown.countdown() {
                     reclaim_semaphore.add_permits(1);
                 }
-                println!("get clean region: {}", region.id());
                 region
             }
             .boxed(),
