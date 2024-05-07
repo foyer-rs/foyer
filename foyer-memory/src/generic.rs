@@ -851,7 +851,7 @@ where
         unsafe { self.ptr.as_ref().base().refs() }
     }
 
-    pub fn is_updated(&self) -> bool {
+    pub fn is_outdated(&self) -> bool {
         unsafe { !self.ptr.as_ref().base().is_in_indexer() }
     }
 }

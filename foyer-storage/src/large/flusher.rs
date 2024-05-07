@@ -188,7 +188,7 @@ where
 
         let (tx, rx) = oneshot::channel();
         let append = |state: &mut BatchState<K, V, S, D>| {
-            if entry.is_updated() {
+            if entry.is_outdated() {
                 let _ = tx.send(Ok(false));
                 return;
             }

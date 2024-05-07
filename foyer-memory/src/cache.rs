@@ -229,12 +229,12 @@ where
         }
     }
 
-    pub fn is_updated(&self) -> bool {
+    pub fn is_outdated(&self) -> bool {
         match self {
-            CacheEntry::Fifo(entry) => entry.is_updated(),
-            CacheEntry::Lru(entry) => entry.is_updated(),
-            CacheEntry::Lfu(entry) => entry.is_updated(),
-            CacheEntry::S3Fifo(entry) => entry.is_updated(),
+            CacheEntry::Fifo(entry) => entry.is_outdated(),
+            CacheEntry::Lru(entry) => entry.is_outdated(),
+            CacheEntry::Lfu(entry) => entry.is_outdated(),
+            CacheEntry::S3Fifo(entry) => entry.is_outdated(),
         }
     }
 }
