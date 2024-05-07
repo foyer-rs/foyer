@@ -235,7 +235,7 @@ where
             group.writer.size += aligned;
         };
 
-        if let Some(mut token) = self.batch.accumulate(append) {
+        if let Some(token) = self.batch.accumulate(append) {
             tracing::trace!("[flusher]: entry with sequence: {sequence} becomes leader");
 
             let indexer = self.indexer.clone();
@@ -326,7 +326,7 @@ where
 
     /// Wait for the current batch to finish.
     pub async fn wait(&self) -> Result<()> {
-        if let Some(handle) = self.batch.close() {
+        if let Some(handle) = self.batch.wait() {
             match handle.await.unwrap() {
                 Ok(_) => {}
                 Err(e) => tracing::error!("batch pipeline error: {e}"),

@@ -24,4 +24,5 @@ serde = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+futures = "0.3"
 rand = "0.8.5"

@@ -74,7 +74,7 @@ impl<T, R> AsyncBatchPipeline<T, R> {
         token
     }
 
-    pub fn close(&self) -> Option<JoinHandle<R>> {
+    pub fn wait(&self) -> Option<JoinHandle<R>> {
         self.inner.lock().handle.take()
     }
 }
@@ -92,7 +92,7 @@ impl<T, R> LeaderToken<T, R> {
     ///
     /// `fr`
     /// - Handle the previous result.
-    pub fn pipeline<FR, F, FU, NS>(&mut self, new_state: NS, fr: FR, f: F)
+    pub fn pipeline<FR, F, FU, NS>(mut self, new_state: NS, fr: FR, f: F)
     where
         R: Send + 'static,
         FR: FnOnce(R) + Send + 'static,
@@ -117,5 +117,51 @@ impl<T, R> LeaderToken<T, R> {
 
         inner.handle = Some(handle);
         inner.has_leader = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use futures::future::join_all;
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_async_batch_pipeline() {
+        let batch: AsyncBatchPipeline<Vec<u64>, Vec<u64>> = AsyncBatchPipeline::new(vec![]);
+        let res = join_all((0..100).map(|i| {
+            let batch = batch.clone();
+            async move { batch.accumulate(|state| state.push(i)) }
+        }))
+        .await;
+
+        let mut res = res.into_iter().flatten().collect_vec();
+        assert_eq!(res.len(), 1);
+        let token = res.remove(0);
+        token.pipeline(|_| vec![], |_| unreachable!(), |state| async move { state });
+
+        let res = join_all((100..200).map(|i| {
+            let batch = batch.clone();
+            async move { batch.accumulate(|state| state.push(i)) }
+        }))
+        .await;
+
+        let mut res = res.into_iter().flatten().collect_vec();
+        assert_eq!(res.len(), 1);
+        let token = res.remove(0);
+        token.pipeline(
+            |_| vec![],
+            |mut res| {
+                res.sort();
+                assert_eq!(res, (0..100).collect_vec());
+            },
+            |state| async move { state },
+        );
+
+        let mut res = batch.wait().unwrap().await.unwrap();
+        res.sort();
+        assert_eq!(res, (100..200).collect_vec());
     }
 }
