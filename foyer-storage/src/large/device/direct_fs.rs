@@ -14,11 +14,11 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use foyer_common::{asyncify::asyncify, bits};
+use foyer_common::{asyncify::asyncify, bits, fs::freespace};
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -213,5 +213,103 @@ impl Device for DirectFsDevice {
                 .await
                 .map(|_| ())
         }
+    }
+}
+
+/// [`DirectFsDeviceConfigBuilder`] is used to build the config for the direct fs device.
+///
+/// The direct fs device uses a directory in a file system to store the data of disk cache.
+///
+/// It uses direct I/O to reduce buffer copy and page cache pollution if supported.
+#[derive(Debug)]
+pub struct DirectFsDeviceConfigBuilder {
+    dir: PathBuf,
+    capacity: Option<usize>,
+    file_size: Option<usize>,
+}
+
+impl DirectFsDeviceConfigBuilder {
+    const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
+
+    /// Use the given `dir` as the direct fs device.
+    pub fn new(dir: impl AsRef<Path>) -> Self {
+        Self {
+            dir: dir.as_ref().into(),
+            capacity: None,
+            file_size: None,
+        }
+    }
+
+    /// Set the capacity of the direct fs device.
+    ///
+    /// The given capacity may be modified on build for alignment.
+    ///
+    /// The direct fs device uses 80% of the current free disk space by default.
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = Some(capacity);
+        self
+    }
+
+    /// Set the file size of the direct fs device.
+    ///
+    /// The given file size may be modified on build for alignment.
+    ///
+    /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
+    pub fn with_file_size(mut self, file_size: usize) -> Self {
+        self.file_size = Some(file_size);
+        self
+    }
+
+    /// Build the config of the direct fs device with the given arguments.
+    pub fn build(self) -> DirectFsDeviceConfig {
+        let dir = self.dir;
+
+        let align_v = |value: usize, align: usize| value - value % align;
+
+        let capacity = self.capacity.unwrap_or({
+            // Create an empty directory before to get freespace.
+            create_dir_all(&dir).unwrap();
+            freespace(&dir).unwrap() / 10 * 8
+        });
+        let capacity = align_v(capacity, ALIGN);
+
+        let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).min(capacity);
+        let file_size = align_v(file_size, ALIGN);
+
+        let capacity = align_v(capacity, file_size);
+
+        DirectFsDeviceConfig {
+            dir,
+            capacity,
+            file_size,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test_log::test]
+    fn test_config_builder() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = DirectFsDeviceConfigBuilder::new(dir.path()).build();
+
+        tracing::debug!("{config:?}");
+
+        config.verify().unwrap();
+    }
+
+    #[test_log::test]
+
+    fn test_config_builder_noent() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = DirectFsDeviceConfigBuilder::new(dir.path().join("noent")).build();
+
+        tracing::debug!("{config:?}");
+
+        config.verify().unwrap();
     }
 }
