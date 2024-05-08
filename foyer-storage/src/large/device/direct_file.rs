@@ -12,57 +12,49 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fs::{create_dir_all, File, OpenOptions},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
 use foyer_common::{asyncify::asyncify, bits, fs::freespace};
-use futures::future::try_join_all;
-use itertools::Itertools;
 
 use super::{Device, DeviceConfig, DeviceExt, RegionId};
 use crate::{
     error::{Error, Result},
     large::device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
 };
+use std::{
+    fs::{create_dir_all, File, OpenOptions},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Debug)]
-pub struct DirectFsDeviceConfig {
-    pub dir: PathBuf,
+pub struct DirectFileDeviceConfig {
+    pub path: PathBuf,
     pub capacity: usize,
-    pub file_size: usize,
+    pub region_size: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct DirectFsDevice {
-    inner: Arc<DirectFsDeviceInner>,
-}
-
-#[derive(Debug)]
-struct DirectFsDeviceInner {
-    files: Vec<Arc<File>>,
+pub struct DirectFileDevice {
+    file: Arc<File>,
 
     capacity: usize,
-    file_size: usize,
+    region_size: usize,
 }
 
-impl DeviceConfig for DirectFsDeviceConfig {
+impl DeviceConfig for DirectFileDeviceConfig {
     fn verify(&self) -> Result<()> {
-        if self.file_size == 0 || self.file_size % ALIGN != 0 {
+        if self.region_size == 0 || self.region_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
-                "file size ({file_size}) must be a multiplier of ALIGN ({ALIGN})",
-                file_size = self.file_size
+                "region size ({region_size}) must be a multiplier of ALIGN ({ALIGN})",
+                region_size = self.region_size,
             )
             .into());
         }
 
-        if self.capacity == 0 || self.capacity % self.file_size != 0 {
+        if self.capacity == 0 || self.capacity % self.region_size != 0 {
             return Err(anyhow::anyhow!(
-                "capacity ({capacity}) must be a multiplier of file size ({file_size})",
+                "capacity ({capacity}) must be a multiplier of region size ({region_size})",
                 capacity = self.capacity,
-                file_size = self.file_size
+                region_size = self.region_size,
             )
             .into());
         }
@@ -71,72 +63,46 @@ impl DeviceConfig for DirectFsDeviceConfig {
     }
 }
 
-impl DirectFsDevice {
-    pub const PREFIX: &'static str = "foyer-storage-direct-fs-";
-
+impl DirectFileDevice {
     #[cfg(target_os = "linux")]
     pub const O_DIRECT: i32 = 0x4000;
-
-    fn filename(region: RegionId) -> String {
-        format!("{}{:08}", Self::PREFIX, region)
-    }
-
-    fn file(&self, region: RegionId) -> &Arc<File> {
-        &self.inner.files[region as usize]
-    }
 }
 
-impl Device for DirectFsDevice {
-    type Config = DirectFsDeviceConfig;
+impl Device for DirectFileDevice {
+    type Config = DirectFileDeviceConfig;
 
     fn capacity(&self) -> usize {
-        self.inner.capacity
+        self.capacity
     }
 
     fn region_size(&self) -> usize {
-        self.inner.file_size
+        self.region_size
     }
 
     async fn open(config: &Self::Config) -> Result<Self> {
         config.verify()?;
 
-        // TODO(MrCroxx): write and read config to a manifest file for pinning
+        let dir = config.path.parent().expect("path must point to a file").to_path_buf();
+        asyncify(move || create_dir_all(dir)).await?;
 
-        let regions = config.capacity / config.file_size;
+        let mut opts = OpenOptions::new();
 
-        let path = config.dir.clone();
-        asyncify(move || create_dir_all(path)).await?;
+        opts.create(true).write(true).read(true);
 
-        let futures = (0..regions)
-            .map(|i| {
-                let path = config.dir.clone().join(Self::filename(i as RegionId));
-                async {
-                    let mut opts = OpenOptions::new();
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(Self::O_DIRECT);
+        }
 
-                    opts.create(true).write(true).read(true);
-
-                    #[cfg(target_os = "linux")]
-                    {
-                        use std::os::unix::fs::OpenOptionsExt;
-                        opts.custom_flags(Self::O_DIRECT);
-                    }
-
-                    let file = opts.open(path)?;
-                    file.set_len(config.file_size as _)?;
-                    let file = Arc::new(file);
-
-                    Ok::<_, Error>(file)
-                }
-            })
-            .collect_vec();
-        let files = try_join_all(futures).await?;
+        let file = opts.open(&config.path)?;
+        file.set_len(config.capacity as _)?;
+        let file = Arc::new(file);
 
         Ok(Self {
-            inner: Arc::new(DirectFsDeviceInner {
-                files,
-                capacity: config.capacity,
-                file_size: config.file_size,
-            }),
+            file,
+            capacity: config.capacity,
+            region_size: config.region_size,
         })
     }
 
@@ -154,7 +120,8 @@ impl Device for DirectFsDevice {
             region_size = self.region_size(),
         );
 
-        let file = self.file(region).clone();
+        let region_size = self.region_size();
+        let file = self.file.clone();
         asyncify(move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
@@ -162,7 +129,7 @@ impl Device for DirectFsDevice {
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let written = file.write_at(buf.as_ref(), offset)?;
+            let written = file.write_at(buf.as_ref(), offset + (region as u64 * region_size as u64))?;
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -182,7 +149,8 @@ impl Device for DirectFsDevice {
             buf.set_len(aligned);
         }
 
-        let file = self.file(region).clone();
+        let region_size = self.region_size();
+        let file = self.file.clone();
         let mut buffer = asyncify(move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
@@ -190,7 +158,7 @@ impl Device for DirectFsDevice {
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let read = file.read_at(buf.as_mut(), offset)?;
+            let read = file.read_at(buf.as_mut(), offset + (region as u64 * region_size as u64))?;
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
             }
@@ -204,19 +172,9 @@ impl Device for DirectFsDevice {
         Ok(buffer)
     }
 
-    async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
-        let flush = |region: RegionId| {
-            let file = self.file(region).clone();
-            asyncify(move || file.sync_all().map_err(Error::from))
-        };
-
-        if let Some(region) = region {
-            flush(region).await
-        } else {
-            try_join_all((0..self.regions() as RegionId).map(flush))
-                .await
-                .map(|_| ())
-        }
+    async fn flush(&self, _: Option<RegionId>) -> Result<()> {
+        let file = self.file.clone();
+        asyncify(move || file.sync_all().map_err(Error::from)).await
     }
 }
 
@@ -226,66 +184,67 @@ impl Device for DirectFsDevice {
 ///
 /// It uses direct I/O to reduce buffer copy and page cache pollution if supported.
 #[derive(Debug)]
-pub struct DirectFsDeviceConfigBuilder {
-    dir: PathBuf,
+pub struct DirectFileDeviceConfigBuilder {
+    path: PathBuf,
     capacity: Option<usize>,
-    file_size: Option<usize>,
+    region_size: Option<usize>,
 }
 
-impl DirectFsDeviceConfigBuilder {
+impl DirectFileDeviceConfigBuilder {
     const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
 
-    /// Use the given `dir` as the direct fs device.
+    /// Use the given file path as the direct file device path.
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
-            dir: dir.as_ref().into(),
+            path: dir.as_ref().into(),
             capacity: None,
-            file_size: None,
+            region_size: None,
         }
     }
 
-    /// Set the capacity of the direct fs device.
+    /// Set the capacity of the direct file device.
     ///
     /// The given capacity may be modified on build for alignment.
     ///
-    /// The direct fs device uses 80% of the current free disk space by default.
+    /// The direct file device uses 80% of the current free disk space by default.
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.capacity = Some(capacity);
         self
     }
 
-    /// Set the file size of the direct fs device.
+    /// Set the file size of the direct file device.
     ///
     /// The given file size may be modified on build for alignment.
     ///
     /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
-    pub fn with_file_size(mut self, file_size: usize) -> Self {
-        self.file_size = Some(file_size);
+    pub fn with_region_size(mut self, region_size: usize) -> Self {
+        self.region_size = Some(region_size);
         self
     }
 
-    /// Build the config of the direct fs device with the given arguments.
-    pub fn build(self) -> DirectFsDeviceConfig {
-        let dir = self.dir;
+    /// Build the config of the direct file device with the given arguments.
+    pub fn build(self) -> DirectFileDeviceConfig {
+        let path = self.path;
 
         let align_v = |value: usize, align: usize| value - value % align;
 
         let capacity = self.capacity.unwrap_or({
             // Create an empty directory before to get freespace.
+            let dir = path.parent().expect("path must point to a file").to_path_buf();
             create_dir_all(&dir).unwrap();
             freespace(&dir).unwrap() / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 
-        let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).min(capacity);
-        let file_size = align_v(file_size, ALIGN);
+        let region_size = self.region_size.unwrap_or(Self::DEFAULT_FILE_SIZE).min(capacity);
+        let region_size = align_v(region_size, ALIGN);
 
-        let capacity = align_v(capacity, file_size);
+        let capacity = align_v(capacity, region_size);
 
-        DirectFsDeviceConfig {
-            dir,
+        DirectFileDeviceConfig {
+            path,
             capacity,
-            file_size,
+            region_size,
         }
     }
 }
@@ -300,7 +259,7 @@ mod tests {
     fn test_config_builder() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFsDeviceConfigBuilder::new(dir.path()).build();
+        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("test-direct-file")).build();
 
         tracing::debug!("{config:?}");
 
@@ -312,7 +271,7 @@ mod tests {
     fn test_config_builder_noent() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFsDeviceConfigBuilder::new(dir.path().join("noent")).build();
+        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("noent").join("test-direct-file")).build();
 
         tracing::debug!("{config:?}");
 
@@ -320,17 +279,17 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    async fn test_direct_fd_device_io() {
+    async fn test_direct_file_device_io() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFsDeviceConfigBuilder::new(dir.path())
+        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("test-direct-file"))
             .with_capacity(4 * 1024 * 1024)
-            .with_file_size(1024 * 1024)
+            .with_region_size(1024 * 1024)
             .build();
 
         tracing::debug!("{config:?}");
 
-        let device = DirectFsDevice::open(&config).await.unwrap();
+        let device = DirectFileDevice::open(&config).await.unwrap();
 
         let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
@@ -344,7 +303,7 @@ mod tests {
 
         drop(device);
 
-        let device = DirectFsDevice::open(&config).await.unwrap();
+        let device = DirectFileDevice::open(&config).await.unwrap();
 
         let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
         assert_eq!(buf, b);

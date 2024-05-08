@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 pub mod allocator;
+pub mod direct_file;
 pub mod direct_fs;
 
 use crate::error::Result;
