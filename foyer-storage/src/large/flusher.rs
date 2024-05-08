@@ -32,6 +32,7 @@ use super::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
 use super::generic::GenericStoreConfig;
 use super::indexer::{EntryAddress, Indexer};
 use super::region::{GetCleanRegionHandle, RegionManager};
+use super::storage::EnqueueHandle;
 
 struct BatchState<K, V, S, D>
 where
@@ -162,7 +163,7 @@ where
     D: Device,
 {
     pub async fn open(
-        config: &GenericStoreConfig<S, D>,
+        config: &GenericStoreConfig<K, V, S, D>,
         device: D,
         indexer: Indexer,
         region_manager: RegionManager<D>,
@@ -183,7 +184,7 @@ where
         &self,
         entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>,
         sequence: Sequence,
-    ) -> oneshot::Receiver<Result<bool>> {
+    ) -> EnqueueHandle {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let (tx, rx) = oneshot::channel();
@@ -375,7 +376,7 @@ where
             );
         }
 
-        rx
+        EnqueueHandle::new(rx)
     }
 
     /// Wait for the current batch to finish.

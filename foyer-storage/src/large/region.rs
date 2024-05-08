@@ -35,7 +35,7 @@ use tokio::sync::Semaphore;
 
 use super::{
     device::{Device, DeviceExt},
-    picker::EvictionPicker,
+    eviction::EvictionPicker,
 };
 use crate::large::device::RegionId;
 

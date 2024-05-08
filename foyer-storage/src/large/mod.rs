@@ -12,11 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub mod admission;
 pub mod device;
+pub mod eviction;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;
-pub mod picker;
 pub mod reclaimer;
 pub mod recover;
 pub mod region;

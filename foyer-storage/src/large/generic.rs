@@ -33,18 +33,21 @@ use crate::{error::Result, serde::EntryDeserializer, Compression};
 use crate::catalog::AtomicSequence;
 
 use super::{
+    admission::AdmissionPicker,
     device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
+    eviction::EvictionPicker,
     flusher::Flusher,
     indexer::Indexer,
-    picker::EvictionPicker,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
     region::RegionManager,
     storage::{EnqueueHandle, Storage},
 };
 
-pub struct GenericStoreConfig<S, D>
+pub struct GenericStoreConfig<K, V, S, D>
 where
+    K: StorageKey,
+    V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
     D: Device,
 {
@@ -59,10 +62,13 @@ where
     pub reclaimers: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+    pub admission_picker: Box<dyn AdmissionPicker<Key = K, Value = V>>,
 }
 
-impl<S, D> Debug for GenericStoreConfig<S, D>
+impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
 where
+    K: StorageKey,
+    V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
     D: Device,
 {
@@ -105,8 +111,12 @@ where
     indexer: Indexer,
     device: D,
     _region_manager: RegionManager<D>,
+
     flushers: Vec<Flusher<K, V, S, D>>,
     reclaimers: Vec<Reclaimer>,
+
+    admission_picker: Box<dyn AdmissionPicker<Key = K, Value = V>>,
+
     sequence: AtomicSequence,
 
     hash_builder: S,
@@ -135,7 +145,7 @@ where
     S: BuildHasher + Send + Sync + 'static + Debug,
     D: Device,
 {
-    async fn open(mut config: GenericStoreConfig<S, D>) -> Result<Self> {
+    async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
         let indexer = Indexer::new(config.indexer_shards);
         let device = D::open(&config.device_config).await?;
         let pickers = std::mem::take(&mut config.eviction_pickers);
@@ -164,6 +174,7 @@ where
                 _region_manager: region_manager,
                 flushers,
                 reclaimers,
+                admission_picker: config.admission_picker,
                 sequence,
                 hash_builder: config.hash_builder,
                 active: AtomicBool::new(true),
@@ -185,9 +196,14 @@ where
                 .unwrap();
             return EnqueueHandle::new(rx);
         }
-        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        let rx = self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(entry, sequence);
-        EnqueueHandle::new(rx)
+        if self.inner.admission_picker.pick(entry.key(), entry.value()) {
+            let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+            self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(entry, sequence)
+        } else {
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(Ok(false));
+            EnqueueHandle::new(rx)
+        }
     }
 
     async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
@@ -252,7 +268,7 @@ where
     type Key = K;
     type Value = V;
     type BuildHasher = S;
-    type Config = GenericStoreConfig<S, D>;
+    type Config = GenericStoreConfig<K, V, S, D>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -299,8 +315,9 @@ mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 
     use crate::large::{
+        admission::AdmitAllPicker,
         device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
-        picker::FifoPicker,
+        eviction::FifoPicker,
     };
 
     use super::*;
@@ -333,6 +350,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
+            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
         })
         .await
         .unwrap();

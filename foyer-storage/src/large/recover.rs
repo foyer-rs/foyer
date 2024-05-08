@@ -21,6 +21,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use foyer_common::bits;
+use foyer_common::code::{StorageKey, StorageValue};
 use futures::future::try_join_all;
 
 use itertools::Itertools;
@@ -54,16 +55,18 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    pub async fn run<S, D>(
-        config: &GenericStoreConfig<S, D>,
+    pub async fn run<K, V, S, D>(
+        config: &GenericStoreConfig<K, V, S, D>,
         device: D,
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager<D>,
     ) -> Result<()>
     where
-        D: Device,
+        K: StorageKey,
+        V: StorageValue,
         S: BuildHasher + Send + Sync + 'static + Debug,
+        D: Device,
     {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
