@@ -82,7 +82,7 @@ where
 
 struct Eviction {
     evictable: HashMap<RegionId, Arc<RegionStats>>,
-    pickers: Vec<Box<dyn EvictionPicker>>,
+    eviction_pickers: Vec<Box<dyn EvictionPicker>>,
 }
 
 struct RegionManagerInner<D>
@@ -113,7 +113,7 @@ impl<D> RegionManager<D>
 where
     D: Device,
 {
-    pub fn new(device: D, pickers: Vec<Box<dyn EvictionPicker>>, reclaim_semaphore: Arc<Semaphore>) -> Self {
+    pub fn new(device: D, eviction_pickers: Vec<Box<dyn EvictionPicker>>, reclaim_semaphore: Arc<Semaphore>) -> Self {
         let regions = (0..device.regions() as RegionId)
             .map(|id| Region {
                 id,
@@ -128,7 +128,7 @@ where
                 regions,
                 eviction: Mutex::new(Eviction {
                     evictable: HashMap::new(),
-                    pickers,
+                    eviction_pickers,
                 }),
                 clean_region_tx,
                 clean_region_rx,
@@ -148,7 +148,7 @@ where
         assert!(res.is_none());
 
         // Temporarily take pickers to make borrow checker happy.
-        let mut pickers = std::mem::take(&mut eviction.pickers);
+        let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
 
         // Noitfy pickers.
         for picker in pickers.iter_mut() {
@@ -157,7 +157,7 @@ where
 
         // Restore taken pickers after operations.
 
-        std::mem::swap(&mut eviction.pickers, &mut pickers);
+        std::mem::swap(&mut eviction.eviction_pickers, &mut pickers);
         assert!(pickers.is_empty());
 
         tracing::debug!("[region manager]: Region {region} is marked evictable.");
@@ -174,7 +174,7 @@ where
         }
 
         // Temporarily take pickers to make borrow checker happy.
-        let mut pickers = std::mem::take(&mut eviction.pickers);
+        let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
 
         // Pick a region to evict with pickers.
         for picker in pickers.iter_mut() {
@@ -203,7 +203,7 @@ where
         }
 
         // Restore taken pickers after operations.
-        std::mem::swap(&mut eviction.pickers, &mut pickers);
+        std::mem::swap(&mut eviction.eviction_pickers, &mut pickers);
         assert!(pickers.is_empty());
 
         let region = self.region(picked).clone();

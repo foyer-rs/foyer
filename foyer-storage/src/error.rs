@@ -22,6 +22,10 @@ pub enum Error {
     Bincode(#[from] bincode::Error),
     #[error(transparent)]
     Multiple(MultipleError),
+    #[error("magiac mismatch, expected: {expected}, get: {get}")]
+    MagicMismatch { expected: u32, get: u32 },
+    #[error("checksum mismatch, expected: {expected}, get: {get}")]
+    ChecksumMismatch { expected: u64, get: u64 },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

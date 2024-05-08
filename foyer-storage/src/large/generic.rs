@@ -28,7 +28,11 @@ use futures::future::{join_all, try_join_all};
 
 use tokio::sync::{oneshot, Semaphore};
 
-use crate::{error::Result, serde::EntryDeserializer, Compression};
+use crate::{
+    error::{Error, Result},
+    serde::EntryDeserializer,
+    Compression,
+};
 
 use crate::catalog::AtomicSequence;
 
@@ -146,11 +150,12 @@ where
     D: Device,
 {
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
-        let indexer = Indexer::new(config.indexer_shards);
         let device = D::open(&config.device_config).await?;
-        let pickers = std::mem::take(&mut config.eviction_pickers);
+
+        let indexer = Indexer::new(device.regions(), config.indexer_shards);
+        let eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
-        let region_manager = RegionManager::new(device.clone(), pickers, reclaim_semaphore.clone());
+        let region_manager = RegionManager::new(device.clone(), eviction_pickers, reclaim_semaphore.clone());
         let sequence = AtomicSequence::default();
 
         RecoverRunner::run(&config, device.clone(), &sequence, &indexer, &region_manager).await?;
@@ -161,10 +166,9 @@ where
             }))
             .await?;
 
-        let reclaimers = join_all(
-            (0..config.reclaimers)
-                .map(|_| async { Reclaimer::open(region_manager.clone(), reclaim_semaphore.clone()).await }),
-        )
+        let reclaimers = join_all((0..config.reclaimers).map(|_| async {
+            Reclaimer::open(region_manager.clone(), reclaim_semaphore.clone(), indexer.clone()).await
+        }))
         .await;
 
         Ok(Self {
@@ -225,7 +229,17 @@ where
             .read(addr.region, addr.offset as _, addr.len as _)
             .await?;
 
-        let (_, k, v) = EntryDeserializer::deserialize::<K, V>(&buffer)?;
+        let (_, k, v) = match EntryDeserializer::deserialize::<K, V>(&buffer) {
+            Ok(res) => res,
+            Err(e) => match e {
+                Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
+                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
+                    self.inner.indexer.remove(hash);
+                    return Ok(None);
+                }
+                e => return Err(e),
+            },
+        };
         if k.borrow() != key {
             return Ok(None);
         }
@@ -323,22 +337,21 @@ mod tests {
     use super::*;
 
     const KB: usize = 1024;
-    const CAPACITY: usize = 64 * KB;
-    const FILE_SIZE: usize = 16 * KB;
 
     #[test_log::test(tokio::test)]
-    async fn test_store() {
+    async fn test_store_enqueue_lookup_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
         let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10)
             .with_eviction_config(FifoConfig::default())
             .build();
 
-        let store: GenericStore<u64, Vec<u8>, _, DirectFsDevice> = GenericStore::open(GenericStoreConfig {
+        // 4 files, fifo eviction
+        let config = GenericStoreConfig {
             device_config: DirectFsDeviceConfig {
                 dir: dir.path().into(),
-                capacity: CAPACITY,
-                file_size: FILE_SIZE,
+                capacity: 64 * KB,
+                file_size: 16 * KB,
             },
             compression: Compression::None,
             flush: true,
@@ -351,26 +364,27 @@ mod tests {
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
-        })
-        .await
-        .unwrap();
+        };
+        let store: GenericStore<u64, Vec<u8>, _, DirectFsDevice> = GenericStore::open(config).await.unwrap();
 
+        // [ [e1, e2], [], [], [] ]
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        store.enqueue(e1).await.unwrap();
-        store.enqueue(e2).await.unwrap();
+        assert!(store.enqueue(e1).await.unwrap());
+        assert!(store.enqueue(e2).await.unwrap());
 
         let v1 = store.lookup(&1).await.unwrap().unwrap();
         assert_eq!(v1, vec![1; 7 * KB]);
         let v2 = store.lookup(&2).await.unwrap().unwrap();
         assert_eq!(v2, vec![2; 7 * KB]);
 
+        // [ [e1, e2], [e3, e4], [], [] ]
         let e3 = memory.insert(3, vec![3; 7 * KB]);
-        let e4 = memory.insert(4, vec![4; 7 * KB]);
+        let e4 = memory.insert(4, vec![4; 6 * KB]);
 
-        store.enqueue(e3).await.unwrap();
-        store.enqueue(e4).await.unwrap();
+        assert!(store.enqueue(e3).await.unwrap());
+        assert!(store.enqueue(e4).await.unwrap());
 
         let v1 = store.lookup(&1).await.unwrap().unwrap();
         assert_eq!(v1, vec![1; 7 * KB]);
@@ -379,6 +393,72 @@ mod tests {
         let v3 = store.lookup(&3).await.unwrap().unwrap();
         assert_eq!(v3, vec![3; 7 * KB]);
         let v4 = store.lookup(&4).await.unwrap().unwrap();
-        assert_eq!(v4, vec![4; 7 * KB]);
+        assert_eq!(v4, vec![4; 6 * KB]);
+
+        // [ [e1, e2], [e3, e4], [e5], [] ]
+        let e5 = memory.insert(5, vec![5; 13 * KB]);
+        assert!(store.enqueue(e5).await.unwrap());
+
+        let v1 = store.lookup(&1).await.unwrap().unwrap();
+        assert_eq!(v1, vec![1; 7 * KB]);
+        let v2 = store.lookup(&2).await.unwrap().unwrap();
+        assert_eq!(v2, vec![2; 7 * KB]);
+        let v3 = store.lookup(&3).await.unwrap().unwrap();
+        assert_eq!(v3, vec![3; 7 * KB]);
+        let v4 = store.lookup(&4).await.unwrap().unwrap();
+        assert_eq!(v4, vec![4; 6 * KB]);
+        let v5 = store.lookup(&5).await.unwrap().unwrap();
+        assert_eq!(v5, vec![5; 13 * KB]);
+
+        // [ [], [e3, e4], [e5], [e6, e4*] ]
+        let e6 = memory.insert(6, vec![6; 7 * KB]);
+        let e4v2 = memory.insert(4, vec![!4; 7 * KB]);
+        assert!(store.enqueue(e6).await.unwrap());
+        assert!(store.enqueue(e4v2).await.unwrap());
+
+        assert!(store.lookup(&1).await.unwrap().is_none());
+        assert!(store.lookup(&2).await.unwrap().is_none());
+        let v3 = store.lookup(&3).await.unwrap().unwrap();
+        assert_eq!(v3, vec![3; 7 * KB]);
+        let v4v2 = store.lookup(&4).await.unwrap().unwrap();
+        assert_eq!(v4v2, vec![!4; 7 * KB]);
+        let v5 = store.lookup(&5).await.unwrap().unwrap();
+        assert_eq!(v5, vec![5; 13 * KB]);
+        let v6 = store.lookup(&6).await.unwrap().unwrap();
+        assert_eq!(v6, vec![6; 7 * KB]);
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let config = GenericStoreConfig {
+            device_config: DirectFsDeviceConfig {
+                dir: dir.path().into(),
+                capacity: 64 * KB,
+                file_size: 16 * KB,
+            },
+            compression: Compression::None,
+            flush: true,
+            indexer_shards: 4,
+            recover_mode: RecoverMode::StrictRecovery,
+            recover_concurrency: 2,
+            hash_builder: memory.hash_builder().clone(),
+            flushers: 1,
+            reclaimers: 1,
+            clean_region_threshold: 1,
+            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
+        };
+        let store: GenericStore<u64, Vec<u8>, _, DirectFsDevice> = GenericStore::open(config).await.unwrap();
+
+        assert!(store.lookup(&1).await.unwrap().is_none());
+        assert!(store.lookup(&2).await.unwrap().is_none());
+        let v3 = store.lookup(&3).await.unwrap().unwrap();
+        assert_eq!(v3, vec![3; 7 * KB]);
+        let v4v2 = store.lookup(&4).await.unwrap().unwrap();
+        assert_eq!(v4v2, vec![!4; 7 * KB]);
+        let v5 = store.lookup(&5).await.unwrap().unwrap();
+        assert_eq!(v5, vec![5; 13 * KB]);
+        let v6 = store.lookup(&6).await.unwrap().unwrap();
+        assert_eq!(v6, vec![6; 7 * KB]);
     }
 }

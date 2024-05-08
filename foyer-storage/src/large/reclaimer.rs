@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use super::{
     device::{Device, DeviceExt, IO_BUFFER_ALLOCATOR},
+    indexer::Indexer,
     region::RegionManager,
 };
 
@@ -27,7 +28,7 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    pub async fn open<D>(region_manager: RegionManager<D>, reclaim_semaphore: Arc<Semaphore>) -> Self
+    pub async fn open<D>(region_manager: RegionManager<D>, reclaim_semaphore: Arc<Semaphore>, indexer: Indexer) -> Self
     where
         D: Device,
     {
@@ -36,6 +37,7 @@ impl Reclaimer {
         let runner = ReclaimRunner {
             region_manager,
             reclaim_semaphore,
+            indexer,
             wait_rx,
         };
 
@@ -58,6 +60,8 @@ where
 {
     region_manager: RegionManager<D>,
     reclaim_semaphore: Arc<Semaphore>,
+
+    indexer: Indexer,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 }
@@ -110,6 +114,9 @@ where
         let id = region.id();
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
+
+        let hashes = self.indexer.take_region(region.id());
+        self.indexer.remove_batch(&hashes);
 
         // TODO(MrCroxx): reclaim entries
 

@@ -12,7 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use anyhow::anyhow;
 use std::{fmt::Debug, hash::Hasher};
 use twox_hash::XxHash64;
 
@@ -89,7 +88,10 @@ impl EntryHeader {
 
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
-            return Err(anyhow!("magic mismatch, expected: {}, got: {}", ENTRY_MAGIC, magic).into());
+            return Err(Error::MagicMismatch {
+                expected: ENTRY_MAGIC,
+                get: magic,
+            });
         }
 
         Ok(this)
@@ -202,7 +204,10 @@ impl EntryDeserializer {
 
         let checksum = checksum(&buffer[EntryHeader::serialized_len()..offset]);
         if checksum != header.checksum {
-            return Err(anyhow!("magic mismatch, expected: {}, got: {}", header.checksum, checksum).into());
+            return Err(Error::ChecksumMismatch {
+                expected: header.checksum,
+                get: checksum,
+            });
         }
 
         Ok((header, key, value))

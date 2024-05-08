@@ -15,7 +15,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use super::device::RegionId;
 
@@ -29,28 +29,47 @@ pub struct EntryAddress {
 /// [`Indexer`] records key hash to entry address on fs.
 #[derive(Debug, Clone)]
 pub struct Indexer {
+    regions: Arc<Vec<Mutex<Vec<u64>>>>,
     shards: Arc<Vec<RwLock<HashMap<u64, EntryAddress>>>>,
 }
 
 impl Indexer {
-    pub fn new(shards: usize) -> Self {
+    pub fn new(regions: usize, shards: usize) -> Self {
+        let regions = (0..regions).map(|_| Mutex::new(vec![])).collect_vec();
         let shards = (0..shards).map(|_| RwLock::new(HashMap::new())).collect_vec();
         Self {
+            regions: Arc::new(regions),
             shards: Arc::new(shards),
         }
     }
 
     pub fn insert(&self, hash: u64, addr: EntryAddress) -> Option<EntryAddress> {
-        let shard = self.shard(hash);
-        self.shards[shard].write().insert(hash, addr)
+        let s = self.shard(hash);
+        let r = addr.region as usize;
+
+        let mut region = self.regions[r].lock();
+        let mut shard = self.shards[s].write();
+
+        region.push(hash);
+        // The old region hash cannot be removed to prevent from phantom entry on hash collision.
+        shard.insert(hash, addr)
     }
 
     pub fn insert_batch(&self, batch: Vec<(u64, EntryAddress)>) -> Vec<(u64, EntryAddress)> {
+        let regions = batch
+            .iter()
+            .map(|(hash, addr)| (addr.region as usize, *hash))
+            .into_group_map();
         let shards: HashMap<usize, Vec<(u64, EntryAddress)>> =
             batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
+
+        for (r, mut hashes) in regions {
+            self.regions[r].lock().append(&mut hashes);
+        }
+
         let mut olds = vec![];
-        for (shard, batch) in shards {
-            let mut shard = self.shards[shard].write();
+        for (s, batch) in shards {
+            let mut shard = self.shards[s].write();
             for (hash, addr) in batch {
                 if let Some(old) = shard.insert(hash, addr) {
                     olds.push((hash, old));
@@ -68,6 +87,25 @@ impl Indexer {
     pub fn remove(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         self.shards[shard].write().remove(&hash)
+    }
+
+    pub fn remove_batch(&self, hashes: &[u64]) -> Vec<EntryAddress> {
+        let shards = hashes.iter().into_group_map_by(|&hash| self.shard(*hash));
+
+        let mut olds = vec![];
+        for (s, hashes) in shards {
+            let mut shard = self.shards[s].write();
+            for hash in hashes {
+                if let Some(old) = shard.remove(hash) {
+                    olds.push(old);
+                }
+            }
+        }
+        olds
+    }
+
+    pub fn take_region(&self, region: RegionId) -> Vec<u64> {
+        std::mem::take(self.regions[region as usize].lock().as_mut())
     }
 
     #[inline(always)]
