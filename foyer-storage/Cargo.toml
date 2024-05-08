@@ -15,6 +15,7 @@ ahash = "0.8"
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
 allocator-api2 = "0.2"
 anyhow = "1.0"
+async-channel = "2"
 bincode = "1"
 bitflags = "2.3.1"
 bitmaps = "3.2"
@@ -28,7 +29,9 @@ lazy_static = "1"
 lz4 = "1.24"
 memoffset = "0.9"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+pin-project = "1"
 prometheus = "0.13"
+rand = "0.8"
 serde = { workspace = true }
 thiserror = "1"
 tokio = { workspace = true }
@@ -38,6 +41,10 @@ zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
 
 [features]
 default = []

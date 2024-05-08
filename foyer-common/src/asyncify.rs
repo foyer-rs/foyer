@@ -12,34 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
+#[cfg(not(madsim))]
+pub async fn asyncify<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f).await.unwrap()
+}
 
-mod admission;
-mod buffer;
-mod catalog;
-mod compress;
-mod device;
-mod error;
-mod flusher;
-mod generic;
-mod judge;
-mod lazy;
-mod metrics;
-mod none;
-mod reclaimer;
-mod region;
-mod region_manager;
-mod reinsertion;
-mod runtime;
-mod serde;
-mod storage;
-mod store;
-
-// TODO(MrCroxx): Remove me after the mod is stable.
-#[doc(hidden)]
-pub mod large;
-
-mod prelude;
-pub use prelude::*;
-
-pub mod test_utils;
+#[cfg(madsim)]
+pub async fn asyncify<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    f()
+}

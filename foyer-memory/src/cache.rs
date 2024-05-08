@@ -70,6 +70,7 @@ pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomS
 pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
     GenericEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
 
+#[derive(Debug)]
 pub enum CacheEntry<K, V, L, S = RandomState>
 where
     K: Key,
@@ -174,6 +175,15 @@ where
     L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
+    pub fn hash(&self) -> u64 {
+        match self {
+            CacheEntry::Fifo(entry) => entry.hash(),
+            CacheEntry::Lru(entry) => entry.hash(),
+            CacheEntry::Lfu(entry) => entry.hash(),
+            CacheEntry::S3Fifo(entry) => entry.hash(),
+        }
+    }
+
     pub fn key(&self) -> &K {
         match self {
             CacheEntry::Fifo(entry) => entry.key(),
@@ -216,6 +226,15 @@ where
             CacheEntry::Lru(entry) => entry.refs(),
             CacheEntry::Lfu(entry) => entry.refs(),
             CacheEntry::S3Fifo(entry) => entry.refs(),
+        }
+    }
+
+    pub fn is_outdated(&self) -> bool {
+        match self {
+            CacheEntry::Fifo(entry) => entry.is_outdated(),
+            CacheEntry::Lru(entry) => entry.is_outdated(),
+            CacheEntry::Lfu(entry) => entry.is_outdated(),
+            CacheEntry::S3Fifo(entry) => entry.is_outdated(),
         }
     }
 }
@@ -588,6 +607,15 @@ where
             Cache::Lru(cache) => cache.metrics(),
             Cache::Lfu(cache) => cache.metrics(),
             Cache::S3Fifo(cache) => cache.metrics(),
+        }
+    }
+
+    pub fn hash_builder(&self) -> &S {
+        match self {
+            Cache::Fifo(cache) => cache.hash_builder(),
+            Cache::Lru(cache) => cache.hash_builder(),
+            Cache::Lfu(cache) => cache.hash_builder(),
+            Cache::S3Fifo(cache) => cache.hash_builder(),
         }
     }
 }

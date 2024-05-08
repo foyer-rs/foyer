@@ -29,6 +29,7 @@ where
     fn on_release(&self, key: Arc<K>, value: Arc<V>, context: CacheContext, weight: usize);
 }
 
+#[derive(Debug)]
 pub struct DefaultCacheEventListener<K, V>(PhantomData<(K, V)>)
 where
     K: Key,
