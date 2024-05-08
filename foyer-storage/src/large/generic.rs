@@ -326,30 +326,44 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 
     use crate::large::{
         admission::AdmitAllPicker,
         device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
         eviction::FifoPicker,
+        test_utils::BiasedPicker,
     };
 
     use super::*;
 
     const KB: usize = 1024;
 
-    #[test_log::test(tokio::test)]
-    async fn test_store_enqueue_lookup_recovery() {
-        let dir = tempfile::tempdir().unwrap();
-
-        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10)
+    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+        CacheBuilder::new(10)
             .with_eviction_config(FifoConfig::default())
-            .build();
+            .build()
+    }
 
-        // 4 files, fifo eviction
+    /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
+    async fn store_for_test(
+        memory: &Cache<u64, Vec<u8>>,
+        dir: impl AsRef<Path>,
+    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        store_for_test_with_admission_picker(memory, dir, Box::<AdmitAllPicker<u64, Vec<u8>>>::default()).await
+    }
+
+    async fn store_for_test_with_admission_picker(
+        memory: &Cache<u64, Vec<u8>>,
+        dir: impl AsRef<Path>,
+        admission_picker: Box<dyn AdmissionPicker<Key = u64, Value = Vec<u8>>>,
+    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
             device_config: DirectFsDeviceConfig {
-                dir: dir.path().into(),
+                dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
             },
@@ -363,15 +377,23 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
+            admission_picker,
         };
-        let store: GenericStore<u64, Vec<u8>, _, DirectFsDevice> = GenericStore::open(config).await.unwrap();
+        GenericStore::open(config).await.unwrap()
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_enqueue_lookup_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test(&memory, dir.path()).await;
 
         // [ [e1, e2], [], [], [] ]
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(store.enqueue(e1).await.unwrap());
+        assert!(store.enqueue(e1.clone()).await.unwrap());
         assert!(store.enqueue(e2).await.unwrap());
 
         let v1 = store.lookup(&1).await.unwrap().unwrap();
@@ -428,27 +450,10 @@ mod tests {
         assert_eq!(v6, vec![6; 7 * KB]);
 
         store.close().await.unwrap();
+        assert!(store.enqueue(e1).await.is_err());
         drop(store);
 
-        let config = GenericStoreConfig {
-            device_config: DirectFsDeviceConfig {
-                dir: dir.path().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            },
-            compression: Compression::None,
-            flush: true,
-            indexer_shards: 4,
-            recover_mode: RecoverMode::StrictRecovery,
-            recover_concurrency: 2,
-            hash_builder: memory.hash_builder().clone(),
-            flushers: 1,
-            reclaimers: 1,
-            clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
-        };
-        let store: GenericStore<u64, Vec<u8>, _, DirectFsDevice> = GenericStore::open(config).await.unwrap();
+        let store = store_for_test(&memory, dir.path()).await;
 
         assert!(store.lookup(&1).await.unwrap().is_none());
         assert!(store.lookup(&2).await.unwrap().is_none());
@@ -460,5 +465,23 @@ mod tests {
         assert_eq!(v5, vec![5; 13 * KB]);
         let v6 = store.lookup(&6).await.unwrap().unwrap();
         assert_eq!(v6, vec![6; 7 * KB]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_reject() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test_with_admission_picker(&memory, dir.path(), Box::new(BiasedPicker::new([1]))).await;
+
+        let e1 = memory.insert(1, vec![1; 7 * KB]);
+        let e2 = memory.insert(2, vec![2; 7 * KB]);
+
+        assert!(store.enqueue(e1.clone()).await.unwrap());
+        assert!(!store.enqueue(e2).await.unwrap());
+
+        let v1 = store.lookup(&1).await.unwrap().unwrap();
+        assert_eq!(v1, vec![1; 7 * KB]);
+        assert!(store.lookup(&2).await.unwrap().is_none());
     }
 }
