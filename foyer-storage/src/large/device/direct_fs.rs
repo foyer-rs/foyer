@@ -28,7 +28,7 @@ use crate::{
     large::device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirectFsDeviceConfig {
     pub dir: PathBuf,
     pub capacity: usize,
@@ -97,7 +97,7 @@ impl Device for DirectFsDevice {
         self.inner.file_size
     }
 
-    async fn open(config: &Self::Config) -> Result<Self> {
+    async fn open(config: Self::Config) -> Result<Self> {
         config.verify()?;
 
         // TODO(MrCroxx): write and read config to a manifest file for pinning
@@ -176,6 +176,13 @@ impl Device for DirectFsDevice {
         bits::assert_aligned(self.align() as u64, offset);
 
         let aligned = bits::align_up(self.align(), len);
+
+        assert!(
+            offset as usize + aligned <= self.region_size(),
+            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= region size ({region_size})",
+            total = offset as usize + aligned,
+            region_size = self.region_size(),
+        );
 
         let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
         unsafe {
@@ -330,7 +337,7 @@ mod tests {
 
         tracing::debug!("{config:?}");
 
-        let device = DirectFsDevice::open(&config).await.unwrap();
+        let device = DirectFsDevice::open(config.clone()).await.unwrap();
 
         let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
@@ -344,7 +351,7 @@ mod tests {
 
         drop(device);
 
-        let device = DirectFsDevice::open(&config).await.unwrap();
+        let device = DirectFsDevice::open(config).await.unwrap();
 
         let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
         assert_eq!(buf, b);

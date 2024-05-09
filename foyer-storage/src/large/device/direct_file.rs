@@ -25,7 +25,7 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirectFileDeviceConfig {
     pub path: PathBuf,
     pub capacity: usize,
@@ -68,6 +68,79 @@ impl DirectFileDevice {
     pub const O_DIRECT: i32 = 0x4000;
 }
 
+impl DirectFileDevice {
+    pub async fn pwrite(&self, mut buf: IoBuffer, offset: u64) -> Result<()> {
+        bits::assert_aligned(self.align() as u64, offset);
+
+        let aligned = bits::align_up(self.align(), buf.len());
+        buf.reserve(aligned - buf.len());
+        unsafe { buf.set_len(aligned) };
+
+        assert!(
+            offset as usize + aligned <= self.capacity(),
+            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= capacity ({capacity})",
+            total = offset as usize + aligned,
+            capacity = self.capacity,
+        );
+
+        let file = self.file.clone();
+        asyncify(move || {
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let written = file.write_at(buf.as_ref(), offset)?;
+            if written != aligned {
+                return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
+            }
+
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+        bits::assert_aligned(self.align() as u64, offset);
+
+        let aligned = bits::align_up(self.align(), len);
+
+        assert!(
+            offset as usize + aligned <= self.capacity(),
+            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= capacity ({capacity})",
+            total = offset as usize + aligned,
+            capacity = self.capacity,
+        );
+
+        let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
+        unsafe {
+            buf.set_len(aligned);
+        }
+
+        let file = self.file.clone();
+        let mut buffer = asyncify(move || {
+            #[cfg(target_family = "unix")]
+            use std::os::unix::fs::FileExt;
+
+            #[cfg(target_family = "windows")]
+            use std::os::windows::fs::FileExt;
+
+            let read = file.read_at(buf.as_mut(), offset)?;
+            if read != aligned {
+                return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
+            }
+
+            Ok::<_, Error>(buf)
+        })
+        .await?;
+
+        buffer.truncate(len);
+
+        Ok(buffer)
+    }
+}
+
 impl Device for DirectFileDevice {
     type Config = DirectFileDeviceConfig;
 
@@ -79,7 +152,7 @@ impl Device for DirectFileDevice {
         self.region_size
     }
 
-    async fn open(config: &Self::Config) -> Result<Self> {
+    async fn open(config: Self::Config) -> Result<Self> {
         config.verify()?;
 
         let dir = config.path.parent().expect("path must point to a file").to_path_buf();
@@ -120,23 +193,8 @@ impl Device for DirectFileDevice {
             region_size = self.region_size(),
         );
 
-        let region_size = self.region_size();
-        let file = self.file.clone();
-        asyncify(move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-
-            #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
-
-            let written = file.write_at(buf.as_ref(), offset + (region as u64 * region_size as u64))?;
-            if written != aligned {
-                return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
-            }
-
-            Ok(())
-        })
-        .await
+        let poffset = offset + region as u64 * self.region_size as u64;
+        self.pwrite(buf, poffset).await
     }
 
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
@@ -144,32 +202,15 @@ impl Device for DirectFileDevice {
 
         let aligned = bits::align_up(self.align(), len);
 
-        let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
-        unsafe {
-            buf.set_len(aligned);
-        }
+        assert!(
+            offset as usize + aligned <= self.region_size(),
+            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= region size ({region_size})",
+            total = offset as usize + aligned,
+            region_size = self.region_size(),
+        );
 
-        let region_size = self.region_size();
-        let file = self.file.clone();
-        let mut buffer = asyncify(move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-
-            #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
-
-            let read = file.read_at(buf.as_mut(), offset + (region as u64 * region_size as u64))?;
-            if read != aligned {
-                return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
-            }
-
-            Ok::<_, Error>(buf)
-        })
-        .await?;
-
-        buffer.truncate(len);
-
-        Ok(buffer)
+        let poffset = offset + region as u64 * self.region_size as u64;
+        self.pread(poffset, len).await
     }
 
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
@@ -194,9 +235,9 @@ impl DirectFileDeviceConfigBuilder {
     const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
 
     /// Use the given file path as the direct file device path.
-    pub fn new(dir: impl AsRef<Path>) -> Self {
+    pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
-            path: dir.as_ref().into(),
+            path: path.as_ref().into(),
             capacity: None,
             region_size: None,
         }
@@ -289,7 +330,7 @@ mod tests {
 
         tracing::debug!("{config:?}");
 
-        let device = DirectFileDevice::open(&config).await.unwrap();
+        let device = DirectFileDevice::open(config.clone()).await.unwrap();
 
         let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
@@ -303,7 +344,7 @@ mod tests {
 
         drop(device);
 
-        let device = DirectFileDevice::open(&config).await.unwrap();
+        let device = DirectFileDevice::open(config).await.unwrap();
 
         let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
         assert_eq!(buf, b);
