@@ -107,7 +107,7 @@ impl DirectFileDevice {
         let aligned = bits::align_up(self.align(), len);
 
         assert!(
-            offset as usize + aligned <= self.region_size(),
+            offset as usize + aligned <= self.capacity(),
             "offset ({offset}) + aligned ({aligned}) = total ({total}) <= capacity ({capacity})",
             total = offset as usize + aligned,
             capacity = self.capacity,
