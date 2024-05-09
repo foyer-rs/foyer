@@ -22,6 +22,7 @@ pub mod reclaimer;
 pub mod recover;
 pub mod region;
 pub mod storage;
+pub mod tombstone;
 
 #[cfg(test)]
 pub mod test_utils;

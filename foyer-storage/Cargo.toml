@@ -38,6 +38,8 @@ tokio = { workspace = true }
 tracing = "0.1"
 twox-hash = "1"
 zstd = "0.13"
+# TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
+array-util = "1"
 
 [dev-dependencies]
 tempfile = "3"

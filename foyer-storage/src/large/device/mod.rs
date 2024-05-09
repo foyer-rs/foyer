@@ -35,10 +35,13 @@ pub type RegionId = u32;
 
 pub type IoBuffer = allocator_api2::vec::Vec<u8, &'static AlignedAllocator<ALIGN>>;
 
-pub trait DeviceConfig: Send + Sync + 'static + Debug {
+pub trait DeviceConfig: Send + Sync + 'static + Debug + Clone {
     fn verify(&self) -> Result<()>;
 }
 
+/// [`Device`] represents 4K aligned block device.
+///
+/// Both i/o block and i/o buffer must be aligned to 4K.
 pub trait Device: Send + Sync + 'static + Sized + Clone {
     type Config: DeviceConfig;
 
@@ -49,7 +52,7 @@ pub trait Device: Send + Sync + 'static + Sized + Clone {
     fn region_size(&self) -> usize;
 
     #[must_use]
-    fn open(config: &Self::Config) -> impl Future<Output = Result<Self>> + Send;
+    fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
 
     #[must_use]
     fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> impl Future<Output = Result<()>> + Send;
