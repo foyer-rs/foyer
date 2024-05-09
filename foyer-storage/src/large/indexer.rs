@@ -108,6 +108,22 @@ impl Indexer {
         std::mem::take(self.regions[region as usize].lock().as_mut())
     }
 
+    pub fn clear(&self) {
+        self.regions.iter().for_each(|region| region.lock().clear());
+        self.shards.iter().for_each(|shard| shard.write().clear());
+    }
+
+    pub fn take(&self) -> Vec<(u64, EntryAddress)> {
+        self.regions.iter().for_each(|region| region.lock().clear());
+
+        let mut res = vec![];
+        for shard in self.shards.iter() {
+            let mut shard = shard.write();
+            res.extend(shard.drain());
+        }
+        res
+    }
+
     #[inline(always)]
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.shards.len()

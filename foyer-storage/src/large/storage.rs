@@ -29,18 +29,18 @@ use tokio::sync::oneshot;
 use crate::error::Result;
 
 #[pin_project]
-pub struct EnqueueHandle {
+pub struct EnqueueFuture {
     #[pin]
     rx: oneshot::Receiver<Result<bool>>,
 }
 
-impl EnqueueHandle {
+impl EnqueueFuture {
     pub(crate) fn new(rx: oneshot::Receiver<Result<bool>>) -> Self {
         Self { rx }
     }
 }
 
-impl Future for EnqueueHandle {
+impl Future for EnqueueFuture {
     type Output = Result<bool>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -66,7 +66,7 @@ pub trait Storage: Send + Sync + 'static + Clone {
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, DefaultCacheEventListener<Self::Key, Self::Value>, Self::BuildHasher>,
-    ) -> EnqueueHandle;
+    ) -> EnqueueFuture;
 
     #[must_use]
     fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<Self::Value>>> + Send
@@ -74,16 +74,11 @@ pub trait Storage: Send + Sync + 'static + Clone {
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;
 
-    fn remove<Q>(&self, key: &Q)
+    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;
 
     #[must_use]
-    fn delete<Q>(&self, key: &Q) -> impl Future<Output = Result<()>> + Send
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static;
-
-    // TODO(MrCroxx): clear & destroy
+    fn destroy(&self) -> impl Future<Output = Result<()>> + Send;
 }

@@ -19,8 +19,9 @@ use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 use super::{
     device::{Device, DeviceExt, IO_BUFFER_ALLOCATOR},
     indexer::Indexer,
-    region::RegionManager,
+    region::{Region, RegionManager},
 };
+use crate::error::Result;
 
 #[derive(Debug)]
 pub struct Reclaimer {
@@ -110,7 +111,6 @@ where
             return;
         };
 
-        let align = region.device().align();
         let id = region.id();
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
@@ -120,10 +120,8 @@ where
 
         // TODO(MrCroxx): reclaim entries
 
-        // mark region clean
-        let buf = allocator_api2::vec![in &IO_BUFFER_ALLOCATOR;0;align];
-        if let Err(e) = region.device().write(buf, id, 0).await {
-            tracing::warn!("mark region {id} clean error: {e}");
+        if let Err(e) = RegionCleaner::clean(&region).await {
+            tracing::warn!("mark region {id} clean error: {e}", id = region.id());
         }
 
         tracing::debug!("[reclaimer]: Finish reclaiming region {id}.");
@@ -138,5 +136,22 @@ where
         //
         // The permit only increase when the a clean region is taken to write.
         permit.forget();
+    }
+}
+
+#[derive(Debug)]
+pub struct RegionCleaner;
+
+impl RegionCleaner {
+    pub async fn clean<D>(region: &Region<D>) -> Result<()>
+    where
+        D: Device,
+    {
+        let buf = allocator_api2::vec![
+            in &IO_BUFFER_ALLOCATOR;
+            0;
+            region.device().align()
+        ];
+        region.device().write(buf, region.id(), 0).await
     }
 }

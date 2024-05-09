@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
@@ -26,6 +29,39 @@ use super::device::{
 };
 
 use crate::error::{Error, Result};
+
+#[derive(Debug, Clone)]
+pub struct TombstoneLogConfig {
+    pub path: PathBuf,
+    pub flush: bool,
+}
+
+#[derive(Debug)]
+pub struct TombstoneLogConfigBuilder {
+    path: PathBuf,
+    flush: bool,
+}
+
+impl TombstoneLogConfigBuilder {
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        Self {
+            path: path.as_ref().into(),
+            flush: true,
+        }
+    }
+
+    pub fn with_flush(mut self, flush: bool) -> Self {
+        self.flush = flush;
+        self
+    }
+
+    pub fn build(self) -> TombstoneLogConfig {
+        TombstoneLogConfig {
+            path: self.path,
+            flush: self.flush,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Tombstone {
@@ -51,17 +87,6 @@ impl Tombstone {
 }
 
 #[derive(Debug, Clone)]
-pub struct TombstoneLogConfig<D>
-where
-    D: Clone,
-{
-    pub path: PathBuf,
-    pub flush: bool,
-
-    pub cache_device: D,
-}
-
-#[derive(Debug, Clone)]
 pub struct TombstoneLog {
     inner: Arc<Mutex<TombstoneLogInner>>,
 }
@@ -78,24 +103,26 @@ impl TombstoneLog {
     /// Open the tombstone log with given a dedicated device.
     ///
     /// The tombstone log will
-    pub async fn open<D>(config: TombstoneLogConfig<D>) -> Result<Self>
+    pub async fn open<D>(
+        path: impl AsRef<Path>,
+        cache_device: D,
+        flush: bool,
+        tombstones: &mut Vec<Tombstone>,
+    ) -> Result<Self>
     where
         D: Device,
     {
-        let align = config.cache_device.align();
+        let align = cache_device.align();
 
         // For large entry disk cache, the minimum entry size is the alignment.
         //
         // So, the tombstone log needs at most `cache device capacity / align` slots.
         //
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
-        let capacity = bits::align_up(
-            align,
-            (config.cache_device.capacity() / align) * Tombstone::serialized_len(),
-        );
+        let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
         let device = DirectFileDevice::open(
-            DirectFileDeviceConfigBuilder::new(&config.path)
+            DirectFileDeviceConfigBuilder::new(path)
                 .with_region_size(align)
                 .with_capacity(capacity)
                 .build(),
@@ -114,6 +141,7 @@ impl TombstoneLog {
                 let mut seq = 0;
                 let mut addr = 0;
                 let mut hash = 0;
+                let mut tombstones = vec![];
 
                 // TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
                 for (slot, buf) in buffer
@@ -122,35 +150,34 @@ impl TombstoneLog {
                     .enumerate()
                 {
                     let tombstone = Tombstone::read(&buf[..]);
-                    tracing::trace!(
-                        "check tombstone at {}, get: {tombstone:?}",
-                        offset + slot * Tombstone::serialized_len()
-                    );
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
                         addr = offset + slot * Tombstone::serialized_len();
                         hash = tombstone.hash
                     }
+                    tombstones.push(tombstone);
                 }
 
-                Ok::<_, Error>((seq, addr, hash))
+                Ok::<_, Error>((tombstones, seq, addr, hash))
             }
         }))
         .await?;
         let offset = res
-            .into_iter()
-            .reduce(|a, b| if a.0 > b.0 { a } else { b })
-            .inspect(|(seq, addr, hash)| {
+            .iter()
+            .reduce(|a, b| if a.1 > b.1 { a } else { b })
+            .inspect(|(_, seq, addr, hash)| {
                 tracing::trace!(
                     "[tombstone log]: found latest tombstone at {addr} with sequence = {seq}, hash = {hash}"
                 )
             })
-            .map(|(_, addr, _)| addr)
+            .map(|(_, _, addr, _)| *addr)
             .unwrap() as u64;
+
+        res.into_iter().for_each(|mut r| tombstones.append(&mut r.0));
         let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
         let region = bits::align_down(align as RegionId, offset as RegionId) / align as RegionId;
-        let buffer = PageBuffer::open(device, region, 0, config.flush).await?;
+        let buffer = PageBuffer::open(device, region, 0, flush).await?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(TombstoneLogInner { offset, buffer })),
@@ -283,13 +310,9 @@ mod tests {
         .await
         .unwrap();
 
-        let config = TombstoneLogConfig {
-            path: dir.path().join("test-tombstone-log"),
-            flush: true,
-            cache_device: device,
-        };
-
-        let log = TombstoneLog::open(config.clone()).await.unwrap();
+        let log = TombstoneLog::open(dir.path().join("test-tombstone-log"), device.clone(), true, &mut vec![])
+            .await
+            .unwrap();
 
         log.append(
             (0..3 * 1024 + 42)
@@ -310,7 +333,9 @@ mod tests {
 
         drop(log);
 
-        let log = TombstoneLog::open(config).await.unwrap();
+        let log = TombstoneLog::open(dir.path().join("test-tombstone-log"), device, true, &mut vec![])
+            .await
+            .unwrap();
 
         {
             let inner = log.inner.lock().await;

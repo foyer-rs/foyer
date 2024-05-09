@@ -45,6 +45,17 @@ pub struct RegionStats {
     pub access: AtomicUsize,
 }
 
+/// # Region format:
+///
+/// ```plain
+/// [ Header | Tombstone Pool | Entries ]
+/// ```
+///
+/// ## Header
+///
+/// ```plain
+/// [ MAGIC | Tombstone Pool Size ]
+/// ```
 #[derive(Debug, Clone)]
 pub struct Region<D>
 where
