@@ -70,7 +70,6 @@ pub struct TombstoneLog {
 struct TombstoneLogInner {
     offset: u64,
     buffer: PageBuffer<DirectFileDevice>,
-    flush: bool,
 }
 
 impl TombstoneLog {
@@ -151,14 +150,10 @@ impl TombstoneLog {
         let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
         let region = bits::align_down(align as RegionId, offset as RegionId) / align as RegionId;
-        let buffer = PageBuffer::open(device, region, 0).await?;
+        let buffer = PageBuffer::open(device, region, 0, config.flush).await?;
 
         Ok(Self {
-            inner: Arc::new(Mutex::new(TombstoneLogInner {
-                offset,
-                buffer,
-                flush: config.flush,
-            })),
+            inner: Arc::new(Mutex::new(TombstoneLogInner { offset, buffer })),
         })
     }
 
@@ -191,6 +186,8 @@ pub struct PageBuffer<D> {
     buffer: IoBuffer,
 
     device: D,
+
+    sync: bool,
 }
 
 impl<D> AsRef<[u8]> for PageBuffer<D> {
@@ -209,12 +206,13 @@ impl<D> PageBuffer<D>
 where
     D: Device,
 {
-    pub async fn open(device: D, region: RegionId, idx: u32) -> Result<Self> {
+    pub async fn open(device: D, region: RegionId, idx: u32, sync: bool) -> Result<Self> {
         let mut this = Self {
             region,
             idx,
             buffer: IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
             device,
+            sync,
         };
 
         this.update().await?;
@@ -252,6 +250,9 @@ where
                 Self::offset(self.device.align(), self.idx),
             )
             .await?;
+        if self.sync {
+            self.device.flush(Some(self.region)).await?;
+        }
         Ok(())
     }
 
