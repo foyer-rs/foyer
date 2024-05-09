@@ -30,6 +30,7 @@ use tokio::sync::{oneshot, Semaphore};
 
 use crate::{
     error::{Error, Result},
+    large::{device::RegionId, reclaimer::RegionCleaner},
     serde::EntryDeserializer,
     Compression,
 };
@@ -38,14 +39,15 @@ use crate::catalog::AtomicSequence;
 
 use super::{
     admission::AdmissionPicker,
-    device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::{Device, DeviceExt},
     eviction::EvictionPicker,
     flusher::Flusher,
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
     region::RegionManager,
-    storage::{EnqueueHandle, Storage},
+    storage::{EnqueueFuture, Storage},
+    tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
 };
 
 pub struct GenericStoreConfig<K, V, S, D>
@@ -67,6 +69,7 @@ where
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub admission_picker: Box<dyn AdmissionPicker<Key = K, Value = V>>,
+    pub tombstone_log_config: Option<TombstoneLogConfig>,
 }
 
 impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
@@ -114,7 +117,7 @@ where
 {
     indexer: Indexer,
     device: D,
-    _region_manager: RegionManager<D>,
+    region_manager: RegionManager<D>,
 
     flushers: Vec<Flusher<K, V, S, D>>,
     reclaimers: Vec<Reclaimer>,
@@ -152,19 +155,42 @@ where
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
         let device = D::open(config.device_config.clone()).await?;
 
+        let mut tombstones = vec![];
+        let tombstone_log = match &config.tombstone_log_config {
+            None => None,
+            Some(config) => {
+                let log = TombstoneLog::open(&config.path, device.clone(), config.flush, &mut tombstones).await?;
+                Some(log)
+            }
+        };
+
         let indexer = Indexer::new(device.regions(), config.indexer_shards);
         let eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(device.clone(), eviction_pickers, reclaim_semaphore.clone());
         let sequence = AtomicSequence::default();
 
-        RecoverRunner::run(&config, device.clone(), &sequence, &indexer, &region_manager).await?;
+        RecoverRunner::run(
+            &config,
+            device.clone(),
+            &sequence,
+            &indexer,
+            &region_manager,
+            &tombstones,
+        )
+        .await?;
 
-        let flushers =
-            try_join_all((0..config.flushers).map(|_| async {
-                Flusher::open(&config, device.clone(), indexer.clone(), region_manager.clone()).await
-            }))
-            .await?;
+        let flushers = try_join_all((0..config.flushers).map(|_| async {
+            Flusher::open(
+                &config,
+                indexer.clone(),
+                region_manager.clone(),
+                device.clone(),
+                tombstone_log.clone(),
+            )
+            .await
+        }))
+        .await?;
 
         let reclaimers = join_all((0..config.reclaimers).map(|_| async {
             Reclaimer::open(region_manager.clone(), reclaim_semaphore.clone(), indexer.clone()).await
@@ -175,7 +201,7 @@ where
             inner: Arc::new(GenericStoreInner {
                 indexer,
                 device,
-                _region_manager: region_manager,
+                region_manager,
                 flushers,
                 reclaimers,
                 admission_picker: config.admission_picker,
@@ -193,12 +219,12 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>) -> EnqueueHandle {
+    fn enqueue(&self, entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>) -> EnqueueFuture {
         if !self.inner.active.load(Ordering::Relaxed) {
             let (tx, rx) = oneshot::channel();
             tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
                 .unwrap();
-            return EnqueueHandle::new(rx);
+            return EnqueueFuture::new(rx);
         }
         if self.inner.admission_picker.pick(entry.key(), entry.value()) {
             let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
@@ -206,7 +232,7 @@ where
         } else {
             let (tx, rx) = oneshot::channel();
             let _ = tx.send(Ok(false));
-            EnqueueHandle::new(rx)
+            EnqueueFuture::new(rx)
         }
     }
 
@@ -247,27 +273,48 @@ where
         Ok(Some(v))
     }
 
-    fn remove<Q>(&self, key: &Q)
+    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            let (tx, rx) = oneshot::channel();
+            tx.send(Err(anyhow::anyhow!("cannot delete entry after closed").into()))
+                .unwrap();
+            return EnqueueFuture::new(rx);
+        }
+
         let hash = self.inner.hash_builder.hash_one(key);
+
         self.inner.indexer.remove(hash);
+
+        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()]
+            .submit(Tombstone { hash, sequence }, sequence)
     }
 
-    async fn delete<Q>(&self, key: &Q) -> Result<()>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
-        let hash = self.inner.hash_builder.hash_one(key);
-        if let Some(addr) = self.inner.indexer.remove(hash) {
-            let align = self.inner.device.align();
-            let mut buf = IoBuffer::with_capacity_in(align, &IO_BUFFER_ALLOCATOR);
-            buf.resize(align, 0);
-            self.inner.device.write(buf, addr.region, addr.offset as _).await?;
+    async fn destroy(&self) -> Result<()> {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            return Err(anyhow::anyhow!("cannot delete entry after closed").into());
         }
+
+        // Clear indices.
+        self.inner.indexer.clear();
+
+        // Write an tombstone to clear tombstone log by increase the max sequence.
+        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()]
+            .submit(Tombstone { hash: 0, sequence }, sequence)
+            .await?;
+
+        // Clean regions.
+        try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {
+            let region = self.inner.region_manager.region(id).clone();
+            async move { RegionCleaner::clean(&region).await }
+        }))
+        .await?;
+
         Ok(())
     }
 }
@@ -295,7 +342,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, DefaultCacheEventListener<Self::Key, Self::Value>, Self::BuildHasher>,
-    ) -> EnqueueHandle {
+    ) -> EnqueueFuture {
         self.enqueue(entry)
     }
 
@@ -307,20 +354,16 @@ where
         self.lookup(key).await
     }
 
-    fn remove<Q>(&self, key: &Q)
+    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        self.remove(key)
+        self.delete(key)
     }
 
-    async fn delete<Q>(&self, key: &Q) -> Result<()>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
-        self.delete(key).await
+    async fn destroy(&self) -> Result<()> {
+        self.destroy().await
     }
 }
 
@@ -378,6 +421,7 @@ mod tests {
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker,
+            tombstone_log_config: None,
         };
         GenericStore::open(config).await.unwrap()
     }

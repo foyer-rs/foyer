@@ -12,7 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
@@ -36,6 +35,7 @@ use super::device::{IoBuffer, IO_BUFFER_ALLOCATOR};
 use super::generic::GenericStoreConfig;
 use super::indexer::Indexer;
 use super::region::RegionManager;
+use super::tombstone::Tombstone;
 use super::{
     device::{Device, DeviceExt, RegionId},
     indexer::EntryAddress,
@@ -43,7 +43,10 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoverMode {
+    // TODO(MrCroxx): Update `NoRecovery` docs after thombstone is supported.
     /// Do not recover disk cache.
+    ///
+    /// For updatable cache, [`RecoverMode::NoRecovery`] must be used to prevent from phantom entry after reopen.
     NoRecovery,
     /// Recover disk cache and skip errors.
     QuietRecovery,
@@ -61,6 +64,7 @@ impl RecoverRunner {
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager<D>,
+        tombstones: &[Tombstone],
     ) -> Result<()>
     where
         K: StorageKey,
@@ -90,9 +94,14 @@ impl RecoverRunner {
             return Err(Error::multiple(errs));
         }
 
+        enum EntryAddressOrTombstoneHash {
+            EntryAddress(EntryAddress),
+            Tombstone,
+        }
+
         // Dedup entries.
-        let mut seq = 0;
-        let mut indices: HashMap<u64, (u64, EntryAddress)> = HashMap::new();
+        let mut latest_sequence = 0;
+        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstoneHash)>> = HashMap::new();
         let mut clean_regions = vec![];
         let mut evictable_regions = vec![];
         for (region, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
@@ -105,20 +114,32 @@ impl RecoverRunner {
             }
 
             for EntryInfo { hash, sequence, addr } in infos {
-                seq = seq.max(sequence);
-                match indices.entry(hash) {
-                    Entry::Occupied(mut o) => {
-                        if o.get().0 < sequence {
-                            o.insert((sequence, addr));
-                        }
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert((sequence, addr));
-                    }
-                }
+                latest_sequence = latest_sequence.max(sequence);
+                indices
+                    .entry(hash)
+                    .or_default()
+                    .push((sequence, EntryAddressOrTombstoneHash::EntryAddress(addr)));
             }
         }
-        let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
+        tombstones.iter().for_each(|tombstone| {
+            latest_sequence = latest_sequence.max(tombstone.sequence);
+            indices
+                .entry(tombstone.hash)
+                .or_default()
+                .push((tombstone.sequence, EntryAddressOrTombstoneHash::Tombstone))
+        });
+        let indices = indices
+            .into_iter()
+            .filter_map(|(hash, mut versions)| {
+                versions.sort_by_key(|(sequence, _)| *sequence);
+                match versions.pop() {
+                    None => None,
+                    Some((_, EntryAddressOrTombstoneHash::Tombstone)) => None,
+                    Some((_, EntryAddressOrTombstoneHash::EntryAddress(addr))) => Some((hash, addr)),
+                }
+            })
+            .collect_vec();
+        // let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
         let permits = config.clean_region_threshold.saturating_sub(clean_regions.len());
         let countdown = clean_regions.len().saturating_sub(config.clean_region_threshold);
 
@@ -128,13 +149,13 @@ impl RecoverRunner {
             e = evictable_regions.len(),
             c = clean_regions.len(),
             t = indices.len(),
-            s = seq,
+            s = latest_sequence,
             p = permits,
         );
 
         // Update components.
         indexer.insert_batch(indices);
-        sequence.store(seq, Ordering::Release);
+        sequence.store(latest_sequence, Ordering::Release);
         for region in clean_regions {
             region_manager.mark_clean(region).await;
         }
