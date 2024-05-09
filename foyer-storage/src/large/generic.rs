@@ -150,7 +150,7 @@ where
     D: Device,
 {
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
-        let device = D::open(&config.device_config).await?;
+        let device = D::open(config.device_config.clone()).await?;
 
         let indexer = Indexer::new(device.regions(), config.indexer_shards);
         let eviction_pickers = std::mem::take(&mut config.eviction_pickers);

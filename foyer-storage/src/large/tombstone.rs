@@ -81,7 +81,7 @@ impl TombstoneLog {
 
         // For large entry disk cache, the minimum entry size is the alignment.
         //
-        // So, the tombstone log needs at most `cache deivce capacity / align` slots.
+        // So, the tombstone log needs at most `cache device capacity / align` slots.
         //
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
         let capacity = bits::align_up(
