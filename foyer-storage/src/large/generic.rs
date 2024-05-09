@@ -602,4 +602,47 @@ mod tests {
 
         assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
     }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_destroy_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+
+        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
+
+        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone())))
+            .await
+            .unwrap()
+            .into_iter()
+            .all(|inserted| inserted));
+
+        for i in 0..6 {
+            assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+        }
+
+        assert!(store.delete(&3).await.unwrap());
+        assert_eq!(store.lookup(&3).await.unwrap(), None);
+
+        store.destroy().await.unwrap();
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        for i in 0..6 {
+            assert_eq!(store.lookup(&i).await.unwrap(), None);
+        }
+
+        assert!(store.enqueue(es[3].clone()).await.unwrap());
+        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+
+        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+    }
 }
