@@ -94,6 +94,7 @@ impl RecoverRunner {
             return Err(Error::multiple(errs));
         }
 
+        #[derive(Debug)]
         enum EntryAddressOrTombstoneHash {
             EntryAddress(EntryAddress),
             Tombstone,
@@ -132,6 +133,7 @@ impl RecoverRunner {
             .into_iter()
             .filter_map(|(hash, mut versions)| {
                 versions.sort_by_key(|(sequence, _)| *sequence);
+                tracing::trace!("[recover runner]: hash {hash} has versions: {versions:?}");
                 match versions.pop() {
                     None => None,
                     Some((_, EntryAddressOrTombstoneHash::Tombstone)) => None,
@@ -155,7 +157,7 @@ impl RecoverRunner {
 
         // Update components.
         indexer.insert_batch(indices);
-        sequence.store(latest_sequence, Ordering::Release);
+        sequence.store(latest_sequence + 1, Ordering::Release);
         for region in clean_regions {
             region_manager.mark_clean(region).await;
         }

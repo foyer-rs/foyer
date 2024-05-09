@@ -150,10 +150,6 @@ impl TombstoneLog {
                     .enumerate()
                 {
                     let tombstone = Tombstone::read(&buf[..]);
-                    tracing::trace!(
-                        "check tombstone at {}, get: {tombstone:?}",
-                        offset + slot * Tombstone::serialized_len()
-                    );
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
                         addr = offset + slot * Tombstone::serialized_len();

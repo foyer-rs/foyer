@@ -373,12 +373,14 @@ mod tests {
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use itertools::Itertools;
 
     use crate::large::{
         admission::AdmitAllPicker,
         device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
         eviction::FifoPicker,
         test_utils::BiasedPicker,
+        tombstone::TombstoneLogConfigBuilder,
     };
 
     use super::*;
@@ -422,6 +424,33 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker,
             tombstone_log_config: None,
+        };
+        GenericStore::open(config).await.unwrap()
+    }
+
+    async fn store_for_test_with_tombstone_log(
+        memory: &Cache<u64, Vec<u8>>,
+        dir: impl AsRef<Path>,
+        path: impl AsRef<Path>,
+    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        let config = GenericStoreConfig {
+            device_config: DirectFsDeviceConfig {
+                dir: dir.as_ref().into(),
+                capacity: 64 * KB,
+                file_size: 16 * KB,
+            },
+            compression: Compression::None,
+            flush: true,
+            indexer_shards: 4,
+            recover_mode: RecoverMode::StrictRecovery,
+            recover_concurrency: 2,
+            hash_builder: memory.hash_builder().clone(),
+            flushers: 1,
+            reclaimers: 1,
+            clean_region_threshold: 1,
+            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
+            tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -527,5 +556,50 @@ mod tests {
         let v1 = store.lookup(&1).await.unwrap().unwrap();
         assert_eq!(v1, vec![1; 7 * KB]);
         assert!(store.lookup(&2).await.unwrap().is_none());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_delete_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+
+        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
+
+        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone())))
+            .await
+            .unwrap()
+            .into_iter()
+            .all(|inserted| inserted));
+
+        for i in 0..6 {
+            assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+        }
+
+        assert!(store.delete(&3).await.unwrap());
+        assert_eq!(store.lookup(&3).await.unwrap(), None);
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        for i in 0..6 {
+            if i != 3 {
+                assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+            } else {
+                assert_eq!(store.lookup(&3).await.unwrap(), None);
+            }
+        }
+
+        assert!(store.enqueue(es[3].clone()).await.unwrap());
+        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+
+        store.close().await.unwrap();
+        drop(store);
+
+        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+
+        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
     }
 }

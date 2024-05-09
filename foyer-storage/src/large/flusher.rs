@@ -439,12 +439,13 @@ where
                 });
                 let future = {
                     let tombstones = state.tombstones;
+                    let has_tombstone_log = tombstone_log.is_some();
                     async move {
                         if let Some(log) = tombstone_log {
                             log.append(tombstones.iter().map(|(tombstone, _)| tombstone)).await?;
-                            for (_, tx) in tombstones {
-                                let _ = tx.send(Ok(true));
-                            }
+                        }
+                        for (_, tx) in tombstones {
+                            let _ = tx.send(Ok(has_tombstone_log));
                         }
                         Ok::<_, Error>(())
                     }
