@@ -745,7 +745,7 @@ where
                     v.insert(vec![]);
                     let cache = self.clone();
                     let future = f();
-                    let join = tokio::spawn(async move {
+                    let join: JoinHandle<Result<GenericCacheEntry<K, V, E, I, S>, ER>> = tokio::spawn(async move {
                         let (value, context) = match future.await {
                             Ok((value, context)) => (value, context),
                             Err(e) => {
