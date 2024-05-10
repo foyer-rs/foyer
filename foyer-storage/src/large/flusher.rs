@@ -23,7 +23,7 @@ use crate::Compression;
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::{CacheEntry, DefaultCacheEventListener};
+use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
 use tokio::sync::oneshot;
@@ -86,7 +86,7 @@ where
     indices: Vec<(u64, EntryAddress)>,
     txs: Vec<oneshot::Sender<Result<bool>>>,
     // hold the entries to avoid memory cache lookup miss?
-    entries: Vec<CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>>,
+    entries: Vec<CacheEntry<K, V, S>>,
 }
 
 impl<K, V, S, D> Debug for WriteGroup<K, V, S, D>
@@ -149,17 +149,17 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    CacheEntry(CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>),
+    CacheEntry(CacheEntry<K, V, S>),
     Tombstone(Tombstone),
 }
 
-impl<K, V, S> From<CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>> for Submission<K, V, S>
+impl<K, V, S> From<CacheEntry<K, V, S>> for Submission<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    fn from(entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>) -> Self {
+    fn from(entry: CacheEntry<K, V, S>) -> Self {
         Self::CacheEntry(entry)
     }
 }
@@ -244,7 +244,7 @@ where
         EnqueueFuture::new(rx)
     }
 
-    fn entry(&self, entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>, sequence: Sequence) -> EnqueueFuture {
+    fn entry(&self, entry: CacheEntry<K, V, S>, sequence: Sequence) -> EnqueueFuture {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let (tx, rx) = oneshot::channel();

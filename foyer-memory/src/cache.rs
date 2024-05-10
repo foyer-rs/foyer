@@ -37,58 +37,55 @@ use crate::{
     },
     generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry, Weighter},
     indexer::ArcKeyHashMapIndexer,
-    listener::{CacheEventListener, DefaultCacheEventListener},
     metrics::Metrics,
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
-pub type FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
+pub type FifoCache<K, V, S = RandomState> =
+    GenericCache<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type FifoCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type FifoEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S, ER>;
 
-pub type LruCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type LruCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type LruEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
+pub type LruCache<K, V, S = RandomState> =
+    GenericCache<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LruCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LruEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S, ER>;
 
-pub type LfuCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type LfuCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type LfuEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
+pub type LfuCache<K, V, S = RandomState> =
+    GenericCache<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LfuCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LfuEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S, ER>;
 
-pub type S3FifoCache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCache<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type S3FifoCacheEntry<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericCacheEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S>;
-pub type S3FifoEntry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState> =
-    GenericEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, L, S, ER>;
+pub type S3FifoCache<K, V, S = RandomState> =
+    GenericCache<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type S3FifoCacheEntry<K, V, S = RandomState> =
+    GenericCacheEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type S3FifoEntry<K, V, ER, S = RandomState> =
+    GenericEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S, ER>;
 
 #[derive(Debug)]
-pub enum CacheEntry<K, V, L, S = RandomState>
+pub enum CacheEntry<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(FifoCacheEntry<K, V, L, S>),
-    Lru(LruCacheEntry<K, V, L, S>),
-    Lfu(LfuCacheEntry<K, V, L, S>),
-    S3Fifo(S3FifoCacheEntry<K, V, L, S>),
+    Fifo(FifoCacheEntry<K, V, S>),
+    Lru(LruCacheEntry<K, V, S>),
+    Lfu(LfuCacheEntry<K, V, S>),
+    S3Fifo(S3FifoCacheEntry<K, V, S>),
 }
 
-impl<K, V, L, S> Clone for CacheEntry<K, V, L, S>
+impl<K, V, S> Clone for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -101,11 +98,10 @@ where
     }
 }
 
-impl<K, V, L, S> Deref for CacheEntry<K, V, L, S>
+impl<K, V, S> Deref for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
@@ -120,59 +116,54 @@ where
     }
 }
 
-impl<K, V, L, S> From<FifoCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: FifoCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: FifoCacheEntry<K, V, S>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, L, S> From<LruCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<LruCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LruCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: LruCacheEntry<K, V, S>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, L, S> From<LfuCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<LfuCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LfuCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: LfuCacheEntry<K, V, S>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, L, S> From<S3FifoCacheEntry<K, V, L, S>> for CacheEntry<K, V, L, S>
+impl<K, V, S> From<S3FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: S3FifoCacheEntry<K, V, L, S>) -> Self {
+    fn from(entry: S3FifoCacheEntry<K, V, S>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, L, S> CacheEntry<K, V, L, S>
+impl<K, V, S> CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn hash(&self) -> u64 {
@@ -271,23 +262,22 @@ impl From<S3FifoConfig> for EvictionConfig {
     }
 }
 
-pub struct CacheBuilder<K, V, L, S>
+pub struct CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     capacity: usize,
     shards: usize,
     eviction_config: EvictionConfig,
     object_pool_capacity: usize,
-    event_listener: L,
+
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
 }
 
-impl<K, V> CacheBuilder<K, V, DefaultCacheEventListener<K, V>, RandomState>
+impl<K, V> CacheBuilder<K, V, RandomState>
 where
     K: Key,
     V: Value,
@@ -304,18 +294,16 @@ where
             }
             .into(),
             object_pool_capacity: 1024,
-            event_listener: DefaultCacheEventListener::default(),
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
         }
     }
 }
 
-impl<K, V, L, S> CacheBuilder<K, V, L, S>
+impl<K, V, S> CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
@@ -343,24 +331,8 @@ where
         self
     }
 
-    /// Set in-memory cache event listener.
-    pub fn with_event_listener<OL>(self, event_listener: OL) -> CacheBuilder<K, V, OL, S>
-    where
-        OL: CacheEventListener<K, V>,
-    {
-        CacheBuilder {
-            capacity: self.capacity,
-            shards: self.shards,
-            eviction_config: self.eviction_config,
-            object_pool_capacity: self.object_pool_capacity,
-            event_listener,
-            hash_builder: self.hash_builder,
-            weighter: self.weighter,
-        }
-    }
-
     /// Set in-memory cache hash builder.
-    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, L, OS>
+    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
         OS: BuildHasher + Send + Sync + 'static,
     {
@@ -369,7 +341,6 @@ where
             shards: self.shards,
             eviction_config: self.eviction_config,
             object_pool_capacity: self.object_pool_capacity,
-            event_listener: self.event_listener,
             hash_builder,
             weighter: self.weighter,
         }
@@ -382,7 +353,7 @@ where
     }
 
     /// Build in-memory cache with the given configuration.
-    pub fn build(self) -> Cache<K, V, L, S> {
+    pub fn build(self) -> Cache<K, V, S> {
         match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 capacity: self.capacity,
@@ -390,7 +361,6 @@ where
                 eviction_config,
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
-                event_listener: self.event_listener,
                 weighter: self.weighter,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
@@ -399,7 +369,6 @@ where
                 eviction_config,
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
-                event_listener: self.event_listener,
                 weighter: self.weighter,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
@@ -408,7 +377,6 @@ where
                 eviction_config,
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
-                event_listener: self.event_listener,
                 weighter: self.weighter,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
@@ -417,31 +385,28 @@ where
                 eviction_config,
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
-                event_listener: self.event_listener,
                 weighter: self.weighter,
             }))),
         }
     }
 }
 
-pub enum Cache<K, V, L = DefaultCacheEventListener<K, V>, S = RandomState>
+pub enum Cache<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(Arc<FifoCache<K, V, L, S>>),
-    Lru(Arc<LruCache<K, V, L, S>>),
-    Lfu(Arc<LfuCache<K, V, L, S>>),
-    S3Fifo(Arc<S3FifoCache<K, V, L, S>>),
+    Fifo(Arc<FifoCache<K, V, S>>),
+    Lru(Arc<LruCache<K, V, S>>),
+    Lfu(Arc<LfuCache<K, V, S>>),
+    S3Fifo(Arc<S3FifoCache<K, V, S>>),
 }
 
-impl<K, V, L, S> Debug for Cache<K, V, L, S>
+impl<K, V, S> Debug for Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -454,11 +419,10 @@ where
     }
 }
 
-impl<K, V, L, S> Clone for Cache<K, V, L, S>
+impl<K, V, S> Clone for Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -471,14 +435,13 @@ where
     }
 }
 
-impl<K, V, L, S> Cache<K, V, L, S>
+impl<K, V, S> Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, L, S>
+    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, S>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
@@ -491,7 +454,7 @@ where
         }
     }
 
-    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, L, S>
+    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, S>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
@@ -504,7 +467,7 @@ where
         }
     }
 
-    pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, L, S>>
+    pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -517,7 +480,7 @@ where
         }
     }
 
-    pub fn pop(&self) -> Option<CacheEntry<K, V, L, S>> {
+    pub fn pop(&self) -> Option<CacheEntry<K, V, S>> {
         match self {
             Cache::Fifo(cache) => cache.pop().map(CacheEntry::from),
             Cache::Lru(cache) => cache.pop().map(CacheEntry::from),
@@ -526,7 +489,7 @@ where
         }
     }
 
-    pub fn pop_corase(&self) -> Option<CacheEntry<K, V, L, S>> {
+    pub fn pop_corase(&self) -> Option<CacheEntry<K, V, S>> {
         match self {
             Cache::Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
             Cache::Lru(cache) => cache.pop_corase().map(CacheEntry::from),
@@ -535,7 +498,7 @@ where
         }
     }
 
-    pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, L, S>>
+    pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -620,76 +583,70 @@ where
     }
 }
 
-pub enum Entry<K, V, ER, L = DefaultCacheEventListener<K, V>, S = RandomState>
+pub enum Entry<K, V, ER, S = RandomState>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(FifoEntry<K, V, ER, L, S>),
-    Lru(LruEntry<K, V, ER, L, S>),
-    Lfu(LfuEntry<K, V, ER, L, S>),
-    S3Fifo(S3FifoEntry<K, V, ER, L, S>),
+    Fifo(FifoEntry<K, V, ER, S>),
+    Lru(LruEntry<K, V, ER, S>),
+    Lfu(LfuEntry<K, V, ER, S>),
+    S3Fifo(S3FifoEntry<K, V, ER, S>),
 }
 
-impl<K, V, ER, L, S> From<FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: FifoEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: FifoEntry<K, V, ER, S>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<LruEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<LruEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LruEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: LruEntry<K, V, ER, S>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<LfuEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<LfuEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LfuEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: LfuEntry<K, V, ER, S>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, ER, L, S> From<S3FifoEntry<K, V, ER, L, S>> for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> From<S3FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: S3FifoEntry<K, V, ER, L, S>) -> Self {
+    fn from(entry: S3FifoEntry<K, V, ER, S>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, ER, L, S> Future for Entry<K, V, ER, L, S>
+impl<K, V, ER, S> Future for Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
     ER: From<oneshot::error::RecvError>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    type Output = std::result::Result<CacheEntry<K, V, L, S>, ER>;
+    type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
@@ -708,11 +665,10 @@ pub enum EntryState {
     Miss,
 }
 
-impl<K, V, ER, L, S> Entry<K, V, ER, L, S>
+impl<K, V, ER, S> Entry<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn state(&self) -> EntryState {
@@ -737,14 +693,13 @@ where
     }
 }
 
-impl<K, V, L, S> Cache<K, V, L, S>
+impl<K, V, S> Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<AK, AV, F, FU, ER>(&self, key: AK, f: F) -> Entry<K, V, ER, L, S>
+    pub fn entry<AK, AV, F, FU, ER>(&self, key: AK, f: F) -> Entry<K, V, ER, S>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,

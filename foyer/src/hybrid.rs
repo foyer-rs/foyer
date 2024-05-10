@@ -17,69 +17,16 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::{BuildHasher, Hash},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
 use ahash::RandomState;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::{
-    Cache, CacheBuilder, CacheContext, CacheEntry, CacheEventListener, Entry, EvictionConfig, Weighter,
-};
+use foyer_memory::{Cache, CacheBuilder, CacheContext, CacheEntry, Entry, EvictionConfig, Weighter};
 use foyer_storage::{
     AdmissionPolicy, AsyncStorageExt, Compression, DeviceConfig, RecoverMode, ReinsertionPolicy, RuntimeConfig,
     Storage, Store, StoreBuilder,
 };
-
-struct HybridCacheEventListenerInner<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    store: OnceLock<Store<K, V>>,
-}
-
-pub struct HybridCacheEventListener<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    inner: Arc<HybridCacheEventListenerInner<K, V>>,
-}
-
-impl<K, V> Default for HybridCacheEventListener<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(HybridCacheEventListenerInner { store: OnceLock::new() }),
-        }
-    }
-}
-
-impl<K, V> Clone for HybridCacheEventListener<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<K, V> CacheEventListener<K, V> for HybridCacheEventListener<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    fn on_release(&self, key: Arc<K>, value: Arc<V>, _context: CacheContext, _weight: usize) {
-        // TODO(MrCroxx): Return read handle to block following request of the key and clear with callback?
-        unsafe { self.inner.store.get().unwrap_unchecked() }.insert_if_not_exists_async(key, value)
-    }
-}
 
 pub struct HybridCacheBuilder;
 
@@ -99,10 +46,8 @@ impl HybridCacheBuilder {
         K: StorageKey,
         V: StorageValue,
     {
-        let listener = HybridCacheEventListener::default();
         HybridCacheBuilderPhaseMemory {
-            builder: CacheBuilder::new(capacity).with_event_listener(listener.clone()),
-            listener,
+            builder: CacheBuilder::new(capacity),
         }
     }
 }
@@ -113,8 +58,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {
-    builder: CacheBuilder<K, V, HybridCacheEventListener<K, V>, S>,
-    listener: HybridCacheEventListener<K, V>,
+    builder: CacheBuilder<K, V, S>,
 }
 
 impl<K, V, S> HybridCacheBuilderPhaseMemory<K, V, S>
@@ -127,10 +71,7 @@ where
     /// Operations on different shard can be parallelized.
     pub fn with_shards(self, shards: usize) -> Self {
         let builder = self.builder.with_shards(shards);
-        HybridCacheBuilderPhaseMemory {
-            builder,
-            listener: self.listener,
-        }
+        HybridCacheBuilderPhaseMemory { builder }
     }
 
     /// Set in-memory cache eviction algorithm.
@@ -138,10 +79,7 @@ where
     /// The default value is a general-used w-TinyLFU algorithm.
     pub fn with_eviction_config(self, eviction_config: impl Into<EvictionConfig>) -> Self {
         let builder = self.builder.with_eviction_config(eviction_config.into());
-        HybridCacheBuilderPhaseMemory {
-            builder,
-            listener: self.listener,
-        }
+        HybridCacheBuilderPhaseMemory { builder }
     }
 
     /// Set object pool for handles. The object pool is used to reduce handle allocation.
@@ -151,10 +89,7 @@ where
     /// The default value is 1024.
     pub fn with_object_pool_capacity(self, object_pool_capacity: usize) -> Self {
         let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
-        HybridCacheBuilderPhaseMemory {
-            builder,
-            listener: self.listener,
-        }
+        HybridCacheBuilderPhaseMemory { builder }
     }
 
     /// Set in-memory cache hash builder.
@@ -163,24 +98,17 @@ where
         OS: BuildHasher + Send + Sync + 'static,
     {
         let builder = self.builder.with_hash_builder(hash_builder);
-        HybridCacheBuilderPhaseMemory {
-            builder,
-            listener: self.listener,
-        }
+        HybridCacheBuilderPhaseMemory { builder }
     }
 
     /// Set in-memory cache weighter.
     pub fn with_weighter(self, weighter: impl Weighter<K, V>) -> Self {
         let builder = self.builder.with_weighter(weighter);
-        HybridCacheBuilderPhaseMemory {
-            builder,
-            listener: self.listener,
-        }
+        HybridCacheBuilderPhaseMemory { builder }
     }
 
     pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         HybridCacheBuilderPhaseStorage {
-            listener: self.listener,
             cache: self.builder.build(),
             builder: StoreBuilder::new(),
         }
@@ -193,8 +121,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {
-    listener: HybridCacheEventListener<K, V>,
-    cache: Cache<K, V, HybridCacheEventListener<K, V>, S>,
+    cache: Cache<K, V, S>,
     builder: StoreBuilder<K, V>,
 }
 
@@ -210,7 +137,6 @@ where
     pub fn with_name(self, name: &str) -> Self {
         let builder = self.builder.with_name(name);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -222,7 +148,6 @@ where
     pub fn with_eviction_config(self, eviction_config: impl Into<EvictionConfig>) -> Self {
         let builder = self.builder.with_eviction_config(eviction_config);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -234,7 +159,6 @@ where
     pub fn with_device_config(self, device_config: impl Into<DeviceConfig>) -> Self {
         let builder = self.builder.with_device_config(device_config);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -244,7 +168,6 @@ where
     pub fn with_catalog_shards(self, catalog_shards: usize) -> Self {
         let builder = self.builder.with_catalog_shards(catalog_shards);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -254,7 +177,6 @@ where
     pub fn with_admission_policy(self, admission: Arc<dyn AdmissionPolicy<Key = K, Value = V>>) -> Self {
         let builder = self.builder.with_admission_policy(admission);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -264,7 +186,6 @@ where
     pub fn with_reinsertion_policy(self, reinsertion: Arc<dyn ReinsertionPolicy<Key = K, Value = V>>) -> Self {
         let builder = self.builder.with_reinsertion_policy(reinsertion);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -274,7 +195,6 @@ where
     pub fn with_flushers(self, flushers: usize) -> Self {
         let builder = self.builder.with_flushers(flushers);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -284,7 +204,6 @@ where
     pub fn with_reclaimers(self, reclaimers: usize) -> Self {
         let builder = self.builder.with_reclaimers(reclaimers);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -298,7 +217,6 @@ where
     pub fn with_clean_region_threshold(self, clean_region_threshold: usize) -> Self {
         let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -310,7 +228,6 @@ where
     pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
         let builder = self.builder.with_recover_mode(recover_mode);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -320,7 +237,6 @@ where
     pub fn with_recover_concurrency(self, recover_concurrency: usize) -> Self {
         let builder = self.builder.with_recover_concurrency(recover_concurrency);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -330,7 +246,6 @@ where
     pub fn with_compression(self, compression: Compression) -> Self {
         let builder = self.builder.with_compression(compression);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -340,7 +255,6 @@ where
     pub fn with_flush(self, flush: bool) -> Self {
         let builder = self.builder.with_flush(flush);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -352,7 +266,6 @@ where
     pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
         let builder = self.builder.with_runtime_config(runtime_config);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -364,7 +277,6 @@ where
     pub fn with_lazy(self, lazy: bool) -> Self {
         let builder = self.builder.with_lazy(lazy);
         Self {
-            listener: self.listener,
             cache: self.cache,
             builder,
         }
@@ -372,7 +284,6 @@ where
 
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let store = self.builder.build().await?;
-        self.listener.inner.store.set(store.clone()).unwrap();
         Ok(HybridCache {
             cache: self.cache,
             store,
@@ -380,7 +291,7 @@ where
     }
 }
 
-pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, HybridCacheEventListener<K, V>, S>;
+pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
 
 pub struct HybridCache<K, V, S = RandomState>
 where
@@ -388,7 +299,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {
-    cache: Cache<K, V, HybridCacheEventListener<K, V>, S>,
+    cache: Cache<K, V, S>,
     store: Store<K, V>,
 }
 
@@ -426,7 +337,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn cache(&self) -> &Cache<K, V, HybridCacheEventListener<K, V>, S> {
+    pub fn cache(&self) -> &Cache<K, V, S> {
         &self.cache
     }
 
@@ -439,7 +350,11 @@ where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
     {
-        self.cache.insert(key, value)
+        let key = key.into();
+        let value = value.into();
+        let entry = self.cache.insert(key.clone(), value.clone());
+        self.store.insert_async(key, value);
+        entry
     }
 
     pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> HybridCacheEntry<K, V, S>
@@ -447,7 +362,11 @@ where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
     {
-        self.cache.insert_with_context(key, value, context)
+        let key = key.into();
+        let value = value.into();
+        let entry = self.cache.insert_with_context(key.clone(), value.clone(), context);
+        self.store.insert_async(key, value);
+        entry
     }
 
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
@@ -490,7 +409,7 @@ where
     }
 }
 
-pub type HybridEntry<K, V, S = RandomState> = Entry<K, V, anyhow::Error, HybridCacheEventListener<K, V>, S>;
+pub type HybridEntry<K, V, S = RandomState> = Entry<K, V, anyhow::Error, S>;
 
 impl<K, V, S> HybridCache<K, V, S>
 where

@@ -40,32 +40,29 @@ use crate::{
     eviction::Eviction,
     handle::{Handle, HandleExt, KeyedHandle},
     indexer::Indexer,
-    listener::CacheEventListener,
     metrics::Metrics,
-    CacheContext, DefaultCacheEventListener,
+    CacheContext,
 };
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
-struct CacheSharedState<T, L> {
+struct CacheSharedState<T> {
     metrics: Metrics,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: ObjectPool<Box<T>>,
-    listener: L,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-struct CacheShard<K, V, E, I, L, S>
+struct CacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     indexer: I,
@@ -74,26 +71,25 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
-    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, L, S>>>>,
+    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, S>>>>,
 
-    state: Arc<CacheSharedState<E::Handle, L>>,
+    state: Arc<CacheSharedState<E::Handle>>,
 }
 
-impl<K, V, E, I, L, S> CacheShard<K, V, E, I, L, S>
+impl<K, V, E, I, S> CacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn new(
         capacity: usize,
         eviction_config: &E::Config,
         usage: Arc<AtomicUsize>,
-        context: Arc<CacheSharedState<E::Handle, L>>,
+        context: Arc<CacheSharedState<E::Handle>>,
     ) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(capacity, eviction_config) };
@@ -371,14 +367,13 @@ where
     }
 }
 
-impl<K, V, E, I, L, S> Drop for CacheShard<K, V, E, I, L, S>
+impl<K, V, E, I, S> Drop for CacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -386,13 +381,12 @@ where
     }
 }
 
-pub struct GenericCacheConfig<K, V, E, L, S = RandomState>
+pub struct GenericCacheConfig<K, V, E, S = RandomState>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub capacity: usize,
@@ -400,36 +394,33 @@ where
     pub eviction_config: E::Config,
     pub object_pool_capacity: usize,
     pub hash_builder: S,
-    pub event_listener: L,
     pub weighter: Arc<dyn Weighter<K, V>>,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-pub enum GenericEntry<K, V, E, I, L, S, ER>
+pub enum GenericEntry<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     Invalid,
-    Hit(GenericCacheEntry<K, V, E, I, L, S>),
-    Wait(oneshot::Receiver<GenericCacheEntry<K, V, E, I, L, S>>),
-    Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, L, S>, ER>>),
+    Hit(GenericCacheEntry<K, V, E, I, S>),
+    Wait(oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>),
+    Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
 }
 
-impl<K, V, E, I, L, S, ER> Default for GenericEntry<K, V, E, I, L, S, ER>
+impl<K, V, E, I, S, ER> Default for GenericEntry<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn default() -> Self {
@@ -437,18 +428,17 @@ where
     }
 }
 
-impl<K, V, E, I, L, S, ER> Future for GenericEntry<K, V, E, I, L, S, ER>
+impl<K, V, E, I, S, ER> Future for GenericEntry<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, L, S>, ER>;
+    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
@@ -465,43 +455,40 @@ where
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-pub struct GenericCache<K, V, E, I, L = DefaultCacheEventListener<K, V>, S = RandomState>
+pub struct GenericCache<K, V, E, I, S = RandomState>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    shards: Vec<Mutex<CacheShard<K, V, E, I, L, S>>>,
+    shards: Vec<Mutex<CacheShard<K, V, E, I, S>>>,
 
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
 
-    context: Arc<CacheSharedState<E::Handle, L>>,
+    context: Arc<CacheSharedState<E::Handle>>,
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
 }
 
-impl<K, V, E, I, L, S> GenericCache<K, V, E, I, L, S>
+impl<K, V, E, I, S> GenericCache<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn new(config: GenericCacheConfig<K, V, E, L, S>) -> Self {
+    pub fn new(config: GenericCacheConfig<K, V, E, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
             metrics: Metrics::default(),
             object_pool: ObjectPool::new_with_create(config.object_pool_capacity, Box::default),
-            listener: config.event_listener,
         });
 
         let shard_capacity = config.capacity / config.shards;
@@ -522,7 +509,7 @@ where
         }
     }
 
-    pub fn insert<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, L, S>
+    pub fn insert<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, S>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
@@ -535,7 +522,7 @@ where
         key: AK,
         value: AV,
         context: CacheContext,
-    ) -> GenericCacheEntry<K, V, E, I, L, S>
+    ) -> GenericCacheEntry<K, V, E, I, S>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
@@ -571,14 +558,12 @@ where
         }
 
         // Do not deallocate data within the lock section.
-        for (key, value, context, weight) in to_deallocate {
-            self.context.listener.on_release(key, value, context.into(), weight)
-        }
+        drop(to_deallocate);
 
         entry
     }
 
-    pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, L, S>>
+    pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -594,7 +579,7 @@ where
         }
     }
 
-    pub fn pop(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, L, S>> {
+    pub fn pop(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, S>> {
         let mut shards = self.shards.iter().map(|shard| shard.lock()).collect_vec();
 
         let shard = self
@@ -619,7 +604,7 @@ where
         }
     }
 
-    pub fn pop_corase(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, L, S>> {
+    pub fn pop_corase(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, S>> {
         let shard = self
             .usages
             .iter()
@@ -643,7 +628,7 @@ where
         }
     }
 
-    pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, L, S>>
+    pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -717,24 +702,21 @@ where
         };
 
         // Do not deallocate data within the lock section.
-        if let Some((key, value, context, weight)) = entry {
-            self.context.listener.on_release(key, value, context.into(), weight);
-        }
+        drop(entry);
     }
 }
 
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
-impl<K, V, E, I, L, S> GenericCache<K, V, E, I, L, S>
+impl<K, V, E, I, S> GenericCache<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<AK, AV, F, FU, ER>(self: &Arc<Self>, key: AK, f: F) -> GenericEntry<K, V, E, I, L, S, ER>
+    pub fn entry<AK, AV, F, FU, ER>(self: &Arc<Self>, key: AK, f: F) -> GenericEntry<K, V, E, I, S, ER>
     where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
@@ -788,28 +770,26 @@ where
     }
 }
 
-pub struct GenericCacheEntry<K, V, E, I, L, S = RandomState>
+pub struct GenericCacheEntry<K, V, E, I, S = RandomState>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    cache: Arc<GenericCache<K, V, E, I, L, S>>,
+    cache: Arc<GenericCache<K, V, E, I, S>>,
     ptr: NonNull<E::Handle>,
 }
 
-impl<K, V, E, I, L, S> Debug for GenericCacheEntry<K, V, E, I, L, S>
+impl<K, V, E, I, S> Debug for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -817,14 +797,13 @@ where
     }
 }
 
-impl<K, V, E, I, L, S> GenericCacheEntry<K, V, E, I, L, S>
+impl<K, V, E, I, S> GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     pub fn hash(&self) -> u64 {
@@ -856,14 +835,13 @@ where
     }
 }
 
-impl<K, V, E, I, L, S> Clone for GenericCacheEntry<K, V, E, I, L, S>
+impl<K, V, E, I, S> Clone for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -882,14 +860,13 @@ where
     }
 }
 
-impl<K, V, E, I, L, S> Drop for GenericCacheEntry<K, V, E, I, L, S>
+impl<K, V, E, I, S> Drop for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -897,14 +874,13 @@ where
     }
 }
 
-impl<K, V, E, I, L, S> Deref for GenericCacheEntry<K, V, E, I, L, S>
+impl<K, V, E, I, S> Deref for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
     type Target = V;
@@ -914,25 +890,23 @@ where
     }
 }
 
-unsafe impl<K, V, E, I, L, S> Send for GenericCacheEntry<K, V, E, I, L, S>
+unsafe impl<K, V, E, I, S> Send for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
-unsafe impl<K, V, E, I, L, S> Sync for GenericCacheEntry<K, V, E, I, L, S>
+unsafe impl<K, V, E, I, S> Sync for GenericCacheEntry<K, V, E, I, S>
 where
     K: Key,
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = Arc<K>, Data = (Arc<K>, Arc<V>)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    L: CacheEventListener<K, V>,
     S: BuildHasher + Send + Sync + 'static,
 {
 }
@@ -949,7 +923,6 @@ mod tests {
             lru::LruConfig,
             test_utils::TestEviction,
         },
-        listener::DefaultCacheEventListener,
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
@@ -970,7 +943,6 @@ mod tests {
             eviction_config: FifoConfig {},
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
             weighter: Arc::new(|_, _| 1),
         };
         let cache = Arc::new(FifoCache::<u64, u64>::new(config));
@@ -995,7 +967,6 @@ mod tests {
             eviction_config: FifoConfig {},
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
         };
         Arc::new(FifoCache::<u64, String>::new(config))
@@ -1010,7 +981,6 @@ mod tests {
             },
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
-            event_listener: DefaultCacheEventListener::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
         };
         Arc::new(LruCache::<u64, String>::new(config))
