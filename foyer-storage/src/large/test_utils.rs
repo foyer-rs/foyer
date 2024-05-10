@@ -16,12 +16,12 @@ use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::
 
 use super::admission::AdmissionPicker;
 
-pub struct BiasedPicker<K, V, Q> {
+pub struct BiasedPicker<K, Q> {
     rejects: HashSet<Q>,
-    _marker: PhantomData<(K, V)>,
+    _marker: PhantomData<K>,
 }
 
-impl<K, V, Q> Debug for BiasedPicker<K, V, Q>
+impl<K, Q> Debug for BiasedPicker<K, Q>
 where
     Q: Debug,
 {
@@ -30,7 +30,7 @@ where
     }
 }
 
-impl<K, V, Q> BiasedPicker<K, V, Q> {
+impl<K, Q> BiasedPicker<K, Q> {
     pub fn new(rejects: impl IntoIterator<Item = Q>) -> Self
     where
         Q: Hash + Eq,
@@ -42,16 +42,14 @@ impl<K, V, Q> BiasedPicker<K, V, Q> {
     }
 }
 
-impl<K, V, Q> AdmissionPicker for BiasedPicker<K, V, Q>
+impl<K, Q> AdmissionPicker for BiasedPicker<K, Q>
 where
     K: Send + Sync + 'static + Borrow<Q>,
-    V: Send + Sync + 'static,
     Q: Hash + Eq + Send + Sync + 'static + Debug,
 {
     type Key = K;
-    type Value = V;
 
-    fn pick(&self, key: &Self::Key, _: &Self::Value) -> bool {
+    fn pick(&self, key: &Self::Key) -> bool {
         self.rejects.contains(key.borrow())
     }
 }

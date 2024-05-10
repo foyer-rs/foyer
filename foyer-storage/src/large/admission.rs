@@ -13,38 +13,34 @@
 //  limitations under the License.
 
 use std::{fmt::Debug, marker::PhantomData};
+
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {
     type Key;
-    type Value;
 
-    fn pick(&self, key: &Self::Key, value: &Self::Value) -> bool;
+    fn pick(&self, key: &Self::Key) -> bool;
 }
 
 #[derive(Default)]
-pub struct AdmitAllPicker<K, V>(PhantomData<(K, V)>)
+pub struct AdmitAllPicker<K>(PhantomData<K>)
 where
-    K: Send + Sync + 'static,
-    V: Send + Sync + 'static;
+    K: Send + Sync + 'static;
 
-impl<K, V> Debug for AdmitAllPicker<K, V>
+impl<K> Debug for AdmitAllPicker<K>
 where
     K: Send + Sync + 'static,
-    V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("AdmitAllPicker").finish()
     }
 }
 
-impl<K, V> AdmissionPicker for AdmitAllPicker<K, V>
+impl<K> AdmissionPicker for AdmitAllPicker<K>
 where
     K: Send + Sync + 'static,
-    V: Send + Sync + 'static,
 {
     type Key = K;
-    type Value = V;
 
-    fn pick(&self, _: &Self::Key, _: &Self::Value) -> bool {
+    fn pick(&self, _: &Self::Key) -> bool {
         true
     }
 }

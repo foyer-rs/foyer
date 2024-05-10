@@ -16,6 +16,7 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     hash::{BuildHasher, Hash},
+    marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -68,8 +69,10 @@ where
     pub reclaimers: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    pub admission_picker: Box<dyn AdmissionPicker<Key = K, Value = V>>,
+    pub admission_picker: Box<dyn AdmissionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
+
+    _marker: PhantomData<V>,
 }
 
 impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
@@ -122,7 +125,7 @@ where
     flushers: Vec<Flusher<K, V, S, D>>,
     reclaimers: Vec<Reclaimer>,
 
-    admission_picker: Box<dyn AdmissionPicker<Key = K, Value = V>>,
+    admission_picker: Box<dyn AdmissionPicker<Key = K>>,
 
     sequence: AtomicSequence,
 
@@ -226,7 +229,7 @@ where
                 .unwrap();
             return EnqueueFuture::new(rx);
         }
-        if self.inner.admission_picker.pick(entry.key(), entry.value()) {
+        if self.inner.admission_picker.pick(entry.key()) {
             let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
             self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(entry, sequence)
         } else {
@@ -395,13 +398,13 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        store_for_test_with_admission_picker(memory, dir, Box::<AdmitAllPicker<u64, Vec<u8>>>::default()).await
+        store_for_test_with_admission_picker(memory, dir, Box::<AdmitAllPicker<u64>>::default()).await
     }
 
     async fn store_for_test_with_admission_picker(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
-        admission_picker: Box<dyn AdmissionPicker<Key = u64, Value = Vec<u8>>>,
+        admission_picker: Box<dyn AdmissionPicker<Key = u64>>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
             device_config: DirectFsDeviceConfig {
@@ -421,6 +424,7 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker,
             tombstone_log_config: None,
+            _marker: PhantomData,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -446,8 +450,9 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64, Vec<u8>>>::default(),
+            admission_picker: Box::<AdmitAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
+            _marker: PhantomData,
         };
         GenericStore::open(config).await.unwrap()
     }
