@@ -23,7 +23,7 @@ use std::{
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::{CacheEntry, DefaultCacheEventListener};
+use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
 
 use tokio::sync::{oneshot, Semaphore};
@@ -219,7 +219,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, DefaultCacheEventListener<K, V>, S>) -> EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueFuture {
         if !self.inner.active.load(Ordering::Relaxed) {
             let (tx, rx) = oneshot::channel();
             tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
@@ -339,10 +339,7 @@ where
         self.close().await
     }
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, DefaultCacheEventListener<Self::Key, Self::Value>, Self::BuildHasher>,
-    ) -> EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture {
         self.enqueue(entry)
     }
 

@@ -68,7 +68,6 @@ mod eviction;
 mod generic;
 mod handle;
 mod indexer;
-mod listener;
 mod metrics;
 mod prelude;
 

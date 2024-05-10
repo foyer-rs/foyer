@@ -22,7 +22,7 @@ use std::{
 };
 
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::{CacheEntry, DefaultCacheEventListener};
+use foyer_memory::CacheEntry;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
 
@@ -63,10 +63,7 @@ pub trait Storage: Send + Sync + 'static + Clone {
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, DefaultCacheEventListener<Self::Key, Self::Value>, Self::BuildHasher>,
-    ) -> EnqueueFuture;
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture;
 
     #[must_use]
     fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<Self::Value>>> + Send
