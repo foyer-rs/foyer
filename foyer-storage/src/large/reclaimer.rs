@@ -16,7 +16,10 @@ use std::{fmt::Debug, hash::BuildHasher, sync::Arc, time::Duration};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use futures::future::try_join_all;
-use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
+use tokio::{
+    runtime::Handle,
+    sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
+};
 
 use super::{
     device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
@@ -39,6 +42,7 @@ impl Reclaimer {
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, S, D>>,
+        runtime: Handle,
     ) -> Self
     where
         K: StorageKey,
@@ -55,9 +59,10 @@ impl Reclaimer {
             flushers,
             reinsertion_picker,
             wait_rx,
+            runtime: runtime.clone(),
         };
 
-        let _handle = tokio::spawn(async move { runner.run().await });
+        let _handle = runtime.spawn(async move { runner.run().await });
 
         Self { wait_tx }
     }
@@ -87,6 +92,8 @@ where
     flushers: Vec<Flusher<K, V, S, D>>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
+
+    runtime: Handle,
 }
 
 impl<K, V, S, D> ReclaimRunner<K, V, S, D>
@@ -193,7 +200,7 @@ where
             }
         }
 
-        tokio::spawn(async move {
+        self.runtime.spawn(async move {
             if let Err(e) = try_join_all(futures).await {
                 tracing::warn!(
                     "[reclaimer]: error raised when reinserting entries, the entries may be dropped, err: {e}"

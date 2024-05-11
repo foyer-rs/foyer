@@ -26,6 +26,7 @@ use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
+use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use super::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
@@ -240,8 +241,9 @@ where
         region_manager: RegionManager<D>,
         device: D,
         tombstone_log: Option<TombstoneLog>,
+        runtime: Handle,
     ) -> Result<Self> {
-        let batch = AsyncBatchPipeline::new(BatchState::default());
+        let batch = AsyncBatchPipeline::with_runtime(BatchState::default(), runtime);
 
         Ok(Self {
             batch,

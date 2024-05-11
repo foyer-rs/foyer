@@ -15,17 +15,19 @@
 use std::{future::Future, sync::Arc};
 
 use parking_lot::Mutex;
-use tokio::task::JoinHandle;
+use tokio::{runtime::Handle, task::JoinHandle};
 
 #[derive(Debug)]
 pub struct AsyncBatchPipeline<T, R> {
     inner: Arc<Mutex<AsyncBatchPipelineInner<T, R>>>,
+    runtime: Handle,
 }
 
 impl<T, R> Clone for AsyncBatchPipeline<T, R> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            runtime: self.runtime.clone(),
         }
     }
 }
@@ -44,12 +46,17 @@ pub struct LeaderToken<T, R> {
 
 impl<T, R> AsyncBatchPipeline<T, R> {
     pub fn new(state: T) -> Self {
+        Self::with_runtime(state, Handle::current())
+    }
+
+    pub fn with_runtime(state: T, runtime: Handle) -> Self {
         Self {
             inner: Arc::new(Mutex::new(AsyncBatchPipelineInner {
                 state,
                 has_leader: false,
                 handle: None,
             })),
+            runtime,
         }
     }
 
@@ -108,7 +115,7 @@ impl<T, R> LeaderToken<T, R> {
         std::mem::swap(&mut inner.state, &mut state);
 
         let future = f(state);
-        let handle = tokio::spawn(async move {
+        let handle = self.batch.runtime.spawn(async move {
             if let Some(handle) = handle {
                 fr(handle.await.unwrap());
             }

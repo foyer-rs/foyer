@@ -22,6 +22,7 @@ pub mod reclaimer;
 pub mod recover;
 pub mod region;
 pub mod reinsertion;
+pub mod runtime;
 pub mod scanner;
 pub mod storage;
 pub mod tombstone;

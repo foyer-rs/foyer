@@ -23,6 +23,7 @@ use foyer_common::code::{StorageKey, StorageValue};
 use futures::future::try_join_all;
 
 use itertools::Itertools;
+use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
 use crate::catalog::{AtomicSequence, Sequence};
@@ -62,6 +63,7 @@ impl RecoverRunner {
         indexer: &Indexer,
         region_manager: &RegionManager<D>,
         tombstones: &[Tombstone],
+        runtime: Handle,
     ) -> Result<()>
     where
         K: StorageKey,
@@ -75,7 +77,7 @@ impl RecoverRunner {
         let handles = (0..device.regions() as RegionId).map(|region| {
             let device = device.clone();
             let semaphore = semaphore.clone();
-            tokio::spawn(async move {
+            runtime.spawn(async move {
                 let permit = semaphore.acquire().await;
                 let res = RegionRecoverRunner::run(mode, device, region).await;
                 drop(permit);
