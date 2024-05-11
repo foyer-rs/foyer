@@ -16,7 +16,7 @@
 pub enum CacheContext {
     /// The default context shared by all eviction container implementations.
     Default,
-    LruPriorityLow,
+    LowPriority,
 }
 
 impl Default for CacheContext {

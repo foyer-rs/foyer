@@ -14,10 +14,10 @@
 
 use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
 
-use super::admission::AdmissionPicker;
+use super::{admission::AdmissionPicker, reinsertion::ReinsertionPicker};
 
 pub struct BiasedPicker<K, Q> {
-    rejects: HashSet<Q>,
+    admits: HashSet<Q>,
     _marker: PhantomData<K>,
 }
 
@@ -26,17 +26,17 @@ where
     Q: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BiasedPicker").field("rejects", &self.rejects).finish()
+        f.debug_struct("BiasedPicker").field("admits", &self.admits).finish()
     }
 }
 
 impl<K, Q> BiasedPicker<K, Q> {
-    pub fn new(rejects: impl IntoIterator<Item = Q>) -> Self
+    pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
     where
         Q: Hash + Eq,
     {
         Self {
-            rejects: rejects.into_iter().collect(),
+            admits: admits.into_iter().collect(),
             _marker: PhantomData,
         }
     }
@@ -50,6 +50,18 @@ where
     type Key = K;
 
     fn pick(&self, key: &Self::Key) -> bool {
-        self.rejects.contains(key.borrow())
+        self.admits.contains(key.borrow())
+    }
+}
+
+impl<K, Q> ReinsertionPicker for BiasedPicker<K, Q>
+where
+    K: Send + Sync + 'static + Borrow<Q>,
+    Q: Hash + Eq + Send + Sync + 'static + Debug,
+{
+    type Key = K;
+
+    fn pick(&self, key: &Self::Key) -> bool {
+        self.admits.contains(key.borrow())
     }
 }
