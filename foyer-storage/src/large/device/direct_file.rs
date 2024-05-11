@@ -12,7 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::{asyncify::asyncify, bits, fs::freespace};
+use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
+use tokio::runtime::Handle;
 
 use super::{Device, DeviceConfig, DeviceExt, RegionId};
 use crate::{
@@ -38,6 +39,8 @@ pub struct DirectFileDevice {
 
     capacity: usize,
     region_size: usize,
+
+    runtime: Handle,
 }
 
 impl DeviceConfig for DirectFileDeviceConfig {
@@ -84,7 +87,7 @@ impl DirectFileDevice {
         );
 
         let file = self.file.clone();
-        asyncify(move || {
+        asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
 
@@ -119,7 +122,7 @@ impl DirectFileDevice {
         }
 
         let file = self.file.clone();
-        let mut buffer = asyncify(move || {
+        let mut buffer = asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
 
@@ -153,10 +156,12 @@ impl Device for DirectFileDevice {
     }
 
     async fn open(config: Self::Config) -> Result<Self> {
+        let runtime = Handle::current();
+
         config.verify()?;
 
         let dir = config.path.parent().expect("path must point to a file").to_path_buf();
-        asyncify(move || create_dir_all(dir)).await?;
+        asyncify_with_runtime(&runtime, move || create_dir_all(dir)).await?;
 
         let mut opts = OpenOptions::new();
 
@@ -176,6 +181,7 @@ impl Device for DirectFileDevice {
             file,
             capacity: config.capacity,
             region_size: config.region_size,
+            runtime,
         })
     }
 
@@ -215,7 +221,7 @@ impl Device for DirectFileDevice {
 
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
-        asyncify(move || file.sync_all().map_err(Error::from)).await
+        asyncify_with_runtime(&self.runtime, move || file.sync_all().map_err(Error::from)).await
     }
 }
 

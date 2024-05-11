@@ -15,8 +15,8 @@
 use std::{
     borrow::Borrow,
     fmt::Debug,
+    future::Future,
     hash::{BuildHasher, Hash},
-    marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -27,7 +27,10 @@ use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheEntry};
 use futures::future::{join_all, try_join_all};
 
-use tokio::sync::{oneshot, Semaphore};
+use tokio::{
+    runtime::Handle,
+    sync::{oneshot, Semaphore},
+};
 
 use crate::{
     error::{Error, Result},
@@ -74,8 +77,6 @@ where
     pub admission_picker: Box<dyn AdmissionPicker<Key = K>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
-
-    _marker: PhantomData<V>,
 }
 
 impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
@@ -163,6 +164,8 @@ where
     D: Device,
 {
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
+        let runtime = Handle::current();
+
         let device = D::open(config.device_config.clone()).await?;
 
         let mut tombstones = vec![];
@@ -187,6 +190,7 @@ where
             &indexer,
             &region_manager,
             &tombstones,
+            runtime.clone(),
         )
         .await?;
 
@@ -197,6 +201,7 @@ where
                 region_manager.clone(),
                 device.clone(),
                 tombstone_log.clone(),
+                runtime.clone(),
             )
             .await
         }))
@@ -209,6 +214,7 @@ where
                 config.reinsertion_picker.clone(),
                 indexer.clone(),
                 flushers.clone(),
+                runtime.clone(),
             )
             .await
         }))
@@ -253,41 +259,40 @@ where
         }
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<V>>
+    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         let hash = self.inner.memory.hash_builder().hash_one(key);
-        let addr = match self.inner.indexer.get(hash) {
-            Some(addr) => addr,
-            None => return Ok(None),
-        };
 
-        tracing::trace!("{addr:#?}");
+        let device = self.inner.device.clone();
+        let indexer = self.inner.indexer.clone();
 
-        let buffer = self
-            .inner
-            .device
-            .read(addr.region, addr.offset as _, addr.len as _)
-            .await?;
+        async move {
+            let addr = match indexer.get(hash) {
+                Some(addr) => addr,
+                None => return Ok(None),
+            };
 
-        let (_, k, v) = match EntryDeserializer::deserialize::<K, V>(&buffer) {
-            Ok(res) => res,
-            Err(e) => match e {
-                Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
-                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
-                    self.inner.indexer.remove(hash);
-                    return Ok(None);
-                }
-                e => return Err(e),
-            },
-        };
-        if k.borrow() != key {
-            return Ok(None);
+            tracing::trace!("{addr:#?}");
+
+            let buffer = device.read(addr.region, addr.offset as _, addr.len as _).await?;
+
+            let (_, k, v) = match EntryDeserializer::deserialize::<K, V>(&buffer) {
+                Ok(res) => res,
+                Err(e) => match e {
+                    Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
+                        tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
+                        indexer.remove(hash);
+                        return Ok(None);
+                    }
+                    e => return Err(e),
+                },
+            };
+
+            Ok(Some((k, v)))
         }
-
-        Ok(Some(v))
     }
 
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
@@ -360,12 +365,12 @@ where
         self.enqueue(entry)
     }
 
-    async fn lookup<Q>(&self, key: &Q) -> Result<Option<Self::Value>>
+    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        self.lookup(key).await
+        self.load(key)
     }
 
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
@@ -440,7 +445,6 @@ mod tests {
             admission_picker,
             reinsertion_picker: Arc::<DenyAllPicker<u64>>::default(),
             tombstone_log_config: None,
-            _marker: PhantomData,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -469,7 +473,6 @@ mod tests {
             admission_picker: Box::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker,
             tombstone_log_config: None,
-            _marker: PhantomData,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -498,7 +501,6 @@ mod tests {
             admission_picker: Box::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<DenyAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
-            _marker: PhantomData,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -517,10 +519,10 @@ mod tests {
         assert!(store.enqueue(e1.clone()).await.unwrap());
         assert!(store.enqueue(e2).await.unwrap());
 
-        let v1 = store.lookup(&1).await.unwrap().unwrap();
-        assert_eq!(v1, vec![1; 7 * KB]);
-        let v2 = store.lookup(&2).await.unwrap().unwrap();
-        assert_eq!(v2, vec![2; 7 * KB]);
+        let r1 = store.load(&1).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        let r2 = store.load(&2).await.unwrap().unwrap();
+        assert_eq!(r2, (2, vec![2; 7 * KB]));
 
         // [ [e1, e2], [e3, e4], [], [] ]
         let e3 = memory.insert(3, vec![3; 7 * KB]);
@@ -529,29 +531,29 @@ mod tests {
         assert!(store.enqueue(e3).await.unwrap());
         assert!(store.enqueue(e4).await.unwrap());
 
-        let v1 = store.lookup(&1).await.unwrap().unwrap();
-        assert_eq!(v1, vec![1; 7 * KB]);
-        let v2 = store.lookup(&2).await.unwrap().unwrap();
-        assert_eq!(v2, vec![2; 7 * KB]);
-        let v3 = store.lookup(&3).await.unwrap().unwrap();
-        assert_eq!(v3, vec![3; 7 * KB]);
-        let v4 = store.lookup(&4).await.unwrap().unwrap();
-        assert_eq!(v4, vec![4; 6 * KB]);
+        let r1 = store.load(&1).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        let r2 = store.load(&2).await.unwrap().unwrap();
+        assert_eq!(r2, (2, vec![2; 7 * KB]));
+        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        let r4 = store.load(&4).await.unwrap().unwrap();
+        assert_eq!(r4, (4, vec![4; 6 * KB]));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
         assert!(store.enqueue(e5).await.unwrap());
 
-        let v1 = store.lookup(&1).await.unwrap().unwrap();
-        assert_eq!(v1, vec![1; 7 * KB]);
-        let v2 = store.lookup(&2).await.unwrap().unwrap();
-        assert_eq!(v2, vec![2; 7 * KB]);
-        let v3 = store.lookup(&3).await.unwrap().unwrap();
-        assert_eq!(v3, vec![3; 7 * KB]);
-        let v4 = store.lookup(&4).await.unwrap().unwrap();
-        assert_eq!(v4, vec![4; 6 * KB]);
-        let v5 = store.lookup(&5).await.unwrap().unwrap();
-        assert_eq!(v5, vec![5; 13 * KB]);
+        let r1 = store.load(&1).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        let r2 = store.load(&2).await.unwrap().unwrap();
+        assert_eq!(r2, (2, vec![2; 7 * KB]));
+        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        let r4 = store.load(&4).await.unwrap().unwrap();
+        assert_eq!(r4, (4, vec![4; 6 * KB]));
+        let r5 = store.load(&5).await.unwrap().unwrap();
+        assert_eq!(r5, (5, vec![5; 13 * KB]));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
         let e6 = memory.insert(6, vec![6; 7 * KB]);
@@ -559,16 +561,16 @@ mod tests {
         assert!(store.enqueue(e6).await.unwrap());
         assert!(store.enqueue(e4v2).await.unwrap());
 
-        assert!(store.lookup(&1).await.unwrap().is_none());
-        assert!(store.lookup(&2).await.unwrap().is_none());
-        let v3 = store.lookup(&3).await.unwrap().unwrap();
-        assert_eq!(v3, vec![3; 7 * KB]);
-        let v4v2 = store.lookup(&4).await.unwrap().unwrap();
-        assert_eq!(v4v2, vec![!4; 7 * KB]);
-        let v5 = store.lookup(&5).await.unwrap().unwrap();
-        assert_eq!(v5, vec![5; 13 * KB]);
-        let v6 = store.lookup(&6).await.unwrap().unwrap();
-        assert_eq!(v6, vec![6; 7 * KB]);
+        assert!(store.load(&1).await.unwrap().is_none());
+        assert!(store.load(&2).await.unwrap().is_none());
+        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        let r4v2 = store.load(&4).await.unwrap().unwrap();
+        assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
+        let r5 = store.load(&5).await.unwrap().unwrap();
+        assert_eq!(r5, (5, vec![5; 13 * KB]));
+        let r6 = store.load(&6).await.unwrap().unwrap();
+        assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
         assert!(store.enqueue(e1).await.is_err());
@@ -576,16 +578,16 @@ mod tests {
 
         let store = store_for_test(&memory, dir.path()).await;
 
-        assert!(store.lookup(&1).await.unwrap().is_none());
-        assert!(store.lookup(&2).await.unwrap().is_none());
-        let v3 = store.lookup(&3).await.unwrap().unwrap();
-        assert_eq!(v3, vec![3; 7 * KB]);
-        let v4v2 = store.lookup(&4).await.unwrap().unwrap();
-        assert_eq!(v4v2, vec![!4; 7 * KB]);
-        let v5 = store.lookup(&5).await.unwrap().unwrap();
-        assert_eq!(v5, vec![5; 13 * KB]);
-        let v6 = store.lookup(&6).await.unwrap().unwrap();
-        assert_eq!(v6, vec![6; 7 * KB]);
+        assert!(store.load(&1).await.unwrap().is_none());
+        assert!(store.load(&2).await.unwrap().is_none());
+        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        let r4v2 = store.load(&4).await.unwrap().unwrap();
+        assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
+        let r5 = store.load(&5).await.unwrap().unwrap();
+        assert_eq!(r5, (5, vec![5; 13 * KB]));
+        let r6 = store.load(&6).await.unwrap().unwrap();
+        assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
     #[test_log::test(tokio::test)]
@@ -604,11 +606,11 @@ mod tests {
             .all(|inserted| inserted));
 
         for i in 0..6 {
-            assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+            assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
         }
 
         assert!(store.delete(&3).await.unwrap());
-        assert_eq!(store.lookup(&3).await.unwrap(), None);
+        assert_eq!(store.load(&3).await.unwrap(), None);
 
         store.close().await.unwrap();
         drop(store);
@@ -616,21 +618,21 @@ mod tests {
         let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
         for i in 0..6 {
             if i != 3 {
-                assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+                assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
             } else {
-                assert_eq!(store.lookup(&3).await.unwrap(), None);
+                assert_eq!(store.load(&3).await.unwrap(), None);
             }
         }
 
         assert!(store.enqueue(es[3].clone()).await.unwrap());
-        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     #[test_log::test(tokio::test)]
@@ -649,11 +651,11 @@ mod tests {
             .all(|inserted| inserted));
 
         for i in 0..6 {
-            assert_eq!(store.lookup(&i).await.unwrap(), Some(vec![i as u8; 7 * KB]));
+            assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
         }
 
         assert!(store.delete(&3).await.unwrap());
-        assert_eq!(store.lookup(&3).await.unwrap(), None);
+        assert_eq!(store.load(&3).await.unwrap(), None);
 
         store.destroy().await.unwrap();
 
@@ -662,18 +664,18 @@ mod tests {
 
         let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
         for i in 0..6 {
-            assert_eq!(store.lookup(&i).await.unwrap(), None);
+            assert_eq!(store.load(&i).await.unwrap(), None);
         }
 
         assert!(store.enqueue(es[3].clone()).await.unwrap());
-        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.lookup(&3).await.unwrap(), Some(vec![3; 7 * KB]));
+        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     #[test_log::test(tokio::test)]
@@ -689,9 +691,9 @@ mod tests {
         assert!(store.enqueue(e1.clone()).await.unwrap());
         assert!(!store.enqueue(e2).await.unwrap());
 
-        let v1 = store.lookup(&1).await.unwrap().unwrap();
-        assert_eq!(v1, vec![1; 7 * KB]);
-        assert!(store.lookup(&2).await.unwrap().is_none());
+        let r1 = store.load(&1).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        assert!(store.load(&2).await.unwrap().is_none());
     }
 
     #[test_log::test(tokio::test)]
@@ -713,26 +715,26 @@ mod tests {
             assert!(store.enqueue(e).await.unwrap());
         }
         for i in 0..6 {
-            let v = store.lookup(&i).await.unwrap().unwrap();
-            assert_eq!(v, vec![i as u8; 7 * KB]);
+            let r = store.load(&i).await.unwrap().unwrap();
+            assert_eq!(r, (i, vec![i as u8; 7 * KB]));
         }
 
         // [ [], [e2, e3], [e4, e5], [e6, e1] ]
         assert!(store.enqueue(es[6].clone()).await.unwrap());
         let mut res = vec![];
         for i in 0..7 {
-            res.push(store.lookup(&i).await.unwrap());
+            res.push(store.load(&i).await.unwrap());
         }
         assert_eq!(
             res,
             vec![
                 None,
-                Some(vec![1; 7 * KB]),
-                Some(vec![2; 7 * KB]),
-                Some(vec![3; 7 * KB]),
-                Some(vec![4; 7 * KB]),
-                Some(vec![5; 7 * KB]),
-                Some(vec![6; 7 * KB]),
+                Some((1, vec![1; 7 * KB])),
+                Some((2, vec![2; 7 * KB])),
+                Some((3, vec![3; 7 * KB])),
+                Some((4, vec![4; 7 * KB])),
+                Some((5, vec![5; 7 * KB])),
+                Some((6, vec![6; 7 * KB])),
             ]
         );
 
@@ -740,19 +742,19 @@ mod tests {
         assert!(store.enqueue(es[7].clone()).await.unwrap());
         let mut res = vec![];
         for i in 0..8 {
-            res.push(store.lookup(&i).await.unwrap());
+            res.push(store.load(&i).await.unwrap());
         }
         assert_eq!(
             res,
             vec![
                 None,
-                Some(vec![1; 7 * KB]),
+                Some((1, vec![1; 7 * KB])),
                 None,
-                Some(vec![3; 7 * KB]),
-                Some(vec![4; 7 * KB]),
-                Some(vec![5; 7 * KB]),
-                Some(vec![6; 7 * KB]),
-                Some(vec![7; 7 * KB]),
+                Some((3, vec![3; 7 * KB])),
+                Some((4, vec![4; 7 * KB])),
+                Some((5, vec![5; 7 * KB])),
+                Some((6, vec![6; 7 * KB])),
+                Some((7, vec![7; 7 * KB])),
             ]
         );
 
@@ -762,21 +764,21 @@ mod tests {
         assert!(store.enqueue(es[9].clone()).await.unwrap());
         let mut res = vec![];
         for i in 0..10 {
-            res.push(store.lookup(&i).await.unwrap());
+            res.push(store.load(&i).await.unwrap());
         }
         assert_eq!(
             res,
             vec![
                 None,
-                Some(vec![1; 7 * KB]),
+                Some((1, vec![1; 7 * KB])),
                 None,
-                Some(vec![3; 7 * KB]),
+                Some((3, vec![3; 7 * KB])),
                 None,
                 None,
-                Some(vec![6; 7 * KB]),
-                Some(vec![7; 7 * KB]),
-                Some(vec![8; 7 * KB]),
-                Some(vec![9; 7 * KB]),
+                Some((6, vec![6; 7 * KB])),
+                Some((7, vec![7; 7 * KB])),
+                Some((8, vec![8; 7 * KB])),
+                Some((9, vec![9; 7 * KB])),
             ]
         );
     }

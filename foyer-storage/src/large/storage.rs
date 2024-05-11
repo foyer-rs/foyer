@@ -66,7 +66,7 @@ pub trait Storage: Send + Sync + 'static + Clone {
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture;
 
     #[must_use]
-    fn lookup<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<Self::Value>>> + Send
+    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;

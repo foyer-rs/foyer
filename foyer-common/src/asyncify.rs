@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use tokio::runtime::Handle;
+
 #[cfg(not(madsim))]
 pub async fn asyncify<F, T>(f: F) -> T
 where
@@ -23,6 +25,24 @@ where
 
 #[cfg(madsim)]
 pub async fn asyncify<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    f()
+}
+
+#[cfg(not(madsim))]
+pub async fn asyncify_with_runtime<F, T>(runtime: &Handle, f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    runtime.spawn_blocking(f).await.unwrap()
+}
+
+#[cfg(madsim)]
+pub async fn asyncify_with_runtime<F, T>(_: &Handle, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,

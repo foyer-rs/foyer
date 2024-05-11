@@ -18,9 +18,10 @@ use std::{
     sync::Arc,
 };
 
-use foyer_common::{asyncify::asyncify, bits, fs::freespace};
+use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use tokio::runtime::Handle;
 
 use super::{Device, DeviceConfig, DeviceExt, RegionId};
 use crate::{
@@ -46,6 +47,8 @@ struct DirectFsDeviceInner {
 
     capacity: usize,
     file_size: usize,
+
+    runtime: Handle,
 }
 
 impl DeviceConfig for DirectFsDeviceConfig {
@@ -98,6 +101,8 @@ impl Device for DirectFsDevice {
     }
 
     async fn open(config: Self::Config) -> Result<Self> {
+        let runtime = Handle::current();
+
         config.verify()?;
 
         // TODO(MrCroxx): write and read config to a manifest file for pinning
@@ -105,7 +110,7 @@ impl Device for DirectFsDevice {
         let regions = config.capacity / config.file_size;
 
         let path = config.dir.clone();
-        asyncify(move || create_dir_all(path)).await?;
+        asyncify_with_runtime(&runtime, move || create_dir_all(path)).await?;
 
         let futures = (0..regions)
             .map(|i| {
@@ -136,6 +141,7 @@ impl Device for DirectFsDevice {
                 files,
                 capacity: config.capacity,
                 file_size: config.file_size,
+                runtime,
             }),
         })
     }
@@ -155,7 +161,7 @@ impl Device for DirectFsDevice {
         );
 
         let file = self.file(region).clone();
-        asyncify(move || {
+        asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
 
@@ -190,7 +196,7 @@ impl Device for DirectFsDevice {
         }
 
         let file = self.file(region).clone();
-        let mut buffer = asyncify(move || {
+        let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
 
@@ -214,7 +220,7 @@ impl Device for DirectFsDevice {
     async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
         let flush = |region: RegionId| {
             let file = self.file(region).clone();
-            asyncify(move || file.sync_all().map_err(Error::from))
+            asyncify_with_runtime(&self.inner.runtime, move || file.sync_all().map_err(Error::from))
         };
 
         if let Some(region) = region {
