@@ -19,19 +19,16 @@ use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use foyer_common::bits;
 use foyer_common::code::{StorageKey, StorageValue};
 use futures::future::try_join_all;
 
 use itertools::Itertools;
 use tokio::sync::Semaphore;
 
-use crate::catalog::Sequence;
+use crate::catalog::{AtomicSequence, Sequence};
 use crate::error::{Error, Result};
-use crate::serde::EntryDeserializer;
-use crate::{catalog::AtomicSequence, serde::EntryHeader};
+use crate::large::scanner::{EntryInfo, RegionScanner};
 
-use super::device::{IoBuffer, IO_BUFFER_ALLOCATOR};
 use super::generic::GenericStoreConfig;
 use super::indexer::Indexer;
 use super::region::RegionManager;
@@ -197,7 +194,7 @@ impl RegionRecoverRunner {
 
         let mut infos = vec![];
 
-        let mut iter = RegionIter::new(region, device);
+        let mut iter = RegionScanner::new(region, device);
         loop {
             let r = iter.next().await;
             match r {
@@ -217,112 +214,5 @@ impl RegionRecoverRunner {
         }
 
         Ok(infos)
-    }
-}
-
-#[derive(Debug)]
-struct EntryInfo {
-    hash: u64,
-    sequence: Sequence,
-    addr: EntryAddress,
-}
-
-#[derive(Debug)]
-struct RegionIter<D> {
-    region: RegionId,
-    offset: u64,
-    cache: CachedDeviceReader<D>,
-}
-
-#[derive(Debug)]
-struct CachedDeviceReader<D> {
-    region: RegionId,
-    offset: u64,
-    buffer: IoBuffer,
-    device: D,
-}
-
-impl<D> CachedDeviceReader<D> {
-    const IO_SIZE_HINT: usize = 16 * 1024;
-
-    fn new(region: RegionId, device: D) -> Self {
-        Self {
-            region,
-            offset: 0,
-            buffer: IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
-            device,
-        }
-    }
-
-    async fn read(&mut self, offset: u64, len: usize) -> Result<&[u8]>
-    where
-        D: Device,
-    {
-        if offset >= self.offset && offset as usize + len <= self.offset as usize + self.buffer.len() {
-            let start = (offset - self.offset) as usize;
-            let end = start + len;
-            return Ok(&self.buffer[start..end]);
-        }
-        self.offset = bits::align_down(self.device.align() as u64, offset);
-        let end = bits::align_up(
-            self.device.align(),
-            std::cmp::max(offset as usize + len, offset as usize + Self::IO_SIZE_HINT),
-        );
-        let end = std::cmp::min(self.device.region_size(), end);
-        let read_len = end - self.offset as usize;
-        debug_assert!(bits::is_aligned(self.device.align(), read_len));
-        debug_assert!(read_len >= len);
-
-        let buffer = self.device.read(self.region, self.offset, read_len).await?;
-        self.buffer = buffer;
-
-        let start = (offset - self.offset) as usize;
-        let end = start + len;
-        Ok(&self.buffer[start..end])
-    }
-}
-
-impl<D> RegionIter<D> {
-    pub fn new(region: RegionId, device: D) -> Self {
-        Self {
-            region,
-            offset: 0,
-            cache: CachedDeviceReader::new(region, device),
-        }
-    }
-
-    pub async fn next(&mut self) -> Result<Option<EntryInfo>>
-    where
-        D: Device,
-    {
-        debug_assert!(bits::is_aligned(self.cache.device.align() as u64, self.offset));
-
-        if self.offset as usize >= self.cache.device.region_size() {
-            // reach region EOF
-            return Ok(None);
-        }
-
-        // load entry header buf
-        let buf = self.cache.read(self.offset, EntryHeader::serialized_len()).await?;
-
-        let Some(header) = EntryDeserializer::header(buf) else {
-            // no more entries
-            return Ok(None);
-        };
-
-        let res = EntryInfo {
-            hash: header.hash,
-            sequence: header.sequence,
-            addr: EntryAddress {
-                region: self.region,
-                offset: self.offset as _,
-                len: header.entry_len() as _,
-            },
-        };
-
-        let aligned = bits::align_up(self.cache.device.align(), header.entry_len());
-        self.offset += aligned as u64;
-
-        Ok(Some(res))
     }
 }

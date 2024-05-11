@@ -58,7 +58,7 @@ impl From<CacheContext> for LruContext {
     fn from(value: CacheContext) -> Self {
         match value {
             CacheContext::Default => Self::HighPriority,
-            CacheContext::LruPriorityLow => Self::LowPriority,
+            CacheContext::LowPriority => Self::LowPriority,
         }
     }
 }
@@ -67,7 +67,7 @@ impl From<LruContext> for CacheContext {
     fn from(value: LruContext) -> Self {
         match value {
             LruContext::HighPriority => CacheContext::Default,
-            LruContext::LowPriority => CacheContext::LruPriorityLow,
+            LruContext::LowPriority => CacheContext::LowPriority,
         }
     }
 }

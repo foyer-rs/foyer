@@ -31,6 +31,7 @@ use tokio::sync::oneshot;
 use super::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
 use super::generic::GenericStoreConfig;
 use super::indexer::{EntryAddress, Indexer};
+use super::reclaimer::Reinsertion;
 use super::region::{GetCleanRegionHandle, RegionManager};
 use super::storage::EnqueueFuture;
 use super::tombstone::{Tombstone, TombstoneLog};
@@ -151,6 +152,7 @@ where
 {
     CacheEntry(CacheEntry<K, V, S>),
     Tombstone(Tombstone),
+    Reinsertion(Reinsertion),
 }
 
 impl<K, V, S> From<CacheEntry<K, V, S>> for Submission<K, V, S>
@@ -175,6 +177,17 @@ where
     }
 }
 
+impl<K, V, S> From<Reinsertion> for Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
+{
+    fn from(reinsertion: Reinsertion) -> Self {
+        Self::Reinsertion(reinsertion)
+    }
+}
+
 #[derive(Debug)]
 pub struct Flusher<K, V, S, D>
 where
@@ -192,6 +205,26 @@ where
 
     compression: Compression,
     flush: bool,
+}
+
+impl<K, V, S, D> Clone for Flusher<K, V, S, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
+    D: Device,
+{
+    fn clone(&self) -> Self {
+        Self {
+            batch: self.batch.clone(),
+            indexer: self.indexer.clone(),
+            region_manager: self.region_manager.clone(),
+            device: self.device.clone(),
+            tombstone_log: self.tombstone_log.clone(),
+            compression: self.compression,
+            flush: self.flush,
+        }
+    }
 }
 
 impl<K, V, S, D> Flusher<K, V, S, D>
@@ -225,6 +258,7 @@ where
         match submission.into() {
             Submission::CacheEntry(entry) => self.entry(entry, sequence),
             Submission::Tombstone(tombstone) => self.tombstone(tombstone, sequence),
+            Submission::Reinsertion(reinsertion) => self.reinsertion(reinsertion, sequence),
         }
     }
 
@@ -254,24 +288,7 @@ where
                 return;
             }
 
-            let hash = entry.hash();
-
-            // Attempt to get a clean region for the new group.
-            if state.groups.is_empty() {
-                let handle = self.region_manager.get_clean_region();
-                state.groups.push(WriteGroup {
-                    writer: RegionHandle {
-                        handle,
-                        offset: 0,
-                        size: 0,
-                        is_full: false,
-                    },
-                    buffer: IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
-                    indices: vec![],
-                    txs: vec![],
-                    entries: vec![],
-                })
-            }
+            self.may_init_batch_state(state);
 
             // Attempt to pick the latest group to write.
             let group = state.groups.last_mut().unwrap();
@@ -315,30 +332,19 @@ where
                 bits::debug_assert_aligned(self.device.align(), group.buffer.len());
                 bits::debug_assert_aligned(self.device.align(), buffer.len());
 
-                let handle = self.region_manager.get_clean_region();
-                state.groups.push(WriteGroup {
-                    writer: RegionHandle {
-                        handle,
-                        offset: 0,
-                        size: 0,
-                        is_full: false,
-                    },
-                    buffer,
-                    indices: vec![],
-                    txs: vec![],
-                    entries: vec![],
-                });
+                self.append_groups_with_buffer(state, buffer);
                 boffset = 0;
             }
 
             // Re-reference the latest group in case it may be out-dated.
             let group = state.groups.last_mut().unwrap();
             group.indices.push((
-                hash,
+                entry.hash(),
                 EntryAddress {
                     region: RegionId::MAX,
                     offset: group.writer.size as u32 + boffset as u32,
                     len: len as _,
+                    sequence,
                 },
             ));
             group.txs.push(tx);
@@ -348,6 +354,70 @@ where
 
         if let Some(token) = self.batch.accumulate(append) {
             tracing::trace!("[flusher]: entry with sequence: {sequence} becomes leader");
+            self.commit(token);
+        }
+
+        EnqueueFuture::new(rx)
+    }
+
+    fn reinsertion(&self, mut reinsertion: Reinsertion, sequence: Sequence) -> EnqueueFuture {
+        tracing::trace!("[flusher]: submit reinsertion with sequence: {sequence}");
+
+        debug_assert_eq!(sequence, 0);
+
+        let (tx, rx) = oneshot::channel();
+        let append = |state: &mut BatchState<K, V, S, D>| {
+            self.may_init_batch_state(state);
+
+            if self.indexer.get(reinsertion.hash).is_none() {
+                let _ = tx.send(Ok(false));
+                return;
+            }
+
+            // Attempt to pick the latest group to write.
+            let group = state.groups.last_mut().unwrap();
+            bits::debug_assert_aligned(self.device.align(), group.buffer.len());
+
+            // Rotate group early for we know the len of the buffer to write.
+            let aligned = bits::align_up(self.device.align(), reinsertion.buffer.len());
+            if group.writer.size + group.buffer.len() + aligned > self.device.region_size() {
+                tracing::trace!("[flusher]: split group at size: {size}, acc buf len: {acc_buf_len}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}",
+                    size = group.writer.size,
+                    acc_buf_len = group.buffer.len(),
+                    buf_len = reinsertion.buffer.len(),
+                    total = group.writer.size + group.buffer.len() + reinsertion.buffer.len(),
+                    region_size = self.device.region_size(),
+                );
+
+                group.writer.is_full = true;
+
+                bits::debug_assert_aligned(self.device.align(), group.buffer.len());
+
+                self.append_groups(state);
+            }
+
+            // Re-reference the latest group in case it may be out-dated.
+            let group = state.groups.last_mut().unwrap();
+            let boffset = group.buffer.len();
+            let len = reinsertion.buffer.len();
+            group.buffer.reserve(aligned);
+            group.buffer.append(&mut reinsertion.buffer);
+            unsafe { group.buffer.set_len(boffset + aligned) };
+            group.indices.push((
+                reinsertion.hash,
+                EntryAddress {
+                    region: RegionId::MAX,
+                    offset: group.writer.size as u32 + boffset as u32,
+                    len: len as _,
+                    sequence: reinsertion.sequence,
+                },
+            ));
+            group.txs.push(tx);
+            group.writer.size += aligned;
+        };
+
+        if let Some(token) = self.batch.accumulate(append) {
+            tracing::trace!("[flusher]: reinsertion with sequence: {sequence} becomes leader");
             self.commit(token);
         }
 
@@ -466,5 +536,35 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Initialize the batch state if needed.
+    fn may_init_batch_state(&self, state: &mut BatchState<K, V, S, D>) {
+        if state.groups.is_empty() {
+            self.append_groups(state);
+        }
+    }
+
+    fn append_groups(&self, state: &mut BatchState<K, V, S, D>) {
+        self.append_groups_with_buffer(
+            state,
+            IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
+        );
+    }
+
+    fn append_groups_with_buffer(&self, state: &mut BatchState<K, V, S, D>, buffer: IoBuffer) {
+        let handle = self.region_manager.get_clean_region();
+        state.groups.push(WriteGroup {
+            writer: RegionHandle {
+                handle,
+                offset: 0,
+                size: 0,
+                is_full: false,
+            },
+            buffer,
+            indices: vec![],
+            txs: vec![],
+            entries: vec![],
+        });
     }
 }

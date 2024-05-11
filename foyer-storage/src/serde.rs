@@ -35,7 +35,7 @@ pub fn checksum(buf: &[u8]) -> u64 {
 const ENTRY_MAGIC: u32 = 0x97_03_27_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct EntryHeader {
     pub key_len: u32,
     pub value_len: u32,
@@ -183,23 +183,13 @@ impl EntryDeserializer {
 
         // deserialize value
         let mut offset = EntryHeader::serialized_len();
-        let compressed = &buffer[offset..offset + header.value_len as usize];
+        let buf = &buffer[offset..offset + header.value_len as usize];
         offset += header.value_len as usize;
-        let value = match header.compression {
-            Compression::None => bincode::deserialize_from(compressed).map_err(Error::from)?,
-            Compression::Zstd => {
-                let decoder = zstd::Decoder::new(compressed).map_err(Error::from)?;
-                bincode::deserialize_from(decoder).map_err(Error::from)?
-            }
-            Compression::Lz4 => {
-                let decoder = lz4::Decoder::new(compressed).map_err(Error::from)?;
-                bincode::deserialize_from(decoder).map_err(Error::from)?
-            }
-        };
+        let value = Self::deserialize_value(buf, header.compression)?;
 
         // deserialize key
         let buf = &buffer[offset..offset + header.key_len as usize];
-        let key = bincode::deserialize_from(buf).map_err(Error::from)?;
+        let key = Self::deserialize_key(buf)?;
         offset += header.key_len as usize;
 
         let checksum = checksum(&buffer[EntryHeader::serialized_len()..offset]);
@@ -213,10 +203,34 @@ impl EntryDeserializer {
         Ok((header, key, value))
     }
 
-    pub fn header(buf: &[u8]) -> Option<EntryHeader> {
+    pub fn deserialize_header(buf: &[u8]) -> Option<EntryHeader> {
         if buf.len() < EntryHeader::serialized_len() {
             return None;
         }
         EntryHeader::read(buf).ok()
+    }
+
+    pub fn deserialize_key<K>(buf: &[u8]) -> Result<K>
+    where
+        K: StorageKey,
+    {
+        bincode::deserialize_from(buf).map_err(Error::from)
+    }
+
+    pub fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
+    where
+        V: StorageValue,
+    {
+        match compression {
+            Compression::None => bincode::deserialize_from(buf).map_err(Error::from),
+            Compression::Zstd => {
+                let decoder = zstd::Decoder::new(buf).map_err(Error::from)?;
+                bincode::deserialize_from(decoder).map_err(Error::from)
+            }
+            Compression::Lz4 => {
+                let decoder = lz4::Decoder::new(buf).map_err(Error::from)?;
+                bincode::deserialize_from(decoder).map_err(Error::from)
+            }
+        }
     }
 }

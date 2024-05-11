@@ -12,16 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, hash::BuildHasher, sync::Arc, time::Duration};
 
+use foyer_common::code::{StorageKey, StorageValue};
+use futures::future::try_join_all;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use super::{
-    device::{Device, DeviceExt, IO_BUFFER_ALLOCATOR},
+    device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
+    flusher::Flusher,
     indexer::Indexer,
     region::{Region, RegionManager},
+    reinsertion::ReinsertionPicker,
 };
-use crate::error::Result;
+use crate::{catalog::Sequence, error::Result, large::scanner::RegionScanner};
 
 #[derive(Debug)]
 pub struct Reclaimer {
@@ -29,8 +33,17 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    pub async fn open<D>(region_manager: RegionManager<D>, reclaim_semaphore: Arc<Semaphore>, indexer: Indexer) -> Self
+    pub async fn open<K, V, S, D>(
+        region_manager: RegionManager<D>,
+        reclaim_semaphore: Arc<Semaphore>,
+        reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+        indexer: Indexer,
+        flushers: Vec<Flusher<K, V, S, D>>,
+    ) -> Self
     where
+        K: StorageKey,
+        V: StorageValue,
+        S: BuildHasher + Send + Sync + 'static + Debug,
         D: Device,
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
@@ -39,6 +52,8 @@ impl Reclaimer {
             region_manager,
             reclaim_semaphore,
             indexer,
+            flushers,
+            reinsertion_picker,
             wait_rx,
         };
 
@@ -55,20 +70,30 @@ impl Reclaimer {
     }
 }
 
-struct ReclaimRunner<D>
+struct ReclaimRunner<K, V, S, D>
 where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
     D: Device,
 {
+    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+
     region_manager: RegionManager<D>,
     reclaim_semaphore: Arc<Semaphore>,
 
     indexer: Indexer,
 
+    flushers: Vec<Flusher<K, V, S, D>>,
+
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 }
 
-impl<D> ReclaimRunner<D>
+impl<K, V, S, D> ReclaimRunner<K, V, S, D>
 where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
     D: Device,
 {
     const RETRY_INTERVAL: Duration = Duration::from_millis(10);
@@ -115,13 +140,70 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let hashes = self.indexer.take_region(region.id());
-        self.indexer.remove_batch(&hashes);
+        // TODO(MrCroxx): Special impl for case : `if self.reinsertion_picker.type_id() != TypeId::of::<Arc<DenyAllPicker<K>>>()` ?
+        let mut scanner = RegionScanner::new(region.id(), region.device().clone());
+        let mut futures = vec![];
+        let mut unpicked = vec![];
+        // The loop will ends when:
+        //
+        // 1. no subsequent entries
+        // 2. on error
+        //
+        // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
+        // They will be removed when a query find a mismatch entry.
+        'reclaim: loop {
+            let (info, key) = match scanner.next_key().await {
+                Ok(None) => break 'reclaim,
+                Err(e) => {
+                    tracing::warn!(
+                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                        id = region.id()
+                    );
+                    break 'reclaim;
+                }
+                Ok(Some((info, key))) => (info, key),
+            };
+            if self.reinsertion_picker.pick(&key) {
+                let buffer = match region
+                    .device()
+                    .read(region.id(), info.addr.offset as _, info.addr.len as _)
+                    .await
+                {
+                    Err(e) => {
+                        tracing::warn!(
+                            "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                            id = region.id()
+                        );
+                        break 'reclaim;
+                    }
+                    Ok(buf) => buf,
+                };
+                let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
+                let future = flusher.submit(
+                    Reinsertion {
+                        hash: info.hash,
+                        sequence: info.sequence,
+                        buffer,
+                    },
+                    0,
+                );
+                futures.push(future);
+            } else {
+                unpicked.push(info.hash);
+            }
+        }
 
-        // TODO(MrCroxx): reclaim entries
+        tokio::spawn(async move {
+            if let Err(e) = try_join_all(futures).await {
+                tracing::warn!(
+                    "[reclaimer]: error raised when reinserting entries, the entries may be dropped, err: {e}"
+                );
+            }
+        });
+        self.indexer.remove_batch(&unpicked);
 
         if let Err(e) = RegionCleaner::clean(&region).await {
-            tracing::warn!("mark region {id} clean error: {e}", id = region.id());
+            tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
         }
 
         tracing::debug!("[reclaimer]: Finish reclaiming region {id}.");
@@ -154,4 +236,11 @@ impl RegionCleaner {
         ];
         region.device().write(buf, region.id(), 0).await
     }
+}
+
+#[derive(Debug)]
+pub struct Reinsertion {
+    pub hash: u64,
+    pub sequence: Sequence,
+    pub buffer: IoBuffer,
 }

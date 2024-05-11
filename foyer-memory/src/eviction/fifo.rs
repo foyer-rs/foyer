@@ -27,17 +27,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct FifoContext;
+pub struct FifoContext(CacheContext);
 
 impl From<CacheContext> for FifoContext {
-    fn from(_: CacheContext) -> Self {
-        Self
+    fn from(context: CacheContext) -> Self {
+        Self(context)
     }
 }
 
 impl From<FifoContext> for CacheContext {
-    fn from(_: FifoContext) -> Self {
-        CacheContext::Default
+    fn from(context: FifoContext) -> Self {
+        context.0
     }
 }
 
@@ -180,7 +180,7 @@ pub mod tests {
 
     unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<TestFifoHandle> {
         let mut handle = Box::<TestFifoHandle>::default();
-        handle.init(0, data, 1, FifoContext);
+        handle.init(0, data, 1, FifoContext(CacheContext::Default));
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 

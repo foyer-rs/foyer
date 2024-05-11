@@ -33,17 +33,17 @@ use crate::{
 const MAX_FREQ: u8 = 3;
 
 #[derive(Debug, Clone)]
-pub struct S3FifoContext;
+pub struct S3FifoContext(CacheContext);
 
 impl From<CacheContext> for S3FifoContext {
-    fn from(_: CacheContext) -> Self {
-        Self
+    fn from(context: CacheContext) -> Self {
+        Self(context)
     }
 }
 
 impl From<S3FifoContext> for CacheContext {
-    fn from(_: S3FifoContext) -> Self {
-        CacheContext::Default
+    fn from(context: S3FifoContext) -> Self {
+        context.0
     }
 }
 
@@ -428,7 +428,7 @@ mod tests {
             let ptrs = (0..100)
                 .map(|i| {
                     let mut handle = Box::<TestS3FifoHandle>::default();
-                    handle.init(i, i, 1, S3FifoContext);
+                    handle.init(i, i, 1, S3FifoContext(CacheContext::Default));
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();

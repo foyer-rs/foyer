@@ -59,17 +59,17 @@ impl Default for LfuConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct LfuContext;
+pub struct LfuContext(CacheContext);
 
 impl From<CacheContext> for LfuContext {
-    fn from(_: CacheContext) -> Self {
-        Self
+    fn from(context: CacheContext) -> Self {
+        Self(context)
     }
 }
 
 impl From<LfuContext> for CacheContext {
-    fn from(_: LfuContext) -> Self {
-        CacheContext::Default
+    fn from(context: LfuContext) -> Self {
+        context.0
     }
 }
 
@@ -464,7 +464,7 @@ mod tests {
             let ptrs = (0..100)
                 .map(|i| {
                     let mut handle = Box::<TestLfuHandle>::default();
-                    handle.init(i, i, 1, LfuContext);
+                    handle.init(i, i, 1, LfuContext(CacheContext::Default));
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();

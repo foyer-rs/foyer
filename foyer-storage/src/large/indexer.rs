@@ -12,10 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
+
+use crate::catalog::Sequence;
 
 use super::device::RegionId;
 
@@ -24,54 +29,42 @@ pub struct EntryAddress {
     pub region: RegionId,
     pub offset: u32,
     pub len: u32,
+
+    pub sequence: Sequence,
 }
 
 /// [`Indexer`] records key hash to entry address on fs.
 #[derive(Debug, Clone)]
 pub struct Indexer {
-    regions: Arc<Vec<Mutex<Vec<u64>>>>,
     shards: Arc<Vec<RwLock<HashMap<u64, EntryAddress>>>>,
 }
 
 impl Indexer {
-    pub fn new(regions: usize, shards: usize) -> Self {
-        let regions = (0..regions).map(|_| Mutex::new(vec![])).collect_vec();
+    pub fn new(shards: usize) -> Self {
         let shards = (0..shards).map(|_| RwLock::new(HashMap::new())).collect_vec();
         Self {
-            regions: Arc::new(regions),
             shards: Arc::new(shards),
         }
     }
 
     pub fn insert(&self, hash: u64, addr: EntryAddress) -> Option<EntryAddress> {
         let s = self.shard(hash);
-        let r = addr.region as usize;
 
-        let mut region = self.regions[r].lock();
         let mut shard = self.shards[s].write();
 
-        region.push(hash);
         // The old region hash cannot be removed to prevent from phantom entry on hash collision.
-        shard.insert(hash, addr)
+        self.insert_inner(&mut shard, hash, addr)
     }
 
     pub fn insert_batch(&self, batch: Vec<(u64, EntryAddress)>) -> Vec<(u64, EntryAddress)> {
-        let regions = batch
-            .iter()
-            .map(|(hash, addr)| (addr.region as usize, *hash))
-            .into_group_map();
         let shards: HashMap<usize, Vec<(u64, EntryAddress)>> =
             batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
-
-        for (r, mut hashes) in regions {
-            self.regions[r].lock().append(&mut hashes);
-        }
 
         let mut olds = vec![];
         for (s, batch) in shards {
             let mut shard = self.shards[s].write();
             for (hash, addr) in batch {
-                if let Some(old) = shard.insert(hash, addr) {
+                if let Some(old) = self.insert_inner(&mut shard, hash, addr) {
                     olds.push((hash, old));
                 }
             }
@@ -104,18 +97,11 @@ impl Indexer {
         olds
     }
 
-    pub fn take_region(&self, region: RegionId) -> Vec<u64> {
-        std::mem::take(self.regions[region as usize].lock().as_mut())
-    }
-
     pub fn clear(&self) {
-        self.regions.iter().for_each(|region| region.lock().clear());
         self.shards.iter().for_each(|shard| shard.write().clear());
     }
 
     pub fn take(&self) -> Vec<(u64, EntryAddress)> {
-        self.regions.iter().for_each(|region| region.lock().clear());
-
         let mut res = vec![];
         for shard in self.shards.iter() {
             let mut shard = shard.write();
@@ -127,5 +113,28 @@ impl Indexer {
     #[inline(always)]
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.shards.len()
+    }
+
+    fn insert_inner(
+        &self,
+        shard: &mut HashMap<u64, EntryAddress>,
+        hash: u64,
+        addr: EntryAddress,
+    ) -> Option<EntryAddress> {
+        match shard.entry(hash) {
+            Entry::Occupied(mut o) => {
+                // `>` for updates.
+                // '=' for reinsertions.
+                if addr.sequence >= o.get().sequence {
+                    Some(o.insert(addr))
+                } else {
+                    Some(addr)
+                }
+            }
+            Entry::Vacant(v) => {
+                v.insert(addr);
+                None
+            }
+        }
     }
 }
