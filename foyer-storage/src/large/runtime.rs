@@ -12,17 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    hash::{BuildHasher, Hash},
-    sync::Arc,
-};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
-use foyer_common::{
-    code::{StorageKey, StorageValue},
-    runtime::BackgroundShutdownRuntime,
-};
+use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
 use futures::{Future, FutureExt};
 
@@ -73,23 +65,17 @@ pub struct RuntimeConfig {
     thread_name: String,
 }
 
-pub struct RuntimeStoreConfig<K, V, S, SS>
+pub struct RuntimeStoreConfig<SS>
 where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-    SS: Storage<Key = K, Value = V, BuildHasher = S>,
+    SS: Storage,
 {
     pub store_config: SS::Config,
     pub runtime_config: RuntimeConfig,
 }
 
-impl<K, V, S, SS> Debug for RuntimeStoreConfig<K, V, S, SS>
+impl<SS> Debug for RuntimeStoreConfig<SS>
 where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-    SS: Storage<Key = K, Value = V, BuildHasher = S>,
+    SS: Storage,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RuntimeStoreConfig")
@@ -99,23 +85,18 @@ where
     }
 }
 
-pub struct Runtime<K, V, S, SS>
+#[derive(Debug)]
+pub struct Runtime<SS>
 where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-    SS: Storage<Key = K, Value = V, BuildHasher = S>,
+    SS: Storage,
 {
     runtime: Arc<BackgroundShutdownRuntime>,
     store: SS,
 }
 
-impl<K, V, S, SS> Clone for Runtime<K, V, S, SS>
+impl<SS> Clone for Runtime<SS>
 where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-    SS: Storage<Key = K, Value = V, BuildHasher = S>,
+    SS: Storage,
 {
     fn clone(&self) -> Self {
         Self {
@@ -125,18 +106,15 @@ where
     }
 }
 
-impl<K, V, S, SS> Storage for Runtime<K, V, S, SS>
+impl<SS> Storage for Runtime<SS>
 where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-    SS: Storage<Key = K, Value = V, BuildHasher = S>,
+    SS: Storage,
 {
-    type Key = K;
-    type Value = V;
-    type BuildHasher = S;
+    type Key = SS::Key;
+    type Value = SS::Value;
+    type BuildHasher = SS::BuildHasher;
 
-    type Config = RuntimeStoreConfig<K, V, S, SS>;
+    type Config = RuntimeStoreConfig<SS>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -202,7 +180,7 @@ mod tests {
             eviction::FifoPicker,
             generic::{GenericStore, GenericStoreConfig},
             recover::RecoverMode,
-            reinsertion::DenyAllPicker,
+            reinsertion::RejectAllPicker,
             storage::Storage,
         },
         Compression,
@@ -231,14 +209,14 @@ mod tests {
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
-            recover_mode: RecoverMode::StrictRecovery,
+            recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker: Box::<AdmitAllPicker<u64>>::default(),
-            reinsertion_picker: Arc::<DenyAllPicker<u64>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
         }
     }

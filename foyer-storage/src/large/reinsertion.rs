@@ -20,21 +20,29 @@ pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
     fn pick(&self, key: &Self::Key) -> bool;
 }
 
-#[derive(Default)]
-pub struct DenyAllPicker<K>(PhantomData<K>)
+pub struct RejectAllPicker<K>(PhantomData<K>)
 where
     K: Send + Sync + 'static;
 
-impl<K> Debug for DenyAllPicker<K>
+impl<K> Debug for RejectAllPicker<K>
 where
     K: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AdmitAllPicker").finish()
+        f.debug_tuple("RejectAllPicker").finish()
     }
 }
 
-impl<K> ReinsertionPicker for DenyAllPicker<K>
+impl<K> Default for RejectAllPicker<K>
+where
+    K: Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K> ReinsertionPicker for RejectAllPicker<K>
 where
     K: Send + Sync + 'static,
 {

@@ -20,7 +20,6 @@ pub trait AdmissionPicker: Send + Sync + 'static + Debug {
     fn pick(&self, key: &Self::Key) -> bool;
 }
 
-#[derive(Default)]
 pub struct AdmitAllPicker<K>(PhantomData<K>)
 where
     K: Send + Sync + 'static;
@@ -31,6 +30,15 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("AdmitAllPicker").finish()
+    }
+}
+
+impl<K> Default for AdmitAllPicker<K>
+where
+    K: Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self(PhantomData)
     }
 }
 
