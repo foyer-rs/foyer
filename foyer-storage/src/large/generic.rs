@@ -147,6 +147,8 @@ where
 
     admission_picker: Box<dyn AdmissionPicker<Key = K>>,
 
+    flush: bool,
+
     sequence: AtomicSequence,
 
     active: AtomicBool,
@@ -224,6 +226,7 @@ where
                 config.reinsertion_picker.clone(),
                 indexer.clone(),
                 flushers.clone(),
+                config.flush,
                 runtime.clone(),
             )
             .await
@@ -239,6 +242,7 @@ where
                 flushers,
                 reclaimers,
                 admission_picker: config.admission_picker,
+                flush: config.flush,
                 sequence,
                 active: AtomicBool::new(true),
             }),
@@ -343,7 +347,7 @@ where
         // Clean regions.
         try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {
             let region = self.inner.region_manager.region(id).clone();
-            async move { RegionCleaner::clean(&region).await }
+            async move { RegionCleaner::clean(&region, self.inner.flush).await }
         }))
         .await?;
 
