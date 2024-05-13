@@ -15,10 +15,10 @@
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use tokio::runtime::Handle;
 
-use super::{Device, DeviceConfig, DeviceExt, RegionId};
+use super::{Device, DeviceExt, DeviceOptions, RegionId};
 use crate::{
+    device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
-    large::device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
 };
 use std::{
     fs::{create_dir_all, File, OpenOptions},
@@ -27,7 +27,7 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct DirectFileDeviceConfig {
+pub struct DirectFileDeviceOptions {
     pub path: PathBuf,
     pub capacity: usize,
     pub region_size: usize,
@@ -43,7 +43,7 @@ pub struct DirectFileDevice {
     runtime: Handle,
 }
 
-impl DeviceConfig for DirectFileDeviceConfig {
+impl DeviceOptions for DirectFileDeviceOptions {
     fn verify(&self) -> Result<()> {
         if self.region_size == 0 || self.region_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
@@ -145,7 +145,7 @@ impl DirectFileDevice {
 }
 
 impl Device for DirectFileDevice {
-    type Config = DirectFileDeviceConfig;
+    type Options = DirectFileDeviceOptions;
 
     fn capacity(&self) -> usize {
         self.capacity
@@ -155,12 +155,12 @@ impl Device for DirectFileDevice {
         self.region_size
     }
 
-    async fn open(config: Self::Config) -> Result<Self> {
+    async fn open(options: Self::Options) -> Result<Self> {
         let runtime = Handle::current();
 
-        config.verify()?;
+        options.verify()?;
 
-        let dir = config.path.parent().expect("path must point to a file").to_path_buf();
+        let dir = options.path.parent().expect("path must point to a file").to_path_buf();
         asyncify_with_runtime(&runtime, move || create_dir_all(dir)).await?;
 
         let mut opts = OpenOptions::new();
@@ -173,14 +173,14 @@ impl Device for DirectFileDevice {
             opts.custom_flags(Self::O_DIRECT);
         }
 
-        let file = opts.open(&config.path)?;
-        file.set_len(config.capacity as _)?;
+        let file = opts.open(&options.path)?;
+        file.set_len(options.capacity as _)?;
         let file = Arc::new(file);
 
         Ok(Self {
             file,
-            capacity: config.capacity,
-            region_size: config.region_size,
+            capacity: options.capacity,
+            region_size: options.region_size,
             runtime,
         })
     }
@@ -225,19 +225,19 @@ impl Device for DirectFileDevice {
     }
 }
 
-/// [`DirectFsDeviceConfigBuilder`] is used to build the config for the direct fs device.
+/// [`DirectFiDeviceOptionsBuilder`] is used to build the options for the direct fs device.
 ///
 /// The direct fs device uses a directory in a file system to store the data of disk cache.
 ///
 /// It uses direct I/O to reduce buffer copy and page cache pollution if supported.
 #[derive(Debug)]
-pub struct DirectFileDeviceConfigBuilder {
+pub struct DirectFileDeviceOptionsBuilder {
     path: PathBuf,
     capacity: Option<usize>,
     region_size: Option<usize>,
 }
 
-impl DirectFileDeviceConfigBuilder {
+impl DirectFileDeviceOptionsBuilder {
     const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
 
     /// Use the given file path as the direct file device path.
@@ -269,8 +269,8 @@ impl DirectFileDeviceConfigBuilder {
         self
     }
 
-    /// Build the config of the direct file device with the given arguments.
-    pub fn build(self) -> DirectFileDeviceConfig {
+    /// Build the options of the direct file device with the given arguments.
+    pub fn build(self) -> DirectFileDeviceOptions {
         let path = self.path;
 
         let align_v = |value: usize, align: usize| value - value % align;
@@ -288,7 +288,7 @@ impl DirectFileDeviceConfigBuilder {
 
         let capacity = align_v(capacity, region_size);
 
-        DirectFileDeviceConfig {
+        DirectFileDeviceOptions {
             path,
             capacity,
             region_size,
@@ -303,40 +303,40 @@ mod tests {
     use super::*;
 
     #[test_log::test]
-    fn test_config_builder() {
+    fn test_options_builder() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("test-direct-file")).build();
+        let options = DirectFileDeviceOptionsBuilder::new(dir.path().join("test-direct-file")).build();
 
-        tracing::debug!("{config:?}");
+        tracing::debug!("{options:?}");
 
-        config.verify().unwrap();
+        options.verify().unwrap();
     }
 
     #[test_log::test]
 
-    fn test_config_builder_noent() {
+    fn test_options_builder_noent() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("noent").join("test-direct-file")).build();
+        let options = DirectFileDeviceOptionsBuilder::new(dir.path().join("noent").join("test-direct-file")).build();
 
-        tracing::debug!("{config:?}");
+        tracing::debug!("{options:?}");
 
-        config.verify().unwrap();
+        options.verify().unwrap();
     }
 
     #[test_log::test(tokio::test)]
     async fn test_direct_file_device_io() {
         let dir = tempfile::tempdir().unwrap();
 
-        let config = DirectFileDeviceConfigBuilder::new(dir.path().join("test-direct-file"))
+        let options = DirectFileDeviceOptionsBuilder::new(dir.path().join("test-direct-file"))
             .with_capacity(4 * 1024 * 1024)
             .with_region_size(1024 * 1024)
             .build();
 
-        tracing::debug!("{config:?}");
+        tracing::debug!("{options:?}");
 
-        let device = DirectFileDevice::open(config.clone()).await.unwrap();
+        let device = DirectFileDevice::open(options.clone()).await.unwrap();
 
         let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
@@ -350,7 +350,7 @@ mod tests {
 
         drop(device);
 
-        let device = DirectFileDevice::open(config).await.unwrap();
+        let device = DirectFileDevice::open(options).await.unwrap();
 
         let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
         assert_eq!(buf, b);

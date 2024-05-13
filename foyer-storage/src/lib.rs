@@ -14,32 +14,26 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 
-mod admission;
-mod buffer;
-mod catalog;
 mod compress;
 mod device;
 mod error;
-mod flusher;
-mod generic;
-mod judge;
-mod lazy;
-mod metrics;
-mod none;
-mod reclaimer;
+mod picker;
 mod region;
-mod region_manager;
-mod reinsertion;
-mod runtime;
 mod serde;
+mod statistics;
 mod storage;
 mod store;
+mod tombstone;
 
-// TODO(MrCroxx): Remove me after the mod is stable.
-#[doc(hidden)]
 pub mod large;
 
 mod prelude;
+
 pub use prelude::*;
 
 pub mod test_utils;
+
+use std::sync::atomic::AtomicU64;
+
+pub type Sequence = u64;
+pub type AtomicSequence = AtomicU64;

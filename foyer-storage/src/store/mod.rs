@@ -12,6 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub mod none;
+pub mod runtime;
+
 use std::{
     borrow::Borrow,
     fmt::Debug,
@@ -22,25 +25,33 @@ use std::{
     task::{Context, Poll},
 };
 
+use ahash::RandomState;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheEntry};
 
 use super::{
-    admission::{AdmissionPicker, AdmitAllPicker},
-    device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
-    eviction::EvictionPicker,
-    generic::{GenericStore, GenericStoreConfig},
-    none::NoneStore,
-    recover::RecoverMode,
-    reinsertion::{ReinsertionPicker, RejectAllPicker},
-    runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig},
+    device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
     storage::{EnqueueFuture, Storage},
     tombstone::TombstoneLogConfig,
 };
 
-use crate::{error::Result, Compression};
+use crate::{
+    compress::Compression,
+    large::{
+        generic::{GenericStore, GenericStoreConfig},
+        recover::RecoverMode,
+    },
+    picker::{
+        utils::{AdmitAllPicker, RejectAllPicker},
+        AdmissionPicker, EvictionPicker, ReinsertionPicker,
+    },
+};
+use none::NoneStore;
+use runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig};
 
-pub enum StoreConfig<K, V, S>
+use crate::error::Result;
+
+pub enum StoreConfig<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
@@ -66,7 +77,7 @@ where
     }
 }
 
-pub enum Store<K, V, S>
+pub enum Store<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
@@ -157,12 +168,24 @@ where
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Eq + ?Sized,
     {
         match self {
             Store::None(store) => store.delete(key),
             Store::DirectFs(store) => store.delete(key),
             Store::RuntimeDirectFs(store) => store.delete(key),
+        }
+    }
+
+    fn may_contains<Q>(&self, key: &Q) -> bool
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        match self {
+            Store::None(store) => store.may_contains(key),
+            Store::DirectFs(store) => store.may_contains(key),
+            Store::RuntimeDirectFs(store) => store.may_contains(key),
         }
     }
 
@@ -214,16 +237,16 @@ where
 #[derive(Debug, Clone)]
 pub enum DeviceConfig {
     None,
-    DirectFs(DirectFsDeviceConfig),
+    DirectFs(DirectFsDeviceOptions),
 }
 
-impl From<DirectFsDeviceConfig> for DeviceConfig {
-    fn from(value: DirectFsDeviceConfig) -> Self {
+impl From<DirectFsDeviceOptions> for DeviceConfig {
+    fn from(value: DirectFsDeviceOptions) -> Self {
         Self::DirectFs(value)
     }
 }
 
-pub struct StoreBuilder<K, V, S>
+pub struct StoreBuilder<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
@@ -239,7 +262,7 @@ where
     reclaimers: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    admision_picker: Box<dyn AdmissionPicker<Key = K>>,
+    admision_picker: Arc<dyn AdmissionPicker<Key = K>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     compression: Compression,
     tombstone_log_config: Option<TombstoneLogConfig>,
@@ -266,7 +289,7 @@ where
             reclaimers: 1,
             clean_region_threshold: None,
             eviction_pickers: vec![],
-            admision_picker: Box::<AdmitAllPicker<K>>::default(),
+            admision_picker: Arc::<AdmitAllPicker<K>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
             compression: Compression::None,
             tombstone_log_config: None,
@@ -362,8 +385,8 @@ where
     /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
     ///
     /// Default: [`AdmitAllPicker`].
-    pub fn with_admission_picker(mut self, admission_picker: impl Into<Box<dyn AdmissionPicker<Key = K>>>) -> Self {
-        self.admision_picker = admission_picker.into();
+    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker<Key = K>>) -> Self {
+        self.admision_picker = admission_picker;
         self
     }
 
@@ -376,11 +399,8 @@ where
     /// reinsertion will be stuck.
     ///
     /// Default: [`RejectAllPicker`].
-    pub fn with_reinsertion_picker(
-        mut self,
-        reinsertion_picker: impl Into<Arc<dyn ReinsertionPicker<Key = K>>>,
-    ) -> Self {
-        self.reinsertion_picker = reinsertion_picker.into();
+    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
+        self.reinsertion_picker = reinsertion_picker;
         self
     }
 
@@ -402,7 +422,7 @@ where
     }
 
     /// Enable the dedicated runtime for the disk cache store.
-    pub fn with_runtime_confi(mut self, runtime_config: RuntimeConfig) -> Self {
+    pub fn with_runtime_config(mut self, runtime_config: RuntimeConfig) -> Self {
         self.runtime_config = Some(runtime_config);
         self
     }

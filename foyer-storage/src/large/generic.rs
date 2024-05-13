@@ -23,7 +23,10 @@ use std::{
     },
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    bits,
+    code::{StorageKey, StorageValue},
+};
 use foyer_memory::{Cache, CacheEntry};
 use futures::future::{join_all, try_join_all};
 
@@ -33,26 +36,24 @@ use tokio::{
 };
 
 use crate::{
+    compress::Compression,
+    device::{Device, DeviceExt, RegionId},
     error::{Error, Result},
-    large::{device::RegionId, reclaimer::RegionCleaner},
+    large::reclaimer::RegionCleaner,
+    picker::{AdmissionPicker, EvictionPicker, ReinsertionPicker},
+    region::RegionManager,
     serde::EntryDeserializer,
-    Compression,
+    statistics::Statistics,
+    storage::{EnqueueFuture, Storage},
+    tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
+    AtomicSequence,
 };
 
-use crate::catalog::AtomicSequence;
-
 use super::{
-    admission::AdmissionPicker,
-    device::Device,
-    eviction::EvictionPicker,
     flusher::Flusher,
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
-    region::RegionManager,
-    reinsertion::ReinsertionPicker,
-    storage::{EnqueueFuture, Storage},
-    tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
 };
 
 pub struct GenericStoreConfig<K, V, S, D>
@@ -64,7 +65,7 @@ where
 {
     pub memory: Cache<K, V, S>,
 
-    pub device_config: D::Config,
+    pub device_config: D::Options,
     pub compression: Compression,
     pub flush: bool,
     pub indexer_shards: usize,
@@ -74,7 +75,7 @@ where
     pub reclaimers: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    pub admission_picker: Box<dyn AdmissionPicker<Key = K>>,
+    pub admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
 }
@@ -145,7 +146,9 @@ where
     flushers: Vec<Flusher<K, V, S, D>>,
     reclaimers: Vec<Reclaimer>,
 
-    admission_picker: Box<dyn AdmissionPicker<Key = K>>,
+    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+
+    stats: Arc<Statistics>,
 
     flush: bool,
 
@@ -180,6 +183,8 @@ where
 
         let device = D::open(config.device_config.clone()).await?;
 
+        let stats = Arc::<Statistics>::default();
+
         let mut tombstones = vec![];
         let tombstone_log = match &config.tombstone_log_config {
             None => None,
@@ -213,6 +218,7 @@ where
                 region_manager.clone(),
                 device.clone(),
                 tombstone_log.clone(),
+                stats.clone(),
                 runtime.clone(),
             )
             .await
@@ -226,6 +232,7 @@ where
                 config.reinsertion_picker.clone(),
                 indexer.clone(),
                 flushers.clone(),
+                stats.clone(),
                 config.flush,
                 runtime.clone(),
             )
@@ -242,6 +249,7 @@ where
                 flushers,
                 reclaimers,
                 admission_picker: config.admission_picker,
+                stats,
                 flush: config.flush,
                 sequence,
                 active: AtomicBool::new(true),
@@ -263,7 +271,7 @@ where
                 .unwrap();
             return EnqueueFuture::new(rx);
         }
-        if self.inner.admission_picker.pick(entry.key()) {
+        if self.inner.admission_picker.pick(&self.inner.stats, entry.key()) {
             let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
             self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(entry, sequence)
         } else {
@@ -282,6 +290,7 @@ where
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
+        let stats = self.inner.stats.clone();
 
         async move {
             let addr = match indexer.get(hash) {
@@ -292,6 +301,10 @@ where
             tracing::trace!("{addr:#?}");
 
             let buffer = device.read(addr.region, addr.offset as _, addr.len as _).await?;
+
+            stats
+                .cache_read_bytes
+                .fetch_add(bits::align_up(device.align(), buffer.len()), Ordering::Relaxed);
 
             let (_, k, v) = match EntryDeserializer::deserialize::<K, V>(&buffer) {
                 Ok(res) => res,
@@ -312,7 +325,7 @@ where
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Eq + ?Sized,
     {
         if !self.inner.active.load(Ordering::Relaxed) {
             let (tx, rx) = oneshot::channel();
@@ -328,6 +341,15 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         self.inner.flushers[sequence as usize % self.inner.flushers.len()]
             .submit(Tombstone { hash, sequence }, sequence)
+    }
+
+    fn may_contains<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let hash = self.inner.memory.hash_builder().hash_one(key);
+        self.inner.indexer.get(hash).is_some()
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -390,9 +412,17 @@ where
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Eq + ?Sized,
     {
         self.delete(key)
+    }
+
+    fn may_contains<Q>(&self, key: &Q) -> bool
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.may_contains(key)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -408,11 +438,9 @@ mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
 
-    use crate::large::{
-        admission::AdmitAllPicker,
-        device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
-        eviction::FifoPicker,
-        reinsertion::RejectAllPicker,
+    use crate::{
+        device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
+        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
         test_utils::BiasedPicker,
         tombstone::TombstoneLogConfigBuilder,
     };
@@ -432,17 +460,17 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        store_for_test_with_admission_picker(memory, dir, Box::<AdmitAllPicker<u64>>::default()).await
+        store_for_test_with_admission_picker(memory, dir, Arc::<AdmitAllPicker<u64>>::default()).await
     }
 
     async fn store_for_test_with_admission_picker(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
-        admission_picker: Box<dyn AdmissionPicker<Key = u64>>,
+        admission_picker: Arc<dyn AdmissionPicker<Key = u64>>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
             memory: memory.clone(),
-            device_config: DirectFsDeviceConfig {
+            device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
@@ -470,7 +498,7 @@ mod tests {
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
             memory: memory.clone(),
-            device_config: DirectFsDeviceConfig {
+            device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
@@ -484,7 +512,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64>>::default(),
+            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker,
             tombstone_log_config: None,
         };
@@ -498,7 +526,7 @@ mod tests {
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
             memory: memory.clone(),
-            device_config: DirectFsDeviceConfig {
+            device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
@@ -512,7 +540,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64>>::default(),
+            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
         };
@@ -697,7 +725,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_admission_picker(&memory, dir.path(), Box::new(BiasedPicker::new([1]))).await;
+        let store = store_for_test_with_admission_picker(&memory, dir.path(), Arc::new(BiasedPicker::new([1]))).await;
 
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);

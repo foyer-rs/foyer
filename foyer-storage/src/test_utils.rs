@@ -10,53 +10,93 @@
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
-//  limitations under the License.s
+//  limitations under the License.
 
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::StorageKey;
 use parking_lot::Mutex;
 
 use crate::{
-    admission::{AdmissionContext, AdmissionPolicy},
-    reinsertion::{ReinsertionContext, ReinsertionPolicy},
+    picker::{AdmissionPicker, ReinsertionPicker},
+    statistics::Statistics,
 };
 
-#[derive(Debug)]
-pub enum Record<K> {
-    Admit(Arc<K>),
-    Evict(Arc<K>),
+pub struct BiasedPicker<K, Q> {
+    admits: HashSet<Q>,
+    _marker: PhantomData<K>,
 }
 
-impl<K> Clone for Record<K> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Admit(key) => Self::Admit(key.clone()),
-            Self::Evict(key) => Self::Evict(key.clone()),
+impl<K, Q> Debug for BiasedPicker<K, Q>
+where
+    Q: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BiasedPicker").field("admits", &self.admits).finish()
+    }
+}
+
+impl<K, Q> BiasedPicker<K, Q> {
+    pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
+    where
+        Q: Hash + Eq,
+    {
+        Self {
+            admits: admits.into_iter().collect(),
+            _marker: PhantomData,
         }
     }
 }
 
-#[derive(Debug)]
-pub struct JudgeRecorder<K, V>
+impl<K, Q> AdmissionPicker for BiasedPicker<K, Q>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Send + Sync + 'static + Borrow<Q>,
+    Q: Hash + Eq + Send + Sync + 'static + Debug,
 {
-    records: Mutex<Vec<Record<K>>>,
-    _marker: PhantomData<V>,
+    type Key = K;
+
+    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
+        self.admits.contains(key.borrow())
+    }
 }
 
-impl<K, V> JudgeRecorder<K, V>
+impl<K, Q> ReinsertionPicker for BiasedPicker<K, Q>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: Send + Sync + 'static + Borrow<Q>,
+    Q: Hash + Eq + Send + Sync + 'static + Debug,
+{
+    type Key = K;
+
+    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
+        self.admits.contains(key.borrow())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Record<K> {
+    Admit(K),
+    Evict(K),
+}
+
+pub struct JudgeRecorder<K> {
+    records: Mutex<Vec<Record<K>>>,
+}
+
+impl<K> Debug for JudgeRecorder<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JudgeRecorder").finish()
+    }
+}
+
+impl<K> JudgeRecorder<K>
+where
+    K: StorageKey + Clone,
 {
     pub fn dump(&self) -> Vec<Record<K>> {
         self.records.lock().clone()
     }
 
-    pub fn remains(&self) -> HashSet<Arc<K>> {
+    pub fn remains(&self) -> HashSet<K> {
         let records = self.dump();
         let mut res = HashSet::default();
         for record in records {
@@ -73,48 +113,36 @@ where
     }
 }
 
-impl<K, V> Default for JudgeRecorder<K, V>
+impl<K> Default for JudgeRecorder<K>
 where
     K: StorageKey,
-    V: StorageValue,
 {
     fn default() -> Self {
         Self {
             records: Mutex::new(Vec::default()),
-            _marker: PhantomData,
         }
     }
 }
 
-impl<K, V> AdmissionPolicy for JudgeRecorder<K, V>
+impl<K> AdmissionPicker for JudgeRecorder<K>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: StorageKey + Clone,
 {
     type Key = K;
 
-    type Value = V;
-
-    fn init(&self, _: AdmissionContext<Self::Key, Self::Value>) {}
-
-    fn judge(&self, key: &Arc<K>) -> bool {
+    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
         self.records.lock().push(Record::Admit(key.clone()));
         true
     }
 }
 
-impl<K, V> ReinsertionPolicy for JudgeRecorder<K, V>
+impl<K> ReinsertionPicker for JudgeRecorder<K>
 where
-    K: StorageKey,
-    V: StorageValue,
+    K: StorageKey + Clone,
 {
     type Key = K;
 
-    type Value = V;
-
-    fn init(&self, _: ReinsertionContext<Self::Key, Self::Value>) {}
-
-    fn judge(&self, key: &Arc<K>) -> bool {
+    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));
         false
     }

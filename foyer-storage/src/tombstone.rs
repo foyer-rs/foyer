@@ -23,8 +23,8 @@ use foyer_common::bits;
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 
-use super::device::{
-    direct_file::{DirectFileDevice, DirectFileDeviceConfigBuilder},
+use crate::device::{
+    direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
     Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
 };
 
@@ -122,7 +122,7 @@ impl TombstoneLog {
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
         let device = DirectFileDevice::open(
-            DirectFileDeviceConfigBuilder::new(path)
+            DirectFileDeviceOptionsBuilder::new(path)
                 .with_region_size(align)
                 .with_capacity(capacity)
                 .build(),
@@ -293,7 +293,7 @@ mod tests {
     use itertools::Itertools;
     use tempfile::tempdir;
 
-    use crate::large::device::direct_fs::{DirectFsDevice, DirectFsDeviceConfigBuilder};
+    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
 
     use super::*;
 
@@ -303,7 +303,7 @@ mod tests {
 
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
         let device = DirectFsDevice::open(
-            DirectFsDeviceConfigBuilder::new(dir.path())
+            DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(4 * 1024 * 1024)
                 .build(),
         )

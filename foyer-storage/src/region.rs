@@ -13,275 +13,308 @@
 //  limitations under the License.
 
 use std::{
-    collections::btree_map::{BTreeMap, Entry},
+    collections::HashMap,
     fmt::Debug,
-    ops::Range,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    future::Future,
+    pin::Pin,
+    sync::{atomic::AtomicUsize, Arc},
+    task::{Context, Poll},
 };
 
-use allocator_api2::vec::Vec as VecA;
-use bytes::{Buf, BufMut};
-use foyer_common::range::RangeBoundsExt;
+use async_channel::{Receiver, Sender};
+use foyer_common::countdown::Countdown;
+use futures::{
+    future::{BoxFuture, Shared},
+    FutureExt,
+};
+use itertools::Itertools;
 use parking_lot::Mutex;
-use tokio::sync::oneshot;
+use pin_project::pin_project;
+use rand::seq::IteratorRandom;
+use tokio::sync::Semaphore;
 
-use crate::{
-    device::{BufferAllocator, Device, DeviceExt},
-    error::Result,
+use super::{
+    device::{Device, DeviceExt},
+    picker::EvictionPicker,
 };
+use crate::device::RegionId;
 
-pub type RegionId = u32;
-
-pub const REGION_MAGIC: u64 = 0x19970327;
-
-#[derive(Debug)]
-pub enum Version {
-    V1,
+#[derive(Debug, Default)]
+pub struct RegionStats {
+    pub invalid: AtomicUsize,
+    pub access: AtomicUsize,
 }
 
-impl Version {
-    pub fn latest() -> Self {
-        Self::V1
-    }
-
-    pub fn to_u64(&self) -> u64 {
-        match self {
-            Version::V1 => 1,
-        }
-    }
-}
-
-impl From<Version> for u64 {
-    fn from(value: Version) -> Self {
-        match value {
-            Version::V1 => 1,
-        }
-    }
-}
-
-impl TryFrom<u64> for Version {
-    type Error = anyhow::Error;
-
-    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::V1),
-            v => Err(anyhow::anyhow!("invalid region format version: {}", v)),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct RegionHeader {
-    /// magic number to decide a valid region
-    pub magic: u64,
-    /// format version
-    pub version: Version,
-}
-
-impl RegionHeader {
-    pub fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.magic);
-        buf.put_u64(self.version.to_u64());
-    }
-
-    pub fn read(mut buf: &[u8]) -> std::result::Result<Self, anyhow::Error> {
-        let magic = buf.get_u64();
-        if magic != REGION_MAGIC {
-            return Err(anyhow::anyhow!(
-                "region magic mismatch, magic: {}, expected: {}",
-                magic,
-                REGION_MAGIC
-            ));
-        }
-        let version = buf.get_u64().try_into()?;
-        Ok(Self { magic, version })
-    }
-
-    pub fn serialized_len() -> usize {
-        16
-    }
-}
-
-#[derive(Debug)]
-pub struct RegionInner<A>
-where
-    A: BufferAllocator,
-{
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
-    waits: BTreeMap<(usize, usize), Vec<oneshot::Sender<Result<Arc<VecA<u8, A>>>>>>,
-}
-
+/// # Region format:
+///
+/// ```plain
+/// [ Header | Tombstone Pool | Entries ]
+/// ```
+///
+/// ## Header
+///
+/// ```plain
+/// [ MAGIC | Tombstone Pool Size ]
+/// ```
 #[derive(Debug, Clone)]
 pub struct Region<D>
 where
     D: Device,
 {
     id: RegionId,
-
-    inner: Arc<Mutex<RegionInner<D::IoBufferAllocator>>>,
-
     device: D,
-
-    refs: Arc<AtomicUsize>,
+    stats: Arc<RegionStats>,
 }
 
 impl<D> Region<D>
 where
     D: Device,
 {
-    pub fn new(id: RegionId, device: D) -> Self {
-        let inner = RegionInner { waits: BTreeMap::new() };
-        Self {
-            id,
-            inner: Arc::new(Mutex::new(inner)),
-            device,
-            refs: Arc::new(AtomicUsize::default()),
-        }
-    }
-
-    pub fn view(&self, offset: u32, len: u32) -> RegionView {
-        self.refs.fetch_add(1, Ordering::SeqCst);
-        RegionView {
-            id: self.id,
-            offset,
-            len,
-            refs: Arc::clone(&self.refs),
-        }
-    }
-
-    pub fn refs(&self) -> &Arc<AtomicUsize> {
-        &self.refs
-    }
-
-    /// Load region data by view from device.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip(self, view))]
-    pub async fn load(&self, view: RegionView) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
-        let res = self
-            .load_range(view.offset as usize..view.offset as usize + view.len as usize)
-            .await;
-        // drop view after load finish
-        drop(view);
-        res
-    }
-
-    /// Load region data with given `range` from device.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip(self, range), fields(start, end))]
-    pub async fn load_range(&self, range: Range<usize>) -> Result<Option<Arc<VecA<u8, D::IoBufferAllocator>>>> {
-        let rx = {
-            let mut inner = self.inner.lock();
-
-            // join wait map if exists
-            let rx = match inner.waits.entry((range.start, range.end)) {
-                Entry::Vacant(v) => {
-                    v.insert(vec![]);
-                    None
-                }
-                Entry::Occupied(mut o) => {
-                    let (tx, rx) = oneshot::channel();
-                    o.get_mut().push(tx);
-                    Some(rx)
-                }
-            };
-
-            drop(inner);
-
-            rx
-        };
-
-        // wait for result if joined into wait map
-        if let Some(rx) = rx {
-            return rx.await.map_err(anyhow::Error::from)?.map(Some);
-        }
-
-        // otherwise, read from device
-        let region = self.id;
-
-        let buf = match self.device.load(region, range.start..range.end).await {
-            Err(e) => {
-                self.cleanup(range.start, range.end)?;
-                return Err(e);
-            }
-            Ok(buf) if buf.len() != range.size().unwrap() => {
-                self.cleanup(range.start, range.end)?;
-                return Ok(None);
-            }
-            Ok(buf) => buf,
-        };
-        let buf = Arc::new(buf);
-
-        if let Some(txs) = self.inner.lock().waits.remove(&(range.start, range.end)) {
-            for tx in txs {
-                tx.send(Ok(buf.clone())).unwrap()
-            }
-        }
-
-        Ok(Some(buf))
+    pub fn id(&self) -> RegionId {
+        self.id
     }
 
     pub fn device(&self) -> &D {
         &self.device
     }
 
-    /// Cleanup waits.
-    fn cleanup(&self, start: usize, end: usize) -> Result<()> {
-        if let Some(txs) = self.inner.lock().waits.remove(&(start, end)) {
-            for tx in txs {
-                tx.send(Err(anyhow::anyhow!("cancelled by previous error").into()))
-                    .unwrap()
+    pub fn stats(&self) -> &Arc<RegionStats> {
+        &self.stats
+    }
+}
+
+#[derive(Clone)]
+pub struct RegionManager<D>
+where
+    D: Device,
+{
+    inner: Arc<RegionManagerInner<D>>,
+}
+
+struct Eviction {
+    evictable: HashMap<RegionId, Arc<RegionStats>>,
+    eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+}
+
+struct RegionManagerInner<D>
+where
+    D: Device,
+{
+    regions: Vec<Region<D>>,
+
+    eviction: Mutex<Eviction>,
+
+    clean_region_tx: Sender<Region<D>>,
+    clean_region_rx: Receiver<Region<D>>,
+
+    reclaim_semaphore: Arc<Semaphore>,
+    reclaim_semaphore_countdown: Arc<Countdown>,
+}
+
+impl<D> Debug for RegionManager<D>
+where
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionManager").finish()
+    }
+}
+
+impl<D> RegionManager<D>
+where
+    D: Device,
+{
+    pub fn new(device: D, eviction_pickers: Vec<Box<dyn EvictionPicker>>, reclaim_semaphore: Arc<Semaphore>) -> Self {
+        let regions = (0..device.regions() as RegionId)
+            .map(|id| Region {
+                id,
+                device: device.clone(),
+                stats: Arc::new(RegionStats::default()),
+            })
+            .collect_vec();
+        let (clean_region_tx, clean_region_rx) = async_channel::unbounded();
+
+        Self {
+            inner: Arc::new(RegionManagerInner {
+                regions,
+                eviction: Mutex::new(Eviction {
+                    evictable: HashMap::new(),
+                    eviction_pickers,
+                }),
+                clean_region_tx,
+                clean_region_rx,
+                reclaim_semaphore,
+                reclaim_semaphore_countdown: Arc::new(Countdown::new(0)),
+            }),
+        }
+    }
+
+    pub fn mark_evictable(&self, region: RegionId) {
+        let mut eviction = self.inner.eviction.lock();
+
+        // Update evictable map.
+        let res = eviction
+            .evictable
+            .insert(region, self.inner.regions[region as usize].stats.clone());
+        assert!(res.is_none());
+
+        // Temporarily take pickers to make borrow checker happy.
+        let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
+
+        // Noitfy pickers.
+        for picker in pickers.iter_mut() {
+            picker.on_region_evictable(&eviction.evictable, region);
+        }
+
+        // Restore taken pickers after operations.
+
+        std::mem::swap(&mut eviction.eviction_pickers, &mut pickers);
+        assert!(pickers.is_empty());
+
+        tracing::debug!("[region manager]: Region {region} is marked evictable.");
+    }
+
+    pub fn evict(&self) -> Option<Region<D>> {
+        let mut picked = None;
+
+        let mut eviction = self.inner.eviction.lock();
+
+        if eviction.evictable.is_empty() {
+            // No evictable region now.
+            return None;
+        }
+
+        // Temporarily take pickers to make borrow checker happy.
+        let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
+
+        // Pick a region to evict with pickers.
+        for picker in pickers.iter_mut() {
+            if let Some(region) = picker.pick(&eviction.evictable) {
+                picked = Some(region);
+                break;
             }
         }
-        Ok(())
+
+        // If no region is selected, just ramdomly pick one.
+        let picked = picked.unwrap_or_else(|| {
+            eviction
+                .evictable
+                .keys()
+                .choose(&mut rand::thread_rng())
+                .copied()
+                .unwrap()
+        });
+
+        // Update evictable map.
+        eviction.evictable.remove(&picked).unwrap();
+
+        // Noitfy pickers.
+        for picker in pickers.iter_mut() {
+            picker.on_region_evict(&eviction.evictable, picked);
+        }
+
+        // Restore taken pickers after operations.
+        std::mem::swap(&mut eviction.eviction_pickers, &mut pickers);
+        assert!(pickers.is_empty());
+
+        let region = self.region(picked).clone();
+        tracing::debug!("[region manager]: Region {picked} is evicted.");
+
+        Some(region)
+    }
+
+    pub async fn mark_clean(&self, region: RegionId) {
+        self.inner
+            .clean_region_tx
+            .send(self.region(region).clone())
+            .await
+            .unwrap();
+    }
+
+    pub fn get_clean_region(&self) -> GetCleanRegionHandle<D> {
+        let clean_region_rx = self.inner.clean_region_rx.clone();
+        let reclaim_semaphore = self.inner.reclaim_semaphore.clone();
+        let reclaim_semaphore_countdown = self.inner.reclaim_semaphore_countdown.clone();
+        GetCleanRegionHandle::new(
+            async move {
+                let region = clean_region_rx.recv().await.unwrap();
+                // The only place to increase the permit.
+                //
+                // See comments in `ReclaimRunner::handle()` and `RecoverRunner::run()`.
+                if reclaim_semaphore_countdown.countdown() {
+                    reclaim_semaphore.add_permits(1);
+                }
+                region
+            }
+            .boxed(),
+        )
+    }
+
+    pub fn regions(&self) -> usize {
+        self.inner.regions.len()
+    }
+
+    pub fn evictable_regions(&self) -> usize {
+        self.inner.eviction.lock().evictable.len()
+    }
+
+    pub fn clean_regions(&self) -> usize {
+        self.inner.clean_region_rx.len()
+    }
+
+    pub fn region(&self, id: RegionId) -> &Region<D> {
+        &self.inner.regions[id as usize]
+    }
+
+    pub fn reclaim_semaphore(&self) -> &Arc<Semaphore> {
+        &self.inner.reclaim_semaphore
+    }
+
+    pub fn reclaim_semaphore_countdown(&self) -> &Countdown {
+        &self.inner.reclaim_semaphore_countdown
     }
 }
 
 #[derive(Debug)]
-pub struct RegionView {
-    id: RegionId,
-    offset: u32,
-    len: u32,
-    refs: Arc<AtomicUsize>,
+#[pin_project]
+pub struct GetCleanRegionHandle<D>
+where
+    D: Device,
+{
+    #[pin]
+    future: Shared<BoxFuture<'static, Region<D>>>,
 }
 
-impl Clone for RegionView {
+impl<D> Clone for GetCleanRegionHandle<D>
+where
+    D: Device,
+{
     fn clone(&self) -> Self {
-        self.refs.fetch_add(1, Ordering::SeqCst);
         Self {
-            id: self.id,
-            offset: self.offset,
-            len: self.len,
-            refs: Arc::clone(&self.refs),
+            future: self.future.clone(),
         }
     }
 }
 
-impl Drop for RegionView {
-    fn drop(&mut self) {
-        self.refs.fetch_sub(1, Ordering::SeqCst);
+impl<D> GetCleanRegionHandle<D>
+where
+    D: Device,
+{
+    pub fn new(future: BoxFuture<'static, Region<D>>) -> Self {
+        Self {
+            future: future.shared(),
+        }
     }
 }
 
-impl RegionView {
-    pub fn id(&self) -> &RegionId {
-        &self.id
-    }
+impl<D> Future for GetCleanRegionHandle<D>
+where
+    D: Device,
+{
+    type Output = Region<D>;
 
-    pub fn offset(&self) -> &u32 {
-        &self.offset
-    }
-
-    pub fn len(&self) -> &u32 {
-        &self.len
-    }
-
-    pub fn refs(&self) -> &Arc<AtomicUsize> {
-        &self.refs
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        this.future.poll(cx)
     }
 }

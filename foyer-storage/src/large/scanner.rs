@@ -18,15 +18,13 @@ use foyer_common::{
 };
 
 use crate::{
-    catalog::Sequence,
+    device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR},
     error::Result,
     serde::{EntryDeserializer, EntryHeader},
+    Sequence,
 };
 
-use super::{
-    device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR},
-    indexer::EntryAddress,
-};
+use super::indexer::EntryAddress;
 
 #[derive(Debug)]
 pub struct EntryInfo {

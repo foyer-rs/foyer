@@ -54,6 +54,7 @@ impl<'a, A: Allocator> std::io::Write for WritableVecA<'a, u8, A> {
         Ok(len)
     }
 
+    // TODO(MrCroxx): Uncomment this after `can_vector` is stable.
     // #[inline]
     // fn is_write_vectored(&self) -> bool {
     //     true
@@ -72,27 +73,29 @@ impl<'a, A: Allocator> std::io::Write for WritableVecA<'a, u8, A> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AlignedAllocator {
-    align: usize,
-}
+pub struct AlignedAllocator<const N: usize>;
 
-impl AlignedAllocator {
-    pub const fn new(align: usize) -> Self {
-        assert!(align.is_power_of_two());
-        Self { align }
+impl<const N: usize> Default for AlignedAllocator<N> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-unsafe impl Allocator for AlignedAllocator {
+impl<const N: usize> AlignedAllocator<N> {
+    pub const fn new() -> Self {
+        assert!(N.is_power_of_two());
+        Self
+    }
+}
+
+unsafe impl<const N: usize> Allocator for AlignedAllocator<N> {
     fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, AllocError> {
-        let layout =
-            std::alloc::Layout::from_size_align(layout.size(), bits::align_up(self.align, layout.align())).unwrap();
+        let layout = std::alloc::Layout::from_size_align(layout.size(), bits::align_up(N, layout.align())).unwrap();
         Global.allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        let layout =
-            std::alloc::Layout::from_size_align(layout.size(), bits::align_up(self.align, layout.align())).unwrap();
+        let layout = std::alloc::Layout::from_size_align(layout.size(), bits::align_up(N, layout.align())).unwrap();
         Global.deallocate(ptr, layout)
     }
 }
@@ -104,7 +107,7 @@ mod tests {
     #[test]
     fn test_aligned_buffer() {
         const ALIGN: usize = 512;
-        let allocator = AlignedAllocator::new(ALIGN);
+        let allocator = AlignedAllocator::<ALIGN>::new();
 
         let mut buf: VecA<u8, _> = VecA::with_capacity_in(ALIGN * 8, &allocator);
         bits::assert_aligned(ALIGN, buf.as_ptr() as _);

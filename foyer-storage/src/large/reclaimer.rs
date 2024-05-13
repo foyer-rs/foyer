@@ -21,14 +21,16 @@ use tokio::{
     sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
 };
 
-use super::{
+use super::{flusher::Flusher, indexer::Indexer};
+use crate::{
     device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
-    flusher::Flusher,
-    indexer::Indexer,
+    error::Result,
+    large::scanner::RegionScanner,
+    picker::ReinsertionPicker,
     region::{Region, RegionManager},
-    reinsertion::ReinsertionPicker,
+    statistics::Statistics,
+    Sequence,
 };
-use crate::{catalog::Sequence, error::Result, large::scanner::RegionScanner};
 
 #[derive(Debug)]
 pub struct Reclaimer {
@@ -36,12 +38,15 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn open<K, V, S, D>(
         region_manager: RegionManager<D>,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, S, D>>,
+        stats: Arc<Statistics>,
         flush: bool,
         runtime: Handle,
     ) -> Self
@@ -59,6 +64,7 @@ impl Reclaimer {
             indexer,
             flushers,
             reinsertion_picker,
+            stats,
             flush,
             wait_rx,
             runtime: runtime.clone(),
@@ -92,6 +98,8 @@ where
     indexer: Indexer,
 
     flushers: Vec<Flusher<K, V, S, D>>,
+
+    stats: Arc<Statistics>,
 
     flush: bool,
 
@@ -178,7 +186,7 @@ where
                 }
                 Ok(Some((info, key))) => (info, key),
             };
-            if self.reinsertion_picker.pick(&key) {
+            if self.reinsertion_picker.pick(&self.stats, &key) {
                 let buffer = match region
                     .device()
                     .read(region.id(), info.addr.offset as _, info.addr.len as _)

@@ -12,17 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-const TEXT: &[u8] = include_bytes!("../etc/sample.txt");
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub fn text(offset: usize, len: usize) -> Vec<u8> {
-    let mut res = Vec::with_capacity(len);
-    let mut cursor = offset % TEXT.len();
-    let mut remain = len;
-    while remain > 0 {
-        let bytes = std::cmp::min(remain, TEXT.len() - cursor);
-        res.extend(&TEXT[cursor..cursor + bytes]);
-        cursor = (cursor + bytes) % TEXT.len();
-        remain -= bytes;
+#[derive(Debug, Default)]
+pub struct Statistics {
+    pub(crate) cache_write_bytes: AtomicUsize,
+    pub(crate) cache_read_bytes: AtomicUsize,
+}
+
+impl Statistics {
+    pub fn cache_write_bytes(&self) -> usize {
+        self.cache_write_bytes.load(Ordering::Relaxed)
     }
-    res
+
+    pub fn cache_read_bytes(&self) -> usize {
+        self.cache_read_bytes.load(Ordering::Relaxed)
+    }
 }

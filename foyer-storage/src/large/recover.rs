@@ -26,18 +26,17 @@ use itertools::Itertools;
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
-use crate::catalog::{AtomicSequence, Sequence};
 use crate::error::{Error, Result};
+
 use crate::large::scanner::{EntryInfo, RegionScanner};
+use crate::{AtomicSequence, Sequence};
 
 use super::generic::GenericStoreConfig;
+use super::indexer::EntryAddress;
 use super::indexer::Indexer;
-use super::region::RegionManager;
-use super::tombstone::Tombstone;
-use super::{
-    device::{Device, DeviceExt, RegionId},
-    indexer::EntryAddress,
-};
+use crate::device::{Device, DeviceExt, RegionId};
+use crate::region::RegionManager;
+use crate::tombstone::Tombstone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoverMode {

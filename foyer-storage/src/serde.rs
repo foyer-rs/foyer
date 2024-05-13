@@ -20,10 +20,10 @@ use bytes::{Buf, BufMut};
 use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{
-    catalog::Sequence,
+    compress::Compression,
     device::allocator::WritableVecA,
     error::{Error, Result},
-    Compression,
+    Sequence,
 };
 
 pub fn checksum(buf: &[u8]) -> u64 {

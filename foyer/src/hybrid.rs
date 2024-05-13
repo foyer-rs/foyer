@@ -24,8 +24,8 @@ use ahash::RandomState;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheBuilder, CacheContext, CacheEntry, Entry, EvictionConfig, Weighter};
 use foyer_storage::{
-    AdmissionPolicy, AsyncStorageExt, Compression, DeviceConfig, RecoverMode, ReinsertionPolicy, RuntimeConfig,
-    Storage, Store, StoreBuilder,
+    AdmissionPicker, Compression, DeviceConfig, EvictionPicker, RecoverMode, ReinsertionPicker, RuntimeConfig, Storage,
+    Store, StoreBuilder, TombstoneLogConfig,
 };
 
 pub struct HybridCacheBuilder;
@@ -56,7 +56,7 @@ pub struct HybridCacheBuilderPhaseMemory<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
     builder: CacheBuilder<K, V, S>,
 }
@@ -65,7 +65,7 @@ impl<K, V, S> HybridCacheBuilderPhaseMemory<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
     /// Operations on different shard can be parallelized.
@@ -95,7 +95,7 @@ where
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> HybridCacheBuilderPhaseMemory<K, V, OS>
     where
-        OS: BuildHasher + Send + Sync + 'static,
+        OS: BuildHasher + Send + Sync + 'static + Debug,
     {
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory { builder }
@@ -108,9 +108,10 @@ where
     }
 
     pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
+        let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
-            cache: self.builder.build(),
-            builder: StoreBuilder::new(),
+            builder: StoreBuilder::new(memory.clone()),
+            memory,
         }
     }
 }
@@ -119,174 +120,195 @@ pub struct HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    cache: Cache<K, V, S>,
-    builder: StoreBuilder<K, V>,
+    memory: Cache<K, V, S>,
+    builder: StoreBuilder<K, V, S>,
 }
 
 impl<K, V, S> HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    /// For distinguish different foyer metrics.
-    ///
-    /// Metrics of this foyer instance has label `foyer = {{ name }}`.
-    pub fn with_name(self, name: &str) -> Self {
-        let builder = self.builder.with_name(name);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Eviction policy configurations.
-    ///
-    /// The default eviction policy is a general-used LFU configuration.
-    pub fn with_eviction_config(self, eviction_config: impl Into<EvictionConfig>) -> Self {
-        let builder = self.builder.with_eviction_config(eviction_config);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Device configurations.
-    ///
-    /// If not give, an always-return-none store will be used.
+    /// Set device config for the disk cache store.
     pub fn with_device_config(self, device_config: impl Into<DeviceConfig>) -> Self {
         let builder = self.builder.with_device_config(device_config);
         Self {
-            cache: self.cache,
+            memory: self.memory,
             builder,
         }
     }
 
-    /// Catalog indices sharding count.
-    pub fn with_catalog_shards(self, catalog_shards: usize) -> Self {
-        let builder = self.builder.with_catalog_shards(catalog_shards);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Push a new admission policy in order.
-    pub fn with_admission_policy(self, admission: Arc<dyn AdmissionPolicy<Key = K, Value = V>>) -> Self {
-        let builder = self.builder.with_admission_policy(admission);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Push a new reinsertion policy in order.
-    pub fn with_reinsertion_policy(self, reinsertion: Arc<dyn ReinsertionPolicy<Key = K, Value = V>>) -> Self {
-        let builder = self.builder.with_reinsertion_policy(reinsertion);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Count of flushers.
-    pub fn with_flushers(self, flushers: usize) -> Self {
-        let builder = self.builder.with_flushers(flushers);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Count of reclaimers.
-    pub fn with_reclaimers(self, reclaimers: usize) -> Self {
-        let builder = self.builder.with_reclaimers(reclaimers);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Clean region count threshold to trigger reclamation.
+    /// Enable/disable `sync` after writes.
     ///
-    /// `clean_region_threshold` is recommended to be equal or larger than `reclaimers`.
-    ///
-    /// The default clean region thrshold is the reclaimer count.
-    pub fn with_clean_region_threshold(self, clean_region_threshold: usize) -> Self {
-        let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Set recover mode.
-    ///
-    /// See [`RecoverMode`].
-    pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
-        let builder = self.builder.with_recover_mode(recover_mode);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Concurrency of recovery.
-    pub fn with_recover_concurrency(self, recover_concurrency: usize) -> Self {
-        let builder = self.builder.with_recover_concurrency(recover_concurrency);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Compression algorithm.
-    pub fn with_compression(self, compression: Compression) -> Self {
-        let builder = self.builder.with_compression(compression);
-        Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Flush device for each io.
+    /// Default: `false`.
     pub fn with_flush(self, flush: bool) -> Self {
         let builder = self.builder.with_flush(flush);
         Self {
-            cache: self.cache,
+            memory: self.memory,
             builder,
         }
     }
 
-    /// Enable a dedicated tokio runtime for the store with a runtime config.
+    /// Set the shard num of the indexer. Each shard has its own lock.
     ///
-    /// If not given, the store will use the user's runtime.
+    /// Default: `64`.
+    pub fn with_indexer_shards(self, indexer_shards: usize) -> Self {
+        let builder = self.builder.with_indexer_shards(indexer_shards);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the recover mode for the disk cache store.
+    ///
+    /// See more in [`RecoverMode`].
+    ///
+    /// Default: [`RecoverMode::Quiet`].
+    pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
+        let builder = self.builder.with_recover_mode(recover_mode);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the recover concurrency for the disk cache store.
+    ///
+    /// Default: `8`.
+    pub fn with_recover_concurrency(self, recover_concurrency: usize) -> Self {
+        let builder = self.builder.with_recover_concurrency(recover_concurrency);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the flusher count for the disk cache store.
+    ///
+    /// The flusher count limits how many regions can be concurrently written.
+    ///
+    /// Default: `1`.
+    pub fn with_flushers(self, flushers: usize) -> Self {
+        let builder = self.builder.with_flushers(flushers);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the reclaimer count for the disk cache store.
+    ///
+    /// The reclaimer count limits how many regions can be concurrently reclaimed.
+    ///
+    /// Default: `1`.
+    pub fn with_reclaimers(self, reclaimers: usize) -> Self {
+        let builder = self.builder.with_reclaimers(reclaimers);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the clean region threshold for the disk cache store.
+    ///
+    /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.
+    ///
+    /// Default: the same value as the `reclaimers`.
+    pub fn with_clean_region_threshold(self, clean_region_threshold: usize) -> Self {
+        let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the eviction pickers for th disk cache store.
+    ///
+    /// The eviction picker is used to pick the region to reclaim.
+    ///
+    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
+    /// will be applied.
+    ///
+    /// If no eviction picker pickes a region, a region will be picked randomly.
+    pub fn with_eviction_pickers(self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
+        let builder = self.builder.with_eviction_pickers(eviction_pickers);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the admission pickers for th disk cache store.
+    ///
+    /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
+    ///
+    /// Default: [`AdmitAllPicker`].
+    pub fn with_admission_picker(self, admission_picker: Arc<dyn AdmissionPicker<Key = K>>) -> Self {
+        let builder = self.builder.with_admission_picker(admission_picker);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the reinsertion pickers for th disk cache store.
+    ///
+    /// The reinsertion picker is used to pick the entries that can be reinsertion into the disk cache store while
+    /// reclaiming.
+    ///
+    /// Note: Only extremely important entries should be picked. If too many entries are picked, both insertion and
+    /// reinsertion will be stuck.
+    ///
+    /// Default: [`RejectAllPicker`].
+    pub fn with_reinsertion_picker(self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
+        let builder = self.builder.with_reinsertion_picker(reinsertion_picker);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the compression algorithm of the disk cache store.
+    ///
+    /// Default: [`Compression::None`].
+    pub fn with_compression(self, compression: Compression) -> Self {
+        let builder = self.builder.with_compression(compression);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Enable the tombstone log with the given config.
+    ///
+    /// For updatable cache, either the tombstone log or [`RecoverMode::None`] must be enabled to prevent from the
+    /// phantom entries after reopen.
+    pub fn with_tombstone_log_config(self, tombstone_log_config: TombstoneLogConfig) -> Self {
+        let builder = self.builder.with_tombstone_log_config(tombstone_log_config);
+        Self {
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Enable the dedicated runtime for the disk cache store.
     pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
         let builder = self.builder.with_runtime_config(runtime_config);
         Self {
-            cache: self.cache,
-            builder,
-        }
-    }
-
-    /// Decide if lazy reocvery feature is enabled.
-    ///
-    /// If enabled, the opening for the store will return immediately, but always return `None` before recovery is finished.
-    pub fn with_lazy(self, lazy: bool) -> Self {
-        let builder = self.builder.with_lazy(lazy);
-        Self {
-            cache: self.cache,
+            memory: self.memory,
             builder,
         }
     }
 
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
-        let store = self.builder.build().await?;
+        let storage = self.builder.build().await?;
         Ok(HybridCache {
-            cache: self.cache,
-            store,
+            memory: self.memory,
+            storage,
         })
     }
 }
@@ -297,22 +319,22 @@ pub struct HybridCache<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    cache: Cache<K, V, S>,
-    store: Store<K, V>,
+    memory: Cache<K, V, S>,
+    storage: Store<K, V, S>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridCache")
-            .field("cache", &self.cache)
-            .field("store", &self.store)
+            .field("memory", &self.memory)
+            .field("storage", &self.storage)
             .finish()
     }
 }
@@ -321,12 +343,12 @@ impl<K, V, S> Clone for HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
     fn clone(&self) -> Self {
         Self {
-            cache: self.cache.clone(),
-            store: self.store.clone(),
+            memory: self.memory.clone(),
+            storage: self.storage.clone(),
         }
     }
 }
@@ -335,14 +357,10 @@ impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    pub fn cache(&self) -> &Cache<K, V, S> {
-        &self.cache
-    }
-
-    pub fn store(&self) -> &Store<K, V> {
-        &self.store
+    pub fn memory(&self) -> &Cache<K, V, S> {
+        &self.memory
     }
 
     pub fn insert<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
@@ -352,8 +370,8 @@ where
     {
         let key = key.into();
         let value = value.into();
-        let entry = self.cache.insert(key.clone(), value.clone());
-        self.store.insert_async(key, value);
+        let entry = self.memory.insert(key.clone(), value.clone());
+        self.storage.enqueue(entry.clone());
         entry
     }
 
@@ -364,8 +382,8 @@ where
     {
         let key = key.into();
         let value = value.into();
-        let entry = self.cache.insert_with_context(key.clone(), value.clone(), context);
-        self.store.insert_async(key, value);
+        let entry = self.memory.insert_with_context(key.clone(), value.clone(), context);
+        self.storage.enqueue(entry.clone());
         entry
     }
 
@@ -374,24 +392,25 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
-        if let Some(entry) = self.cache.get(key) {
+        if let Some(entry) = self.memory.get(key) {
             return Ok(Some(entry));
         }
-        if let Some(entry) = self.store.get(key).await? {
-            let (key, value) = entry.to_arc();
-            return Ok(Some(self.cache.insert(key, value)));
+        if let Some((k, v)) = self.storage.load(key).await? {
+            if k.borrow() != key {
+                return Ok(None);
+            }
+            return Ok(Some(self.memory.insert(k, v)));
         }
         Ok(None)
     }
 
-    pub fn remove<Q>(&self, key: &Q) -> anyhow::Result<bool>
+    pub fn remove<Q>(&self, key: &Q)
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let cache = self.cache.remove(key).is_some();
-        let store = self.store.remove(key)?;
-        Ok(cache || store)
+        self.memory.remove(key);
+        self.storage.delete(key);
     }
 
     pub fn contains<Q>(&self, key: &Q) -> anyhow::Result<bool>
@@ -399,12 +418,12 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        Ok(self.cache.contains(key) || self.store.exists(key)?)
+        Ok(self.memory.contains(key) || self.storage.may_contains(key))
     }
 
-    pub fn clear(&self) -> anyhow::Result<()> {
-        self.cache.clear();
-        self.store.clear()?;
+    pub async fn clear(&self) -> anyhow::Result<()> {
+        self.memory.clear();
+        self.storage.destroy().await?;
         Ok(())
     }
 }
@@ -415,7 +434,7 @@ impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: BuildHasher + Send + Sync + 'static + Debug,
 {
     pub fn entry<AK, AV, F, FU>(&self, key: AK, f: F) -> HybridEntry<K, V, S>
     where
@@ -425,12 +444,14 @@ where
         FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
     {
         let key: Arc<K> = key.into();
-        let store = self.store.clone();
-        self.cache.entry(key.clone(), || {
+        let store = self.storage.clone();
+        self.memory.entry(key.clone(), || {
             let future = f();
             async move {
-                if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                    return Ok((entry.to_arc().1, CacheContext::default()));
+                match store.load(&key).await.map_err(anyhow::Error::from)? {
+                    None => {}
+                    Some((k, _)) if key.as_ref() != &k => {}
+                    Some((_, v)) => return Ok((Arc::new(v), CacheContext::default())),
                 }
                 future
                     .await

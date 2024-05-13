@@ -12,13 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::{fmt::Debug, hash::BuildHasher};
 
-use crate::catalog::Sequence;
+use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
 use crate::error::{Error, Result};
 use crate::serde::EntrySerializer;
-use crate::Compression;
+use crate::statistics::Statistics;
+use crate::Sequence;
 
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
@@ -29,13 +32,13 @@ use futures::future::{try_join, try_join_all};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
-use super::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
-use super::generic::GenericStoreConfig;
 use super::indexer::{EntryAddress, Indexer};
 use super::reclaimer::Reinsertion;
-use super::region::{GetCleanRegionHandle, RegionManager};
-use super::storage::EnqueueFuture;
-use super::tombstone::{Tombstone, TombstoneLog};
+use crate::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
+use crate::large::generic::GenericStoreConfig;
+use crate::region::{GetCleanRegionHandle, RegionManager};
+use crate::storage::EnqueueFuture;
+use crate::tombstone::{Tombstone, TombstoneLog};
 
 struct BatchState<K, V, S, D>
 where
@@ -204,6 +207,8 @@ where
     device: D,
     tombstone_log: Option<TombstoneLog>,
 
+    stats: Arc<Statistics>,
+
     compression: Compression,
     flush: bool,
 }
@@ -222,6 +227,7 @@ where
             region_manager: self.region_manager.clone(),
             device: self.device.clone(),
             tombstone_log: self.tombstone_log.clone(),
+            stats: self.stats.clone(),
             compression: self.compression,
             flush: self.flush,
         }
@@ -241,6 +247,7 @@ where
         region_manager: RegionManager<D>,
         device: D,
         tombstone_log: Option<TombstoneLog>,
+        stats: Arc<Statistics>,
         runtime: Handle,
     ) -> Result<Self> {
         let batch = AsyncBatchPipeline::with_runtime(BatchState::default(), runtime);
@@ -251,6 +258,7 @@ where
             region_manager,
             device,
             tombstone_log,
+            stats,
             compression: config.compression,
             flush: config.flush,
         })
@@ -431,6 +439,7 @@ where
         let flush = self.flush;
         let region_manager = self.region_manager.clone();
         let tombstone_log: Option<TombstoneLog> = self.tombstone_log.clone();
+        let stats = self.stats.clone();
 
         token.pipeline(
             |state| {
@@ -468,6 +477,7 @@ where
                 let futures = state.groups.into_iter().map(|group| {
                     let indexer = indexer.clone();
                     let region_manager = region_manager.clone();
+                    let stats = stats.clone();
                     async move {
                         // Wait for region is clean.
                         let region = group.writer.handle.await;
@@ -481,6 +491,8 @@ where
 
                         // Write buffet to device.
                         if !group.buffer.is_empty() {
+                            let aligned = group.buffer.len();
+
                             region
                                 .device()
                                 .write(group.buffer, region.id(), group.writer.offset)
@@ -488,6 +500,8 @@ where
                             if flush {
                                 region.device().flush(Some(region.id())).await?;
                             }
+
+                            stats.cache_write_bytes.fetch_add(aligned, Ordering::Relaxed);
 
                             let mut indices = group.indices;
                             for (_, addr) in indices.iter_mut() {

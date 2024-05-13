@@ -12,22 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub mod admission;
-pub mod device;
-pub mod eviction;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;
-pub mod none;
 pub mod reclaimer;
 pub mod recover;
-pub mod region;
-pub mod reinsertion;
-pub mod runtime;
 pub mod scanner;
-pub mod storage;
-pub mod store;
-pub mod tombstone;
-
-#[cfg(test)]
-pub mod test_utils;

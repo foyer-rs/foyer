@@ -20,7 +20,7 @@ use futures::{Future, FutureExt};
 
 use crate::error::Result;
 
-use super::storage::{EnqueueFuture, Storage};
+use crate::storage::{EnqueueFuture, Storage};
 
 pub struct RuntimeConfigBuilder {
     worker_threads: Option<usize>,
@@ -154,9 +154,17 @@ where
     fn delete<Q>(&self, key: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Eq + ?Sized,
     {
         self.store.delete(key)
+    }
+
+    fn may_contains<Q>(&self, key: &Q) -> bool
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.store.may_contains(key)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -174,16 +182,14 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
+        compress::Compression,
+        device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         large::{
-            admission::AdmitAllPicker,
-            device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
-            eviction::FifoPicker,
             generic::{GenericStore, GenericStoreConfig},
             recover::RecoverMode,
-            reinsertion::RejectAllPicker,
-            storage::Storage,
         },
-        Compression,
+        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
+        storage::Storage,
     };
 
     use super::*;
@@ -201,7 +207,7 @@ mod tests {
     ) -> GenericStoreConfig<u64, Vec<u8>, RandomState, DirectFsDevice> {
         GenericStoreConfig {
             memory: memory.clone(),
-            device_config: DirectFsDeviceConfig {
+            device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
@@ -215,7 +221,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Box::<AdmitAllPicker<u64>>::default(),
+            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
         }

@@ -24,7 +24,7 @@ use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use tokio::sync::oneshot;
 
-use super::storage::{EnqueueFuture, Storage};
+use crate::storage::{EnqueueFuture, Storage};
 
 use crate::error::Result;
 
@@ -95,11 +95,19 @@ where
     fn delete<Q>(&self, _: &Q) -> EnqueueFuture
     where
         Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Eq + ?Sized,
     {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(false));
         EnqueueFuture::new(rx)
+    }
+
+    fn may_contains<Q>(&self, _: &Q) -> bool
+    where
+        Self::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        false
     }
 
     async fn destroy(&self) -> Result<()> {
