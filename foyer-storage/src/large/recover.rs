@@ -41,15 +41,15 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoverMode {
-    // TODO(MrCroxx): Update `NoRecovery` docs after thombstone is supported.
     /// Do not recover disk cache.
     ///
-    /// For updatable cache, [`RecoverMode::NoRecovery`] must be used to prevent from phantom entry after reopen.
-    NoRecovery,
+    /// For updatable cache, either [`RecoverMode::None`] or the tombstone log must be used to prevent from phantom
+    /// entry when reopen.
+    None,
     /// Recover disk cache and skip errors.
-    QuietRecovery,
+    Quiet,
     /// Recover disk cache and panic on errors.
-    StrictRecovery,
+    Strict,
 }
 
 #[derive(Debug)]
@@ -192,7 +192,7 @@ impl RegionRecoverRunner {
     where
         D: Device,
     {
-        assert_ne!(mode, RecoverMode::NoRecovery);
+        assert_ne!(mode, RecoverMode::None);
 
         let mut infos = vec![];
 
@@ -201,7 +201,7 @@ impl RegionRecoverRunner {
             let r = iter.next().await;
             match r {
                 Err(e) => {
-                    if mode == RecoverMode::StrictRecovery {
+                    if mode == RecoverMode::Strict {
                         return Err(e);
                     } else {
                         tracing::warn!(

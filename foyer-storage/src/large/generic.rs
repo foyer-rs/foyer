@@ -106,7 +106,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct GenericStore<K, V, S, D>
 where
     K: StorageKey,
@@ -117,7 +116,18 @@ where
     inner: Arc<GenericStoreInner<K, V, S, D>>,
 }
 
-#[derive(Debug)]
+impl<K, V, S, D> Debug for GenericStore<K, V, S, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: BuildHasher + Send + Sync + 'static + Debug,
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenericStore").finish()
+    }
+}
+
 struct GenericStoreInner<K, V, S, D>
 where
     K: StorageKey,
@@ -402,7 +412,7 @@ mod tests {
         admission::AdmitAllPicker,
         device::direct_fs::{DirectFsDevice, DirectFsDeviceConfig},
         eviction::FifoPicker,
-        reinsertion::DenyAllPicker,
+        reinsertion::RejectAllPicker,
         test_utils::BiasedPicker,
         tombstone::TombstoneLogConfigBuilder,
     };
@@ -440,14 +450,14 @@ mod tests {
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
-            recover_mode: RecoverMode::StrictRecovery,
+            recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker,
-            reinsertion_picker: Arc::<DenyAllPicker<u64>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
         };
         GenericStore::open(config).await.unwrap()
@@ -468,7 +478,7 @@ mod tests {
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
-            recover_mode: RecoverMode::StrictRecovery,
+            recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
@@ -496,14 +506,14 @@ mod tests {
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
-            recover_mode: RecoverMode::StrictRecovery,
+            recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker: Box::<AdmitAllPicker<u64>>::default(),
-            reinsertion_picker: Arc::<DenyAllPicker<u64>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
         };
         GenericStore::open(config).await.unwrap()

@@ -18,6 +18,7 @@ pub mod eviction;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;
+pub mod none;
 pub mod reclaimer;
 pub mod recover;
 pub mod region;
@@ -25,6 +26,7 @@ pub mod reinsertion;
 pub mod runtime;
 pub mod scanner;
 pub mod storage;
+pub mod store;
 pub mod tombstone;
 
 #[cfg(test)]

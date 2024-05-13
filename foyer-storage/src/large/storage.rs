@@ -51,7 +51,7 @@ impl Future for EnqueueFuture {
 
 // TODO(MrCroxx): Remove this after in-memory cache event listener is removed.
 #[allow(clippy::type_complexity)]
-pub trait Storage: Send + Sync + 'static + Clone {
+pub trait Storage: Send + Sync + 'static + Clone + Debug {
     type Key: StorageKey;
     type Value: StorageValue;
     type BuildHasher: BuildHasher + Send + Sync + 'static;
