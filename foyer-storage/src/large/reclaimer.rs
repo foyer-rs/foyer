@@ -143,6 +143,10 @@ where
             // There is no evictable region, which means all regions are being written or being reclaiming.
             //
             // Wait for a while in this case.
+            tracing::warn!(
+                "[reclaimer]: No evictable region at the moment, sleep for {interval:?}.",
+                interval = Self::RETRY_INTERVAL
+            );
             tokio::time::sleep(Self::RETRY_INTERVAL).await;
             return;
         };
@@ -167,7 +171,7 @@ where
                 Ok(None) => break 'reclaim,
                 Err(e) => {
                     tracing::warn!(
-                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                        "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
                         id = region.id()
                     );
                     break 'reclaim;
