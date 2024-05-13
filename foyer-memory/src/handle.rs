@@ -23,6 +23,7 @@ bitflags! {
     struct BaseHandleFlags: u8 {
         const IN_INDEXER = 0b00000001;
         const IN_EVICTION = 0b00000010;
+        const IS_DEPOSIT= 0b00000100;
     }
 }
 
@@ -219,6 +220,20 @@ impl<T, C> BaseHandle<T, C> {
     #[inline(always)]
     pub fn is_in_eviction(&self) -> bool {
         !(self.flags & BaseHandleFlags::IN_EVICTION).is_empty()
+    }
+
+    #[inline(always)]
+    pub fn set_deposit(&mut self, deposit: bool) {
+        if deposit {
+            self.flags |= BaseHandleFlags::IS_DEPOSIT;
+        } else {
+            self.flags -= BaseHandleFlags::IS_DEPOSIT;
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_deposit(&self) -> bool {
+        !(self.flags & BaseHandleFlags::IS_DEPOSIT).is_empty()
     }
 }
 

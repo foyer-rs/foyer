@@ -107,13 +107,15 @@ where
     /// Insert a new entry into the cache. The handle for the new entry is returned.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    unsafe fn insert<AK, AV>(
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn emplace<AK, AV>(
         &mut self,
         hash: u64,
         key: AK,
         value: AV,
         weight: usize,
         context: <E::Handle as Handle>::Context,
+        deposit: bool,
         last_reference_entries: &mut Vec<(Arc<K>, Arc<V>, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle>
     where
@@ -145,10 +147,14 @@ where
         } else {
             self.state.metrics.insert.fetch_add(1, Ordering::Relaxed);
         }
-        self.eviction.push(ptr);
+        debug_assert!(ptr.as_ref().base().is_in_indexer());
 
-        debug_assert!(ptr.as_ref().base().is_in_indexer());
-        debug_assert!(ptr.as_ref().base().is_in_indexer());
+        if !deposit {
+            self.eviction.push(ptr);
+            debug_assert!(ptr.as_ref().base().is_in_eviction());
+        }
+
+        ptr.as_mut().base_mut().set_deposit(deposit);
 
         self.usage.fetch_add(weight, Ordering::Relaxed);
         ptr.as_mut().base_mut().inc_refs();
@@ -174,6 +180,7 @@ where
         let base = ptr.as_mut().base_mut();
         debug_assert!(base.is_in_indexer());
 
+        base.set_deposit(false);
         base.inc_refs();
         self.eviction.acquire(ptr);
 
@@ -325,6 +332,10 @@ where
 
         debug_assert!(handle.base().is_inited());
         debug_assert!(!handle.base().has_refs());
+
+        if handle.base().is_deposit() {
+            self.indexer.remove(handle.base().hash(), handle.key());
+        }
 
         // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and
         // the eviction container.
@@ -527,6 +538,41 @@ where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
     {
+        self.emplace(key, value, context, false)
+    }
+
+    pub fn deposit<AK, AV>(self: &Arc<Self>, key: AK, value: AV) -> GenericCacheEntry<K, V, E, I, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        self.deposit_with_context(key, value, CacheContext::default())
+    }
+
+    pub fn deposit_with_context<AK, AV>(
+        self: &Arc<Self>,
+        key: AK,
+        value: AV,
+        context: CacheContext,
+    ) -> GenericCacheEntry<K, V, E, I, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        self.emplace(key, value, context, true)
+    }
+
+    fn emplace<AK, AV>(
+        self: &Arc<Self>,
+        key: AK,
+        value: AV,
+        context: CacheContext,
+        deposit: bool,
+    ) -> GenericCacheEntry<K, V, E, I, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
         let key = key.into();
         let value = value.into();
         let hash = self.hash_builder.hash_one(&key);
@@ -537,7 +583,7 @@ where
         let (entry, waiters) = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             let waiters = shard.waiters.remove(&key);
-            let mut ptr = shard.insert(hash, key, value, weight, context.into(), &mut to_deallocate);
+            let mut ptr = shard.emplace(hash, key, value, weight, context.into(), deposit, &mut to_deallocate);
             if let Some(waiters) = waiters.as_ref() {
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
             }
@@ -1018,6 +1064,22 @@ mod tests {
 
         drop(e1);
         assert_eq!(refs(ptr), 0);
+    }
+
+    #[test]
+    fn test_deposit() {
+        let cache = lru(10);
+        let e = cache.deposit(42, "answer".to_string());
+        assert_eq!(cache.usage(), 6);
+        drop(e);
+        assert_eq!(cache.usage(), 0);
+
+        let e = cache.deposit(42, "answer".to_string());
+        assert_eq!(cache.usage(), 6);
+        assert_eq!(cache.get(&42).unwrap().value(), "answer");
+        drop(e);
+        assert_eq!(cache.usage(), 6);
+        assert_eq!(cache.get(&42).unwrap().value(), "answer");
     }
 
     #[test]

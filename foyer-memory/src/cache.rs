@@ -467,6 +467,32 @@ where
         }
     }
 
+    pub fn deposit<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.deposit(key, value).into(),
+            Cache::Lru(cache) => cache.deposit(key, value).into(),
+            Cache::Lfu(cache) => cache.deposit(key, value).into(),
+            Cache::S3Fifo(cache) => cache.deposit(key, value).into(),
+        }
+    }
+
+    pub fn deposit_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
+            Cache::Lru(cache) => cache.deposit_with_context(key, value, context).into(),
+            Cache::Lfu(cache) => cache.deposit_with_context(key, value, context).into(),
+            Cache::S3Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
+        }
+    }
+
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
