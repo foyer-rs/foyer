@@ -28,13 +28,13 @@ use crate::storage::{EnqueueFuture, Storage};
 
 use crate::error::Result;
 
-pub struct NoneStore<K, V, S>(PhantomData<(K, V, S)>)
+pub struct NoopStore<K, V, S>(PhantomData<(K, V, S)>)
 where
     K: StorageKey,
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug;
 
-impl<K, V, S> Debug for NoneStore<K, V, S>
+impl<K, V, S> Debug for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -45,7 +45,7 @@ where
     }
 }
 
-impl<K, V, S> Clone for NoneStore<K, V, S>
+impl<K, V, S> Clone for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<K, V, S> Storage for NoneStore<K, V, S>
+impl<K, V, S> Storage for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -130,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn test_none_store() {
         let memory = cache_for_test();
-        let store = NoneStore::open(()).await.unwrap();
+        let store = NoopStore::open(()).await.unwrap();
         assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384])).await.unwrap());
         assert!(store.load(&0).await.unwrap().is_none());
         store.delete(&0).await.unwrap();

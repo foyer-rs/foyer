@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub mod none;
+pub mod noop;
 pub mod runtime;
 
 use std::{
@@ -46,7 +46,7 @@ use crate::{
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
 };
-use none::NoneStore;
+use noop::NoopStore;
 use runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig};
 
 use crate::error::Result;
@@ -57,7 +57,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    None,
+    Noop,
     DirectFs(GenericStoreConfig<K, V, S, DirectFsDevice>),
     RuntimeDirectFs(RuntimeStoreConfig<GenericStore<K, V, S, DirectFsDevice>>),
 }
@@ -70,7 +70,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None => f.debug_tuple("None").finish(),
+            Self::Noop => f.debug_tuple("None").finish(),
             Self::DirectFs(config) => f.debug_tuple("DirectFs").field(config).finish(),
             Self::RuntimeDirectFs(config) => f.debug_tuple("RuntimeDirectFs").field(config).finish(),
         }
@@ -83,7 +83,7 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    None(NoneStore<K, V, S>),
+    Noop(NoopStore<K, V, S>),
     DirectFs(GenericStore<K, V, S, DirectFsDevice>),
     RuntimeDirectFs(Runtime<GenericStore<K, V, S, DirectFsDevice>>),
 }
@@ -96,7 +96,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None(store) => f.debug_tuple("None").field(store).finish(),
+            Self::Noop(store) => f.debug_tuple("None").field(store).finish(),
             Self::DirectFs(store) => f.debug_tuple("DirectFs").field(store).finish(),
             Self::RuntimeDirectFs(store) => f.debug_tuple("RuntimeDirectFs").field(store).finish(),
         }
@@ -111,7 +111,7 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::None(store) => Self::None(store.clone()),
+            Self::Noop(store) => Self::Noop(store.clone()),
             Self::DirectFs(store) => Self::DirectFs(store.clone()),
             Self::RuntimeDirectFs(store) => Self::RuntimeDirectFs(store.clone()),
         }
@@ -131,7 +131,7 @@ where
 
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
-            StoreConfig::None => Ok(Self::None(NoneStore::open(()).await?)),
+            StoreConfig::Noop => Ok(Self::Noop(NoopStore::open(()).await?)),
             StoreConfig::DirectFs(config) => Ok(Self::DirectFs(GenericStore::open(config).await?)),
             StoreConfig::RuntimeDirectFs(config) => Ok(Self::RuntimeDirectFs(Runtime::open(config).await?)),
         }
@@ -139,7 +139,7 @@ where
 
     async fn close(&self) -> Result<()> {
         match self {
-            Store::None(store) => store.close().await,
+            Store::Noop(store) => store.close().await,
             Store::DirectFs(store) => store.close().await,
             Store::RuntimeDirectFs(store) => store.close().await,
         }
@@ -147,7 +147,7 @@ where
 
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> super::storage::EnqueueFuture {
         match self {
-            Store::None(store) => store.enqueue(entry),
+            Store::Noop(store) => store.enqueue(entry),
             Store::DirectFs(store) => store.enqueue(entry),
             Store::RuntimeDirectFs(store) => store.enqueue(entry),
         }
@@ -159,7 +159,7 @@ where
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         match self {
-            Store::None(store) => LoadFuture::None(store.load(key)),
+            Store::Noop(store) => LoadFuture::Noop(store.load(key)),
             Store::DirectFs(store) => LoadFuture::DirectFs(store.load(key)),
             Store::RuntimeDirectFs(store) => LoadFuture::RuntimeDirectFs(store.load(key)),
         }
@@ -171,7 +171,7 @@ where
         Q: Hash + Eq + ?Sized,
     {
         match self {
-            Store::None(store) => store.delete(key),
+            Store::Noop(store) => store.delete(key),
             Store::DirectFs(store) => store.delete(key),
             Store::RuntimeDirectFs(store) => store.delete(key),
         }
@@ -183,7 +183,7 @@ where
         Q: Hash + Eq + ?Sized,
     {
         match self {
-            Store::None(store) => store.may_contains(key),
+            Store::Noop(store) => store.may_contains(key),
             Store::DirectFs(store) => store.may_contains(key),
             Store::RuntimeDirectFs(store) => store.may_contains(key),
         }
@@ -191,7 +191,7 @@ where
 
     async fn destroy(&self) -> Result<()> {
         match self {
-            Store::None(store) => store.destroy().await,
+            Store::Noop(store) => store.destroy().await,
             Store::DirectFs(store) => store.destroy().await,
             Store::RuntimeDirectFs(store) => store.destroy().await,
         }
@@ -199,7 +199,7 @@ where
 }
 
 enum LoadFuture<F1, F2, F3> {
-    None(F1),
+    Noop(F1),
     DirectFs(F2),
     RuntimeDirectFs(F3),
 }
@@ -209,7 +209,7 @@ impl<F1, F2, F3> LoadFuture<F1, F2, F3> {
     pub fn as_pin_mut(self: Pin<&mut Self>) -> LoadFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>> {
         unsafe {
             match *Pin::get_unchecked_mut(self) {
-                LoadFuture::None(ref mut inner) => LoadFuture::None(Pin::new_unchecked(inner)),
+                LoadFuture::Noop(ref mut inner) => LoadFuture::Noop(Pin::new_unchecked(inner)),
                 LoadFuture::DirectFs(ref mut inner) => LoadFuture::DirectFs(Pin::new_unchecked(inner)),
                 LoadFuture::RuntimeDirectFs(ref mut inner) => LoadFuture::RuntimeDirectFs(Pin::new_unchecked(inner)),
             }
@@ -227,7 +227,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.as_pin_mut() {
-            LoadFuture::None(future) => future.poll(cx),
+            LoadFuture::Noop(future) => future.poll(cx),
             LoadFuture::DirectFs(future) => future.poll(cx),
             LoadFuture::RuntimeDirectFs(future) => future.poll(cx),
         }
@@ -435,7 +435,7 @@ where
             tracing::warn!(
                 "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
             );
-            return Store::open(StoreConfig::None).await;
+            return Store::open(StoreConfig::Noop).await;
         }
 
         match (self.device_config, self.runtime_config) {
