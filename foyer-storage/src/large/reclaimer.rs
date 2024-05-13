@@ -42,6 +42,7 @@ impl Reclaimer {
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, S, D>>,
+        flush: bool,
         runtime: Handle,
     ) -> Self
     where
@@ -58,6 +59,7 @@ impl Reclaimer {
             indexer,
             flushers,
             reinsertion_picker,
+            flush,
             wait_rx,
             runtime: runtime.clone(),
         };
@@ -90,6 +92,8 @@ where
     indexer: Indexer,
 
     flushers: Vec<Flusher<K, V, S, D>>,
+
+    flush: bool,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
@@ -139,6 +143,10 @@ where
             // There is no evictable region, which means all regions are being written or being reclaiming.
             //
             // Wait for a while in this case.
+            tracing::warn!(
+                "[reclaimer]: No evictable region at the moment, sleep for {interval:?}.",
+                interval = Self::RETRY_INTERVAL
+            );
             tokio::time::sleep(Self::RETRY_INTERVAL).await;
             return;
         };
@@ -163,7 +171,7 @@ where
                 Ok(None) => break 'reclaim,
                 Err(e) => {
                     tracing::warn!(
-                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                        "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
                         id = region.id()
                     );
                     break 'reclaim;
@@ -209,7 +217,7 @@ where
         });
         self.indexer.remove_batch(&unpicked);
 
-        if let Err(e) = RegionCleaner::clean(&region).await {
+        if let Err(e) = RegionCleaner::clean(&region, self.flush).await {
             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
         }
 
@@ -232,7 +240,7 @@ where
 pub struct RegionCleaner;
 
 impl RegionCleaner {
-    pub async fn clean<D>(region: &Region<D>) -> Result<()>
+    pub async fn clean<D>(region: &Region<D>, flush: bool) -> Result<()>
     where
         D: Device,
     {
@@ -241,7 +249,11 @@ impl RegionCleaner {
             0;
             region.device().align()
         ];
-        region.device().write(buf, region.id(), 0).await
+        region.device().write(buf, region.id(), 0).await?;
+        if flush {
+            region.device().flush(Some(region.id())).await?;
+        }
+        Ok(())
     }
 }
 
