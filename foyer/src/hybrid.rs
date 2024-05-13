@@ -387,6 +387,35 @@ where
         entry
     }
 
+    pub fn insert_storage<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        let key = key.into();
+        let value = value.into();
+        let entry = self.memory.deposit(key.clone(), value.clone());
+        self.storage.enqueue(entry.clone());
+        entry
+    }
+
+    pub fn insert_storage_with_context<AK, AV>(
+        &self,
+        key: AK,
+        value: AV,
+        context: CacheContext,
+    ) -> HybridCacheEntry<K, V, S>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+        AV: Into<Arc<V>> + Send + 'static,
+    {
+        let key = key.into();
+        let value = value.into();
+        let entry = self.memory.deposit_with_context(key.clone(), value.clone(), context);
+        self.storage.enqueue(entry.clone());
+        entry
+    }
+
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Borrow<Q>,
