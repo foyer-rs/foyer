@@ -14,10 +14,7 @@
 
 use std::{fmt::Debug, ptr::NonNull};
 
-use foyer_intrusive::{
-    dlist::{Dlist, DlistLink},
-    intrusive_adapter,
-};
+use foyer_common::slab::{slab_linked_list::SlabLinkedList, Token};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -45,7 +42,7 @@ pub struct FifoHandle<T>
 where
     T: Send + Sync + 'static,
 {
-    link: DlistLink,
+    token: Option<Token>,
     base: BaseHandle<T, FifoContext>,
 }
 
@@ -58,15 +55,13 @@ where
     }
 }
 
-intrusive_adapter! { FifoHandleDlistAdapter<T> = NonNull<FifoHandle<T>>: FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
-
 impl<T> Default for FifoHandle<T>
 where
     T: Send + Sync + 'static,
 {
     fn default() -> Self {
         Self {
-            link: DlistLink::default(),
+            token: None,
             base: BaseHandle::new(),
         }
     }
@@ -95,7 +90,7 @@ pub struct Fifo<T>
 where
     T: Send + Sync + 'static,
 {
-    queue: Dlist<FifoHandleDlistAdapter<T>>,
+    queue: SlabLinkedList<NonNull<FifoHandle<T>>>,
 }
 
 impl<T> Eviction for Fifo<T>
@@ -109,17 +104,23 @@ where
     where
         Self: Sized,
     {
-        Self { queue: Dlist::new() }
+        Self {
+            queue: SlabLinkedList::new(),
+        }
     }
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        self.queue.push_back(ptr);
-        ptr.as_mut().base_mut().set_in_eviction(true);
+        let token = self.queue.push_back(ptr);
+        let handle = ptr.as_mut();
+        handle.base_mut().set_in_eviction(true);
+        handle.token = Some(token);
     }
 
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         self.queue.pop_front().map(|mut ptr| {
-            ptr.as_mut().base_mut().set_in_eviction(false);
+            let handle = ptr.as_mut();
+            handle.base_mut().set_in_eviction(false);
+            handle.token = None;
             ptr
         })
     }
@@ -129,15 +130,19 @@ where
     unsafe fn acquire(&mut self, _: NonNull<Self::Handle>) {}
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
+        let p = self.queue.remove_with_token(ptr.as_ref().token.unwrap_unchecked());
         assert_eq!(p, ptr);
-        ptr.as_mut().base_mut().set_in_eviction(false);
+        let handle = ptr.as_mut();
+        handle.base_mut().set_in_eviction(false);
+        handle.token = None;
     }
 
     unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
         let mut res = Vec::with_capacity(self.len());
         while let Some(mut ptr) = self.queue.pop_front() {
-            ptr.as_mut().base_mut().set_in_eviction(false);
+            let handle = ptr.as_mut();
+            handle.base_mut().set_in_eviction(false);
+            handle.token = None;
             res.push(ptr);
         }
         res
@@ -168,10 +173,12 @@ pub mod tests {
         T: Send + Sync + 'static + Clone,
     {
         fn dump(&self) -> Vec<T> {
-            self.queue
-                .iter()
-                .map(|handle| handle.base().data_unwrap_unchecked().clone())
-                .collect_vec()
+            unsafe {
+                self.queue
+                    .iter()
+                    .map(|handle| handle.as_ref().base().data_unwrap_unchecked().clone())
+                    .collect_vec()
+            }
         }
     }
 
