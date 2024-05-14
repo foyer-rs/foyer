@@ -145,9 +145,11 @@ async fn main() -> Result<()> {
     let e = hybrid
         .entry(20230512, || async {
             let value = fetch().await?;
-            Ok((value, CacheContext::default()))
+            Ok(Some((value, CacheContext::default())))
         })
         .await?;
+    assert!(e.is_some());
+    let e = e.unwrap();
     assert_eq!(e.key(), &20230512);
     assert_eq!(e.value(), "Hello, foyer.");
 

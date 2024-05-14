@@ -188,7 +188,7 @@ where
         AK: Into<Arc<K>>,
         AV: Into<Arc<V>>,
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<Option<(AV, CacheContext)>>> + Send + 'static,
     {
         let key: Arc<K> = key.into();
         let store = self.storage.clone();
@@ -198,11 +198,11 @@ where
                 match store.load(&key).await.map_err(anyhow::Error::from)? {
                     None => {}
                     Some((k, _)) if key.as_ref() != &k => {}
-                    Some((_, v)) => return Ok((Arc::new(v), CacheContext::default())),
+                    Some((_, v)) => return Ok(Some((Arc::new(v), CacheContext::default()))),
                 }
                 future
                     .await
-                    .map(|(value, context)| (value.into(), context))
+                    .map(|opt| opt.map(|(value, context)| (value.into(), context)))
                     .map_err(anyhow::Error::from)
             }
         })
