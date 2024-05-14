@@ -119,6 +119,7 @@ impl EntrySerializer {
 
         // reserve space for header, header will be filled after the serialized len is known
         cursor += EntryHeader::serialized_len();
+        buffer.reserve(EntryHeader::serialized_len());
         unsafe { buffer.set_len(cursor) };
 
         // serialize value
