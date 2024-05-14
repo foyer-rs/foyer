@@ -672,14 +672,14 @@ where
     ER: From<oneshot::error::RecvError>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
+    type Output = std::result::Result<Option<CacheEntry<K, V, S>>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
-            Entry::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Entry::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Entry::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Entry::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
+            Entry::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Entry::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Entry::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Entry::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
         }
     }
 }
@@ -730,7 +730,7 @@ where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<Option<(AV, CacheContext)>, ER>> + Send + 'static,
         ER: Send + 'static,
     {
         match self {
@@ -832,12 +832,13 @@ mod tests {
                 let entry = cache
                     .entry(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, tokio::sync::oneshot::error::RecvError>((i, CacheContext::Default))
+                        Ok::<_, tokio::sync::oneshot::error::RecvError>(Some((i, CacheContext::Default)))
                     })
                     .await
                     .unwrap();
-                assert_eq!(*entry.key(), i);
-                assert_eq!(entry.key(), entry.value());
+                let e = entry.unwrap();
+                assert_eq!(*e.key(), i);
+                assert_eq!(e.key(), e.value());
             }
             _ => unreachable!(),
         }

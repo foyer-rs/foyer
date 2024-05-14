@@ -71,7 +71,7 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
-    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, S>>>>,
+    waiters: HashMap<Arc<K>, Vec<oneshot::Sender<Option<GenericCacheEntry<K, V, E, I, S>>>>>,
 
     state: Arc<CacheSharedState<E::Handle>>,
 }
@@ -421,8 +421,8 @@ where
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, S>),
-    Wait(oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>),
-    Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
+    Wait(oneshot::Receiver<Option<GenericCacheEntry<K, V, E, I, S>>>),
+    Miss(JoinHandle<std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>>),
 }
 
 impl<K, V, E, I, S, ER> Default for GenericEntry<K, V, E, I, S, ER>
@@ -449,13 +449,13 @@ where
     S: BuildHasher + Send + Sync + 'static,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
+    type Output = std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
             Self::Invalid => unreachable!(),
             Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
-                GenericEntry::Hit(entry) => entry,
+                GenericEntry::Hit(entry) => Some(entry),
                 _ => unreachable!(),
             })),
             Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
@@ -596,10 +596,10 @@ where
 
         if let Some(waiters) = waiters {
             for waiter in waiters {
-                let _ = waiter.send(GenericCacheEntry {
+                let _ = waiter.send(Some(GenericCacheEntry {
                     cache: self.clone(),
                     ptr: entry.ptr,
-                });
+                }));
             }
         }
 
@@ -767,7 +767,7 @@ where
         AK: Into<Arc<K>> + Send + 'static,
         AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(AV, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<Option<(AV, CacheContext)>, ER>> + Send + 'static,
         ER: Send + 'static,
     {
         let key = key.into();
@@ -792,16 +792,18 @@ where
                     let cache = self.clone();
                     let future = f();
                     let join = tokio::spawn(async move {
-                        let (value, context) = match future.await {
-                            Ok((value, context)) => (value, context),
+                        let res = match future.await {
+                            Ok(res) => res,
                             Err(e) => {
                                 let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
                                 shard.waiters.remove(&key);
                                 return Err(e);
                             }
                         };
-                        let entry = cache.insert_with_context(key, value, context);
-                        Ok(entry)
+                        match res {
+                            Some((value, context)) => Ok(Some(cache.insert_with_context(key, value, context))),
+                            None => Ok(None),
+                        }
                     });
                     GenericEntry::Miss(join)
                 }
