@@ -25,11 +25,11 @@ use super::{flusher::Flusher, indexer::Indexer};
 use crate::{
     device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
-    large::scanner::RegionScanner,
+    large::{flusher::Submission, scanner::RegionScanner},
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    Sequence,
+    EnqueueFuture, Sequence,
 };
 
 #[derive(Debug)]
@@ -202,11 +202,16 @@ where
                     Ok(buf) => buf,
                 };
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
-                let future = flusher.submit(
-                    Reinsertion {
-                        hash: info.hash,
-                        sequence: info.sequence,
-                        buffer,
+                let (tx, rx) = oneshot::channel();
+                let future = EnqueueFuture::new(rx);
+                flusher.submit(
+                    Submission::Reinsertion {
+                        reinsertion: Reinsertion {
+                            hash: info.hash,
+                            sequence: info.sequence,
+                            buffer,
+                        },
+                        tx,
                     },
                     0,
                 );

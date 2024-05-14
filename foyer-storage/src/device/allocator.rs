@@ -18,7 +18,6 @@ use allocator_api2::{
     alloc::{AllocError, Allocator, Global},
     vec::Vec as VecA,
 };
-use foyer_common::bits;
 
 #[derive(Debug)]
 pub struct WritableVecA<'a, T, A: Allocator>(pub &'a mut VecA<T, A>);
@@ -90,18 +89,18 @@ impl<const N: usize> AlignedAllocator<N> {
 
 unsafe impl<const N: usize> Allocator for AlignedAllocator<N> {
     fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, AllocError> {
-        let layout = std::alloc::Layout::from_size_align(layout.size(), bits::align_up(N, layout.align())).unwrap();
-        Global.allocate(layout)
+        Global.allocate(layout.align_to(N).unwrap())
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        let layout = std::alloc::Layout::from_size_align(layout.size(), bits::align_up(N, layout.align())).unwrap();
-        Global.deallocate(ptr, layout)
+        Global.deallocate(ptr, layout.align_to(N).unwrap())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use foyer_common::bits;
+
     use super::*;
 
     #[test]

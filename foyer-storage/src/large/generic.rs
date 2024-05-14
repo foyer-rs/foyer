@@ -50,7 +50,7 @@ use crate::{
 };
 
 use super::{
-    flusher::Flusher,
+    flusher::{Flusher, Submission},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
@@ -154,6 +154,8 @@ where
 
     sequence: AtomicSequence,
 
+    runtime: Handle,
+
     active: AtomicBool,
 }
 
@@ -252,6 +254,7 @@ where
                 stats,
                 flush: config.flush,
                 sequence,
+                runtime,
                 active: AtomicBool::new(true),
             }),
         })
@@ -265,20 +268,28 @@ where
     }
 
     fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueFuture {
-        if !self.inner.active.load(Ordering::Relaxed) {
-            let (tx, rx) = oneshot::channel();
-            tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
-                .unwrap();
-            return EnqueueFuture::new(rx);
-        }
-        if self.inner.admission_picker.pick(&self.inner.stats, entry.key()) {
-            let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-            self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(entry, sequence)
-        } else {
-            let (tx, rx) = oneshot::channel();
-            let _ = tx.send(Ok(false));
-            EnqueueFuture::new(rx)
-        }
+        let (tx, rx) = oneshot::channel();
+        let future = EnqueueFuture::new(rx);
+
+        let this = self.clone();
+
+        self.inner.runtime.spawn(async move {
+            if !this.inner.active.load(Ordering::Relaxed) {
+                tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
+                    .unwrap();
+                return;
+            }
+
+            if this.inner.admission_picker.pick(&this.inner.stats, entry.key()) {
+                let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
+                this.inner.flushers[sequence as usize % this.inner.flushers.len()]
+                    .submit(Submission::CacheEntry { entry, tx }, sequence);
+            } else {
+                let _ = tx.send(Ok(false));
+            }
+        });
+
+        future
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
@@ -327,20 +338,32 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        let (tx, rx) = oneshot::channel();
+        let future = EnqueueFuture::new(rx);
+
         if !self.inner.active.load(Ordering::Relaxed) {
-            let (tx, rx) = oneshot::channel();
             tx.send(Err(anyhow::anyhow!("cannot delete entry after closed").into()))
                 .unwrap();
-            return EnqueueFuture::new(rx);
+            return future;
         }
 
         let hash = self.inner.memory.hash_builder().hash_one(key);
 
         self.inner.indexer.remove(hash);
 
-        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()]
-            .submit(Tombstone { hash, sequence }, sequence)
+        let this = self.clone();
+        self.inner.runtime.spawn(async move {
+            let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
+            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(
+                Submission::Tombstone {
+                    tombstone: Tombstone { hash, sequence },
+                    tx,
+                },
+                sequence,
+            );
+        });
+
+        future
     }
 
     fn may_contains<Q>(&self, key: &Q) -> bool
@@ -362,9 +385,16 @@ where
 
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()]
-            .submit(Tombstone { hash: 0, sequence }, sequence)
-            .await?;
+        let (tx, rx) = oneshot::channel();
+        let future = EnqueueFuture::new(rx);
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(
+            Submission::Tombstone {
+                tombstone: Tombstone { hash: 0, sequence },
+                tx,
+            },
+            sequence,
+        );
+        future.await?;
 
         // Clean regions.
         try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {

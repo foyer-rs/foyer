@@ -3,11 +3,11 @@ resolver = "2"
 members = [
     "examples",
     "foyer",
+    "foyer-bench",
     "foyer-common",
     "foyer-intrusive",
     "foyer-memory",
     "foyer-storage",
-    # "foyer-storage-bench",
 ]
 
 [workspace.dependencies]
@@ -21,6 +21,10 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "fs",
 ] }
 serde = { version = "1", features = ["derive", "rc"] }
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
 
 [profile.release]
 debug = true

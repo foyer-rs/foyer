@@ -12,8 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use bytesize::MIB;
+use foyer::{
+    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LfuConfig, RateLimitPicker,
+    RuntimeConfigBuilder,
+};
+use metrics_exporter_prometheus::PrometheusBuilder;
+
 mod analyze;
-mod export;
 mod rate;
 mod text;
 mod utils;
@@ -31,12 +37,7 @@ use std::{
 
 use analyze::{analyze, monitor, Metrics};
 use clap::Parser;
-use export::MetricsExporter;
 
-use foyer_storage::{
-    AsyncStorageExt, CachedEntry, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy,
-    Result, RuntimeConfigBuilder, Storage, StorageExt, Store, StoreBuilder,
-};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{
@@ -53,13 +54,17 @@ use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
 pub struct Args {
-    /// dir for cache data
+    /// Directory for disk cache data.
     #[arg(short, long)]
     dir: String,
 
-    /// (MiB)
+    /// In-memory cache capacity. (MiB)
     #[arg(long, default_value_t = 1024)]
-    capacity: usize,
+    mem: usize,
+
+    /// Disk cache capacity. (MiB)
+    #[arg(long, default_value_t = 1024)]
+    disk: usize,
 
     /// (s)
     #[arg(short, long, default_value_t = 60)]
@@ -74,68 +79,65 @@ pub struct Args {
     #[arg(long, default_value = "")]
     iostat_dev: String,
 
-    /// (MiB)
+    /// Write rate limit per writer. (MiB)
     #[arg(long, default_value_t = 0.0)]
     w_rate: f64,
 
-    /// (MiB)
+    /// Read rate limit per reader. (MiB)
     #[arg(long, default_value_t = 0.0)]
     r_rate: f64,
 
+    /// Min entry size (B).
     #[arg(long, default_value_t = 64 * 1024)]
     entry_size_min: usize,
 
+    /// Max entry size (B).
     #[arg(long, default_value_t = 64 * 1024)]
     entry_size_max: usize,
 
+    /// Reader lookup key range.
     #[arg(long, default_value_t = 10000)]
     get_range: u64,
 
-    /// (MiB)
+    /// Disk cache file size. (MiB)
     #[arg(long, default_value_t = 64)]
     file_size: usize,
 
+    /// Flusher count.
     #[arg(long, default_value_t = 4)]
     flushers: usize,
 
+    /// Reclaimer count.
     #[arg(long, default_value_t = 4)]
     reclaimers: usize,
 
-    #[arg(long, default_value_t = false)]
-    disable_direct: bool,
-
-    #[arg(long, default_value_t = 4096)]
-    align: usize,
-
-    #[arg(long, default_value_t = 16 * 1024)]
-    io_size: usize,
-
+    /// Writer count.
     #[arg(long, default_value_t = 16)]
     writers: usize,
 
+    /// Reader count.
     #[arg(long, default_value_t = 16)]
     readers: usize,
 
+    /// Recover concurrency.
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// enable rated ticket admission policy if `ticket_insert_rate_limit` > 0
-    /// (MiB/s)
+    /// Enable rated ticket admission picker if `admission_rate_limit > 0`. (MiB/s)
     #[arg(long, default_value_t = 0)]
-    ticket_insert_rate_limit: usize,
+    admission_rate_limit: usize,
 
-    /// enable rated ticket reinsetion policy if `ticket_reinsert_rate_limit` > 0
-    /// (MiB/s)
+    /// Enable rated ticket reinsetion picker if `reinseriton_rate_limit > 0`. (MiB/s)
     #[arg(long, default_value_t = 0)]
-    ticket_reinsert_rate_limit: usize,
+    reinseriton_rate_limit: usize,
 
-    /// `0` means use default
+    /// `0` means use default.
     #[arg(long, default_value_t = 0)]
     clean_region_threshold: usize,
 
-    /// Catalog indices sharding bits.
+    /// Shards of both in-memory cache and disk cache indexer.
     #[arg(long, default_value_t = 64)]
-    catalog_shards: usize,
+    shards: usize,
 
     /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
@@ -168,6 +170,9 @@ pub struct Args {
     // (s)
     #[arg(long, default_value_t = 2)]
     warm_up: u64,
+
+    #[arg(long, default_value_t = false)]
+    flush: bool,
 }
 
 #[derive(Debug)]
@@ -338,14 +343,12 @@ async fn main() {
     }
 
     let args = Args::parse();
+    println!("{:#?}", args);
+    assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
     if args.metrics {
-        MetricsExporter::init("0.0.0.0:19970".parse().unwrap());
+        PrometheusBuilder::new().install().unwrap();
     }
-
-    println!("{:#?}", args);
-
-    assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
     create_dir_all(&args.dir).unwrap();
 
@@ -366,21 +369,24 @@ async fn main() {
     let iostat_start = iostat(&iostat_path);
     let metrics_dump_start = metrics.dump();
 
-    let mut builder = StoreBuilder::new()
-        .with_name("foyer-storage-bench")
+    let mut builder = HybridCacheBuilder::new()
+        .memory(args.mem * MIB as usize)
+        .with_shards(args.shards)
+        .with_eviction_config(LfuConfig::default())
+        .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
+        .storage()
         .with_device_config(
-            FsDeviceConfigBuilder::new(&args.dir)
-                .with_capacity(args.capacity * 1024 * 1024)
-                .with_file_size(args.file_size * 1024 * 1024)
-                .with_direct(!args.disable_direct)
-                .with_align(args.align)
-                .with_io_size(args.io_size)
+            DirectFsDeviceOptionsBuilder::new(&args.dir)
+                .with_capacity(args.disk * MIB as usize)
+                .with_file_size(args.file_size * MIB as usize)
                 .build(),
         )
-        .with_catalog_shards(args.catalog_shards)
+        .with_flush(args.flush)
+        .with_indexer_shards(args.shards)
+        .with_recover_concurrency(args.recover_concurrency)
         .with_flushers(args.flushers)
         .with_reclaimers(args.reclaimers)
-        .with_recover_concurrency(args.recover_concurrency)
+        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
         .with_compression(
             args.compression
                 .as_str()
@@ -388,15 +394,13 @@ async fn main() {
                 .expect("unsupported compression algorithm"),
         );
 
-    if args.ticket_insert_rate_limit > 0 {
-        builder = builder.with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-            args.ticket_insert_rate_limit * 1024 * 1024,
-        )));
+    if args.admission_rate_limit > 0 {
+        builder =
+            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
     }
-    if args.ticket_reinsert_rate_limit > 0 {
-        builder = builder.with_reinsertion_policy(Arc::new(RatedTicketReinsertionPolicy::new(
-            args.ticket_reinsert_rate_limit * 1024 * 1024,
-        )));
+    if args.reinseriton_rate_limit > 0 {
+        builder =
+            builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
     }
 
     if args.clean_region_threshold > 0 {
@@ -407,10 +411,7 @@ async fn main() {
         builder = builder.with_runtime_config(RuntimeConfigBuilder::new().with_thread_name("foyer").build());
     }
 
-    let config = builder.build_config();
-    println!("{config:#?}");
-
-    let store = Store::open(config).await.unwrap();
+    let hybrid = builder.build().await.unwrap();
 
     let (stop_tx, _) = broadcast::channel(4096);
 
@@ -430,7 +431,7 @@ async fn main() {
 
     let time = Instant::now();
 
-    let handle_bench = tokio::spawn(bench(args.clone(), store.clone(), metrics.clone(), stop_tx.clone()));
+    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
 
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
@@ -450,7 +451,7 @@ async fn main() {
         &metrics_dump_end,
     );
 
-    store.close().await.unwrap();
+    hybrid.close().await.unwrap();
 
     handle_monitor.abort();
     handle_signal.abort();
@@ -458,7 +459,7 @@ async fn main() {
     println!("\nTotal:\n{}", analysis);
 }
 
-async fn bench(args: Args, store: impl Storage<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
+async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
     let w_rate = if args.w_rate == 0.0 {
         None
     } else {
@@ -487,17 +488,17 @@ async fn bench(args: Args, store: impl Storage<u64, Value>, metrics: Metrics, st
     });
 
     let w_handles = (0..args.writers)
-        .map(|id| tokio::spawn(write(id as u64, store.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
     let r_handles = (0..args.readers)
-        .map(|_| tokio::spawn(read(store.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
 
     join_all(w_handles).await;
     join_all(r_handles).await;
 }
 
-async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
+async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
@@ -566,22 +567,17 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
 
         let time = Instant::now();
         let ctx = context.clone();
-        let callback = move |res: Result<Option<CachedEntry<u64, Value>>>| async move {
+        let entry_size = u64::BITS as usize / 8 + data.len();
+        let update = || {
             let record = start.elapsed() > ctx.warm_up;
-
-            let entry = res.unwrap();
             let lat = time.elapsed().as_micros() as u64;
             ctx.counts[id as usize].fetch_add(1, Ordering::Relaxed);
-
             if record {
                 if let Err(e) = ctx.metrics.insert_lats.write().record(lat) {
                     tracing::error!("metrics error: {:?}, value: {}", e, lat);
                 }
-
-                if entry.is_some() {
-                    ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-                    ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
-                }
+                ctx.metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+                ctx.metrics.insert_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
         };
 
@@ -589,22 +585,22 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
 
         match &context.distribution {
             TimeSeriesDistribution::None => {
-                let res = store.insert(idx, data).await;
-                callback(res).await;
+                hybrid.insert(idx, data);
+                update();
             }
             TimeSeriesDistribution::Uniform { interval } => {
-                store.insert_async_with_callback(idx, data, callback);
+                hybrid.insert(idx, data);
+                update();
                 tokio::time::sleep(interval.saturating_sub(elapsed)).await;
             }
             TimeSeriesDistribution::Zipf { .. } => {
-                store.insert_async_with_callback(idx, data, callback);
+                hybrid.insert(idx, data);
+                update();
                 let intervals = zipf_intervals.as_ref().unwrap();
-
                 let group = match intervals.binary_search_by_key(&(c as usize % K), |(sum, _)| *sum) {
                     Ok(i) => i,
                     Err(i) => i.min(G - 1),
                 };
-
                 tokio::time::sleep(intervals[group].1.saturating_sub(elapsed)).await;
             }
         }
@@ -613,7 +609,7 @@ async fn write(id: u64, store: impl Storage<u64, Value>, context: Arc<Context>, 
     }
 }
 
-async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
+async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
@@ -640,14 +636,14 @@ async fn read(store: impl Storage<u64, Value>, context: Arc<Context>, mut stop: 
         let idx = w + c * step;
 
         let time = Instant::now();
-        let res = store.get(&idx).await.unwrap();
+        let res = hybrid.get(&idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
         let record = start.elapsed() > context.warm_up;
 
-        if let Some(buf) = res {
-            let entry_size = buf.len();
-            assert_eq!(text(idx as usize, entry_size), **buf.value());
+        if let Some(entry) = res {
+            let entry_size = entry.len();
+            assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
             if let Some(limiter) = &mut limiter {

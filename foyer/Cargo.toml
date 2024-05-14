@@ -22,3 +22,4 @@ foyer-storage = { version = "0.7", path = "../foyer-storage" }
 [features]
 default = []
 nightly = ["foyer-storage/nightly"]
+deadlock = ["foyer-storage/deadlock"]

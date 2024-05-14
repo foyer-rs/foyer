@@ -1,9 +1,9 @@
 [package]
-name = "foyer-storage-bench"
-version = "0.7.5"
+name = "foyer-bench"
+version = "0.1.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "storage engine bench tool for foyer - the hybrid cache for Rust"
+description = "bench tool for foyer - the hybrid cache for Rust"
 license = "Apache-2.0"
 repository = "https://github.com/mrcroxx/foyer"
 homepage = "https://github.com/mrcroxx/foyer"
@@ -15,9 +15,7 @@ anyhow = "1"
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
-foyer-common = { version = "0.6", path = "../foyer-common" }
-foyer-memory = { version = "0.3", path = "../foyer-memory" }
-foyer-storage = { version = "0.7", path = "../foyer-storage" }
+foyer = { version = "0.8", path = "../foyer" }
 futures = "0.3"
 hdrhistogram = "7"
 http-body-util = "0.1"
@@ -29,8 +27,12 @@ hyper-util = { version = "0.1", features = [
     "http2",
     "tokio",
 ] }
+indexmap = "2"
 itertools = "0.12"
 libc = "0.2"
+metrics = "0.22"
+metrics-exporter-prometheus = "0.14"
+metrics-util = { version = "0.16" }
 nix = { version = "0.28", features = ["fs", "mman"] }
 opentelemetry = { version = "0.22", optional = true }
 opentelemetry-otlp = { version = "0.15.0", optional = true }
@@ -45,13 +47,14 @@ rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.14"
 tokio = { workspace = true }
+toml = "0.8"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.23", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"
 
 [features]
-deadlock = ["parking_lot/deadlock_detection", "foyer-storage/deadlock"]
+deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["console-subscriber"]
 trace = [
     "opentelemetry",
