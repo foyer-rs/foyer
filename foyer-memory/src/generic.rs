@@ -972,6 +972,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
@@ -1235,5 +1237,36 @@ mod tests {
         //
         // For cache policy like FIFO, the entries will not be reinserted while all handles are referenced.
         // It's okay for this is not a common situation and is not supposed to happen in real workload.
+    }
+
+    #[tokio::test]
+    async fn test_entry() {
+        let cache = fifo(10);
+
+        let fetch = || async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok::<_, anyhow::Error>(Some(("111".to_string(), CacheContext::default())))
+        };
+
+        let e1 = cache.entry(1, fetch).await.unwrap().unwrap();
+        let e2 = cache.entry(1, fetch).await.unwrap().unwrap();
+        let e3 = cache.entry(1, fetch).await.unwrap().unwrap();
+
+        assert_eq!(e1.value(), "111");
+        assert_eq!(e2.value(), "111");
+        assert_eq!(e3.value(), "111");
+
+        let fetch = || async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok::<_, anyhow::Error>(None::<(String, _)>)
+        };
+
+        let e4 = cache.entry(2, fetch).await.unwrap();
+        let e5 = cache.entry(2, fetch).await.unwrap();
+        let e6 = cache.entry(2, fetch).await.unwrap();
+
+        assert!(e4.is_none());
+        assert!(e5.is_none());
+        assert!(e6.is_none());
     }
 }
