@@ -20,7 +20,3 @@ coverage:
       default:
         informational: true
         only_pulls: true
-ignore:
-  - "foyer-storage-bench"
-  - "foyer-experimental"
-  - "foyer-experimental-bench"

@@ -139,6 +139,13 @@ jobs:
           cargo llvm-cov --no-report run --example memory
           cargo llvm-cov --no-report run --example hybrid
           cargo llvm-cov --no-report run --example hybrid_full
+      - name: Run foyer-bench with coverage
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
