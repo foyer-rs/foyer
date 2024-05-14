@@ -422,7 +422,7 @@ where
         AK: Into<Arc<K>>,
         AV: Into<Arc<V>>,
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<(AV, CacheContext)>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<Option<(AV, CacheContext)>>> + Send + 'static,
     {
         let key: Arc<K> = key.into();
         let store = self.store.clone();
@@ -430,11 +430,11 @@ where
             let future = f();
             async move {
                 if let Some(entry) = store.get(&key).await.map_err(anyhow::Error::from)? {
-                    return Ok((entry.to_arc().1, CacheContext::default()));
+                    return Ok(Some((entry.to_arc().1, CacheContext::default())));
                 }
                 future
                     .await
-                    .map(|(value, context)| (value.into(), context))
+                    .map(|res| res.map(|(value, context)| (value.into(), context)))
                     .map_err(anyhow::Error::from)
             }
         })

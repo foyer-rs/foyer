@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
         .with_recover_mode(RecoverMode::QuietRecovery)
         .with_recover_concurrency(4)
         .with_compression(foyer::Compression::Lz4)
-        .with_flush(true)
+        .with_flush(false)
         .with_runtime_config(
             RuntimeConfigBuilder::new()
                 .with_thread_name("foyer")
@@ -150,9 +150,11 @@ async fn main() -> Result<()> {
     let e = hybrid
         .entry(20230512, || async {
             let value = fetch().await?;
-            Ok((value, CacheContext::default()))
+            Ok(Some((value, CacheContext::default())))
         })
         .await?;
+    assert!(e.is_some());
+    let e = e.unwrap();
     assert_eq!(e.key(), &20230512);
     assert_eq!(e.value(), "Hello, foyer.");
 
@@ -166,7 +168,6 @@ async fn fetch() -> Result<String> {
     }
     Ok("Hello, foyer.".to_string())
 }
-
 ```
 
 ### Other Cases
