@@ -42,12 +42,10 @@ opentelemetry_sdk = { version = "0.22", features = [
     "trace",
 ], optional = true }
 parking_lot = "0.12"
-prometheus = "0.13"
 rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.14"
 tokio = { workspace = true }
-toml = "0.8"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.23", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
