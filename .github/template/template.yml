@@ -140,6 +140,7 @@ jobs:
           cargo llvm-cov --no-report run --example hybrid
           cargo llvm-cov --no-report run --example hybrid_full
       - name: Run foyer-bench with coverage
+        if: matrix.os == 'ubuntu-latest'
         env:
           RUST_BACKTRACE: 1
           CI: true
