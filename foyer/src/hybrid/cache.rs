@@ -146,6 +146,27 @@ where
         Ok(None)
     }
 
+    pub async fn obtain<AK>(&self, key: AK) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    where
+        AK: Into<Arc<K>> + Send + 'static,
+    {
+        let key = key.into();
+        self.memory
+            .entry(key.clone(), || {
+                let store = self.storage.clone();
+                async move {
+                    let res = match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Err(e) => Err(e),
+                        Ok(None) => Ok(None),
+                        Ok(Some((k, _))) if key.as_ref() != &k => Ok(None),
+                        Ok(Some((_, v))) => Ok(Some((Arc::new(v), CacheContext::default()))),
+                    };
+                    res
+                }
+            })
+            .await
+    }
+
     pub fn remove<Q>(&self, key: &Q)
     where
         K: Borrow<Q>,

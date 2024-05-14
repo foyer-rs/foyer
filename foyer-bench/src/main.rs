@@ -636,7 +636,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let idx = w + c * step;
 
         let time = Instant::now();
-        let res = hybrid.get(&idx).await.unwrap();
+        let res = hybrid.obtain(idx).await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
         let record = start.elapsed() > context.warm_up;

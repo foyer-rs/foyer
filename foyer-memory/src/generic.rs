@@ -802,7 +802,18 @@ where
                         };
                         match res {
                             Some((value, context)) => Ok(Some(cache.insert_with_context(key, value, context))),
-                            None => Ok(None),
+                            None => {
+                                if let Some(waiters) = cache.shards[hash as usize % cache.shards.len()]
+                                    .lock()
+                                    .waiters
+                                    .remove(&key)
+                                {
+                                    for waiter in waiters {
+                                        let _ = waiter.send(None);
+                                    }
+                                }
+                                Ok(None)
+                            }
                         }
                     });
                     GenericEntry::Miss(join)
