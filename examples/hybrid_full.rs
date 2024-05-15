@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
 
     let e = hybrid
         .fetch(20230512, || async {
-            let value = fetch().await?;
+            let value = mock().await?;
             Ok(Some((value, CacheContext::default())))
         })
         .await?;
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn fetch() -> Result<String> {
+async fn mock() -> Result<String> {
     let now = chrono::Utc::now();
     if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
         return Err(anyhow::anyhow!("Hi, time traveler!"));
