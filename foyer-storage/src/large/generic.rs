@@ -793,6 +793,9 @@ mod tests {
 
         // [ [], [e2, e3], [e4, e5], [e6, e1] ]
         assert!(store.enqueue(es[6].clone()).await.unwrap());
+        for reclaimer in store.inner.reclaimers.iter() {
+            reclaimer.wait().await;
+        }
         let mut res = vec![];
         for i in 0..7 {
             res.push(store.load(&i).await.unwrap());
@@ -812,6 +815,9 @@ mod tests {
 
         // [ [e7, e3], [], [e4, e5], [e6, e1] ]
         assert!(store.enqueue(es[7].clone()).await.unwrap());
+        for reclaimer in store.inner.reclaimers.iter() {
+            reclaimer.wait().await;
+        }
         let mut res = vec![];
         for i in 0..8 {
             res.push(store.load(&i).await.unwrap());
@@ -834,6 +840,9 @@ mod tests {
         store.delete(&5).await.unwrap();
         assert!(store.enqueue(es[8].clone()).await.unwrap());
         assert!(store.enqueue(es[9].clone()).await.unwrap());
+        for reclaimer in store.inner.reclaimers.iter() {
+            reclaimer.wait().await;
+        }
         let mut res = vec![];
         for i in 0..10 {
             res.push(store.load(&i).await.unwrap());
