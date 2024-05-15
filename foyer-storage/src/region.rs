@@ -17,7 +17,10 @@ use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -33,16 +36,23 @@ use pin_project::pin_project;
 use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
-use super::{
-    device::{Device, DeviceExt},
+use crate::{
+    device::{Device, DeviceExt, IoBuffer, RegionId},
+    error::Result,
     picker::EvictionPicker,
 };
-use crate::device::RegionId;
 
 #[derive(Debug, Default)]
 pub struct RegionStats {
     pub invalid: AtomicUsize,
     pub access: AtomicUsize,
+}
+
+impl RegionStats {
+    pub fn reset(&self) {
+        self.invalid.store(0, Ordering::Relaxed);
+        self.access.store(0, Ordering::Relaxed);
+    }
 }
 
 /// # Region format:
@@ -74,12 +84,29 @@ where
         self.id
     }
 
-    pub fn device(&self) -> &D {
-        &self.device
-    }
-
     pub fn stats(&self) -> &Arc<RegionStats> {
         &self.stats
+    }
+
+    pub async fn write(&self, buf: IoBuffer, offset: u64) -> Result<()> {
+        self.device.write(buf, self.id, offset).await
+    }
+
+    pub async fn read(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+        self.stats.access.fetch_add(1, Ordering::Relaxed);
+        self.device.read(self.id, offset, len).await
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        self.device.flush(Some(self.id)).await
+    }
+
+    pub fn size(&self) -> usize {
+        self.device.region_size()
+    }
+
+    pub fn align(&self) -> usize {
+        self.device.align()
     }
 }
 

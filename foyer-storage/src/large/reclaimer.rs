@@ -23,7 +23,7 @@ use tokio::{
 
 use super::{flusher::Flusher, indexer::Indexer};
 use crate::{
-    device::{Device, DeviceExt, IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
     large::{flusher::Submission, scanner::RegionScanner},
     picker::ReinsertionPicker,
@@ -163,8 +163,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        // TODO(MrCroxx): Special impl for case : `if self.reinsertion_picker.type_id() != TypeId::of::<Arc<DenyAllPicker<K>>>()` ?
-        let mut scanner = RegionScanner::new(region.id(), region.device().clone());
+        let mut scanner = RegionScanner::new(region.clone());
         let mut futures = vec![];
         let mut unpicked = vec![];
         // The loop will ends when:
@@ -187,11 +186,7 @@ where
                 Ok(Some((info, key))) => (info, key),
             };
             if self.reinsertion_picker.pick(&self.stats, &key) {
-                let buffer = match region
-                    .device()
-                    .read(region.id(), info.addr.offset as _, info.addr.len as _)
-                    .await
-                {
+                let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
                     Err(e) => {
                         tracing::warn!(
                             "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
@@ -236,6 +231,8 @@ where
 
         tracing::debug!("[reclaimer]: Finish reclaiming region {id}.");
 
+        region.stats().reset();
+
         self.region_manager.mark_clean(id).await;
         // These operations should be atomic:
         //
@@ -260,11 +257,11 @@ impl RegionCleaner {
         let buf = allocator_api2::vec![
             in &IO_BUFFER_ALLOCATOR;
             0;
-            region.device().align()
+            region.align()
         ];
-        region.device().write(buf, region.id(), 0).await?;
+        region.write(buf, 0).await?;
         if flush {
-            region.device().flush(Some(region.id())).await?;
+            region.flush().await?;
         }
         Ok(())
     }

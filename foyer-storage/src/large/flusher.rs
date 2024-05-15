@@ -459,12 +459,9 @@ where
                         if !group.buffer.is_empty() {
                             let aligned = group.buffer.len();
 
-                            region
-                                .device()
-                                .write(group.buffer, region.id(), group.writer.offset)
-                                .await?;
+                            region.write(group.buffer, group.writer.offset).await?;
                             if flush {
-                                region.device().flush(Some(region.id())).await?;
+                                region.flush().await?;
                             }
 
                             stats.cache_write_bytes.fetch_add(aligned, Ordering::Relaxed);

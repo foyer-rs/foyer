@@ -18,8 +18,9 @@ use foyer_common::{
 };
 
 use crate::{
-    device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR},
+    device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
+    region::Region,
     serde::{EntryDeserializer, EntryHeader},
     Sequence,
 };
@@ -34,45 +35,46 @@ pub struct EntryInfo {
 }
 
 #[derive(Debug)]
-struct CachedDeviceReader<D> {
-    region: RegionId,
+struct CachedDeviceReader<D>
+where
+    D: Device,
+{
+    region: Region<D>,
     offset: u64,
     buffer: IoBuffer,
-    device: D,
 }
 
-impl<D> CachedDeviceReader<D> {
+impl<D> CachedDeviceReader<D>
+where
+    D: Device,
+{
     const IO_SIZE_HINT: usize = 16 * 1024;
 
-    fn new(region: RegionId, device: D) -> Self {
+    fn new(region: Region<D>) -> Self {
         Self {
             region,
             offset: 0,
             buffer: IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
-            device,
         }
     }
 
-    async fn read(&mut self, offset: u64, len: usize) -> Result<&[u8]>
-    where
-        D: Device,
-    {
+    async fn read(&mut self, offset: u64, len: usize) -> Result<&[u8]> {
         if offset >= self.offset && offset as usize + len <= self.offset as usize + self.buffer.len() {
             let start = (offset - self.offset) as usize;
             let end = start + len;
             return Ok(&self.buffer[start..end]);
         }
-        self.offset = bits::align_down(self.device.align() as u64, offset);
+        self.offset = bits::align_down(self.region.align() as u64, offset);
         let end = bits::align_up(
-            self.device.align(),
+            self.region.align(),
             std::cmp::max(offset as usize + len, offset as usize + Self::IO_SIZE_HINT),
         );
-        let end = std::cmp::min(self.device.region_size(), end);
+        let end = std::cmp::min(self.region.size(), end);
         let read_len = end - self.offset as usize;
-        debug_assert!(bits::is_aligned(self.device.align(), read_len));
+        debug_assert!(bits::is_aligned(self.region.align(), read_len));
         debug_assert!(read_len >= len);
 
-        let buffer = self.device.read(self.region, self.offset, read_len).await?;
+        let buffer = self.region.read(self.offset, read_len).await?;
         self.buffer = buffer;
 
         let start = (offset - self.offset) as usize;
@@ -82,29 +84,32 @@ impl<D> CachedDeviceReader<D> {
 }
 
 #[derive(Debug)]
-pub struct RegionScanner<D> {
-    region: RegionId,
+pub struct RegionScanner<D>
+where
+    D: Device,
+{
+    region: Region<D>,
     offset: u64,
     cache: CachedDeviceReader<D>,
 }
 
-impl<D> RegionScanner<D> {
-    // TODO(MrCroxx): Receives `Region` directly.
-    pub fn new(region: RegionId, device: D) -> Self {
+impl<D> RegionScanner<D>
+where
+    D: Device,
+{
+    pub fn new(region: Region<D>) -> Self {
+        let cache = CachedDeviceReader::new(region.clone());
         Self {
             region,
             offset: 0,
-            cache: CachedDeviceReader::new(region, device),
+            cache,
         }
     }
 
-    async fn current(&mut self) -> Result<Option<EntryHeader>>
-    where
-        D: Device,
-    {
-        debug_assert!(bits::is_aligned(self.cache.device.align() as u64, self.offset));
+    async fn current(&mut self) -> Result<Option<EntryHeader>> {
+        debug_assert!(bits::is_aligned(self.region.align() as u64, self.offset));
 
-        if self.offset as usize >= self.cache.device.region_size() {
+        if self.offset as usize >= self.region.size() {
             // reach region EOF
             return Ok(None);
         }
@@ -115,11 +120,8 @@ impl<D> RegionScanner<D> {
         Ok(EntryDeserializer::deserialize_header(buf))
     }
 
-    async fn step(&mut self, header: &EntryHeader)
-    where
-        D: Device,
-    {
-        let aligned = bits::align_up(self.cache.device.align(), header.entry_len());
+    async fn step(&mut self, header: &EntryHeader) {
+        let aligned = bits::align_up(self.region.align(), header.entry_len());
         self.offset += aligned as u64;
     }
 
@@ -128,7 +130,7 @@ impl<D> RegionScanner<D> {
             hash: header.hash,
             sequence: header.sequence,
             addr: EntryAddress {
-                region: self.region,
+                region: self.region.id(),
                 offset: self.offset as _,
                 len: header.entry_len() as _,
                 sequence: header.sequence,
@@ -136,10 +138,7 @@ impl<D> RegionScanner<D> {
         }
     }
 
-    pub async fn next(&mut self) -> Result<Option<EntryInfo>>
-    where
-        D: Device,
-    {
+    pub async fn next(&mut self) -> Result<Option<EntryInfo>> {
         let header = match self.current().await {
             Ok(Some(header)) => header,
             Ok(None) => return Ok(None),
@@ -156,7 +155,6 @@ impl<D> RegionScanner<D> {
     pub async fn next_key<K>(&mut self) -> Result<Option<(EntryInfo, K)>>
     where
         K: StorageKey,
-        D: Device,
     {
         let header = match self.current().await {
             Ok(Some(header)) => header,
@@ -179,7 +177,6 @@ impl<D> RegionScanner<D> {
     pub async fn next_value<V>(&mut self) -> Result<Option<(EntryInfo, V)>>
     where
         V: StorageValue,
-        D: Device,
     {
         let header = match self.current().await {
             Ok(Some(header)) => header,
@@ -203,7 +200,6 @@ impl<D> RegionScanner<D> {
     where
         K: StorageKey,
         V: StorageValue,
-        D: Device,
     {
         let header = match self.current().await {
             Ok(Some(header)) => header,
