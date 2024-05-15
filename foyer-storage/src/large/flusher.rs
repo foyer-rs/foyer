@@ -323,7 +323,7 @@ where
                 entry.hash(),
                 EntryAddress {
                     region: RegionId::MAX,
-                    offset: group.writer.size as u32 + boffset as u32,
+                    offset: group.writer.offset as u32 + boffset as u32,
                     len: len as _,
                     sequence,
                 },
@@ -385,7 +385,7 @@ where
                 reinsertion.hash,
                 EntryAddress {
                     region: RegionId::MAX,
-                    offset: group.writer.size as u32 + boffset as u32,
+                    offset: group.writer.offset as u32 + boffset as u32,
                     len: len as _,
                     sequence: reinsertion.sequence,
                 },
