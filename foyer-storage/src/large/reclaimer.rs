@@ -174,15 +174,15 @@ where
         //
         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
         // They will be removed when a query find a mismatch entry.
-        'reclaim: loop {
+        'reinsert: loop {
             let (info, key) = match scanner.next_key().await {
-                Ok(None) => break 'reclaim,
+                Ok(None) => break 'reinsert,
                 Err(e) => {
                     tracing::warn!(
                         "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
                         id = region.id()
                     );
-                    break 'reclaim;
+                    break 'reinsert;
                 }
                 Ok(Some((info, key))) => (info, key),
             };
@@ -197,7 +197,7 @@ where
                             "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
                             id = region.id()
                         );
-                        break 'reclaim;
+                        break 'reinsert;
                     }
                     Ok(buf) => buf,
                 };
