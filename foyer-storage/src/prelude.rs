@@ -21,7 +21,7 @@ pub use crate::{
     },
     large::recover::RecoverMode,
     picker::{
-        utils::{AdmitAllPicker, FifoPicker, RateLimitPicker, RejectAllPicker},
+        utils::{AdmitAllPicker, OrderPicker, RateLimitPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     statistics::Statistics,

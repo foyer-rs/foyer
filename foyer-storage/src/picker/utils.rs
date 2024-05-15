@@ -23,6 +23,7 @@ use std::{
 };
 
 use foyer_common::{code::StorageKey, rated_ticket::RatedTicket};
+use foyer_memory::{EvictionConfig, OrderMap};
 
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
@@ -189,11 +190,11 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct FifoPicker {
+pub struct DebugFifoPicker {
     queue: VecDeque<RegionId>,
 }
 
-impl EvictionPicker for FifoPicker {
+impl EvictionPicker for DebugFifoPicker {
     fn pick(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
         let res = self.queue.front().copied();
         tracing::trace!("[fifo picker]: pick {res:?}");
@@ -212,13 +213,61 @@ impl EvictionPicker for FifoPicker {
     }
 }
 
+#[derive(Debug)]
+pub struct OrderPicker {
+    order: Option<OrderMap<RegionId, ()>>,
+    config: Option<EvictionConfig>,
+}
+
+impl OrderPicker {
+    pub fn new(config: impl Into<EvictionConfig>) -> Self {
+        Self {
+            order: None,
+            config: Some(config.into()),
+        }
+    }
+}
+
+impl EvictionPicker for OrderPicker {
+    fn init(&mut self, regions: usize) {
+        self.order = Some(OrderMap::new(regions, self.config.take().unwrap()));
+    }
+
+    fn pick(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
+        let order = unsafe { self.order.as_mut().unwrap_unchecked() };
+
+        let id = order.pop().map(|(id, _)| id)?;
+        // `pick` must not modify the evictable states, insert the popped value back.
+        // No matter what, the value will be removed because the picker always picks if there are evictables.
+        order.insert(id, ());
+        tracing::trace!("[order picker ({order:?})]: pick {id}", order = order);
+        Some(id)
+    }
+
+    fn on_region_evictable(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
+        let order = unsafe { self.order.as_mut().unwrap_unchecked() };
+
+        tracing::trace!("[order picker ({order:?})]: {region} is evictable", order = order);
+        debug_assert!(!order.contains(&region));
+        order.insert(region, ());
+    }
+
+    fn on_region_evict(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
+        let order = unsafe { self.order.as_mut().unwrap_unchecked() };
+
+        tracing::trace!("[order picker ({order:?})]: {region} is evicted", order = order);
+        debug_assert!(order.contains(&region));
+        order.remove(&region);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_fifo_picker() {
-        let mut picker = FifoPicker::default();
+        let mut picker = DebugFifoPicker::default();
         let m = HashMap::new();
 
         (0..10).for_each(|i| picker.on_region_evictable(&m, i));
