@@ -13,17 +13,22 @@
 //  limitations under the License.
 
 pub use crate::{
-    admission::{rated_ticket::RatedTicketAdmissionPolicy, AdmissionContext, AdmissionPolicy},
     compress::Compression,
-    device::fs::{FsDeviceConfig, FsDeviceConfigBuilder},
-    error::{Error, Result},
-    generic::RecoverMode,
-    metrics::{get_metrics_registry, set_metrics_registry},
-    reinsertion::{
-        exist::ExistReinsertionPolicy, rated_ticket::RatedTicketReinsertionPolicy, ReinsertionContext,
-        ReinsertionPolicy,
+    device::{
+        direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
+        direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
+        Device, DeviceExt, DeviceOptions,
     },
-    runtime::{RuntimeConfig, RuntimeConfigBuilder, RuntimeStoreConfig},
-    storage::{AsyncStorageExt, CachedEntry, ForceStorageExt, Storage, StorageExt, StorageWriter},
-    store::{DeviceConfig, FsStoreConfig, Store, StoreBuilder, StoreConfig, StoreWriter},
+    large::recover::RecoverMode,
+    picker::{
+        utils::{AdmitAllPicker, FifoPicker, RateLimitPicker, RejectAllPicker},
+        AdmissionPicker, EvictionPicker, ReinsertionPicker,
+    },
+    statistics::Statistics,
+    storage::{EnqueueFuture, Storage},
+    store::{
+        runtime::{RuntimeConfig, RuntimeConfigBuilder},
+        DeviceConfig, Store, StoreBuilder, StoreConfig,
+    },
+    tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
 };

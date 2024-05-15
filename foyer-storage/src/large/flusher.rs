@@ -12,13 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::{fmt::Debug, hash::BuildHasher};
 
-use crate::catalog::Sequence;
+use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
 use crate::error::{Error, Result};
 use crate::serde::EntrySerializer;
-use crate::Compression;
+use crate::statistics::Statistics;
+use crate::Sequence;
 
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
@@ -29,13 +32,12 @@ use futures::future::{try_join, try_join_all};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
-use super::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
-use super::generic::GenericStoreConfig;
 use super::indexer::{EntryAddress, Indexer};
 use super::reclaimer::Reinsertion;
-use super::region::{GetCleanRegionHandle, RegionManager};
-use super::storage::EnqueueFuture;
-use super::tombstone::{Tombstone, TombstoneLog};
+use crate::device::{Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR};
+use crate::large::generic::GenericStoreConfig;
+use crate::region::{GetCleanRegionHandle, RegionManager};
+use crate::tombstone::{Tombstone, TombstoneLog};
 
 struct BatchState<K, V, S, D>
 where
@@ -151,42 +153,18 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    CacheEntry(CacheEntry<K, V, S>),
-    Tombstone(Tombstone),
-    Reinsertion(Reinsertion),
-}
-
-impl<K, V, S> From<CacheEntry<K, V, S>> for Submission<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-{
-    fn from(entry: CacheEntry<K, V, S>) -> Self {
-        Self::CacheEntry(entry)
-    }
-}
-
-impl<K, V, S> From<Tombstone> for Submission<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-{
-    fn from(tombstone: Tombstone) -> Self {
-        Self::Tombstone(tombstone)
-    }
-}
-
-impl<K, V, S> From<Reinsertion> for Submission<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
-{
-    fn from(reinsertion: Reinsertion) -> Self {
-        Self::Reinsertion(reinsertion)
-    }
+    CacheEntry {
+        entry: CacheEntry<K, V, S>,
+        tx: oneshot::Sender<Result<bool>>,
+    },
+    Tombstone {
+        tombstone: Tombstone,
+        tx: oneshot::Sender<Result<bool>>,
+    },
+    Reinsertion {
+        reinsertion: Reinsertion,
+        tx: oneshot::Sender<Result<bool>>,
+    },
 }
 
 #[derive(Debug)]
@@ -203,6 +181,8 @@ where
 
     device: D,
     tombstone_log: Option<TombstoneLog>,
+
+    stats: Arc<Statistics>,
 
     compression: Compression,
     flush: bool,
@@ -222,6 +202,7 @@ where
             region_manager: self.region_manager.clone(),
             device: self.device.clone(),
             tombstone_log: self.tombstone_log.clone(),
+            stats: self.stats.clone(),
             compression: self.compression,
             flush: self.flush,
         }
@@ -241,6 +222,7 @@ where
         region_manager: RegionManager<D>,
         device: D,
         tombstone_log: Option<TombstoneLog>,
+        stats: Arc<Statistics>,
         runtime: Handle,
     ) -> Result<Self> {
         let batch = AsyncBatchPipeline::with_runtime(BatchState::default(), runtime);
@@ -251,39 +233,36 @@ where
             region_manager,
             device,
             tombstone_log,
+            stats,
             compression: config.compression,
             flush: config.flush,
         })
     }
 
-    pub fn submit(&self, submission: impl Into<Submission<K, V, S>>, sequence: Sequence) -> EnqueueFuture {
-        match submission.into() {
-            Submission::CacheEntry(entry) => self.entry(entry, sequence),
-            Submission::Tombstone(tombstone) => self.tombstone(tombstone, sequence),
-            Submission::Reinsertion(reinsertion) => self.reinsertion(reinsertion, sequence),
+    pub fn submit(&self, submission: Submission<K, V, S>, sequence: Sequence) {
+        match submission {
+            Submission::CacheEntry { entry, tx } => self.entry(entry, tx, sequence),
+            Submission::Tombstone { tombstone, tx } => self.tombstone(tombstone, tx, sequence),
+            Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx, sequence),
         }
     }
 
-    fn tombstone(&self, tombstone: Tombstone, sequence: Sequence) -> EnqueueFuture {
+    fn tombstone(&self, tombstone: Tombstone, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit tombstone with sequence: {sequence}");
 
         debug_assert_eq!(tombstone.sequence, sequence);
 
-        let (tx, rx) = oneshot::channel();
         let append = |state: &mut BatchState<K, V, S, D>| state.tombstones.push((tombstone, tx));
 
         if let Some(token) = self.batch.accumulate(append) {
             tracing::trace!("[flusher]: tombstone with sequence: {sequence} becomes leader");
             self.commit(token);
         }
-
-        EnqueueFuture::new(rx)
     }
 
-    fn entry(&self, entry: CacheEntry<K, V, S>, sequence: Sequence) -> EnqueueFuture {
+    fn entry(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
-        let (tx, rx) = oneshot::channel();
         let append = |state: &mut BatchState<K, V, S, D>| {
             if entry.is_outdated() {
                 let _ = tx.send(Ok(false));
@@ -358,16 +337,13 @@ where
             tracing::trace!("[flusher]: entry with sequence: {sequence} becomes leader");
             self.commit(token);
         }
-
-        EnqueueFuture::new(rx)
     }
 
-    fn reinsertion(&self, mut reinsertion: Reinsertion, sequence: Sequence) -> EnqueueFuture {
+    fn reinsertion(&self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit reinsertion with sequence: {sequence}");
 
         debug_assert_eq!(sequence, 0);
 
-        let (tx, rx) = oneshot::channel();
         let append = |state: &mut BatchState<K, V, S, D>| {
             self.may_init_batch_state(state);
 
@@ -422,8 +398,6 @@ where
             tracing::trace!("[flusher]: reinsertion with sequence: {sequence} becomes leader");
             self.commit(token);
         }
-
-        EnqueueFuture::new(rx)
     }
 
     fn commit(&self, token: LeaderToken<BatchState<K, V, S, D>, Result<()>>) {
@@ -431,6 +405,7 @@ where
         let flush = self.flush;
         let region_manager = self.region_manager.clone();
         let tombstone_log: Option<TombstoneLog> = self.tombstone_log.clone();
+        let stats = self.stats.clone();
 
         token.pipeline(
             |state| {
@@ -468,6 +443,7 @@ where
                 let futures = state.groups.into_iter().map(|group| {
                     let indexer = indexer.clone();
                     let region_manager = region_manager.clone();
+                    let stats = stats.clone();
                     async move {
                         // Wait for region is clean.
                         let region = group.writer.handle.await;
@@ -481,6 +457,8 @@ where
 
                         // Write buffet to device.
                         if !group.buffer.is_empty() {
+                            let aligned = group.buffer.len();
+
                             region
                                 .device()
                                 .write(group.buffer, region.id(), group.writer.offset)
@@ -488,6 +466,8 @@ where
                             if flush {
                                 region.device().flush(Some(region.id())).await?;
                             }
+
+                            stats.cache_write_bytes.fetch_add(aligned, Ordering::Relaxed);
 
                             let mut indices = group.indices;
                             for (_, addr) in indices.iter_mut() {

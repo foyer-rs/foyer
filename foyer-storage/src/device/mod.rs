@@ -13,198 +13,65 @@
 //  limitations under the License.
 
 pub mod allocator;
-pub mod fs;
+pub mod direct_file;
+pub mod direct_fs;
 
-use std::{fmt::Debug, ops::Range};
+use crate::error::Result;
+use std::{fmt::Debug, future::Future};
 
-use allocator_api2::{alloc::Allocator, vec::Vec as VecA};
-use foyer_common::range::RangeBoundsExt;
-use futures::Future;
+use allocator::AlignedAllocator;
 
-use crate::{error::Result, region::RegionId};
+pub const ALIGN: usize = 4096;
+pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new();
+
+pub type RegionId = u32;
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 
-// pub trait BufferAllocator = Allocator + Clone + Send + Sync + 'static;
-// pub trait IoBuf = AsRef<[u8]> + Send + Sync + 'static;
-// pub trait IoBufMut = AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static;
-// pub trait IoRange = RangeBoundsExt<usize> + Sized + Send + Sync + 'static;
+// pub trait IoBuf: AsRef<[u8]> + Send + Sync + 'static {}
+// impl<T: AsRef<[u8]> + Send + Sync + 'static> IoBuf for T {}
+// pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static {}
+// impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static> IoBufMut for T {}
 
-pub trait BufferAllocator: Allocator + Clone + Send + Sync + 'static {}
-impl<T: Allocator + Clone + Send + Sync + 'static> BufferAllocator for T {}
-pub trait IoBuf: AsRef<[u8]> + Send + Sync + 'static {}
-impl<T: AsRef<[u8]> + Send + Sync + 'static> IoBuf for T {}
-pub trait IoBufMut: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static {}
-impl<T: AsRef<[u8]> + AsMut<[u8]> + Send + Sync + 'static> IoBufMut for T {}
-pub trait IoRange: RangeBoundsExt<usize> + Sized + Send + Sync + 'static {}
-impl<T: RangeBoundsExt<usize> + Sized + Send + Sync + 'static> IoRange for T {}
+pub type IoBuffer = allocator_api2::vec::Vec<u8, &'static AlignedAllocator<ALIGN>>;
 
-pub trait Device: Sized + Clone + Send + Sync + 'static {
-    type IoBufferAllocator: BufferAllocator;
-    type Config: Send + Debug + Clone;
+pub trait DeviceOptions: Send + Sync + 'static + Debug + Clone {
+    fn verify(&self) -> Result<()>;
+}
 
-    #[must_use]
-    fn open(config: Self::Config) -> impl Future<Output = Result<Self>> + Send;
+/// [`Device`] represents 4K aligned block device.
+///
+/// Both i/o block and i/o buffer must be aligned to 4K.
+pub trait Device: Send + Sync + 'static + Sized + Clone {
+    type Options: DeviceOptions;
 
-    #[must_use]
-    fn write<B>(
-        &self,
-        buf: B,
-        range: impl IoRange,
-        region: RegionId,
-        offset: usize,
-    ) -> impl Future<Output = (Result<usize>, B)> + Send
-    where
-        B: IoBuf;
-
-    #[must_use]
-    fn read<B>(
-        &self,
-        buf: B,
-        range: impl IoRange,
-        region: RegionId,
-        offset: usize,
-    ) -> impl Future<Output = (Result<usize>, B)> + Send
-    where
-        B: IoBufMut;
-
-    #[must_use]
-    fn flush_region(&self, region: RegionId) -> impl Future<Output = Result<()>> + Send;
-
-    #[must_use]
-    fn flush(&self) -> impl Future<Output = Result<()>> + Send;
-
+    /// The capacity of the device, must be 4K aligned.
     fn capacity(&self) -> usize;
 
-    fn regions(&self) -> usize;
+    /// The region size of the device, must be 4K aligned.
+    fn region_size(&self) -> usize;
 
-    /// must be power of 2
-    fn align(&self) -> usize;
+    #[must_use]
+    fn open(options: Self::Options) -> impl Future<Output = Result<Self>> + Send;
 
-    /// optimized io size
-    fn io_size(&self) -> usize;
+    #[must_use]
+    fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> impl Future<Output = Result<()>> + Send;
 
-    fn io_buffer_allocator(&self) -> &Self::IoBufferAllocator;
+    #[must_use]
+    fn read(&self, region: RegionId, offset: u64, len: usize) -> impl Future<Output = Result<IoBuffer>> + Send;
 
-    fn io_buffer(&self, len: usize, capacity: usize) -> VecA<u8, Self::IoBufferAllocator>;
-
-    fn region_size(&self) -> usize {
-        debug_assert!(self.capacity() % self.regions() == 0);
-        self.capacity() / self.regions()
-    }
+    #[must_use]
+    fn flush(&self, region: Option<RegionId>) -> impl Future<Output = Result<()>> + Send;
 }
 
 pub trait DeviceExt: Device {
-    #[must_use]
-    fn load(
-        &self,
-        region: RegionId,
-        range: Range<usize>,
-    ) -> impl Future<Output = Result<VecA<u8, Self::IoBufferAllocator>>> + Send {
-        async move {
-            let size = range.size().unwrap();
-            debug_assert_eq!(size & (self.align() - 1), 0);
+    fn align(&self) -> usize {
+        ALIGN
+    }
 
-            let buf = self.io_buffer(size, size);
-            let (res, mut buf) = self.read(buf, 0..size, region, range.start).await;
-            let bytes = res?;
-
-            unsafe { buf.set_len(bytes) };
-
-            Ok(buf)
-        }
+    fn regions(&self) -> usize {
+        self.capacity() / self.region_size()
     }
 }
 
-impl<D: Device> DeviceExt for D {}
-
-#[cfg(not(madsim))]
-#[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(f).await.unwrap()
-}
-
-#[cfg(madsim)]
-#[tracing::instrument(level = "trace", skip(f))]
-async fn asyncify<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    f()
-}
-
-#[cfg(test)]
-pub mod tests {
-    use super::{allocator::AlignedAllocator, *};
-
-    #[derive(Debug, Clone)]
-    pub struct NullDevice(AlignedAllocator);
-
-    impl NullDevice {
-        pub fn new(align: usize) -> Self {
-            Self(AlignedAllocator::new(align))
-        }
-    }
-
-    impl Device for NullDevice {
-        type Config = usize;
-        type IoBufferAllocator = AlignedAllocator;
-
-        async fn open(config: usize) -> Result<Self> {
-            Ok(Self::new(config))
-        }
-
-        async fn write<B>(&self, buf: B, _range: impl IoRange, _region: RegionId, _offset: usize) -> (Result<usize>, B)
-        where
-            B: IoBuf,
-        {
-            (Ok(0), buf)
-        }
-
-        async fn read<B>(&self, buf: B, _range: impl IoRange, _region: RegionId, _offset: usize) -> (Result<usize>, B)
-        where
-            B: IoBufMut,
-        {
-            (Ok(0), buf)
-        }
-
-        async fn flush_region(&self, _: RegionId) -> Result<()> {
-            Ok(())
-        }
-
-        async fn flush(&self) -> Result<()> {
-            Ok(())
-        }
-
-        fn capacity(&self) -> usize {
-            usize::MAX
-        }
-
-        fn regions(&self) -> usize {
-            4096
-        }
-
-        fn align(&self) -> usize {
-            4096
-        }
-
-        fn io_size(&self) -> usize {
-            4096
-        }
-
-        fn io_buffer_allocator(&self) -> &Self::IoBufferAllocator {
-            &self.0
-        }
-
-        fn io_buffer(&self, len: usize, capacity: usize) -> VecA<u8, Self::IoBufferAllocator> {
-            let mut buf = VecA::with_capacity_in(capacity, self.0);
-            unsafe { buf.set_len(len) };
-            buf
-        }
-    }
-}
+impl<T> DeviceExt for T where T: Device {}

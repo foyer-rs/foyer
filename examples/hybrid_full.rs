@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    CacheContext, FsDeviceConfigBuilder, HybridCache, HybridCacheBuilder, LfuConfig, LruConfig,
-    RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, RecoverMode, RuntimeConfigBuilder,
+    CacheContext, DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig,
+    RateLimitPicker, RecoverMode, RuntimeConfigBuilder, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -36,39 +36,34 @@ async fn main() -> Result<()> {
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
         .storage()
-        .with_name("foyer")
-        .with_eviction_config(LfuConfig {
-            window_capacity_ratio: 0.1,
-            protected_capacity_ratio: 0.8,
-            cmsketch_eps: 0.001,
-            cmsketch_confidence: 0.9,
-        })
         .with_device_config(
-            FsDeviceConfigBuilder::new(dir.path())
+            DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
                 .with_file_size(4 * 1024 * 1024)
-                .with_align(4 * 1024)
-                .with_io_size(16 * 1024)
-                .with_direct(true)
                 .build(),
         )
-        .with_catalog_shards(4)
-        .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(10 * 1024 * 1024)))
-        .with_reinsertion_policy(Arc::new(RatedTicketReinsertionPolicy::new(10 * 1024 * 1024)))
+        .with_flush(true)
+        .with_indexer_shards(64)
+        .with_recover_mode(RecoverMode::Quiet)
+        .with_recover_concurrency(8)
         .with_flushers(2)
         .with_reclaimers(2)
-        .with_clean_region_threshold(2)
-        .with_recover_mode(RecoverMode::QuietRecovery)
-        .with_recover_concurrency(4)
+        .with_clean_region_threshold(4)
+        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+        .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
+        .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)
-        .with_flush(false)
+        .with_tombstone_log_config(
+            TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
+                .with_flush(true)
+                .build(),
+        )
         .with_runtime_config(
             RuntimeConfigBuilder::new()
                 .with_thread_name("foyer")
                 .with_worker_threads(4)
                 .build(),
         )
-        .with_lazy(true)
         .build()
         .await?;
 

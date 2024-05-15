@@ -12,9 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub mod flusher;
-pub mod generic;
-pub mod indexer;
-pub mod reclaimer;
-pub mod recover;
-pub mod scanner;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Debug, Default)]
+pub struct Statistics {
+    pub(crate) cache_write_bytes: AtomicUsize,
+    pub(crate) cache_read_bytes: AtomicUsize,
+}
+
+impl Statistics {
+    pub fn cache_write_bytes(&self) -> usize {
+        self.cache_write_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn cache_read_bytes(&self) -> usize {
+        self.cache_read_bytes.load(Ordering::Relaxed)
+    }
+}

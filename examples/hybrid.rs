@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer::{FsDeviceConfigBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
         .memory(64 * 1024 * 1024)
         .storage()
         .with_device_config(
-            FsDeviceConfigBuilder::new(dir.path())
+            DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(256 * 1024 * 1024)
                 .build(),
         )

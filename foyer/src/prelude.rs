@@ -25,15 +25,17 @@ pub use common::{
 };
 pub use memory::{CacheContext, EntryState, EvictionConfig, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
 pub use storage::{
-    get_metrics_registry, set_metrics_registry, AdmissionContext, AdmissionPolicy, Compression, ExistReinsertionPolicy,
-    FsDeviceConfig, FsDeviceConfigBuilder, RatedTicketAdmissionPolicy, RatedTicketReinsertionPolicy, RecoverMode,
-    ReinsertionContext, ReinsertionPolicy, RuntimeConfigBuilder, Storage, StorageExt, StorageWriter,
+    AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DirectFileDevice,
+    DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
+    DirectFsDeviceOptionsBuilder, EnqueueFuture, EvictionPicker, FifoPicker, RateLimitPicker, RecoverMode,
+    ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, StoreConfig,
+    TombstoneLogConfigBuilder,
 };
 
 pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, S>;
 pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, S>;
 
 pub use crate::hybrid::{
-    HybridCache, HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage, HybridCacheEntry,
-    HybridEntry,
+    builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
+    cache::{HybridCache, HybridCacheEntry, HybridEntry},
 };

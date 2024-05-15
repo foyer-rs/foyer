@@ -5,7 +5,7 @@ on:
 env:
   RUST_TOOLCHAIN_NIGHTLY: nightly-2024-03-17
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20240426
+  CACHE_KEY_SUFFIX: 20240514
 
 jobs:
   misc-check:
@@ -139,6 +139,14 @@ jobs:
           cargo llvm-cov --no-report run --example memory
           cargo llvm-cov --no-report run --example hybrid
           cargo llvm-cov --no-report run --example hybrid_full
+      - name: Run foyer-bench with coverage
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -168,7 +176,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
-      - name: Run foyer-storage-bench with single worker thread and deadlock detection
+      - name: Run foyer-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "--cfg tokio_unstable"
@@ -177,8 +185,8 @@ jobs:
           CI: true
         run: |-
           cargo build --all --features deadlock
-          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock
-          timeout 2m ./target/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/deadlock --capacity 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -207,7 +215,7 @@ jobs:
           CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
-      - name: Run foyer-storage-bench With Address Sanitizer
+      - name: Run foyer-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
@@ -215,8 +223,8 @@ jobs:
           CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
-          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/asan --capacity 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
@@ -255,7 +263,7 @@ jobs:
           CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
-      - name: Run foyer-storage-bench With Leak Sanitizer
+      - name: Run foyer-bench With Leak Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
@@ -263,8 +271,8 @@ jobs:
           CI: true
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
-          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-storage-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-storage-bench/lsan --capacity 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --ticket-insert-rate-limit 10 --time 60
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
