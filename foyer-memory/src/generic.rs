@@ -400,7 +400,7 @@ where
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-pub enum GenericEntry<K, V, E, I, S, ER>
+pub enum GenericFetch<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -415,7 +415,7 @@ where
     Miss(JoinHandle<std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>>),
 }
 
-impl<K, V, E, I, S, ER> Default for GenericEntry<K, V, E, I, S, ER>
+impl<K, V, E, I, S, ER> Default for GenericFetch<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -429,7 +429,7 @@ where
     }
 }
 
-impl<K, V, E, I, S, ER> Future for GenericEntry<K, V, E, I, S, ER>
+impl<K, V, E, I, S, ER> Future for GenericFetch<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -445,7 +445,7 @@ where
         match &mut *self {
             Self::Invalid => unreachable!(),
             Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
-                GenericEntry::Hit(entry) => Some(entry),
+                GenericFetch::Hit(entry) => Some(entry),
                 _ => unreachable!(),
             })),
             Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
@@ -730,7 +730,7 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericEntry<K, V, E, I, S, ER>
+    pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
@@ -741,7 +741,7 @@ where
         unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             if let Some(ptr) = shard.get(hash, &key) {
-                return GenericEntry::Hit(GenericCacheEntry {
+                return GenericFetch::Hit(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
                 });
@@ -750,7 +750,7 @@ where
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
-                    GenericEntry::Wait(rx)
+                    GenericFetch::Wait(rx)
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
@@ -781,12 +781,12 @@ where
                             }
                         }
                     });
-                    GenericEntry::Miss(join)
+                    GenericFetch::Miss(join)
                 }
             };
             match entry {
-                GenericEntry::Wait(_) => shard.state.metrics.queue.fetch_add(1, Ordering::Relaxed),
-                GenericEntry::Miss(_) => shard.state.metrics.fetch.fetch_add(1, Ordering::Relaxed),
+                GenericFetch::Wait(_) => shard.state.metrics.queue.fetch_add(1, Ordering::Relaxed),
+                GenericFetch::Miss(_) => shard.state.metrics.fetch.fetch_add(1, Ordering::Relaxed),
                 _ => unreachable!(),
             };
             entry
@@ -1193,9 +1193,9 @@ mod tests {
             Ok::<_, anyhow::Error>(Some(("111".to_string(), CacheContext::default())))
         };
 
-        let e1 = cache.entry(1, fetch).await.unwrap().unwrap();
-        let e2 = cache.entry(1, fetch).await.unwrap().unwrap();
-        let e3 = cache.entry(1, fetch).await.unwrap().unwrap();
+        let e1 = cache.fetch(1, fetch).await.unwrap().unwrap();
+        let e2 = cache.fetch(1, fetch).await.unwrap().unwrap();
+        let e3 = cache.fetch(1, fetch).await.unwrap().unwrap();
 
         assert_eq!(e1.value(), "111");
         assert_eq!(e2.value(), "111");
@@ -1206,9 +1206,9 @@ mod tests {
             Ok::<_, anyhow::Error>(None::<(String, _)>)
         };
 
-        let e4 = cache.entry(2, fetch).await.unwrap();
-        let e5 = cache.entry(2, fetch).await.unwrap();
-        let e6 = cache.entry(2, fetch).await.unwrap();
+        let e4 = cache.fetch(2, fetch).await.unwrap();
+        let e5 = cache.fetch(2, fetch).await.unwrap();
+        let e6 = cache.fetch(2, fetch).await.unwrap();
 
         assert!(e4.is_none());
         assert!(e5.is_none());

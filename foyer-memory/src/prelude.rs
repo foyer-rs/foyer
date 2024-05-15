@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 pub use crate::{
-    cache::{Cache, CacheBuilder, CacheEntry, Entry, EntryState, EvictionConfig},
+    cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch, FetchState},
     context::CacheContext,
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
     generic::Weighter,

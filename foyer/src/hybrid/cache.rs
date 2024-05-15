@@ -21,7 +21,7 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::{Cache, CacheContext, CacheEntry, Entry};
+use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
 use foyer_storage::{Storage, Store};
 
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
@@ -121,7 +121,7 @@ where
         K: Clone,
     {
         self.memory
-            .entry(key.clone(), || {
+            .fetch(key.clone(), || {
                 let store = self.storage.clone();
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
@@ -164,7 +164,7 @@ where
     }
 }
 
-pub type HybridEntry<K, V, S = RandomState> = Entry<K, V, anyhow::Error, S>;
+pub type HybridEntry<K, V, S = RandomState> = Fetch<K, V, anyhow::Error, S>;
 
 impl<K, V, S> HybridCache<K, V, S>
 where
@@ -172,13 +172,13 @@ where
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    pub fn entry<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
+    pub fn fetch<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<Option<(V, CacheContext)>>> + Send + 'static,
     {
         let store = self.storage.clone();
-        self.memory.entry(key.clone(), || {
+        self.memory.fetch(key.clone(), || {
             let future = f();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from)? {

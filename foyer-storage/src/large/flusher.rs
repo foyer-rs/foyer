@@ -241,7 +241,7 @@ where
 
     pub fn submit(&self, submission: Submission<K, V, S>, sequence: Sequence) {
         match submission {
-            Submission::CacheEntry { entry, tx } => self.entry(entry, tx, sequence),
+            Submission::CacheEntry { entry, tx } => self.fetch(entry, tx, sequence),
             Submission::Tombstone { tombstone, tx } => self.tombstone(tombstone, tx, sequence),
             Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx, sequence),
         }
@@ -260,7 +260,7 @@ where
         }
     }
 
-    fn entry(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
+    fn fetch(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let append = |state: &mut BatchState<K, V, S, D>| {

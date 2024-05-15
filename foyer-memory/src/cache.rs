@@ -35,7 +35,7 @@ use crate::{
         lru::{Lru, LruHandle},
         s3fifo::{S3Fifo, S3FifoHandle},
     },
-    generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry, Weighter},
+    generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
     indexer::HashTableIndexer,
     metrics::Metrics,
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
@@ -45,27 +45,27 @@ pub type FifoCache<K, V, S = RandomState> =
     GenericCache<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
 pub type FifoCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
-pub type FifoEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S, ER>;
+pub type FifoFetch<K, V, ER, S = RandomState> =
+    GenericFetch<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S, ER>;
 
 pub type LruCache<K, V, S = RandomState> = GenericCache<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
 pub type LruCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
-pub type LruEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S, ER>;
+pub type LruFetch<K, V, ER, S = RandomState> =
+    GenericFetch<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S, ER>;
 
 pub type LfuCache<K, V, S = RandomState> = GenericCache<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
 pub type LfuCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
-pub type LfuEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S, ER>;
+pub type LfuFetch<K, V, ER, S = RandomState> =
+    GenericFetch<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S, ER>;
 
 pub type S3FifoCache<K, V, S = RandomState> =
     GenericCache<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
 pub type S3FifoCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
-pub type S3FifoEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S, ER>;
+pub type S3FifoFetch<K, V, ER, S = RandomState> =
+    GenericFetch<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S, ER>;
 
 #[derive(Debug)]
 pub enum CacheEntry<K, V, S = RandomState>
@@ -591,63 +591,63 @@ where
     }
 }
 
-pub enum Entry<K, V, ER, S = RandomState>
+pub enum Fetch<K, V, ER, S = RandomState>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    Fifo(FifoEntry<K, V, ER, S>),
-    Lru(LruEntry<K, V, ER, S>),
-    Lfu(LfuEntry<K, V, ER, S>),
-    S3Fifo(S3FifoEntry<K, V, ER, S>),
+    Fifo(FifoFetch<K, V, ER, S>),
+    Lru(LruFetch<K, V, ER, S>),
+    Lfu(LfuFetch<K, V, ER, S>),
+    S3Fifo(S3FifoFetch<K, V, ER, S>),
 }
 
-impl<K, V, ER, S> From<FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
+impl<K, V, ER, S> From<FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: FifoEntry<K, V, ER, S>) -> Self {
+    fn from(entry: FifoFetch<K, V, ER, S>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, ER, S> From<LruEntry<K, V, ER, S>> for Entry<K, V, ER, S>
+impl<K, V, ER, S> From<LruFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LruEntry<K, V, ER, S>) -> Self {
+    fn from(entry: LruFetch<K, V, ER, S>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, ER, S> From<LfuEntry<K, V, ER, S>> for Entry<K, V, ER, S>
+impl<K, V, ER, S> From<LfuFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: LfuEntry<K, V, ER, S>) -> Self {
+    fn from(entry: LfuFetch<K, V, ER, S>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, ER, S> From<S3FifoEntry<K, V, ER, S>> for Entry<K, V, ER, S>
+impl<K, V, ER, S> From<S3FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    fn from(entry: S3FifoEntry<K, V, ER, S>) -> Self {
+    fn from(entry: S3FifoFetch<K, V, ER, S>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, ER, S> Future for Entry<K, V, ER, S>
+impl<K, V, ER, S> Future for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
@@ -658,45 +658,45 @@ where
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
-            Entry::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
-            Entry::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
-            Entry::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
-            Entry::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Fetch::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Fetch::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Fetch::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+            Fetch::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntryState {
+pub enum FetchState {
     Hit,
     Wait,
     Miss,
 }
 
-impl<K, V, ER, S> Entry<K, V, ER, S>
+impl<K, V, ER, S> Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn state(&self) -> EntryState {
+    pub fn state(&self) -> FetchState {
         match self {
-            Entry::Fifo(FifoEntry::Hit(_))
-            | Entry::Lru(LruEntry::Hit(_))
-            | Entry::Lfu(LfuEntry::Hit(_))
-            | Entry::S3Fifo(S3FifoEntry::Hit(_)) => EntryState::Hit,
-            Entry::Fifo(FifoEntry::Wait(_))
-            | Entry::Lru(LruEntry::Wait(_))
-            | Entry::Lfu(LfuEntry::Wait(_))
-            | Entry::S3Fifo(S3FifoEntry::Wait(_)) => EntryState::Wait,
-            Entry::Fifo(FifoEntry::Miss(_))
-            | Entry::Lru(LruEntry::Miss(_))
-            | Entry::Lfu(LfuEntry::Miss(_))
-            | Entry::S3Fifo(S3FifoEntry::Miss(_)) => EntryState::Miss,
-            Entry::Fifo(FifoEntry::Invalid)
-            | Entry::Lru(LruEntry::Invalid)
-            | Entry::Lfu(LfuEntry::Invalid)
-            | Entry::S3Fifo(S3FifoEntry::Invalid) => unreachable!(),
+            Fetch::Fifo(FifoFetch::Hit(_))
+            | Fetch::Lru(LruFetch::Hit(_))
+            | Fetch::Lfu(LfuFetch::Hit(_))
+            | Fetch::S3Fifo(S3FifoFetch::Hit(_)) => FetchState::Hit,
+            Fetch::Fifo(FifoFetch::Wait(_))
+            | Fetch::Lru(LruFetch::Wait(_))
+            | Fetch::Lfu(LfuFetch::Wait(_))
+            | Fetch::S3Fifo(S3FifoFetch::Wait(_)) => FetchState::Wait,
+            Fetch::Fifo(FifoFetch::Miss(_))
+            | Fetch::Lru(LruFetch::Miss(_))
+            | Fetch::Lfu(LfuFetch::Miss(_))
+            | Fetch::S3Fifo(S3FifoFetch::Miss(_)) => FetchState::Miss,
+            Fetch::Fifo(FifoFetch::Invalid)
+            | Fetch::Lru(LruFetch::Invalid)
+            | Fetch::Lfu(LfuFetch::Invalid)
+            | Fetch::S3Fifo(S3FifoFetch::Invalid) => unreachable!(),
         }
     }
 }
@@ -707,17 +707,17 @@ where
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, S>
+    pub fn fetch<F, FU, ER>(&self, key: K, f: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
         ER: Send + 'static,
     {
         match self {
-            Cache::Fifo(cache) => Entry::from(cache.entry(key, f)),
-            Cache::Lru(cache) => Entry::from(cache.entry(key, f)),
-            Cache::Lfu(cache) => Entry::from(cache.entry(key, f)),
-            Cache::S3Fifo(cache) => Entry::from(cache.entry(key, f)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch(key, f)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch(key, f)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch(key, f)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, f)),
         }
     }
 }
@@ -810,7 +810,7 @@ mod tests {
             }
             3 => {
                 let entry = cache
-                    .entry(i, || async move {
+                    .fetch(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
                         Ok::<_, tokio::sync::oneshot::error::RecvError>(Some((i, CacheContext::Default)))
                     })

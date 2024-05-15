@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
     );
 
     let e = hybrid
-        .entry(20230512, || async {
+        .fetch(20230512, || async {
             let value = fetch().await?;
             Ok(Some((value, CacheContext::default())))
         })
