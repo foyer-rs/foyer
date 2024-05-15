@@ -93,14 +93,14 @@ impl RecoverRunner {
         }
 
         #[derive(Debug)]
-        enum EntryAddressOrTombstoneHash {
+        enum EntryAddressOrTombstone {
             EntryAddress(EntryAddress),
             Tombstone,
         }
 
         // Dedup entries.
         let mut latest_sequence = 0;
-        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstoneHash)>> = HashMap::new();
+        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstone)>> = HashMap::new();
         let mut clean_regions = vec![];
         let mut evictable_regions = vec![];
         for (region, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
@@ -117,7 +117,7 @@ impl RecoverRunner {
                 indices
                     .entry(hash)
                     .or_default()
-                    .push((sequence, EntryAddressOrTombstoneHash::EntryAddress(addr)));
+                    .push((sequence, EntryAddressOrTombstone::EntryAddress(addr)));
             }
         }
         tombstones.iter().for_each(|tombstone| {
@@ -125,7 +125,7 @@ impl RecoverRunner {
             indices
                 .entry(tombstone.hash)
                 .or_default()
-                .push((tombstone.sequence, EntryAddressOrTombstoneHash::Tombstone))
+                .push((tombstone.sequence, EntryAddressOrTombstone::Tombstone))
         });
         let indices = indices
             .into_iter()
@@ -134,8 +134,8 @@ impl RecoverRunner {
                 tracing::trace!("[recover runner]: hash {hash} has versions: {versions:?}");
                 match versions.pop() {
                     None => None,
-                    Some((_, EntryAddressOrTombstoneHash::Tombstone)) => None,
-                    Some((_, EntryAddressOrTombstoneHash::EntryAddress(addr))) => Some((hash, addr)),
+                    Some((_, EntryAddressOrTombstone::Tombstone)) => None,
+                    Some((_, EntryAddressOrTombstone::EntryAddress(addr))) => Some((hash, addr)),
                 }
             })
             .collect_vec();
