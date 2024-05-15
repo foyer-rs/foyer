@@ -18,5 +18,6 @@ pub use crate::{
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
     generic::Weighter,
     metrics::Metrics,
+    order::OrderMap,
 };
 pub use ahash::RandomState;

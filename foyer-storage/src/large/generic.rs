@@ -197,7 +197,10 @@ where
         };
 
         let indexer = Indexer::new(config.indexer_shards);
-        let eviction_pickers = std::mem::take(&mut config.eviction_pickers);
+        let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
+        for picker in eviction_pickers.iter_mut() {
+            picker.init(device.regions());
+        }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(device.clone(), eviction_pickers, reclaim_semaphore.clone());
         let sequence = AtomicSequence::default();
@@ -470,7 +473,7 @@ mod tests {
 
     use crate::{
         device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
+        picker::utils::{AdmitAllPicker, DebugFifoPicker, RejectAllPicker},
         test_utils::BiasedPicker,
         tombstone::TombstoneLogConfigBuilder,
     };
@@ -513,7 +516,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            eviction_pickers: vec![Box::<DebugFifoPicker>::default()],
             admission_picker,
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
@@ -541,7 +544,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            eviction_pickers: vec![Box::<DebugFifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker,
             tombstone_log_config: None,
@@ -569,7 +572,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            eviction_pickers: vec![Box::<DebugFifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),

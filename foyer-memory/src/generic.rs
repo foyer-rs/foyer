@@ -56,7 +56,7 @@ struct CacheSharedState<T> {
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-struct CacheShard<K, V, E, I, S>
+struct GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
@@ -76,7 +76,7 @@ where
     state: Arc<CacheSharedState<E::Handle>>,
 }
 
-impl<K, V, E, I, S> CacheShard<K, V, E, I, S>
+impl<K, V, E, I, S> GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
@@ -368,7 +368,7 @@ where
     }
 }
 
-impl<K, V, E, I, S> Drop for CacheShard<K, V, E, I, S>
+impl<K, V, E, I, S> Drop for GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
@@ -465,7 +465,7 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: BuildHasher + Send + Sync + 'static,
 {
-    shards: Vec<Mutex<CacheShard<K, V, E, I, S>>>,
+    shards: Vec<Mutex<GenericCacheShard<K, V, E, I, S>>>,
 
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
@@ -496,7 +496,9 @@ where
 
         let shards = usages
             .iter()
-            .map(|usage| CacheShard::new(shard_capacity, &config.eviction_config, usage.clone(), context.clone()))
+            .map(|usage| {
+                GenericCacheShard::new(shard_capacity, &config.eviction_config, usage.clone(), context.clone())
+            })
             .map(Mutex::new)
             .collect_vec();
 

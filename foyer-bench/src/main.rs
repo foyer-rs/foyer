@@ -14,8 +14,8 @@
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LfuConfig, RateLimitPicker,
-    RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, EvictionConfig, FifoConfig, HybridCache, HybridCacheBuilder, LfuConfig, LruConfig,
+    OrderPicker, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -36,7 +36,7 @@ use std::{
 };
 
 use analyze::{analyze, monitor, Metrics};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use futures::future::join_all;
 use itertools::Itertools;
@@ -61,6 +61,14 @@ pub struct Args {
     /// In-memory cache capacity. (MiB)
     #[arg(long, default_value_t = 1024)]
     mem: usize,
+
+    /// In-memory cache eviction algorithm.
+    #[arg(long, value_enum, default_value_t = Eviction::Lfu)]
+    mem_eviction: Eviction,
+
+    /// Disk cache eviction algorithm.
+    #[arg(long, value_enum, default_value_t = Eviction::Lfu)]
+    disk_eviction: Eviction,
 
     /// Disk cache capacity. (MiB)
     #[arg(long, default_value_t = 1024)]
@@ -173,6 +181,26 @@ pub struct Args {
 
     #[arg(long, default_value_t = false)]
     flush: bool,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+#[clap(rename_all = "lower")]
+enum Eviction {
+    Fifo,
+    S3Fifo,
+    Lru,
+    Lfu,
+}
+
+impl From<Eviction> for EvictionConfig {
+    fn from(value: Eviction) -> Self {
+        match value {
+            Eviction::Fifo => Self::Fifo(FifoConfig::default()),
+            Eviction::S3Fifo => Self::S3Fifo(S3FifoConfig::default()),
+            Eviction::Lru => Self::Lru(LruConfig::default()),
+            Eviction::Lfu => Self::Lfu(LfuConfig::default()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -372,7 +400,7 @@ async fn main() {
     let mut builder = HybridCacheBuilder::new()
         .memory(args.mem * MIB as usize)
         .with_shards(args.shards)
-        .with_eviction_config(LfuConfig::default())
+        .with_eviction_config(args.mem_eviction.clone())
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
         .with_device_config(
@@ -386,7 +414,7 @@ async fn main() {
         .with_recover_concurrency(args.recover_concurrency)
         .with_flushers(args.flushers)
         .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+        .with_eviction_pickers(vec![Box::new(OrderPicker::new(args.disk_eviction.clone()))])
         .with_compression(
             args.compression
                 .as_str()

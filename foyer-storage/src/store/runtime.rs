@@ -188,7 +188,7 @@ mod tests {
             generic::{GenericStore, GenericStoreConfig},
             recover::RecoverMode,
         },
-        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
+        picker::utils::{AdmitAllPicker, DebugFifoPicker, RejectAllPicker},
         storage::Storage,
     };
 
@@ -220,7 +220,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
+            eviction_pickers: vec![Box::<DebugFifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    CacheContext, DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig,
+    CacheContext, DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder, LfuConfig, LruConfig, OrderPicker,
     RateLimitPicker, RecoverMode, RuntimeConfigBuilder, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
         .with_flushers(2)
         .with_reclaimers(2)
         .with_clean_region_threshold(4)
-        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+        .with_eviction_pickers(vec![Box::new(OrderPicker::new(LfuConfig::default()))])
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
         .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)

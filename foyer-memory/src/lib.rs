@@ -71,4 +71,6 @@ mod indexer;
 mod metrics;
 mod prelude;
 
+mod order;
+
 pub use prelude::*;
