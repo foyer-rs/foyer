@@ -35,7 +35,7 @@ use super::generic::GenericStoreConfig;
 use super::indexer::EntryAddress;
 use super::indexer::Indexer;
 use crate::device::{Device, DeviceExt, RegionId};
-use crate::region::RegionManager;
+use crate::region::{Region, RegionManager};
 use crate::tombstone::Tombstone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,12 +73,12 @@ impl RecoverRunner {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
         let mode = config.recover_mode;
-        let handles = (0..device.regions() as RegionId).map(|region| {
-            let device = device.clone();
+        let handles = (0..device.regions() as RegionId).map(|id| {
             let semaphore = semaphore.clone();
+            let region = region_manager.region(id).clone();
             runtime.spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, device, region).await;
+                let res = RegionRecoverRunner::run(mode, region).await;
                 drop(permit);
                 res
             })
@@ -187,7 +187,7 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run<D>(mode: RecoverMode, device: D, region: RegionId) -> Result<Vec<EntryInfo>>
+    async fn run<D>(mode: RecoverMode, region: Region<D>) -> Result<Vec<EntryInfo>>
     where
         D: Device,
     {
@@ -195,7 +195,8 @@ impl RegionRecoverRunner {
 
         let mut infos = vec![];
 
-        let mut iter = RegionScanner::new(region, device);
+        let id = region.id();
+        let mut iter = RegionScanner::new(region);
         loop {
             let r = iter.next().await;
             match r {
@@ -203,9 +204,7 @@ impl RegionRecoverRunner {
                     if mode == RecoverMode::Strict {
                         return Err(e);
                     } else {
-                        tracing::warn!(
-                            "error raised when recovering region {region}, skip further recovery for region {region}"
-                        );
+                        tracing::warn!("error raised when recovering region {id}, skip further recovery for {id}.");
                         break;
                     }
                 }
