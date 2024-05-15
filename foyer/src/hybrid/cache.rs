@@ -17,7 +17,6 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::{BuildHasher, Hash},
-    sync::Arc,
 };
 
 use ahash::RandomState;
@@ -75,55 +74,26 @@ where
         &self.memory
     }
 
-    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
-        let key = key.into();
-        let value = value.into();
-        let entry = self.memory.insert(key.clone(), value.clone());
+    pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let entry = self.memory.insert(key, value);
         self.storage.enqueue(entry.clone());
         entry
     }
 
-    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> HybridCacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
-        let key = key.into();
-        let value = value.into();
-        let entry = self.memory.insert_with_context(key.clone(), value.clone(), context);
+    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let entry = self.memory.insert_with_context(key, value, context);
         self.storage.enqueue(entry.clone());
         entry
     }
 
-    pub fn insert_storage<AK, AV>(&self, key: AK, value: AV) -> HybridCacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
-        let key = key.into();
-        let value = value.into();
-        let entry = self.memory.deposit(key.clone(), value.clone());
+    pub fn insert_storage(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let entry = self.memory.deposit(key, value);
         self.storage.enqueue(entry.clone());
         entry
     }
 
-    pub fn insert_storage_with_context<AK, AV>(
-        &self,
-        key: AK,
-        value: AV,
-        context: CacheContext,
-    ) -> HybridCacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
-        let key = key.into();
-        let value = value.into();
-        let entry = self.memory.deposit_with_context(key.clone(), value.clone(), context);
+    pub fn insert_storage_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let entry = self.memory.deposit_with_context(key, value, context);
         self.storage.enqueue(entry.clone());
         entry
     }
@@ -146,22 +116,20 @@ where
         Ok(None)
     }
 
-    pub async fn obtain<AK>(&self, key: AK) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    pub async fn obtain(&self, key: K) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        AK: Into<Arc<K>> + Send + 'static,
+        K: Clone,
     {
-        let key = key.into();
         self.memory
             .entry(key.clone(), || {
                 let store = self.storage.clone();
                 async move {
-                    let res = match store.load(&key).await.map_err(anyhow::Error::from) {
+                    match store.load(&key).await.map_err(anyhow::Error::from) {
                         Err(e) => Err(e),
                         Ok(None) => Ok(None),
-                        Ok(Some((k, _))) if key.as_ref() != &k => Ok(None),
-                        Ok(Some((_, v))) => Ok(Some((Arc::new(v), CacheContext::default()))),
-                    };
-                    res
+                        Ok(Some((k, _))) if key != k => Ok(None),
+                        Ok(Some((_, v))) => Ok(Some((v, CacheContext::default()))),
+                    }
                 }
             })
             .await
@@ -200,31 +168,25 @@ pub type HybridEntry<K, V, S = RandomState> = Entry<K, V, anyhow::Error, S>;
 
 impl<K, V, S> HybridCache<K, V, S>
 where
-    K: StorageKey,
+    K: StorageKey + Clone,
     V: StorageValue,
     S: BuildHasher + Send + Sync + 'static + Debug,
 {
-    pub fn entry<AK, AV, F, FU>(&self, key: AK, f: F) -> HybridEntry<K, V, S>
+    pub fn entry<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
     where
-        AK: Into<Arc<K>>,
-        AV: Into<Arc<V>>,
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<Option<(AV, CacheContext)>>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<Option<(V, CacheContext)>>> + Send + 'static,
     {
-        let key: Arc<K> = key.into();
         let store = self.storage.clone();
         self.memory.entry(key.clone(), || {
             let future = f();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from)? {
                     None => {}
-                    Some((k, _)) if key.as_ref() != &k => {}
-                    Some((_, v)) => return Ok(Some((Arc::new(v), CacheContext::default()))),
+                    Some((k, _)) if key != k => {}
+                    Some((_, v)) => return Ok(Some((v, CacheContext::default()))),
                 }
-                future
-                    .await
-                    .map(|opt| opt.map(|(value, context)| (value.into(), context)))
-                    .map_err(anyhow::Error::from)
+                future.await.map_err(anyhow::Error::from)
             }
         })
     }
