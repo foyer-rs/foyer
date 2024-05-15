@@ -11,7 +11,6 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ahash = "0.8"
 bytes = "1"
 cfg-if = "1"
 crossbeam = "0.8"

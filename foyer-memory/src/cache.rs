@@ -36,38 +36,36 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoHandle},
     },
     generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericEntry, Weighter},
-    indexer::ArcKeyHashMapIndexer,
+    indexer::HashTableIndexer,
     metrics::Metrics,
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
 pub type FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCache<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
 pub type FifoCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCacheEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
 pub type FifoEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, FifoHandle<(Arc<K>, Arc<V>)>>, S, ER>;
+    GenericEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S, ER>;
 
-pub type LruCache<K, V, S = RandomState> =
-    GenericCache<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LruCache<K, V, S = RandomState> = GenericCache<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
 pub type LruCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCacheEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
 pub type LruEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Lru<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LruHandle<(Arc<K>, Arc<V>)>>, S, ER>;
+    GenericEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S, ER>;
 
-pub type LfuCache<K, V, S = RandomState> =
-    GenericCache<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S>;
+pub type LfuCache<K, V, S = RandomState> = GenericCache<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
 pub type LfuCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCacheEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
 pub type LfuEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, Lfu<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, LfuHandle<(Arc<K>, Arc<V>)>>, S, ER>;
+    GenericEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S, ER>;
 
 pub type S3FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCache<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
 pub type S3FifoCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S>;
+    GenericCacheEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
 pub type S3FifoEntry<K, V, ER, S = RandomState> =
-    GenericEntry<K, V, S3Fifo<(Arc<K>, Arc<V>)>, ArcKeyHashMapIndexer<K, S3FifoHandle<(Arc<K>, Arc<V>)>>, S, ER>;
+    GenericEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S, ER>;
 
 #[derive(Debug)]
 pub enum CacheEntry<K, V, S = RandomState>
@@ -441,11 +439,7 @@ where
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn insert<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
+    pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
             Cache::Lru(cache) => cache.insert(key, value).into(),
@@ -454,11 +448,7 @@ where
         }
     }
 
-    pub fn insert_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
+    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
             Cache::Lru(cache) => cache.insert_with_context(key, value, context).into(),
@@ -467,11 +457,7 @@ where
         }
     }
 
-    pub fn deposit<AK, AV>(&self, key: AK, value: AV) -> CacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
+    pub fn deposit(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit(key, value).into(),
             Cache::Lru(cache) => cache.deposit(key, value).into(),
@@ -480,11 +466,7 @@ where
         }
     }
 
-    pub fn deposit_with_context<AK, AV>(&self, key: AK, value: AV, context: CacheContext) -> CacheEntry<K, V, S>
-    where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
-    {
+    pub fn deposit_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
             Cache::Lru(cache) => cache.deposit_with_context(key, value, context).into(),
@@ -721,16 +703,14 @@ where
 
 impl<K, V, S> Cache<K, V, S>
 where
-    K: Key,
+    K: Key + Clone,
     V: Value,
     S: BuildHasher + Send + Sync + 'static,
 {
-    pub fn entry<AK, AV, F, FU, ER>(&self, key: AK, f: F) -> Entry<K, V, ER, S>
+    pub fn entry<F, FU, ER>(&self, key: K, f: F) -> Entry<K, V, ER, S>
     where
-        AK: Into<Arc<K>> + Send + 'static,
-        AV: Into<Arc<V>> + Send + 'static,
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<Option<(AV, CacheContext)>, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
         ER: Send + 'static,
     {
         match self {
