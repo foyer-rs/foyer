@@ -22,7 +22,6 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 mod analyze;
 mod rate;
 mod text;
-mod utils;
 
 use std::{
     collections::BTreeMap,
@@ -49,7 +48,8 @@ use rate::RateLimiter;
 use serde::{Deserialize, Serialize};
 use text::text;
 use tokio::sync::broadcast;
-use utils::{detect_fs_type, dev_stat_path, file_stat_path, iostat, FsType};
+
+use crate::analyze::IoStat;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
@@ -73,11 +73,6 @@ pub struct Args {
     /// (s)
     #[arg(long, default_value_t = 2)]
     report_interval: u64,
-
-    /// Some filesystem (e.g. btrfs) can span across multiple block devices and it's hard to decide
-    /// which device to moitor. Use this argument to specify which block device to monitor.
-    #[arg(long, default_value = "")]
-    iostat_dev: String,
 
     /// Write rate limit per writer. (MiB)
     #[arg(long, default_value_t = 0.0)]
@@ -355,23 +350,6 @@ async fn main() {
 
     create_dir_all(&args.dir).unwrap();
 
-    let iostat_path = match detect_fs_type(&args.dir) {
-        FsType::Tmpfs => panic!("tmpfs is not supported with benches"),
-        FsType::Btrfs => {
-            if args.iostat_dev.is_empty() {
-                panic!("cannot decide which block device to monitor for btrfs, please specify device name with \'--iostat-dev\'")
-            } else {
-                dev_stat_path(&args.iostat_dev)
-            }
-        }
-        _ => file_stat_path(&args.dir),
-    };
-
-    let metrics = Metrics::default();
-
-    let iostat_start = iostat(&iostat_path);
-    let metrics_dump_start = metrics.dump();
-
     let mut builder = HybridCacheBuilder::new()
         .memory(args.mem * MIB as usize)
         .with_shards(args.shards)
@@ -419,14 +397,20 @@ async fn main() {
 
     let hybrid = builder.build().await.unwrap();
 
+    let stats = hybrid.stats();
+
+    let iostat_start = IoStat::snapshot(&stats);
+    let metrics = Metrics::default();
+
+    let metrics_dump_start = metrics.dump();
+
     let (stop_tx, _) = broadcast::channel(4096);
 
     let handle_monitor = tokio::spawn({
-        let iostat_path = iostat_path.clone();
         let metrics = metrics.clone();
 
         monitor(
-            iostat_path,
+            stats.clone(),
             Duration::from_secs(args.report_interval),
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
@@ -447,7 +431,7 @@ async fn main() {
 
     handle_bench.await.unwrap();
 
-    let iostat_end = iostat(&iostat_path);
+    let iostat_end = IoStat::snapshot(&stats);
     let metrics_dump_end = metrics.dump();
     let analysis = analyze(
         time.elapsed(),

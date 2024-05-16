@@ -24,6 +24,7 @@ pub mod code;
 pub mod continuum;
 pub mod countdown;
 pub mod erwlock;
+pub mod iostat;
 pub mod object_pool;
 pub mod range;
 pub mod rate;

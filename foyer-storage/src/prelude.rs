@@ -17,6 +17,7 @@ pub use crate::{
     device::{
         direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
+        monitor::DeviceStats,
         Device, DeviceExt, DeviceOptions,
     },
     large::recover::RecoverMode,

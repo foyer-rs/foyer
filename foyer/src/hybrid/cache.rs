@@ -12,12 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash};
+use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, sync::Arc};
 
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
-use foyer_storage::{Storage, Store};
+use foyer_storage::{DeviceStats, Storage, Store};
 
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
 
@@ -156,6 +156,10 @@ where
     pub async fn close(&self) -> anyhow::Result<()> {
         self.storage.close().await?;
         Ok(())
+    }
+
+    pub fn stats(&self) -> Arc<DeviceStats> {
+        self.storage.stats()
     }
 }
 
