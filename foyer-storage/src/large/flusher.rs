@@ -47,7 +47,7 @@ where
     D: Device,
 {
     groups: Vec<WriteGroup<K, V, S, D>>,
-    tombstones: Vec<(Tombstone, oneshot::Sender<Result<bool>>)>,
+    tombstones: Vec<(Tombstone, Option<InvalidStats>, oneshot::Sender<Result<bool>>)>,
 }
 
 impl<K, V, S, D> Debug for BatchState<K, V, S, D>
@@ -159,12 +159,19 @@ where
     },
     Tombstone {
         tombstone: Tombstone,
+        stats: Option<InvalidStats>,
         tx: oneshot::Sender<Result<bool>>,
     },
     Reinsertion {
         reinsertion: Reinsertion,
         tx: oneshot::Sender<Result<bool>>,
     },
+}
+
+#[derive(Debug)]
+pub struct InvalidStats {
+    pub region: RegionId,
+    pub size: usize,
 }
 
 #[derive(Debug)]
@@ -242,17 +249,23 @@ where
     pub fn submit(&self, submission: Submission<K, V, S>, sequence: Sequence) {
         match submission {
             Submission::CacheEntry { entry, tx } => self.fetch(entry, tx, sequence),
-            Submission::Tombstone { tombstone, tx } => self.tombstone(tombstone, tx, sequence),
+            Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx, sequence),
             Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx, sequence),
         }
     }
 
-    fn tombstone(&self, tombstone: Tombstone, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
+    fn tombstone(
+        &self,
+        tombstone: Tombstone,
+        stats: Option<InvalidStats>,
+        tx: oneshot::Sender<Result<bool>>,
+        sequence: Sequence,
+    ) {
         tracing::trace!("[flusher]: submit tombstone with sequence: {sequence}");
 
         debug_assert_eq!(tombstone.sequence, sequence);
 
-        let append = |state: &mut BatchState<K, V, S, D>| state.tombstones.push((tombstone, tx));
+        let append = |state: &mut BatchState<K, V, S, D>| state.tombstones.push((tombstone, stats, tx));
 
         if let Some(token) = self.batch.accumulate(append) {
             tracing::trace!("[flusher]: tombstone with sequence: {sequence} becomes leader");
@@ -489,11 +502,19 @@ where
                 let future = {
                     let tombstones = state.tombstones;
                     let has_tombstone_log = tombstone_log.is_some();
+                    let region_manager = region_manager.clone();
                     async move {
                         if let Some(log) = tombstone_log {
-                            log.append(tombstones.iter().map(|(tombstone, _)| tombstone)).await?;
+                            log.append(tombstones.iter().map(|(tombstone, _, _)| tombstone)).await?;
                         }
-                        for (_, tx) in tombstones {
+                        for (_, stats, tx) in tombstones {
+                            if let Some(stats) = stats {
+                                region_manager
+                                    .region(stats.region)
+                                    .stats()
+                                    .invalid
+                                    .fetch_add(stats.size, Ordering::Relaxed);
+                            }
                             let _ = tx.send(Ok(has_tombstone_log));
                         }
                         Ok::<_, Error>(())

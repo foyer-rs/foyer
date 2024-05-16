@@ -14,8 +14,8 @@
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LfuConfig, RateLimitPicker,
-    RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker, LfuConfig,
+    RateLimitPicker, RuntimeConfigBuilder,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -173,6 +173,9 @@ pub struct Args {
 
     #[arg(long, default_value_t = false)]
     flush: bool,
+
+    #[arg(long, default_value_t = 0.8)]
+    invalid_ratio: f64,
 }
 
 #[derive(Debug)]
@@ -386,7 +389,10 @@ async fn main() {
         .with_recover_concurrency(args.recover_concurrency)
         .with_flushers(args.flushers)
         .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+        .with_eviction_pickers(vec![
+            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+            Box::<FifoPicker>::default(),
+        ])
         .with_compression(
             args.compression
                 .as_str()

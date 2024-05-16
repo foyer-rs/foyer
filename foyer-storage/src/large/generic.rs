@@ -50,7 +50,7 @@ use crate::{
 };
 
 use super::{
-    flusher::{Flusher, Submission},
+    flusher::{Flusher, InvalidStats, Submission},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
@@ -197,7 +197,10 @@ where
         };
 
         let indexer = Indexer::new(config.indexer_shards);
-        let eviction_pickers = std::mem::take(&mut config.eviction_pickers);
+        let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
+        for picker in eviction_pickers.iter_mut() {
+            picker.init(device.regions(), device.region_size());
+        }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(device.clone(), eviction_pickers, reclaim_semaphore.clone());
         let sequence = AtomicSequence::default();
@@ -349,7 +352,10 @@ where
 
         let hash = self.inner.memory.hash_builder().hash_one(key);
 
-        self.inner.indexer.remove(hash);
+        let stats = self.inner.indexer.remove(hash).map(|addr| InvalidStats {
+            region: addr.region,
+            size: bits::align_up(self.inner.device.align(), addr.len as usize),
+        });
 
         let this = self.clone();
         self.inner.runtime.spawn(async move {
@@ -357,6 +363,7 @@ where
             this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(
                 Submission::Tombstone {
                     tombstone: Tombstone { hash, sequence },
+                    stats,
                     tx,
                 },
                 sequence,
@@ -390,6 +397,7 @@ where
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(
             Submission::Tombstone {
                 tombstone: Tombstone { hash: 0, sequence },
+                stats: None,
                 tx,
             },
             sequence,
@@ -399,7 +407,11 @@ where
         // Clean regions.
         try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {
             let region = self.inner.region_manager.region(id).clone();
-            async move { RegionCleaner::clean(&region, self.inner.flush).await }
+            async move {
+                let res = RegionCleaner::clean(&region, self.inner.flush).await;
+                region.stats().reset();
+                res
+            }
         }))
         .await?;
 

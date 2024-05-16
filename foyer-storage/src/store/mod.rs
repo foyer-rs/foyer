@@ -45,6 +45,7 @@ use crate::{
         utils::{AdmitAllPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    FifoPicker, InvalidRatioPicker,
 };
 use noop::NoopStore;
 use runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig};
@@ -288,7 +289,7 @@ where
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: None,
-            eviction_pickers: vec![],
+            eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admision_picker: Arc::<AdmitAllPicker<K>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
             compression: Compression::None,
@@ -375,6 +376,8 @@ where
     /// will be applied.
     ///
     /// If no eviction picker pickes a region, a region will be picked randomly.
+    ///
+    /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
         self.eviction_pickers = eviction_pickers;
         self

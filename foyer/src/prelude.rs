@@ -27,8 +27,8 @@ pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig
 pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
-    DirectFsDeviceOptionsBuilder, EnqueueFuture, EvictionPicker, FifoPicker, RateLimitPicker, RecoverMode,
-    ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, StoreConfig,
+    DirectFsDeviceOptionsBuilder, EnqueueFuture, EvictionPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker,
+    RecoverMode, ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, StoreConfig,
     TombstoneLogConfigBuilder,
 };
 
