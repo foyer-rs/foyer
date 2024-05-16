@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::hash::Hash;
+use std::hash::{BuildHasher, Hash};
 
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -29,3 +29,6 @@ impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned {}
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 pub trait StorageValue: Value + 'static + Serialize + DeserializeOwned {}
 impl<T> StorageValue for T where T: Value + Serialize + DeserializeOwned {}
+
+pub trait HashBuilder: BuildHasher + Send + Sync + 'static {}
+impl<T> HashBuilder for T where T: BuildHasher + Send + Sync + 'static {}

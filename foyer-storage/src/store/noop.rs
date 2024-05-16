@@ -12,15 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    future::Future,
-    hash::{BuildHasher, Hash},
-    marker::PhantomData,
-};
+use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::PhantomData};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use tokio::sync::oneshot;
 
@@ -32,13 +26,13 @@ pub struct NoopStore<K, V, S>(PhantomData<(K, V, S)>)
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug;
+    S: HashBuilder + Debug;
 
 impl<K, V, S> Debug for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("NoneStore").finish()
@@ -49,7 +43,7 @@ impl<K, V, S> Clone for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self(PhantomData)
@@ -60,7 +54,7 @@ impl<K, V, S> Storage for NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;

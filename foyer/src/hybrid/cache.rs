@@ -12,15 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    future::Future,
-    hash::{BuildHasher, Hash},
-};
+use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash};
 
 use ahash::RandomState;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
 use foyer_storage::{Storage, Store};
 
@@ -30,7 +25,7 @@ pub struct HybridCache<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     pub(crate) memory: Cache<K, V, S>,
     pub(crate) storage: Store<K, V, S>,
@@ -40,7 +35,7 @@ impl<K, V, S> Debug for HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridCache")
@@ -54,7 +49,7 @@ impl<K, V, S> Clone for HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self {
@@ -68,7 +63,7 @@ impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     pub fn memory(&self) -> &Cache<K, V, S> {
         &self.memory
@@ -170,7 +165,7 @@ impl<K, V, S> HybridCache<K, V, S>
 where
     K: StorageKey + Clone,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     pub fn fetch<F, FU>(&self, key: K, f: F) -> HybridEntry<K, V, S>
     where

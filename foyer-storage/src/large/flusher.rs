@@ -12,9 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::{fmt::Debug, hash::BuildHasher};
 
 use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
@@ -25,7 +25,7 @@ use crate::Sequence;
 
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
@@ -43,7 +43,7 @@ struct BatchState<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     groups: Vec<WriteGroup<K, V, S, D>>,
@@ -54,7 +54,7 @@ impl<K, V, S, D> Debug for BatchState<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -66,7 +66,7 @@ impl<K, V, S, D> Default for BatchState<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn default() -> Self {
@@ -81,7 +81,7 @@ struct WriteGroup<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
     D: Device,
 {
     writer: RegionHandle<D>,
@@ -97,7 +97,7 @@ impl<K, V, S, D> Debug for WriteGroup<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -151,7 +151,7 @@ pub enum Submission<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     CacheEntry {
         entry: CacheEntry<K, V, S>,
@@ -179,7 +179,7 @@ pub struct Flusher<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     batch: AsyncBatchPipeline<BatchState<K, V, S, D>, Result<()>>,
@@ -199,7 +199,7 @@ impl<K, V, S, D> Clone for Flusher<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn clone(&self) -> Self {
@@ -220,7 +220,7 @@ impl<K, V, S, D> Flusher<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     pub async fn open(

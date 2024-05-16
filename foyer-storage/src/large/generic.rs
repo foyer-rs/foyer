@@ -16,7 +16,7 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::{BuildHasher, Hash},
+    hash::Hash,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -25,7 +25,7 @@ use std::{
 
 use foyer_common::{
     bits,
-    code::{StorageKey, StorageValue},
+    code::{HashBuilder, StorageKey, StorageValue},
 };
 use foyer_memory::{Cache, CacheEntry};
 use futures::future::{join_all, try_join_all};
@@ -60,7 +60,7 @@ pub struct GenericStoreConfig<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     pub memory: Cache<K, V, S>,
@@ -84,7 +84,7 @@ impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -111,7 +111,7 @@ pub struct GenericStore<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     inner: Arc<GenericStoreInner<K, V, S, D>>,
@@ -121,7 +121,7 @@ impl<K, V, S, D> Debug for GenericStore<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -133,7 +133,7 @@ struct GenericStoreInner<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     /// Holds the memory cache for reinsertion.
@@ -163,7 +163,7 @@ impl<K, V, S, D> Clone for GenericStore<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     fn clone(&self) -> Self {
@@ -177,7 +177,7 @@ impl<K, V, S, D> GenericStore<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
@@ -423,7 +423,7 @@ impl<K, V, S, D> Storage for GenericStore<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     type Key = K;

@@ -16,7 +16,7 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::{BuildHasher, Hash},
+    hash::Hash,
     ops::Deref,
     ptr::NonNull,
     sync::{
@@ -27,7 +27,7 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::{
-    code::{Key, Value},
+    code::{HashBuilder, Key, Value},
     object_pool::ObjectPool,
 };
 use futures::FutureExt;
@@ -63,7 +63,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     indexer: I,
     eviction: E,
@@ -83,7 +83,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn new(
         capacity: usize,
@@ -375,7 +375,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn drop(&mut self) {
         unsafe { self.clear(&mut vec![]) }
@@ -388,7 +388,7 @@ where
     V: Value,
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub capacity: usize,
     pub shards: usize,
@@ -407,7 +407,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, S>),
@@ -422,7 +422,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn default() -> Self {
         Self::Invalid
@@ -436,7 +436,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
 {
     type Output = std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>;
@@ -463,7 +463,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     shards: Vec<Mutex<CacheShard<K, V, E, I, S>>>,
 
@@ -483,7 +483,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn new(config: GenericCacheConfig<K, V, E, S>) -> Self {
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
@@ -728,7 +728,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericFetch<K, V, E, I, S, ER>
     where
@@ -801,7 +801,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     cache: Arc<GenericCache<K, V, E, I, S>>,
     ptr: NonNull<E::Handle>,
@@ -814,7 +814,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericCacheEntry").finish()
@@ -828,7 +828,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn hash(&self) -> u64 {
         unsafe { self.ptr.as_ref().base().hash() }
@@ -866,7 +866,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn clone(&self) -> Self {
         let mut ptr = self.ptr;
@@ -891,7 +891,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn drop(&mut self) {
         unsafe { self.cache.try_release_external_handle(self.ptr) }
@@ -905,7 +905,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     type Target = V;
 
@@ -921,7 +921,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
 }
 unsafe impl<K, V, E, I, S> Sync for GenericCacheEntry<K, V, E, I, S>
@@ -931,7 +931,7 @@ where
     E: Eviction,
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     I: Indexer<Key = K, Handle = E::Handle>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
 }
 
