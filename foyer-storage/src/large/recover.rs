@@ -25,6 +25,7 @@ use itertools::Itertools;
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
+use crate::device::monitor::Monitored;
 use crate::error::{Error, Result};
 
 use crate::large::scanner::{EntryInfo, RegionScanner};
@@ -56,7 +57,7 @@ pub struct RecoverRunner;
 impl RecoverRunner {
     pub async fn run<K, V, S, D>(
         config: &GenericStoreConfig<K, V, S, D>,
-        device: D,
+        device: Monitored<D>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager<D>,

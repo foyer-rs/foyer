@@ -37,7 +37,10 @@ use tokio::{
 
 use crate::{
     compress::Compression,
-    device::{Device, DeviceExt, RegionId},
+    device::{
+        monitor::{DeviceStats, Monitored},
+        Device, DeviceExt, RegionId,
+    },
     error::{Error, Result},
     large::reclaimer::RegionCleaner,
     picker::{AdmissionPicker, EvictionPicker, ReinsertionPicker},
@@ -140,7 +143,7 @@ where
     memory: Cache<K, V, S>,
 
     indexer: Indexer,
-    device: D,
+    device: Monitored<D>,
     region_manager: RegionManager<D>,
 
     flushers: Vec<Flusher<K, V, S, D>>,
@@ -173,6 +176,18 @@ where
     }
 }
 
+impl<K, V, S, D> GenericStore<K, V, S, Monitored<D>>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+    D: Device,
+{
+    pub fn device_stats(&self) -> &Arc<DeviceStats> {
+        self.inner.device.stat()
+    }
+}
+
 impl<K, V, S, D> GenericStore<K, V, S, D>
 where
     K: StorageKey,
@@ -183,7 +198,7 @@ where
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
         let runtime = Handle::current();
 
-        let device = D::open(config.device_config.clone()).await?;
+        let device = Monitored::open(config.device_config.clone()).await?;
 
         let stats = Arc::<Statistics>::default();
 
@@ -469,6 +484,10 @@ where
 
     async fn destroy(&self) -> Result<()> {
         self.destroy().await
+    }
+
+    fn stats(&self) -> Arc<DeviceStats> {
+        self.inner.device.stat().clone()
     }
 }
 

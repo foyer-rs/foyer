@@ -37,7 +37,7 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
-    device::{Device, DeviceExt, IoBuffer, RegionId},
+    device::{monitor::Monitored, Device, DeviceExt, IoBuffer, RegionId},
     error::Result,
     picker::EvictionPicker,
 };
@@ -72,7 +72,7 @@ where
     D: Device,
 {
     id: RegionId,
-    device: D,
+    device: Monitored<D>,
     stats: Arc<RegionStats>,
 }
 
@@ -151,7 +151,11 @@ impl<D> RegionManager<D>
 where
     D: Device,
 {
-    pub fn new(device: D, eviction_pickers: Vec<Box<dyn EvictionPicker>>, reclaim_semaphore: Arc<Semaphore>) -> Self {
+    pub fn new(
+        device: Monitored<D>,
+        eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+        reclaim_semaphore: Arc<Semaphore>,
+    ) -> Self {
         let regions = (0..device.regions() as RegionId)
             .map(|id| Region {
                 id,

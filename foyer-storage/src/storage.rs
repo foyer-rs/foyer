@@ -18,6 +18,7 @@ use std::{
     future::Future,
     hash::Hash,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 
@@ -26,7 +27,7 @@ use foyer_memory::CacheEntry;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
 
-use crate::error::Result;
+use crate::{device::monitor::DeviceStats, error::Result};
 
 #[pin_project]
 pub struct EnqueueFuture {
@@ -83,4 +84,6 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
 
     #[must_use]
     fn destroy(&self) -> impl Future<Output = Result<()>> + Send;
+
+    fn stats(&self) -> Arc<DeviceStats>;
 }

@@ -15,6 +15,7 @@
 pub mod allocator;
 pub mod direct_file;
 pub mod direct_fs;
+pub mod monitor;
 
 use crate::error::Result;
 use std::{fmt::Debug, future::Future};
