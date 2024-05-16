@@ -17,6 +17,7 @@
 mod compress;
 mod device;
 mod error;
+mod large;
 mod picker;
 mod region;
 mod serde;
@@ -24,8 +25,6 @@ mod statistics;
 mod storage;
 mod store;
 mod tombstone;
-
-pub mod large;
 
 mod prelude;
 
