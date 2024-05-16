@@ -19,14 +19,14 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::{BuildHasher, Hash},
+    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
 use ahash::RandomState;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheEntry};
 
 use super::{
@@ -55,7 +55,7 @@ pub enum StoreConfig<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     Noop,
     DirectFs(GenericStoreConfig<K, V, S, DirectFsDevice>),
@@ -66,7 +66,7 @@ impl<K, V, S> Debug for StoreConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -81,7 +81,7 @@ pub enum Store<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     Noop(NoopStore<K, V, S>),
     DirectFs(GenericStore<K, V, S, DirectFsDevice>),
@@ -92,7 +92,7 @@ impl<K, V, S> Debug for Store<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -107,7 +107,7 @@ impl<K, V, S> Clone for Store<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         match self {
@@ -122,7 +122,7 @@ impl<K, V, S> Storage for Store<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
@@ -250,7 +250,7 @@ pub struct StoreBuilder<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     memory: Cache<K, V, S>,
     device_config: DeviceConfig,
@@ -274,7 +274,7 @@ impl<K, V, S> StoreBuilder<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     /// Setup disk cache store for the given in-memory cache.
     pub fn new(memory: Cache<K, V, S>) -> Self {

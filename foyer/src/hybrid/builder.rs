@@ -12,10 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::BuildHasher, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use ahash::RandomState;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
     AdmissionPicker, Compression, DeviceConfig, EvictionPicker, RecoverMode, ReinsertionPicker, RuntimeConfig,
@@ -52,7 +52,7 @@ pub struct HybridCacheBuilderPhaseMemory<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     builder: CacheBuilder<K, V, S>,
 }
@@ -61,7 +61,7 @@ impl<K, V, S> HybridCacheBuilderPhaseMemory<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
     /// Operations on different shard can be parallelized.
@@ -91,7 +91,7 @@ where
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> HybridCacheBuilderPhaseMemory<K, V, OS>
     where
-        OS: BuildHasher + Send + Sync + 'static + Debug,
+        OS: HashBuilder + Debug,
     {
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory { builder }
@@ -116,7 +116,7 @@ pub struct HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     memory: Cache<K, V, S>,
     builder: StoreBuilder<K, V, S>,
@@ -126,7 +126,7 @@ impl<K, V, S> HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
 {
     /// Set device config for the disk cache store.
     pub fn with_device_config(self, device_config: impl Into<DeviceConfig>) -> Self {

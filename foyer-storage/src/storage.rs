@@ -16,12 +16,12 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::{BuildHasher, Hash},
+    hash::Hash,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
@@ -54,7 +54,7 @@ impl Future for EnqueueFuture {
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
     type Key: StorageKey;
     type Value: StorageValue;
-    type BuildHasher: BuildHasher + Send + Sync + 'static;
+    type BuildHasher: HashBuilder;
     type Config: Send + Debug + 'static;
 
     #[must_use]

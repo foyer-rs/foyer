@@ -12,20 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    hash::{BuildHasher, Hash},
-    ops::Deref,
-    sync::Arc,
-};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{HashBuilder, Key, Value};
 
 use crate::{
     context::CacheContext,
@@ -72,7 +66,7 @@ pub enum CacheEntry<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     Fifo(FifoCacheEntry<K, V, S>),
     Lru(LruCacheEntry<K, V, S>),
@@ -84,7 +78,7 @@ impl<K, V, S> Clone for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn clone(&self) -> Self {
         match self {
@@ -100,7 +94,7 @@ impl<K, V, S> Deref for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     type Target = V;
 
@@ -118,7 +112,7 @@ impl<K, V, S> From<FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: FifoCacheEntry<K, V, S>) -> Self {
         Self::Fifo(entry)
@@ -129,7 +123,7 @@ impl<K, V, S> From<LruCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: LruCacheEntry<K, V, S>) -> Self {
         Self::Lru(entry)
@@ -140,7 +134,7 @@ impl<K, V, S> From<LfuCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: LfuCacheEntry<K, V, S>) -> Self {
         Self::Lfu(entry)
@@ -151,7 +145,7 @@ impl<K, V, S> From<S3FifoCacheEntry<K, V, S>> for CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: S3FifoCacheEntry<K, V, S>) -> Self {
         Self::S3Fifo(entry)
@@ -162,7 +156,7 @@ impl<K, V, S> CacheEntry<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn hash(&self) -> u64 {
         match self {
@@ -264,7 +258,7 @@ pub struct CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     capacity: usize,
     shards: usize,
@@ -302,7 +296,7 @@ impl<K, V, S> CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
     /// Operations on different shard can be parallelized.
@@ -332,7 +326,7 @@ where
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
-        OS: BuildHasher + Send + Sync + 'static,
+        OS: HashBuilder,
     {
         CacheBuilder {
             capacity: self.capacity,
@@ -393,7 +387,7 @@ pub enum Cache<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     Fifo(Arc<FifoCache<K, V, S>>),
     Lru(Arc<LruCache<K, V, S>>),
@@ -405,7 +399,7 @@ impl<K, V, S> Debug for Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -421,7 +415,7 @@ impl<K, V, S> Clone for Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn clone(&self) -> Self {
         match self {
@@ -437,7 +431,7 @@ impl<K, V, S> Cache<K, V, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
@@ -595,7 +589,7 @@ pub enum Fetch<K, V, ER, S = RandomState>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     Fifo(FifoFetch<K, V, ER, S>),
     Lru(LruFetch<K, V, ER, S>),
@@ -607,7 +601,7 @@ impl<K, V, ER, S> From<FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: FifoFetch<K, V, ER, S>) -> Self {
         Self::Fifo(entry)
@@ -618,7 +612,7 @@ impl<K, V, ER, S> From<LruFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: LruFetch<K, V, ER, S>) -> Self {
         Self::Lru(entry)
@@ -629,7 +623,7 @@ impl<K, V, ER, S> From<LfuFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: LfuFetch<K, V, ER, S>) -> Self {
         Self::Lfu(entry)
@@ -640,7 +634,7 @@ impl<K, V, ER, S> From<S3FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     fn from(entry: S3FifoFetch<K, V, ER, S>) -> Self {
         Self::S3Fifo(entry)
@@ -652,7 +646,7 @@ where
     K: Key,
     V: Value,
     ER: From<oneshot::error::RecvError>,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     type Output = std::result::Result<Option<CacheEntry<K, V, S>>, ER>;
 
@@ -677,7 +671,7 @@ impl<K, V, ER, S> Fetch<K, V, ER, S>
 where
     K: Key,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn state(&self) -> FetchState {
         match self {
@@ -705,7 +699,7 @@ impl<K, V, S> Cache<K, V, S>
 where
     K: Key + Clone,
     V: Value,
-    S: BuildHasher + Send + Sync + 'static,
+    S: HashBuilder,
 {
     pub fn fetch<F, FU, ER>(&self, key: K, f: F) -> Fetch<K, V, ER, S>
     where

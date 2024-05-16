@@ -12,9 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::BuildHasher, sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use futures::future::try_join_all;
 use tokio::{
     runtime::Handle,
@@ -53,7 +53,7 @@ impl Reclaimer {
     where
         K: StorageKey,
         V: StorageValue,
-        S: BuildHasher + Send + Sync + 'static + Debug,
+        S: HashBuilder + Debug,
         D: Device,
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
@@ -87,7 +87,7 @@ struct ReclaimRunner<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -112,7 +112,7 @@ impl<K, V, S, D> ReclaimRunner<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
-    S: BuildHasher + Send + Sync + 'static + Debug,
+    S: HashBuilder + Debug,
     D: Device,
 {
     const RETRY_INTERVAL: Duration = Duration::from_millis(10);

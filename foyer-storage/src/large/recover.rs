@@ -13,13 +13,12 @@
 //  limitations under the License.
 
 use std::collections::HashMap;
-use std::hash::BuildHasher;
 
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use futures::future::try_join_all;
 
 use itertools::Itertools;
@@ -67,7 +66,7 @@ impl RecoverRunner {
     where
         K: StorageKey,
         V: StorageValue,
-        S: BuildHasher + Send + Sync + 'static + Debug,
+        S: HashBuilder + Debug,
         D: Device,
     {
         // Recover regions concurrently.
