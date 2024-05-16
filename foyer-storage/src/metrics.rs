@@ -12,27 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
+use metrics::{Counter, Histogram};
 
-mod compress;
-mod device;
-mod error;
-mod large;
-mod picker;
-mod region;
-mod serde;
-mod statistics;
-mod storage;
-mod store;
-mod tombstone;
-
-mod prelude;
-
-pub use prelude::*;
-
-pub mod test_utils;
-
-use std::sync::atomic::AtomicU64;
-
-pub type Sequence = u64;
-pub type AtomicSequence = AtomicU64;
+#[derive(Clone)]
+pub struct Metrics {
+    pub enqueue_duration: Histogram,
+    pub enqueue_counter: Counter,
+}

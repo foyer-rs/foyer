@@ -45,15 +45,6 @@ impl Indexer {
         }
     }
 
-    pub fn insert(&self, hash: u64, addr: EntryAddress) -> Option<EntryAddress> {
-        let s = self.shard(hash);
-
-        let mut shard = self.shards[s].write();
-
-        // The old region hash cannot be removed to prevent from phantom entry on hash collision.
-        self.insert_inner(&mut shard, hash, addr)
-    }
-
     pub fn insert_batch(&self, batch: Vec<(u64, EntryAddress)>) -> Vec<(u64, EntryAddress)> {
         let shards: HashMap<usize, Vec<(u64, EntryAddress)>> =
             batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
@@ -97,15 +88,6 @@ impl Indexer {
 
     pub fn clear(&self) {
         self.shards.iter().for_each(|shard| shard.write().clear());
-    }
-
-    pub fn take(&self) -> Vec<(u64, EntryAddress)> {
-        let mut res = vec![];
-        for shard in self.shards.iter() {
-            let mut shard = shard.write();
-            res.extend(shard.drain());
-        }
-        res
     }
 
     #[inline(always)]

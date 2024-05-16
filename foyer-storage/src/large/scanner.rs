@@ -174,6 +174,8 @@ where
         Ok(Some((info, key)))
     }
 
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(dead_code)]
     pub async fn next_value<V>(&mut self) -> Result<Option<(EntryInfo, V)>>
     where
         V: StorageValue,
@@ -196,6 +198,8 @@ where
         Ok(Some((info, value)))
     }
 
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(dead_code)]
     pub async fn next_kv<K, V>(&mut self) -> Result<Option<(EntryInfo, K, V)>>
     where
         K: StorageKey,
