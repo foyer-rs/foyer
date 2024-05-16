@@ -20,3 +20,5 @@ coverage:
       default:
         informational: true
         only_pulls: true
+ignore:
+  - "foyer-util"
