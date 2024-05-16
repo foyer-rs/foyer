@@ -18,6 +18,7 @@ use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
 use futures::{Future, FutureExt};
 
+use crate::device::monitor::DeviceStats;
 use crate::error::Result;
 
 use crate::storage::{EnqueueFuture, Storage};
@@ -169,6 +170,10 @@ where
 
     async fn destroy(&self) -> Result<()> {
         self.store.destroy().await
+    }
+
+    fn stats(&self) -> Arc<DeviceStats> {
+        self.store.stats()
     }
 }
 

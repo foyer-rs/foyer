@@ -12,12 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::Arc;
 use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::PhantomData};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use tokio::sync::oneshot;
 
+use crate::device::monitor::DeviceStats;
 use crate::storage::{EnqueueFuture, Storage};
 
 use crate::error::Result;
@@ -106,6 +108,10 @@ where
 
     async fn destroy(&self) -> Result<()> {
         Ok(())
+    }
+
+    fn stats(&self) -> Arc<DeviceStats> {
+        Arc::default()
     }
 }
 

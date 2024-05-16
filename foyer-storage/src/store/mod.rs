@@ -197,6 +197,14 @@ where
             Store::RuntimeDirectFs(store) => store.destroy().await,
         }
     }
+
+    fn stats(&self) -> Arc<crate::device::monitor::DeviceStats> {
+        match self {
+            Store::Noop(store) => store.stats(),
+            Store::DirectFs(store) => store.stats(),
+            Store::RuntimeDirectFs(store) => store.stats(),
+        }
+    }
 }
 
 enum LoadFuture<F1, F2, F3> {

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
+use crate::device::monitor::Monitored;
 use crate::error::{Error, Result};
 use crate::serde::EntrySerializer;
 use crate::statistics::Statistics;
@@ -186,7 +187,7 @@ where
     indexer: Indexer,
     region_manager: RegionManager<D>,
 
-    device: D,
+    device: Monitored<D>,
     tombstone_log: Option<TombstoneLog>,
 
     stats: Arc<Statistics>,
@@ -227,7 +228,7 @@ where
         config: &GenericStoreConfig<K, V, S, D>,
         indexer: Indexer,
         region_manager: RegionManager<D>,
-        device: D,
+        device: Monitored<D>,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
         runtime: Handle,

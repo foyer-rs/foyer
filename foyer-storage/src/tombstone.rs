@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 
 use crate::device::{
     direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
+    monitor::Monitored,
     Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
 };
 
@@ -94,7 +95,7 @@ pub struct TombstoneLog {
 #[derive(Debug)]
 struct TombstoneLogInner {
     offset: u64,
-    buffer: PageBuffer<DirectFileDevice>,
+    buffer: PageBuffer<Monitored<DirectFileDevice>>,
 }
 
 impl TombstoneLog {
@@ -121,7 +122,7 @@ impl TombstoneLog {
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
-        let device = DirectFileDevice::open(
+        let device = Monitored::open(
             DirectFileDeviceOptionsBuilder::new(path)
                 .with_region_size(align)
                 .with_capacity(capacity)
