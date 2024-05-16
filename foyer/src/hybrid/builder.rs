@@ -230,6 +230,8 @@ where
     /// will be applied.
     ///
     /// If no eviction picker pickes a region, a region will be picked randomly.
+    ///
+    /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
         let builder = self.builder.with_eviction_pickers(eviction_pickers);
         Self {
