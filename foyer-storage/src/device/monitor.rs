@@ -96,6 +96,7 @@ impl Monitored<DirectFileDevice> {
 
         self.device.pwrite(buf, offset).await
     }
+
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
         let bytes = bits::align_up(self.align(), len);
         self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
