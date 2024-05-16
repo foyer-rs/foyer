@@ -29,7 +29,6 @@ hyper-util = { version = "0.1", features = [
 ] }
 indexmap = "2"
 itertools = "0.12"
-libc = "0.2"
 metrics = "0.22"
 metrics-exporter-prometheus = "0.14"
 metrics-util = { version = "0.16" }

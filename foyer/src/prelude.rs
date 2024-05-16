@@ -25,7 +25,7 @@ pub use common::{
 };
 pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
 pub use storage::{
-    AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DirectFileDevice,
+    AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
     DirectFsDeviceOptionsBuilder, EnqueueFuture, EvictionPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker,
     RecoverMode, ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, StoreConfig,

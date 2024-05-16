@@ -27,7 +27,6 @@
 // limitations under the License.
 
 use std::{
-    path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -36,13 +35,10 @@ use std::{
 };
 
 use bytesize::ByteSize;
+use foyer::DeviceStats;
 use hdrhistogram::Histogram;
 use parking_lot::RwLock;
 use tokio::sync::broadcast;
-
-use crate::utils::{iostat, IoStat};
-
-const SECTOR_SIZE: usize = 512;
 
 // latencies are measured by 'us'
 #[derive(Clone, Copy, Debug)]
@@ -237,6 +233,25 @@ impl std::fmt::Display for Analysis {
     }
 }
 
+pub struct IoStat {
+    pub read_ios: usize,
+    pub read_bytes: usize,
+
+    pub write_ios: usize,
+    pub write_bytes: usize,
+}
+
+impl IoStat {
+    pub fn snapshot(stats: &DeviceStats) -> Self {
+        Self {
+            read_ios: stats.read_ios.load(Ordering::Relaxed),
+            read_bytes: stats.read_bytes.load(Ordering::Relaxed),
+            write_ios: stats.write_ios.load(Ordering::Relaxed),
+            write_bytes: stats.write_bytes.load(Ordering::Relaxed),
+        }
+    }
+}
+
 pub fn analyze(
     duration: Duration,
     iostat_start: &IoStat,
@@ -246,10 +261,9 @@ pub fn analyze(
 ) -> Analysis {
     let secs = duration.as_secs_f64();
     let disk_read_iops = (iostat_end.read_ios - iostat_start.read_ios) as f64 / secs;
-    let disk_read_throughput = (iostat_end.read_sectors - iostat_start.read_sectors) as f64 * SECTOR_SIZE as f64 / secs;
+    let disk_read_throughput = (iostat_end.read_bytes - iostat_start.read_bytes) as f64 / secs;
     let disk_write_iops = (iostat_end.write_ios - iostat_start.write_ios) as f64 / secs;
-    let disk_write_throughput =
-        (iostat_end.write_sectors - iostat_start.write_sectors) as f64 * SECTOR_SIZE as f64 / secs;
+    let disk_write_throughput = (iostat_end.write_bytes - iostat_start.write_bytes) as f64 / secs;
 
     let insert_iops = (metrics_dump_end.insert_ios - metrics_dump_start.insert_ios) as f64 / secs;
     let insert_throughput = (metrics_dump_end.insert_bytes - metrics_dump_start.insert_bytes) as f64 / secs;
@@ -296,7 +310,7 @@ pub fn analyze(
 }
 
 pub async fn monitor(
-    iostat_path: impl AsRef<Path>,
+    stats: Arc<DeviceStats>,
     interval: Duration,
     total_secs: Duration,
     warm_up: Duration,
@@ -313,7 +327,7 @@ pub async fn monitor(
         }
     }
 
-    let mut stat = iostat(&iostat_path);
+    let mut stat = IoStat::snapshot(&stats);
     let mut metrics_dump = metrics.dump();
 
     let start = Instant::now();
@@ -326,7 +340,7 @@ pub async fn monitor(
         }
 
         tokio::time::sleep(interval).await;
-        let new_stat = iostat(&iostat_path);
+        let new_stat = IoStat::snapshot(&stats);
         let new_metrics_dump = metrics.dump();
         let analysis = analyze(
             // interval may have ~ +7% error
