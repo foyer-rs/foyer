@@ -28,6 +28,10 @@ pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
 }
 
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(unused_variables)]
+    fn init(&mut self, regions: usize, region_size: usize) {}
+
     fn pick(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId>;
 
     fn on_region_evictable(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId);

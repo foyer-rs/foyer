@@ -23,6 +23,7 @@ use std::{
 };
 
 use foyer_common::{code::StorageKey, rated_ticket::RatedTicket};
+use itertools::Itertools;
 
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
@@ -212,6 +213,57 @@ impl EvictionPicker for FifoPicker {
     }
 }
 
+/// Evict the region with the largest invalid data ratio.
+///
+/// If the largest invalid data ratio is less than the threshold, no region will be picked.
+#[derive(Debug)]
+pub struct InvalidRatioPicker {
+    threshold: f64,
+    region_size: usize,
+}
+
+impl InvalidRatioPicker {
+    /// Create [`InvalidRatioPicker`] with the given `threshold` (0.0 ~ 1.0).
+    pub fn new(threshold: f64) -> Self {
+        let ratio = threshold.clamp(0.0, 1.0);
+        Self {
+            threshold: ratio,
+            region_size: 0,
+        }
+    }
+}
+
+impl EvictionPicker for InvalidRatioPicker {
+    fn init(&mut self, _: usize, region_size: usize) {
+        self.region_size = region_size;
+    }
+
+    fn pick(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
+        debug_assert!(self.region_size > 0);
+
+        let mut info = evictable
+            .iter()
+            .map(|(region, stats)| (*region, stats.invalid.load(Ordering::Relaxed)))
+            .collect_vec();
+        info.sort_by_key(|(_, invalid)| *invalid);
+
+        let (region, invalid) = info.last().copied()?;
+        if (invalid as f64 / self.region_size as f64) < self.threshold {
+            return None;
+        }
+        tracing::trace!("[invalid ratio picker]: pick {region:?}");
+        Some(region)
+    }
+
+    fn on_region_evictable(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
+        tracing::trace!("[invalid ratio picker]: {region} is evictable");
+    }
+
+    fn on_region_evict(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId) {
+        tracing::trace!("[invalid ratio picker]: {region} is evicted");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +293,35 @@ mod tests {
         picker.on_region_evict(&m, 6);
         assert_eq!(picker.pick(&m), Some(8));
         picker.on_region_evict(&m, 8);
+    }
+
+    #[test]
+    fn test_invalid_ratio_picker() {
+        let mut picker = InvalidRatioPicker::new(0.5);
+        picker.init(10, 10);
+
+        let mut m = HashMap::new();
+
+        (0..10).for_each(|i| {
+            let stats = Arc::new(RegionStats::default());
+            stats.invalid.fetch_add(i as _, Ordering::Relaxed);
+            m.insert(i, stats);
+        });
+
+        assert_eq!(picker.pick(&m), Some(9));
+
+        assert_eq!(picker.pick(&m), Some(9));
+        m.remove(&9);
+        assert_eq!(picker.pick(&m), Some(8));
+        m.remove(&8);
+        assert_eq!(picker.pick(&m), Some(7));
+        m.remove(&7);
+        assert_eq!(picker.pick(&m), Some(6));
+        m.remove(&6);
+        assert_eq!(picker.pick(&m), Some(5));
+        m.remove(&5);
+
+        assert_eq!(picker.pick(&m), None);
+        assert_eq!(picker.pick(&m), None);
     }
 }
