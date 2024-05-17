@@ -384,7 +384,6 @@ where
 
     fn reinsertion(&self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit reinsertion with sequence: {sequence}");
-
         debug_assert_eq!(sequence, 0);
 
         let append = |state: &mut BatchState<K, V, S, D>| {
@@ -409,7 +408,7 @@ where
                     size = group.writer.size,
                     acc_buf_len = group.buffer.len(),
                     buf_len = reinsertion.buffer.len(),
-                    total = group.writer.size + group.buffer.len() + reinsertion.buffer.len(),
+                    total = group.writer.offset as usize + group.buffer.len() + reinsertion.buffer.len(),
                     region_size = self.device.region_size(),
                 );
 
