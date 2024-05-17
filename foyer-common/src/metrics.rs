@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, time::Instant};
+use std::fmt::Debug;
 
 use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
 
@@ -189,45 +189,5 @@ impl Metrics {
         //     lookup_miss,
         //     lookup_miss_duration,
         // }
-    }
-}
-
-pub struct HistogramDuraitonGuard<'a> {
-    start: Instant,
-    histogram: &'a Histogram,
-}
-
-impl<'a> HistogramDuraitonGuard<'a> {
-    pub fn new(histogram: &'a Histogram) -> Self {
-        Self {
-            start: Instant::now(),
-            histogram,
-        }
-    }
-}
-
-impl<'a> Drop for HistogramDuraitonGuard<'a> {
-    fn drop(&mut self) {
-        self.histogram.record(self.start.elapsed())
-    }
-}
-
-pub struct HistogramDuraitonOwnedGuard {
-    start: Instant,
-    histogram: Histogram,
-}
-
-impl HistogramDuraitonOwnedGuard {
-    pub fn new(histogram: Histogram) -> Self {
-        Self {
-            start: Instant::now(),
-            histogram,
-        }
-    }
-}
-
-impl Drop for HistogramDuraitonOwnedGuard {
-    fn drop(&mut self) {
-        self.histogram.record(self.start.elapsed())
     }
 }
