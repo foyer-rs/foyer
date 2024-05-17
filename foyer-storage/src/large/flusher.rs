@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
@@ -27,6 +28,7 @@ use crate::Sequence;
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::metrics::Metrics;
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
@@ -49,6 +51,7 @@ where
 {
     groups: Vec<WriteGroup<K, V, S, D>>,
     tombstones: Vec<(Tombstone, Option<InvalidStats>, oneshot::Sender<Result<bool>>)>,
+    init_time: Option<Instant>,
 }
 
 impl<K, V, S, D> Debug for BatchState<K, V, S, D>
@@ -74,6 +77,7 @@ where
         Self {
             groups: vec![],
             tombstones: vec![],
+            init_time: None,
         }
     }
 }
@@ -194,6 +198,8 @@ where
 
     compression: Compression,
     flush: bool,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S, D> Clone for Flusher<K, V, S, D>
@@ -213,6 +219,7 @@ where
             stats: self.stats.clone(),
             compression: self.compression,
             flush: self.flush,
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -224,6 +231,8 @@ where
     S: HashBuilder + Debug,
     D: Device,
 {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn open(
         config: &GenericStoreConfig<K, V, S, D>,
         indexer: Indexer,
@@ -231,6 +240,7 @@ where
         device: Monitored<D>,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Result<Self> {
         let batch = AsyncBatchPipeline::with_runtime(BatchState::default(), runtime);
@@ -244,6 +254,7 @@ where
             stats,
             compression: config.compression,
             flush: config.flush,
+            metrics,
         })
     }
 
@@ -266,11 +277,19 @@ where
 
         debug_assert_eq!(tombstone.sequence, sequence);
 
-        let append = |state: &mut BatchState<K, V, S, D>| state.tombstones.push((tombstone, stats, tx));
+        let append = |state: &mut BatchState<K, V, S, D>| {
+            state.tombstones.push((tombstone, stats, tx));
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
+        };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: tombstone with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
@@ -284,6 +303,9 @@ where
             }
 
             self.may_init_batch_state(state);
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
 
             // Attempt to pick the latest group to write.
             let group = state.groups.last_mut().unwrap();
@@ -352,8 +374,11 @@ where
         };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: entry with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
@@ -363,6 +388,9 @@ where
 
         let append = |state: &mut BatchState<K, V, S, D>| {
             self.may_init_batch_state(state);
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
 
             if self.indexer.get(reinsertion.hash).is_none() {
                 let _ = tx.send(Ok(false));
@@ -412,8 +440,11 @@ where
         };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: reinsertion with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
@@ -423,6 +454,7 @@ where
         let region_manager = self.region_manager.clone();
         let tombstone_log: Option<TombstoneLog> = self.tombstone_log.clone();
         let stats = self.stats.clone();
+        let metrics = self.metrics.clone();
         let device = self.device.clone();
 
         token.pipeline(
@@ -499,6 +531,9 @@ where
                             region_manager.mark_evictable(region.id());
                         }
 
+                        // Make sure entries are dropped after written.
+                        drop(group.entries);
+
                         tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
 
                         Ok::<_, Error>(())
@@ -526,6 +561,11 @@ where
                     }
                 };
                 try_join(try_join_all(futures), future).await?;
+
+                if let Some(init_time) = state.init_time.as_ref() {
+                    metrics.storage_queue_rotate.increment(1);
+                    metrics.storage_queue_rotate_duration.record(init_time.elapsed());
+                }
 
                 Ok(())
             },

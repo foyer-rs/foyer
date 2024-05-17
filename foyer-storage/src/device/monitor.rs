@@ -12,14 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.use std::marker::PhantomData;
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
 };
 
-use foyer_common::bits;
+use foyer_common::{bits, metrics::Metrics};
 
-use crate::{error::Result, Device, DeviceExt, DirectFileDevice};
+use crate::{error::Result, Device, DeviceExt, DeviceOptions, DirectFileDevice};
 
 use super::{IoBuffer, RegionId};
 
@@ -34,6 +38,36 @@ pub struct DeviceStats {
     pub flush_ios: AtomicUsize,
 }
 
+#[derive(Clone)]
+pub struct MonitoredOptions<D>
+where
+    D: Device,
+{
+    pub options: D::Options,
+    pub metrics: Arc<Metrics>,
+}
+
+impl<D> Debug for MonitoredOptions<D>
+where
+    D: Device,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MonitoredOptions")
+            .field("options", &self.options)
+            .field("metrics", &self.metrics)
+            .finish()
+    }
+}
+
+impl<D> DeviceOptions for MonitoredOptions<D>
+where
+    D: Device,
+{
+    fn verify(&self) -> Result<()> {
+        self.options.verify()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Monitored<D>
 where
@@ -41,13 +75,14 @@ where
 {
     device: D,
     stats: Arc<DeviceStats>,
+    metrics: Arc<Metrics>,
 }
 
 impl<D> Device for Monitored<D>
 where
     D: Device,
 {
-    type Options = D::Options;
+    type Options = MonitoredOptions<D>;
 
     fn capacity(&self) -> usize {
         self.device.capacity()
@@ -58,51 +93,91 @@ where
     }
 
     async fn open(options: Self::Options) -> Result<Self> {
-        let device = D::open(options).await?;
+        let device = D::open(options.options).await?;
         Ok(Self {
             device,
             stats: Arc::default(),
+            metrics: options.metrics,
         })
     }
 
     async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+        let now = Instant::now();
+
         let bytes = bits::align_up(self.align(), buf.len());
         self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        self.device.write(buf, region, offset).await
+        let res = self.device.write(buf, region, offset).await;
+
+        self.metrics.storage_disk_write.increment(1);
+        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
+        self.metrics.storage_disk_write_duration.record(now.elapsed());
+
+        res
     }
 
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+        let now = Instant::now();
+
         let bytes = bits::align_up(self.align(), len);
         self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        self.device.read(region, offset, len).await
+        let res = self.device.read(region, offset, len).await;
+
+        self.metrics.storage_disk_read.increment(1);
+        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
+        self.metrics.storage_disk_read_duration.record(now.elapsed());
+
+        res
     }
 
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
+        let now = Instant::now();
+
         self.stats.flush_ios.fetch_add(1, Ordering::Relaxed);
 
-        self.device.flush(region).await
+        let res = self.device.flush(region).await;
+
+        self.metrics.storage_disk_flush.increment(1);
+        self.metrics.storage_disk_flush_duration.record(now.elapsed());
+
+        res
     }
 }
 
 impl Monitored<DirectFileDevice> {
     pub async fn pwrite(&self, buf: IoBuffer, offset: u64) -> Result<()> {
+        let now = Instant::now();
+
         let bytes = bits::align_up(self.align(), buf.len());
         self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        self.device.pwrite(buf, offset).await
+        let res = self.device.pwrite(buf, offset).await;
+
+        self.metrics.storage_disk_write.increment(1);
+        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
+        self.metrics.storage_disk_write_duration.record(now.elapsed());
+
+        res
     }
 
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+        let now = Instant::now();
+
         let bytes = bits::align_up(self.align(), len);
         self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        self.device.pread(offset, len).await
+        let res = self.device.pread(offset, len).await;
+
+        self.metrics.storage_disk_read.increment(1);
+        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
+        self.metrics.storage_disk_read_duration.record(now.elapsed());
+
+        res
     }
 }
 
