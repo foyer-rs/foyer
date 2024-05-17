@@ -19,13 +19,13 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::bits;
+use foyer_common::{bits, metrics::Metrics};
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 
 use crate::device::{
     direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
-    monitor::Monitored,
+    monitor::{Monitored, MonitoredOptions},
     Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
 };
 
@@ -109,6 +109,7 @@ impl TombstoneLog {
         cache_device: D,
         flush: bool,
         tombstones: &mut Vec<Tombstone>,
+        metrics: Arc<Metrics>,
     ) -> Result<Self>
     where
         D: Device,
@@ -122,12 +123,13 @@ impl TombstoneLog {
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
-        let device = Monitored::open(
-            DirectFileDeviceOptionsBuilder::new(path)
+        let device = Monitored::open(MonitoredOptions {
+            options: DirectFileDeviceOptionsBuilder::new(path)
                 .with_region_size(align)
                 .with_capacity(capacity)
                 .build(),
-        )
+            metrics,
+        })
         .await?;
 
         let tasks = bits::align_up(Self::RECOVER_IO_SIZE, capacity) / Self::RECOVER_IO_SIZE;
@@ -311,9 +313,15 @@ mod tests {
         .await
         .unwrap();
 
-        let log = TombstoneLog::open(dir.path().join("test-tombstone-log"), device.clone(), true, &mut vec![])
-            .await
-            .unwrap();
+        let log = TombstoneLog::open(
+            dir.path().join("test-tombstone-log"),
+            device.clone(),
+            true,
+            &mut vec![],
+            Arc::new(Metrics::new("test")),
+        )
+        .await
+        .unwrap();
 
         log.append(
             (0..3 * 1024 + 42)
@@ -334,9 +342,15 @@ mod tests {
 
         drop(log);
 
-        let log = TombstoneLog::open(dir.path().join("test-tombstone-log"), device, true, &mut vec![])
-            .await
-            .unwrap();
+        let log = TombstoneLog::open(
+            dir.path().join("test-tombstone-log"),
+            device,
+            true,
+            &mut vec![],
+            Arc::new(Metrics::new("test")),
+        )
+        .await
+        .unwrap();
 
         {
             let inner = log.inner.lock().await;

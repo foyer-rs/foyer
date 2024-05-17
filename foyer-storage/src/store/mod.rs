@@ -467,6 +467,7 @@ where
             (DeviceConfig::DirectFs(device_config), None) => {
                 Store::open(StoreConfig::DirectFs(GenericStoreConfig {
                     memory: self.memory,
+                    name: self.name,
                     device_config,
                     compression: self.compression,
                     flush: self.flush,
@@ -487,6 +488,7 @@ where
                 Store::open(StoreConfig::RuntimeDirectFs(RuntimeStoreConfig {
                     store_config: GenericStoreConfig {
                         memory: self.memory,
+                        name: self.name,
                         device_config,
                         compression: self.compression,
                         flush: self.flush,

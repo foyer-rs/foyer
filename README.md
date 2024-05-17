@@ -185,4 +185,6 @@ The development state and the roadmap can be found [here](https://github.com/use
 
 Contributions for *foyer* are warmly welcomed! 🥰
 
-Don't forget to pass `make check` and `make test` locally before submitting a PR. 🚀
+Don't forget to pass `make fast` (which means fast check & test) locally before submitting a PR. 🚀
+
+If you want to run a broader range of checks locally, rur `make full`. 🙌

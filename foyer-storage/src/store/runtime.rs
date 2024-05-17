@@ -212,6 +212,7 @@ mod tests {
     ) -> GenericStoreConfig<u64, Vec<u8>, RandomState, DirectFsDevice> {
         GenericStoreConfig {
             memory: memory.clone(),
+            name: "test".to_string(),
             device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,

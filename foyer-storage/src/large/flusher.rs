@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::compress::Compression;
 use crate::device::allocator::WritableVecA;
@@ -27,6 +28,7 @@ use crate::Sequence;
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
 use foyer_common::bits;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::metrics::Metrics;
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
@@ -49,6 +51,7 @@ where
 {
     groups: Vec<WriteGroup<K, V, S, D>>,
     tombstones: Vec<(Tombstone, Option<InvalidStats>, oneshot::Sender<Result<bool>>)>,
+    init_time: Option<Instant>,
 }
 
 impl<K, V, S, D> Debug for BatchState<K, V, S, D>
@@ -74,6 +77,7 @@ where
         Self {
             groups: vec![],
             tombstones: vec![],
+            init_time: None,
         }
     }
 }
@@ -194,6 +198,8 @@ where
 
     compression: Compression,
     flush: bool,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S, D> Clone for Flusher<K, V, S, D>
@@ -213,6 +219,7 @@ where
             stats: self.stats.clone(),
             compression: self.compression,
             flush: self.flush,
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -224,6 +231,8 @@ where
     S: HashBuilder + Debug,
     D: Device,
 {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn open(
         config: &GenericStoreConfig<K, V, S, D>,
         indexer: Indexer,
@@ -231,6 +240,7 @@ where
         device: Monitored<D>,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Result<Self> {
         let batch = AsyncBatchPipeline::with_runtime(BatchState::default(), runtime);
@@ -244,12 +254,13 @@ where
             stats,
             compression: config.compression,
             flush: config.flush,
+            metrics,
         })
     }
 
     pub fn submit(&self, submission: Submission<K, V, S>, sequence: Sequence) {
         match submission {
-            Submission::CacheEntry { entry, tx } => self.fetch(entry, tx, sequence),
+            Submission::CacheEntry { entry, tx } => self.entry(entry, tx, sequence),
             Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx, sequence),
             Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx, sequence),
         }
@@ -266,15 +277,23 @@ where
 
         debug_assert_eq!(tombstone.sequence, sequence);
 
-        let append = |state: &mut BatchState<K, V, S, D>| state.tombstones.push((tombstone, stats, tx));
+        let append = |state: &mut BatchState<K, V, S, D>| {
+            state.tombstones.push((tombstone, stats, tx));
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
+        };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: tombstone with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
-    fn fetch(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
+    fn entry(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let append = |state: &mut BatchState<K, V, S, D>| {
@@ -284,6 +303,9 @@ where
             }
 
             self.may_init_batch_state(state);
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
 
             // Attempt to pick the latest group to write.
             let group = state.groups.last_mut().unwrap();
@@ -310,13 +332,17 @@ where
             unsafe { group.buffer.set_len(boffset + aligned) };
 
             bits::debug_assert_aligned(self.device.align(), group.buffer.len());
+            tracing::trace!(
+                "[flusher]: sequence: {sequence}, len: {len}, aligned: {aligned}, buf len: {buf_len}",
+                buf_len = group.buffer.len()
+            );
 
             // Split the latest group if it exceeds the current region.
-            if group.writer.size + group.buffer.len() > self.device.region_size() {
-                tracing::trace!("[flusher]: split group at size: {size}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}", 
+            if group.writer.offset as usize + group.buffer.len() > self.device.region_size() {
+                tracing::trace!("[flusher]: (sequence: {sequence}) split group at size: {size}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}", 
                     size = group.writer.size,
                     buf_len = group.buffer.len(),
-                    total = group.writer.size + group.buffer.len() ,
+                    total = group.writer.offset as usize + group.buffer.len() ,
                     region_size = self.device.region_size(),
                 );
 
@@ -348,8 +374,11 @@ where
         };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: entry with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
@@ -360,6 +389,9 @@ where
 
         let append = |state: &mut BatchState<K, V, S, D>| {
             self.may_init_batch_state(state);
+            if state.init_time.is_none() {
+                state.init_time = Some(Instant::now());
+            }
 
             if self.indexer.get(reinsertion.hash).is_none() {
                 let _ = tx.send(Ok(false));
@@ -372,7 +404,7 @@ where
 
             // Rotate group early for we know the len of the buffer to write.
             let aligned = bits::align_up(self.device.align(), reinsertion.buffer.len());
-            if group.writer.size + group.buffer.len() + aligned > self.device.region_size() {
+            if group.writer.offset as usize + group.buffer.len() + aligned > self.device.region_size() {
                 tracing::trace!("[flusher]: split group at size: {size}, acc buf len: {acc_buf_len}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}",
                     size = group.writer.size,
                     acc_buf_len = group.buffer.len(),
@@ -409,8 +441,11 @@ where
         };
 
         if let Some(token) = self.batch.accumulate(append) {
+            self.metrics.storage_queue_leader.increment(1);
             tracing::trace!("[flusher]: reinsertion with sequence: {sequence} becomes leader");
             self.commit(token);
+        } else {
+            self.metrics.storage_queue_follower.increment(1);
         }
     }
 
@@ -420,9 +455,11 @@ where
         let region_manager = self.region_manager.clone();
         let tombstone_log: Option<TombstoneLog> = self.tombstone_log.clone();
         let stats = self.stats.clone();
+        let metrics = self.metrics.clone();
+        let device = self.device.clone();
 
         token.pipeline(
-            |state| {
+            move |state| {
                 tracing::trace!("[flusher]: create new state based on old state: {state:?}");
 
                 let mut s = BatchState::default();
@@ -440,7 +477,7 @@ where
                     writer.offset = writer.size as u64;
                     s.groups.push(WriteGroup {
                         writer,
-                        buffer: IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
+                        buffer: IoBuffer::with_capacity_in(device.region_size(), &IO_BUFFER_ALLOCATOR),
                         indices: vec![],
                         txs: vec![],
                         entries: vec![],
@@ -522,6 +559,11 @@ where
                     }
                 };
                 try_join(try_join_all(futures), future).await?;
+
+                if let Some(init_time) = state.init_time.as_ref() {
+                    metrics.storage_queue_rotate.increment(1);
+                    metrics.storage_queue_rotate_duration.record(init_time.elapsed());
+                }
 
                 Ok(())
             },

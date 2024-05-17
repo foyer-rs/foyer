@@ -347,7 +347,12 @@ async fn main() {
 
     if args.metrics {
         let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
-        PrometheusBuilder::new().with_http_listener(addr).install().unwrap();
+        PrometheusBuilder::new()
+            .with_http_listener(addr)
+            .set_buckets(&[0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 1.0])
+            .unwrap()
+            .install()
+            .unwrap();
     }
 
     create_dir_all(&args.dir).unwrap();

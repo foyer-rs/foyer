@@ -21,11 +21,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheEntry};
 use futures::future::{join_all, try_join_all};
@@ -38,7 +40,7 @@ use tokio::{
 use crate::{
     compress::Compression,
     device::{
-        monitor::{DeviceStats, Monitored},
+        monitor::{DeviceStats, Monitored, MonitoredOptions},
         Device, DeviceExt, RegionId,
     },
     error::{Error, Result},
@@ -68,6 +70,7 @@ where
 {
     pub memory: Cache<K, V, S>,
 
+    pub name: String,
     pub device_config: D::Options,
     pub compression: Compression,
     pub flush: bool,
@@ -160,6 +163,8 @@ where
     runtime: Handle,
 
     active: AtomicBool,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S, D> Clone for GenericStore<K, V, S, D>
@@ -198,7 +203,13 @@ where
     async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
         let runtime = Handle::current();
 
-        let device = Monitored::open(config.device_config.clone()).await?;
+        let metrics = Arc::new(Metrics::new(&config.name));
+
+        let device = Monitored::open(MonitoredOptions {
+            options: config.device_config.clone(),
+            metrics: metrics.clone(),
+        })
+        .await?;
 
         let stats = Arc::<Statistics>::default();
 
@@ -206,7 +217,14 @@ where
         let tombstone_log = match &config.tombstone_log_config {
             None => None,
             Some(config) => {
-                let log = TombstoneLog::open(&config.path, device.clone(), config.flush, &mut tombstones).await?;
+                let log = TombstoneLog::open(
+                    &config.path,
+                    device.clone(),
+                    config.flush,
+                    &mut tombstones,
+                    metrics.clone(),
+                )
+                .await?;
                 Some(log)
             }
         };
@@ -239,6 +257,7 @@ where
                 device.clone(),
                 tombstone_log.clone(),
                 stats.clone(),
+                metrics.clone(),
                 runtime.clone(),
             )
             .await
@@ -274,6 +293,7 @@ where
                 sequence,
                 runtime,
                 active: AtomicBool::new(true),
+                metrics,
             }),
         })
     }
@@ -286,6 +306,8 @@ where
     }
 
     fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueFuture {
+        let now = Instant::now();
+
         let (tx, rx) = oneshot::channel();
         let future = EnqueueFuture::new(rx);
 
@@ -307,6 +329,9 @@ where
             }
         });
 
+        self.inner.metrics.storage_enqueue.increment(1);
+        self.inner.metrics.storage_enqueue_duration.record(now.elapsed());
+
         future
     }
 
@@ -315,16 +340,23 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        let now = Instant::now();
+
         let hash = self.inner.memory.hash_builder().hash_one(key);
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
         let stats = self.inner.stats.clone();
+        let metrics = self.inner.metrics.clone();
 
         async move {
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
-                None => return Ok(None),
+                None => {
+                    metrics.storage_miss.increment(1);
+                    metrics.storage_miss_duration.record(now.elapsed());
+                    return Ok(None);
+                }
             };
 
             tracing::trace!("{addr:#?}");
@@ -341,11 +373,16 @@ where
                     Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
                         tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
                         indexer.remove(hash);
+                        metrics.storage_miss.increment(1);
+                        metrics.storage_miss_duration.record(now.elapsed());
                         return Ok(None);
                     }
                     e => return Err(e),
                 },
             };
+
+            metrics.storage_hit.increment(1);
+            metrics.storage_hit_duration.record(now.elapsed());
 
             Ok(Some((k, v)))
         }
@@ -356,6 +393,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        let now = Instant::now();
+
         let (tx, rx) = oneshot::channel();
         let future = EnqueueFuture::new(rx);
 
@@ -384,6 +423,9 @@ where
                 sequence,
             );
         });
+
+        self.inner.metrics.storage_delete.increment(1);
+        self.inner.metrics.storage_miss_duration.record(now.elapsed());
 
         future
     }
@@ -530,6 +572,7 @@ mod tests {
         admission_picker: Arc<dyn AdmissionPicker<Key = u64>>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
+            name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
@@ -558,6 +601,7 @@ mod tests {
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
+            name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
@@ -586,6 +630,7 @@ mod tests {
         path: impl AsRef<Path>,
     ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
         let config = GenericStoreConfig {
+            name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),

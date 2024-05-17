@@ -43,7 +43,7 @@ example:
 	cargo run --example hybrid
 	cargo run --example hybrid_full
 
-all: check-all test-all example
+full: check-all test-all example udeps
 
 fast: check test example
 
