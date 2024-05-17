@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   node-exporter: 
     image: prom/node-exporter:latest

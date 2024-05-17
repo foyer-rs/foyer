@@ -23,7 +23,7 @@ pub use common::{
     code::{Key, StorageKey, StorageValue, Value},
     range::RangeBoundsExt,
 };
-pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, Metrics, S3FifoConfig};
+pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,

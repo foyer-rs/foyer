@@ -15,7 +15,10 @@
 use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, sync::Arc};
 
 use ahash::RandomState;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
 use foyer_storage::{DeviceStats, Storage, Store};
 
@@ -27,8 +30,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub(crate) memory: Cache<K, V, S>,
-    pub(crate) storage: Store<K, V, S>,
+    memory: Cache<K, V, S>,
+    storage: Store<K, V, S>,
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -55,6 +59,7 @@ where
         Self {
             memory: self.memory.clone(),
             storage: self.storage.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -65,6 +70,15 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    pub(crate) fn new(name: String, memory: Cache<K, V, S>, storage: Store<K, V, S>) -> Self {
+        let metrics = Arc::new(Metrics::new(&name));
+        Self {
+            memory,
+            storage,
+            metrics,
+        }
+    }
+
     pub fn memory(&self) -> &Cache<K, V, S> {
         &self.memory
     }

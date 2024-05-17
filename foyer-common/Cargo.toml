@@ -16,6 +16,7 @@ cfg-if = "1"
 crossbeam = "0.8"
 hashbrown = "0.14"
 itertools = "0.12"
+metrics = "0.22"
 nix = { version = "0.28", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 rustversion = "1.0"
