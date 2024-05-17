@@ -59,13 +59,7 @@ pub struct Metrics {
     pub storage_disk_read_duration: Histogram,
     pub storage_disk_flush_duration: Histogram,
     /* hybrid cache metrics */
-    // pub insert: Counter,
-    // pub insert_duration: Histogram,
-
-    // pub lookup_hit: Counter,
-    // pub lookup_hit_duration: Histogram,
-    // pub lookup_miss: Counter,
-    // pub lookup_miss_duration: Histogram,
+    // TODO(MrCroxx): Add hybrid cache mtrics.
 }
 
 impl Debug for Metrics {
@@ -173,21 +167,5 @@ impl Metrics {
             storage_disk_read_duration,
             storage_disk_flush_duration,
         }
-        // let insert = counter!(format!("{name}_op_total"), "op" => "insert");
-        // let insert_duration = histogram!(format!("{name}_op_duration"), "op" => "insert");
-
-        // let lookup_hit = counter!(format!("{name}_op_total"), "op" => "lookup", "extra" => "hit");
-        // let lookup_hit_duration = histogram!(format!("{name}_op_duration"), "op" => "lookup", "extra" => "hit");
-        // let lookup_miss = counter!(format!("{name}_op_total"), "op" => "lookup", "extra" => "miss");
-        // let lookup_miss_duration = histogram!(format!("{name}_op_duration"), "op" => "lookup", "extra" => "miss");
-
-        // Self {
-        //     insert,
-        //     insert_duration,
-        //     lookup_hit,
-        //     lookup_hit_duration,
-        //     lookup_miss,
-        //     lookup_miss_duration,
-        // }
     }
 }
