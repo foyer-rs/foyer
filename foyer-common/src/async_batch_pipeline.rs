@@ -99,31 +99,32 @@ impl<T, R> LeaderToken<T, R> {
     ///
     /// `fr`
     /// - Handle the previous result.
-    pub fn pipeline<FR, F, FU, NS>(mut self, new_state: NS, fr: FR, f: F)
+    pub fn pipeline<FR, F, FU, NS>(mut self, new_state: NS, fr: FR, f: F) -> JoinHandle<()>
     where
+        T: Send + 'static,
         R: Send + 'static,
         FR: FnOnce(R) + Send + 'static,
-        F: FnOnce(T) -> FU,
+        F: FnOnce(T) -> FU + Send + 'static,
         FU: Future<Output = R> + Send + 'static,
-        NS: FnOnce(&T) -> T,
+        NS: FnOnce(&T) -> T + Send + 'static,
     {
         let handle = self.handle.take();
+        let inner = self.batch.inner.clone();
+        let runtime = self.batch.runtime.clone();
 
-        let mut inner = self.batch.inner.lock();
-
-        let mut state = new_state(&inner.state);
-        std::mem::swap(&mut inner.state, &mut state);
-
-        let future = f(state);
-        let handle = self.batch.runtime.spawn(async move {
+        self.batch.runtime.spawn(async move {
             if let Some(handle) = handle {
                 fr(handle.await.unwrap());
             }
-            future.await
-        });
 
-        inner.handle = Some(handle);
-        inner.has_leader = false;
+            let mut guard = inner.lock();
+            let mut state = new_state(&guard.state);
+            std::mem::swap(&mut guard.state, &mut state);
+            let future = f(state);
+            let handle = runtime.spawn(future);
+            guard.handle = Some(handle);
+            guard.has_leader = false;
+        })
     }
 }
 
@@ -147,7 +148,10 @@ mod tests {
         let mut res = res.into_iter().flatten().collect_vec();
         assert_eq!(res.len(), 1);
         let token = res.remove(0);
-        token.pipeline(|_| vec![], |_| unreachable!(), |state| async move { state });
+        token
+            .pipeline(|_| vec![], |_| unreachable!(), |state| async move { state })
+            .await
+            .unwrap();
 
         let res = join_all((100..200).map(|i| {
             let batch = batch.clone();
@@ -158,14 +162,17 @@ mod tests {
         let mut res = res.into_iter().flatten().collect_vec();
         assert_eq!(res.len(), 1);
         let token = res.remove(0);
-        token.pipeline(
-            |_| vec![],
-            |mut res| {
-                res.sort();
-                assert_eq!(res, (0..100).collect_vec());
-            },
-            |state| async move { state },
-        );
+        token
+            .pipeline(
+                |_| vec![],
+                |mut res| {
+                    res.sort();
+                    assert_eq!(res, (0..100).collect_vec());
+                },
+                |state| async move { state },
+            )
+            .await
+            .unwrap();
 
         let mut res = batch.wait().unwrap().await.unwrap();
         res.sort();

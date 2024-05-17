@@ -249,7 +249,7 @@ where
 
     pub fn submit(&self, submission: Submission<K, V, S>, sequence: Sequence) {
         match submission {
-            Submission::CacheEntry { entry, tx } => self.fetch(entry, tx, sequence),
+            Submission::CacheEntry { entry, tx } => self.entry(entry, tx, sequence),
             Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx, sequence),
             Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx, sequence),
         }
@@ -274,7 +274,7 @@ where
         }
     }
 
-    fn fetch(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
+    fn entry(&self, entry: CacheEntry<K, V, S>, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         let append = |state: &mut BatchState<K, V, S, D>| {
@@ -310,13 +310,17 @@ where
             unsafe { group.buffer.set_len(boffset + aligned) };
 
             bits::debug_assert_aligned(self.device.align(), group.buffer.len());
+            tracing::trace!(
+                "[flusher]: sequence: {sequence}, len: {len}, aligned: {aligned}, buf len: {buf_len}",
+                buf_len = group.buffer.len()
+            );
 
             // Split the latest group if it exceeds the current region.
-            if group.writer.size + group.buffer.len() > self.device.region_size() {
-                tracing::trace!("[flusher]: split group at size: {size}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}", 
+            if group.writer.offset as usize + group.buffer.len() > self.device.region_size() {
+                tracing::trace!("[flusher]: (sequence: {sequence}) split group at size: {size}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}", 
                     size = group.writer.size,
                     buf_len = group.buffer.len(),
-                    total = group.writer.size + group.buffer.len() ,
+                    total = group.writer.offset as usize + group.buffer.len() ,
                     region_size = self.device.region_size(),
                 );
 
@@ -355,7 +359,6 @@ where
 
     fn reinsertion(&self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit reinsertion with sequence: {sequence}");
-
         debug_assert_eq!(sequence, 0);
 
         let append = |state: &mut BatchState<K, V, S, D>| {
@@ -372,12 +375,12 @@ where
 
             // Rotate group early for we know the len of the buffer to write.
             let aligned = bits::align_up(self.device.align(), reinsertion.buffer.len());
-            if group.writer.size + group.buffer.len() + aligned > self.device.region_size() {
+            if group.writer.offset as usize + group.buffer.len() + aligned > self.device.region_size() {
                 tracing::trace!("[flusher]: split group at size: {size}, acc buf len: {acc_buf_len}, buf len: {buf_len}, total (if not split): {total}, exceeds region size: {region_size}",
                     size = group.writer.size,
                     acc_buf_len = group.buffer.len(),
                     buf_len = reinsertion.buffer.len(),
-                    total = group.writer.size + group.buffer.len() + reinsertion.buffer.len(),
+                    total = group.writer.offset as usize + group.buffer.len() + reinsertion.buffer.len(),
                     region_size = self.device.region_size(),
                 );
 
@@ -420,9 +423,10 @@ where
         let region_manager = self.region_manager.clone();
         let tombstone_log: Option<TombstoneLog> = self.tombstone_log.clone();
         let stats = self.stats.clone();
+        let device = self.device.clone();
 
         token.pipeline(
-            |state| {
+            move |state| {
                 tracing::trace!("[flusher]: create new state based on old state: {state:?}");
 
                 let mut s = BatchState::default();
@@ -440,7 +444,7 @@ where
                     writer.offset = writer.size as u64;
                     s.groups.push(WriteGroup {
                         writer,
-                        buffer: IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
+                        buffer: IoBuffer::with_capacity_in(device.region_size(), &IO_BUFFER_ALLOCATOR),
                         indices: vec![],
                         txs: vec![],
                         entries: vec![],
