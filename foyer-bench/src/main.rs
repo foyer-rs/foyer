@@ -624,12 +624,12 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         }
 
         let w = rng.gen_range(0..step); // pick a writer to read form
-        let c_max = context.counts[w as usize].load(Ordering::Relaxed);
-        if c_max == 0 {
+        let c_w = context.counts[w as usize].load(Ordering::Relaxed);
+        if c_w == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
-        let c = rng.gen_range(std::cmp::max(c_max, context.get_range) - context.get_range..c_max);
+        let c = rng.gen_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
         let time = Instant::now();
