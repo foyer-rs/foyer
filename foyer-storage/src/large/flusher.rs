@@ -531,6 +531,9 @@ where
                             region_manager.mark_evictable(region.id());
                         }
 
+                        // Make sure entries are dropped after written.
+                        drop(group.entries);
+
                         tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
 
                         Ok::<_, Error>(())
