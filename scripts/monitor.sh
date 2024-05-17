@@ -3,8 +3,6 @@
 compose=$(docker compose ps -q | wc -l)
 
 cat <<EOF > docker-compose.override.yaml
-version: '3'
-
 services:
     prometheus:
         user: "${UID}"

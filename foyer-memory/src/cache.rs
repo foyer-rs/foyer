@@ -31,7 +31,6 @@ use crate::{
     },
     generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
     indexer::HashTableIndexer,
-    metrics::Metrics,
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
@@ -260,6 +259,8 @@ where
     V: Value,
     S: HashBuilder,
 {
+    name: String,
+
     capacity: usize,
     shards: usize,
     eviction_config: EvictionConfig,
@@ -276,6 +277,8 @@ where
 {
     pub fn new(capacity: usize) -> Self {
         Self {
+            name: "foyer".to_string(),
+
             capacity,
             shards: 8,
             eviction_config: LfuConfig {
@@ -298,6 +301,16 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Set the name of the foyer in-memory cache instance.
+    ///
+    /// Foyer will use the name as the prefix of the metric names.
+    ///
+    /// Default: `foyer`.
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
+    }
+
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
     /// Operations on different shard can be parallelized.
     pub fn with_shards(mut self, shards: usize) -> Self {
@@ -329,6 +342,7 @@ where
         OS: HashBuilder,
     {
         CacheBuilder {
+            name: self.name,
             capacity: self.capacity,
             shards: self.shards,
             eviction_config: self.eviction_config,
@@ -348,6 +362,7 @@ where
     pub fn build(self) -> Cache<K, V, S> {
         match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -356,6 +371,7 @@ where
                 weighter: self.weighter,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
+                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -364,6 +380,7 @@ where
                 weighter: self.weighter,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
+                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -372,6 +389,7 @@ where
                 weighter: self.weighter,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -563,15 +581,6 @@ where
             Cache::Lru(cache) => cache.usage(),
             Cache::Lfu(cache) => cache.usage(),
             Cache::S3Fifo(cache) => cache.usage(),
-        }
-    }
-
-    pub fn metrics(&self) -> &Metrics {
-        match self {
-            Cache::Fifo(cache) => cache.metrics(),
-            Cache::Lru(cache) => cache.metrics(),
-            Cache::Lfu(cache) => cache.metrics(),
-            Cache::S3Fifo(cache) => cache.metrics(),
         }
     }
 

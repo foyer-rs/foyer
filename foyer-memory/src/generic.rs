@@ -28,6 +28,7 @@ use std::{
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, Key, Value},
+    metrics::Metrics,
     object_pool::ObjectPool,
 };
 use futures::FutureExt;
@@ -40,7 +41,6 @@ use crate::{
     eviction::Eviction,
     handle::{Handle, HandleExt, KeyedHandle},
     indexer::Indexer,
-    metrics::Metrics,
     CacheContext,
 };
 
@@ -49,7 +49,7 @@ pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
 struct CacheSharedState<T> {
-    metrics: Metrics,
+    metrics: Arc<Metrics>,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: ObjectPool<Box<T>>,
 }
@@ -126,7 +126,7 @@ where
 
         debug_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
-            self.state.metrics.replace.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.memory_replace.increment(1);
 
             debug_assert!(!old.as_ref().base().is_in_indexer());
             if old.as_ref().base().is_in_eviction() {
@@ -138,7 +138,7 @@ where
                 last_reference_entries.push(entry);
             }
         } else {
-            self.state.metrics.insert.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.memory_insert.increment(1);
         }
         debug_assert!(ptr.as_ref().base().is_in_indexer());
 
@@ -150,6 +150,7 @@ where
         ptr.as_mut().base_mut().set_deposit(deposit);
 
         self.usage.fetch_add(weight, Ordering::Relaxed);
+        self.state.metrics.memory_usage.increment(weight as f64);
         ptr.as_mut().base_mut().inc_refs();
 
         ptr
@@ -162,11 +163,11 @@ where
     {
         let mut ptr = match self.indexer.get(hash, key) {
             Some(ptr) => {
-                self.state.metrics.hit.fetch_add(1, Ordering::Relaxed);
+                self.state.metrics.memory_hit.increment(1);
                 ptr
             }
             None => {
-                self.state.metrics.miss.fetch_add(1, Ordering::Relaxed);
+                self.state.metrics.memory_miss.increment(1);
                 return None;
             }
         };
@@ -211,7 +212,7 @@ where
         let mut ptr = self.indexer.remove(hash, key)?;
         let handle = ptr.as_mut();
 
-        self.state.metrics.remove.fetch_add(1, Ordering::Relaxed);
+        self.state.metrics.memory_remove.increment(1);
 
         if handle.base().is_in_eviction() {
             self.eviction.remove(ptr);
@@ -254,7 +255,7 @@ where
             debug_assert!((&eptrs - &ptrs).is_empty());
         }
 
-        self.state.metrics.remove.fetch_add(ptrs.len(), Ordering::Relaxed);
+        self.state.metrics.memory_remove.increment(ptrs.len() as _);
 
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
@@ -279,7 +280,7 @@ where
                 Some(evicted) => evicted,
                 None => break,
             };
-            self.state.metrics.evict.fetch_add(1, Ordering::Relaxed);
+            self.state.metrics.memory_evict.increment(1);
             let base = evicted.as_ref().base();
             debug_assert!(base.is_in_indexer());
             debug_assert!(!base.is_in_eviction());
@@ -338,7 +339,7 @@ where
                 self.eviction.release(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
                     if was_in_eviction {
-                        self.state.metrics.reinsert.fetch_add(1, Ordering::Relaxed);
+                        self.state.metrics.memory_reinsert.increment(1);
                     }
                     return None;
                 }
@@ -356,9 +357,10 @@ where
         debug_assert!(!handle.base().is_in_eviction());
         debug_assert!(!handle.base().has_refs());
 
-        self.state.metrics.release.fetch_add(1, Ordering::Relaxed);
+        self.state.metrics.memory_release.increment(1);
 
         self.usage.fetch_sub(handle.base().weight(), Ordering::Relaxed);
+        self.state.metrics.memory_usage.decrement(handle.base().weight() as f64);
         let ((key, value), context, weight) = handle.base_mut().take();
 
         let handle = Box::from_raw(ptr.as_ptr());
@@ -390,6 +392,7 @@ where
     E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
     S: HashBuilder,
 {
+    pub name: String,
     pub capacity: usize,
     pub shards: usize,
     pub eviction_config: E::Config,
@@ -474,6 +477,8 @@ where
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
+
+    _metrics: Arc<Metrics>,
 }
 
 impl<K, V, E, I, S> GenericCache<K, V, E, I, S>
@@ -486,9 +491,11 @@ where
     S: HashBuilder,
 {
     pub fn new(config: GenericCacheConfig<K, V, E, S>) -> Self {
+        let metrics = Arc::new(Metrics::new(&config.name));
+
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
         let context = Arc::new(CacheSharedState {
-            metrics: Metrics::default(),
+            metrics: metrics.clone(),
             object_pool: ObjectPool::new_with_create(config.object_pool_capacity, Box::default),
         });
 
@@ -507,6 +514,7 @@ where
             context,
             hash_builder: config.hash_builder,
             weighter: config.weighter,
+            _metrics: metrics,
         }
     }
 
@@ -785,8 +793,8 @@ where
                 }
             };
             match entry {
-                GenericFetch::Wait(_) => shard.state.metrics.queue.fetch_add(1, Ordering::Relaxed),
-                GenericFetch::Miss(_) => shard.state.metrics.fetch.fetch_add(1, Ordering::Relaxed),
+                GenericFetch::Wait(_) => shard.state.metrics.memory_queue.increment(1),
+                GenericFetch::Miss(_) => shard.state.metrics.memory_fetch.increment(1),
                 _ => unreachable!(),
             };
             entry
@@ -964,6 +972,7 @@ mod tests {
         const CAPACITY: usize = 256;
 
         let config = GenericCacheConfig {
+            name: "test".to_string(),
             capacity: CAPACITY,
             shards: 4,
             eviction_config: FifoConfig {},
@@ -988,6 +997,7 @@ mod tests {
 
     fn fifo(capacity: usize) -> Arc<FifoCache<u64, String>> {
         let config = GenericCacheConfig {
+            name: "test".to_string(),
             capacity,
             shards: 1,
             eviction_config: FifoConfig {},
@@ -1000,6 +1010,7 @@ mod tests {
 
     fn lru(capacity: usize) -> Arc<LruCache<u64, String>> {
         let config = GenericCacheConfig {
+            name: "test".to_string(),
             capacity,
             shards: 1,
             eviction_config: LruConfig {

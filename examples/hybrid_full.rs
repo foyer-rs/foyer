@@ -84,6 +84,8 @@ async fn main() -> Result<()> {
     assert_eq!(e.key(), &20230512);
     assert_eq!(e.value(), "Hello, foyer.");
 
+    hybrid.close().await.unwrap();
+
     Ok(())
 }
 

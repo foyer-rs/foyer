@@ -26,6 +26,7 @@ mod text;
 use std::{
     collections::BTreeMap,
     fs::create_dir_all,
+    net::SocketAddr,
     ops::{Deref, Range},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -345,7 +346,8 @@ async fn main() {
     assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
     if args.metrics {
-        PrometheusBuilder::new().install().unwrap();
+        let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
+        PrometheusBuilder::new().with_http_listener(addr).install().unwrap();
     }
 
     create_dir_all(&args.dir).unwrap();

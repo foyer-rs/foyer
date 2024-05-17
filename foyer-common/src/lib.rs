@@ -20,6 +20,7 @@ pub mod bits;
 pub mod buf;
 pub mod code;
 pub mod countdown;
+pub mod metrics;
 pub mod object_pool;
 pub mod range;
 pub mod rate;

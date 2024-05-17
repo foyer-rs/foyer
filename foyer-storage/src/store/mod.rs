@@ -262,6 +262,8 @@ where
     S: HashBuilder + Debug,
 {
     memory: Cache<K, V, S>,
+
+    name: String,
     device_config: DeviceConfig,
     flush: bool,
     indexer_shards: usize,
@@ -289,6 +291,7 @@ where
     pub fn new(memory: Cache<K, V, S>) -> Self {
         Self {
             memory,
+            name: "foyer".to_string(),
             device_config: DeviceConfig::None,
             flush: false,
             indexer_shards: 64,
@@ -304,6 +307,16 @@ where
             tombstone_log_config: None,
             runtime_config: None,
         }
+    }
+
+    /// Set the name of the foyer disk cache instance.
+    ///
+    /// Foyer will use the name as the prefix of the metric names.
+    ///
+    /// Default: `foyer`.
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
     }
 
     /// Set device config for the disk cache store.

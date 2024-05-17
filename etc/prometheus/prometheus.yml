@@ -11,6 +11,6 @@ scrape_configs:
     static_configs:
       - targets: ['node-exporter:9100']
 
-  - job_name: 'foyer-storage-bench'
+  - job_name: 'foyer-bench'
     static_configs:
       - targets: ['host.docker.internal:19970']
