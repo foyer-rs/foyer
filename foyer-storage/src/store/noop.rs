@@ -20,7 +20,7 @@ use foyer_memory::CacheEntry;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
-use crate::storage::{EnqueueFuture, Storage};
+use crate::storage::{EnqueueHandle, Storage};
 
 use crate::error::Result;
 
@@ -71,10 +71,10 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture {
+    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(false));
-        EnqueueFuture::new(rx)
+        EnqueueHandle::new(rx)
     }
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -88,14 +88,14 @@ where
         async move { Ok(None) }
     }
 
-    fn delete<Q>(&self, _: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, _: &Q) -> EnqueueHandle
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(false));
-        EnqueueFuture::new(rx)
+        EnqueueHandle::new(rx)
     }
 
     fn may_contains<Q>(&self, _: &Q) -> bool

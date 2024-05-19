@@ -29,7 +29,7 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    EnqueueFuture, Sequence,
+    EnqueueHandle, Sequence,
 };
 
 #[derive(Debug)]
@@ -198,7 +198,7 @@ where
                 };
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
                 let (tx, rx) = oneshot::channel();
-                let future = EnqueueFuture::new(rx);
+                let future = EnqueueHandle::new(rx);
                 flusher.submit(
                     Submission::Reinsertion {
                         reinsertion: Reinsertion {
