@@ -32,10 +32,12 @@ pub use storage::{
     TombstoneLogConfigBuilder,
 };
 
-pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, S>;
-pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, S>;
-
 pub use crate::hybrid::{
     builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-    cache::{HybridCache, HybridCacheEntry, HybridEntry},
+    cache::{HybridCache, HybridCacheEntry, HybridFetch},
 };
+
+/// In-memory cache.
+pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, S>;
+/// In-memory cache builder.
+pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, S>;

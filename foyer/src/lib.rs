@@ -13,6 +13,9 @@
 //  limitations under the License.
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![warn(missing_docs)]
+
+//! A hybrid cache library that supports plug-and-play cache algorithms, in-memory cache and disk cache.
 
 use foyer_common as common;
 use foyer_memory as memory;
