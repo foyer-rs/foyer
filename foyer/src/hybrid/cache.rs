@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, sync::Arc};
+use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, sync::Arc, time::Instant};
 
 use ahash::RandomState;
 use foyer_common::{
@@ -84,26 +84,50 @@ where
     }
 
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let now = Instant::now();
+
         let entry = self.memory.insert(key, value);
         self.storage.enqueue(entry.clone());
+
+        self.metrics.hybrid_insert.increment(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed());
+
         entry
     }
 
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let now = Instant::now();
+
         let entry = self.memory.insert_with_context(key, value, context);
         self.storage.enqueue(entry.clone());
+
+        self.metrics.hybrid_insert.increment(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed());
+
         entry
     }
 
     pub fn insert_storage(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let now = Instant::now();
+
         let entry = self.memory.deposit(key, value);
         self.storage.enqueue(entry.clone());
+
+        self.metrics.hybrid_insert.increment(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed());
+
         entry
     }
 
     pub fn insert_storage_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let now = Instant::now();
+
         let entry = self.memory.deposit_with_context(key, value, context);
         self.storage.enqueue(entry.clone());
+
+        self.metrics.hybrid_insert.increment(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed());
+
         entry
     }
 
@@ -112,16 +136,31 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
+        let now = Instant::now();
+
+        let record_hit = || {
+            self.metrics.hybrid_hit.increment(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed());
+        };
+        let record_miss = || {
+            self.metrics.hybrid_miss.increment(1);
+            self.metrics.hybrid_miss_duration.record(now.elapsed());
+        };
+
         if let Some(entry) = self.memory.get(key) {
+            record_hit();
             return Ok(Some(entry));
         }
 
         if let Some((k, v)) = self.storage.load(key).await? {
             if k.borrow() != key {
+                record_miss();
                 return Ok(None);
             }
+            record_hit();
             return Ok(Some(self.memory.insert(k, v)));
         }
+        record_miss();
         Ok(None)
     }
 
@@ -129,7 +168,10 @@ where
     where
         K: Clone,
     {
-        self.memory
+        let now = Instant::now();
+
+        let res = self
+            .memory
             .fetch(key.clone(), || {
                 let store = self.storage.clone();
                 async move {
@@ -141,7 +183,21 @@ where
                     }
                 }
             })
-            .await
+            .await;
+
+        match res {
+            Ok(Some(_)) => {
+                self.metrics.hybrid_hit.increment(1);
+                self.metrics.hybrid_hit_duration.record(now.elapsed());
+            }
+            Ok(None) => {
+                self.metrics.hybrid_miss.increment(1);
+                self.metrics.hybrid_miss_duration.record(now.elapsed());
+            }
+            _ => {}
+        }
+
+        res
     }
 
     pub fn remove<Q>(&self, key: &Q)
@@ -149,8 +205,13 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        let now = Instant::now();
+
         self.memory.remove(key);
         self.storage.delete(key);
+
+        self.metrics.hybrid_remove.increment(1);
+        self.metrics.hybrid_remove_duration.record(now.elapsed());
     }
 
     pub fn contains<Q>(&self, key: &Q) -> anyhow::Result<bool>

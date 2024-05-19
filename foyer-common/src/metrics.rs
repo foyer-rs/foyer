@@ -58,8 +58,17 @@ pub struct Metrics {
     pub storage_disk_write_duration: Histogram,
     pub storage_disk_read_duration: Histogram,
     pub storage_disk_flush_duration: Histogram,
+
     /* hybrid cache metrics */
-    // TODO(MrCroxx): Add hybrid cache mtrics.
+    pub hybrid_insert: Counter,
+    pub hybrid_hit: Counter,
+    pub hybrid_miss: Counter,
+    pub hybrid_remove: Counter,
+
+    pub hybrid_insert_duration: Histogram,
+    pub hybrid_hit_duration: Histogram,
+    pub hybrid_miss_duration: Histogram,
+    pub hybrid_remove_duration: Histogram,
 }
 
 impl Debug for Metrics {
@@ -133,6 +142,20 @@ impl Metrics {
 
         /* hybrid cache metrics */
 
+        let hybrid_insert = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "insert");
+        let hybrid_hit = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "hit");
+        let hybrid_miss = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "miss");
+        let hybrid_remove = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "remove");
+
+        let hybrid_insert_duration =
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "insert");
+        let hybrid_hit_duration =
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "hit");
+        let hybrid_miss_duration =
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "miss");
+        let hybrid_remove_duration =
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "remove");
+
         Self {
             memory_insert,
             memory_replace,
@@ -166,6 +189,15 @@ impl Metrics {
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,
+
+            hybrid_insert,
+            hybrid_hit,
+            hybrid_miss,
+            hybrid_remove,
+            hybrid_insert_duration,
+            hybrid_hit_duration,
+            hybrid_miss_duration,
+            hybrid_remove_duration,
         }
     }
 }
