@@ -14,6 +14,7 @@
 
 use bytes::{Buf, BufMut};
 
+/// Extend [`Buf`] with `get_isize()` and `get_usize()`.
 pub trait BufExt: Buf {
     // TODO(MrCroxx): Use `cfg_match` after stable.
     // cfg_match! {
@@ -75,6 +76,7 @@ pub trait BufExt: Buf {
 
 impl<T: Buf> BufExt for T {}
 
+/// Extend [`BufMut`] with `put_isize()` and `put_usize()`.
 pub trait BufMutExt: BufMut {
     // TODO(MrCroxx): Use `cfg_match` after stable.
     // cfg_match! {

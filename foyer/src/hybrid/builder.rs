@@ -24,6 +24,7 @@ use foyer_storage::{
 
 use crate::HybridCache;
 
+/// Hybrid cache builder.
 pub struct HybridCacheBuilder {
     name: String,
 }
@@ -35,6 +36,7 @@ impl Default for HybridCacheBuilder {
 }
 
 impl HybridCacheBuilder {
+    /// Create a new hybrid cache builder.
     pub fn new() -> Self {
         Self {
             name: "foyer".to_string(),
@@ -51,6 +53,7 @@ impl HybridCacheBuilder {
         self
     }
 
+    /// Continue to modify the in-memory cache configurations.
     pub fn memory<K, V>(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, RandomState>
     where
         K: StorageKey,
@@ -63,6 +66,7 @@ impl HybridCacheBuilder {
     }
 }
 
+/// Hybrid cache builder to modify the in-memory cache configurations.
 pub struct HybridCacheBuilderPhaseMemory<K, V, S>
 where
     K: StorageKey,
@@ -134,6 +138,7 @@ where
         }
     }
 
+    /// Continue to modify the in-memory cache configurations.
     pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
@@ -144,6 +149,7 @@ where
     }
 }
 
+/// Hybird cache builder modify the disk cache configurations.
 pub struct HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
@@ -349,6 +355,7 @@ where
         }
     }
 
+    /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let storage = self.builder.build().await?;
         Ok(HybridCache::new(self.name, self.memory, storage))
