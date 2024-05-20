@@ -12,10 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+/// Context of the cache entry.
+///
+/// It may be used by the eviction algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheContext {
     /// The default context shared by all eviction container implementations.
     Default,
+    /// Mark the entry as low-priority.
+    ///
+    /// The behaviour differs from different eviction algorithm.
     LowPriority,
 }
 

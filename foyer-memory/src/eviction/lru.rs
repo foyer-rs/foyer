@@ -27,6 +27,7 @@ use crate::{
     CacheContext,
 };
 
+/// LRU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LruConfig {
     /// The ratio of the high priority pool occupied.

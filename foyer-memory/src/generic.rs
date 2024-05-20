@@ -45,6 +45,9 @@ use crate::{
 };
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
+/// The weighter for the in-memory cache.
+///
+/// The weighter is used to calculate the weight of the cache entry.
 pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
