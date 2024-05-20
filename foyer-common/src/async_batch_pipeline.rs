@@ -17,6 +17,7 @@ use std::{future::Future, sync::Arc};
 use parking_lot::Mutex;
 use tokio::{runtime::Handle, task::JoinHandle};
 
+/// A structured async batch pipeline.
 #[derive(Debug)]
 pub struct AsyncBatchPipeline<T, R> {
     inner: Arc<Mutex<AsyncBatchPipelineInner<T, R>>>,
@@ -39,16 +40,21 @@ struct AsyncBatchPipelineInner<T, R> {
     handle: Option<JoinHandle<R>>,
 }
 
+/// The token returns by [`AsyncBatchPipeline::accumulate`] if the caller is the leader of the batch.
 pub struct LeaderToken<T, R> {
     batch: AsyncBatchPipeline<T, R>,
     handle: Option<JoinHandle<R>>,
 }
 
 impl<T, R> AsyncBatchPipeline<T, R> {
+    /// Create a new structured async batch pipeline with the given state as its initial state.
     pub fn new(state: T) -> Self {
         Self::with_runtime(state, Handle::current())
     }
 
+    /// Create a new structured async batch pipeline with the given state as its initial state.
+    ///
+    /// The pipeline will use the given runtime for spawning tasks.
     pub fn with_runtime(state: T, runtime: Handle) -> Self {
         Self {
             inner: Arc::new(Mutex::new(AsyncBatchPipelineInner {
@@ -60,6 +66,11 @@ impl<T, R> AsyncBatchPipeline<T, R> {
         }
     }
 
+    /// Accumulate the batch state with the given method.
+    ///
+    /// `accumulate` returns a leader token if the caller is the leader of the batch.
+    ///
+    /// The leader must call [`LeaderToken::pipeline`] to handle the batch and progress the pipeline.
     pub fn accumulate<F>(&self, f: F) -> Option<LeaderToken<T, R>>
     where
         F: FnOnce(&mut T),
@@ -81,6 +92,7 @@ impl<T, R> AsyncBatchPipeline<T, R> {
         token
     }
 
+    /// Wait for the last batch pipeline to finish.
     pub fn wait(&self) -> Option<JoinHandle<R>> {
         self.inner.lock().handle.take()
     }

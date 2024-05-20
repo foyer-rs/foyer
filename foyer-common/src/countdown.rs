@@ -14,6 +14,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
+/// A concurrent count down util.
 #[derive(Debug)]
 pub struct Countdown {
     finish: AtomicBool,

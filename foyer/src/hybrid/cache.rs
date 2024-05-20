@@ -154,7 +154,7 @@ where
         Some(entry)
     }
 
-    /// Get cached entry with the given key from the hybrid cache..
+    /// Get cached entry with the given key from the hybrid cache.
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Borrow<Q>,

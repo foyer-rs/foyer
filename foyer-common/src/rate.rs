@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
+/// A rate limiter that returns the wait duration for limitation.
 #[derive(Debug)]
 pub struct RateLimiter {
     inner: Mutex<Inner>,
@@ -30,6 +31,7 @@ struct Inner {
 }
 
 impl RateLimiter {
+    /// Create a rate limiter that returns the wait duration for limitation.
     pub fn new(rate: f64) -> Self {
         let inner = Inner {
             quota: 0.0,
@@ -41,6 +43,9 @@ impl RateLimiter {
         }
     }
 
+    /// Consume some quota from the rate limiter.
+    ///
+    /// If there is not enough quota left, return a duration for the caller to wait.
     pub fn consume(&self, weight: f64) -> Option<Duration> {
         let mut inner = self.inner.lock();
         let now = Instant::now();

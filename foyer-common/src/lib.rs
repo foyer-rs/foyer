@@ -13,19 +13,35 @@
 //  limitations under the License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![warn(missing_docs)]
 
+//! Shared components and utils for foyer.
+
+/// A structured async batch pipeline.
 pub mod async_batch_pipeline;
+/// The util that convert the blocking call to async call.
 pub mod asyncify;
+/// The bitwise utils.
 pub mod bits;
+/// The [`bytes::Buf`] and [`bytes::BufMut`] extensions.
 pub mod buf;
+/// The trait for the key and value encoding and decoding.
 pub mod code;
+/// A concurrent count down util.
 pub mod countdown;
+/// The shared metrics for foyer.
 pub mod metrics;
+/// A concurrent object pool.
 pub mod object_pool;
+/// The range extensions.
 pub mod range;
+/// A rate limiter that returns the wait duration for limitation.
 pub mod rate;
+///  A ticket-based rate limiter.
 pub mod rated_ticket;
+/// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
 
+/// File system utils.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod fs;

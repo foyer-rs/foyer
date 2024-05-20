@@ -44,6 +44,7 @@ use std::{
 //     + Clone
 //     + Copy;
 
+/// An unsigned trait that used by the utils.
 pub trait Unsigned:
     Add<Output = Self>
     + Sub<Output = Self>
@@ -75,67 +76,65 @@ impl<
 {
 }
 
+/// Check if the given value is a power of 2.
 #[inline(always)]
 pub fn is_pow2<U: Unsigned>(v: U) -> bool {
     v & (v - U::from(1)) == U::from(0)
 }
 
+/// Assert that the given value is a power of 2.
 #[inline(always)]
 pub fn assert_pow2<U: Unsigned>(v: U) {
     assert_eq!(v & (v - U::from(1)), U::from(0), "v: {}", v);
 }
 
+/// Debug assert that the given value is a power of 2.
 #[inline(always)]
 pub fn debug_assert_pow2<U: Unsigned>(v: U) {
     debug_assert_eq!(v & (v - U::from(1)), U::from(0), "v: {}", v);
 }
 
+/// Check if the given value is aligend with the given align.
+///
+/// Note: The given align must be a power of 2.
 #[inline(always)]
 pub fn is_aligned<U: Unsigned>(align: U, v: U) -> bool {
     debug_assert_pow2(align);
     v & (align - U::from(1)) == U::from(0)
 }
 
+/// Assert that the given value is aligend with the given align.
+///
+/// Note: The given align must be a power of 2.
 #[inline(always)]
 pub fn assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
     assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
 }
 
+/// Debug assert that the given value is aligend with the given align.
+///
+/// Note: The given align must be a power of 2.
 #[inline(always)]
 pub fn debug_assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
     debug_assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
 }
 
+/// Align up the given value with the given align.
+///
+/// Note: The given align must be a power of 2.
 #[inline(always)]
 pub fn align_up<U: Unsigned>(align: U, v: U) -> U {
     debug_assert_pow2(align);
     (v + align - U::from(1)) & !(align - U::from(1))
 }
 
+/// Align down the given value with the given align.
+///
+/// Note: The given align must be a power of 2.
 #[inline(always)]
 pub fn align_down<U: Unsigned>(align: U, v: U) -> U {
     debug_assert_pow2(align);
     v & !(align - U::from(1))
 }
-
-// macro_rules! bpf_buffer_trace {
-//     ($buf:expr, $span:expr) => {
-//         #[cfg(feature = "bpf")]
-//         {
-//             if $buf.len() >= 16 && let Some(id) = $span.id() {
-//                 use bytes::BufMut;
-
-//                 const BPF_BUFFER_TRACE_MAGIC: u64 = 0xdeadbeefdeadbeef;
-
-//                 $span.record("sid", id.into_u64());
-
-//                 (&mut $buf[0..8]).put_u64_le(BPF_BUFFER_TRACE_MAGIC);
-//                 (&mut $buf[8..16]).put_u64_le(id.into_u64());
-//             }
-//         }
-//     };
-// }
-
-// pub(crate) use bpf_buffer_trace;

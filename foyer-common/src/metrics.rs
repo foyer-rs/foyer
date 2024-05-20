@@ -16,6 +16,8 @@ use std::fmt::Debug;
 
 use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
 
+// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+#[allow(missing_docs)]
 #[derive(Clone)]
 pub struct Metrics {
     /* in-memory cache metrics */
@@ -78,6 +80,7 @@ impl Debug for Metrics {
 }
 
 impl Metrics {
+    /// Create a new metrics with the given name.
     pub fn new(name: &str) -> Self {
         /* in-memory cache metrics */
 
