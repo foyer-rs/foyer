@@ -48,25 +48,31 @@ pub trait BufExt: Buf {
     // }
     cfg_if::cfg_if! {
         if #[cfg(target_pointer_width = "16")] {
+            /// Gets an usize from self in big-endian byte order and advance the current position.
             fn get_usize(&mut self) -> usize {
                 self.get_u16() as usize
             }
+            /// Gets an isize from self in big-endian byte order and advance the current position.
             fn get_isize(&mut self) -> isize {
                 self.get_i16() as isize
             }
         }
         else if #[cfg(target_pointer_width = "32")] {
+            /// Gets an usize from self in big-endian byte order and advance the current position.
             fn get_usize(&mut self) -> usize {
                 self.get_u32() as usize
             }
+            /// Gets an isize from self in big-endian byte order and advance the current position.
             fn get_isize(&mut self) -> isize {
                 self.get_i32() as isize
             }
         }
         else if #[cfg(target_pointer_width = "64")] {
+            /// Gets an usize from self in big-endian byte order and advance the current position.
             fn get_usize(&mut self) -> usize {
                 self.get_u64() as usize
             }
+            /// Gets an isize from self in big-endian byte order and advance the current position.
             fn get_isize(&mut self) -> isize {
                 self.get_i64() as isize
             }
@@ -110,25 +116,31 @@ pub trait BufMutExt: BufMut {
     // }
     cfg_if::cfg_if! {
         if #[cfg(target_pointer_width = "16")] {
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_usize(&mut self, v: usize) {
                 self.put_u16(v as u16);
             }
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_isize(&mut self, v: isize) {
                 self.put_i16(v as i16);
             }
         }
         else if #[cfg(target_pointer_width = "32")] {
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_usize(&mut self, v: usize) {
                 self.put_u32(v as u32);
             }
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_isize(&mut self, v: isize) {
                 self.put_i32(v as i32);
             }
         }
         else if #[cfg(target_pointer_width = "64")] {
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_usize(&mut self, v: usize) {
                 self.put_u64(v as u64);
             }
+            /// Writes an usize to self in the big-endian byte order and advance the current position.
             fn put_isize(&mut self, v: isize) {
                 self.put_i64(v as i64);
             }

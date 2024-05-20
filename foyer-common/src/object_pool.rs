@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crossbeam::queue::ArrayQueue;
 
+/// A concurrent object pool.
 pub struct ObjectPool<T> {
     inner: Arc<ObjectPoolInner<T>>,
 }
@@ -37,12 +38,14 @@ impl<T> ObjectPool<T>
 where
     T: Default + 'static,
 {
+    /// Create a new concurrent object pool.
     pub fn new(capacity: usize) -> Self {
         Self::new_with_create(capacity, T::default)
     }
 }
 
 impl<T> ObjectPool<T> {
+    /// Create a new concurrent object pool with object creation method.
     pub fn new_with_create(capacity: usize, create: impl Fn() -> T + Send + Sync + 'static) -> Self {
         let inner = ObjectPoolInner {
             queue: if capacity == 0 {
@@ -55,6 +58,7 @@ impl<T> ObjectPool<T> {
         Self { inner: Arc::new(inner) }
     }
 
+    /// Get or create an object from the objcet pool.
     pub fn acquire(&self) -> T {
         match self.inner.queue.as_ref() {
             Some(queue) => queue.pop().unwrap_or((self.inner.create)()),
@@ -62,6 +66,7 @@ impl<T> ObjectPool<T> {
         }
     }
 
+    /// Give back or release an object from the objcet pool.
     pub fn release(&self, item: T) {
         if let Some(queue) = self.inner.queue.as_ref() {
             let _ = queue.push(item);

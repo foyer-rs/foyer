@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
+///  A ticket-based rate limiter.
 #[derive(Debug)]
 pub struct RatedTicket {
     inner: Mutex<Inner>,
@@ -30,6 +31,7 @@ struct Inner {
 }
 
 impl RatedTicket {
+    /// Create a ticket-based rate limiter.
     pub fn new(rate: f64) -> Self {
         let inner = Inner {
             quota: 0.0,
@@ -41,6 +43,7 @@ impl RatedTicket {
         }
     }
 
+    /// Check if there is still some quota left.
     pub fn probe(&self) -> bool {
         let mut inner = self.inner.lock();
 
@@ -52,10 +55,14 @@ impl RatedTicket {
         inner.quota > 0.0
     }
 
+    /// Reduce some quota manually.
     pub fn reduce(&self, weight: f64) {
         self.inner.lock().quota -= weight;
     }
 
+    /// Consume some quota from the rate limiter.
+    ///
+    /// If there enough quota left, returns `true`; otherwise, returns `false`.
     pub fn consume(&self, weight: f64) -> bool {
         let mut inner = self.inner.lock();
 

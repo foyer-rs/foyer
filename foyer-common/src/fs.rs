@@ -16,6 +16,7 @@ use std::path::Path;
 
 use nix::{errno::Errno, sys::statvfs::statvfs};
 
+/// Get the freespace of the device that contains the given path.
 pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
     let stat = statvfs(path.as_ref())?;
     let res = stat.blocks_available() as usize * stat.fragment_size() as usize;

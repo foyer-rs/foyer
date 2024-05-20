@@ -14,6 +14,7 @@
 
 use tokio::runtime::Handle;
 
+/// Convert the block call to async call.
 #[cfg(not(madsim))]
 pub async fn asyncify<F, T>(f: F) -> T
 where
@@ -32,6 +33,7 @@ where
     f()
 }
 
+/// Convert the block call to async call.
 #[cfg(not(madsim))]
 pub async fn asyncify_with_runtime<F, T>(runtime: &Handle, f: F) -> T
 where
