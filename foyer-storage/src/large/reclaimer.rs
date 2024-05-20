@@ -254,11 +254,7 @@ impl RegionCleaner {
     where
         D: Device,
     {
-        let buf = allocator_api2::vec![
-            in &IO_BUFFER_ALLOCATOR;
-            0;
-            region.align()
-        ];
+        let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR);
         region.write(buf, 0).await?;
         if flush {
             region.flush().await?;
