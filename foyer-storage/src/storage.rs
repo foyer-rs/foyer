@@ -64,7 +64,9 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle;
+    fn pick(&self, key: &Self::Key) -> bool;
+
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle;
 
     #[must_use]
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -86,4 +88,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn destroy(&self) -> impl Future<Output = Result<()>> + Send;
 
     fn stats(&self) -> Arc<DeviceStats>;
+
+    #[must_use]
+    fn wait(&self) -> impl Future<Output = Result<()>> + Send;
 }

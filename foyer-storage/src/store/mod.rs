@@ -146,11 +146,23 @@ where
         }
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> super::storage::EnqueueHandle {
+    fn pick(&self, key: &Self::Key) -> bool {
         match self {
-            Store::Noop(store) => store.enqueue(entry),
-            Store::DirectFs(store) => store.enqueue(entry),
-            Store::RuntimeDirectFs(store) => store.enqueue(entry),
+            Store::Noop(store) => store.pick(key),
+            Store::DirectFs(store) => store.pick(key),
+            Store::RuntimeDirectFs(store) => store.pick(key),
+        }
+    }
+
+    fn enqueue(
+        &self,
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        force: bool,
+    ) -> super::storage::EnqueueHandle {
+        match self {
+            Store::Noop(store) => store.enqueue(entry, force),
+            Store::DirectFs(store) => store.enqueue(entry, force),
+            Store::RuntimeDirectFs(store) => store.enqueue(entry, force),
         }
     }
 
@@ -203,6 +215,14 @@ where
             Store::Noop(store) => store.stats(),
             Store::DirectFs(store) => store.stats(),
             Store::RuntimeDirectFs(store) => store.stats(),
+        }
+    }
+
+    async fn wait(&self) -> Result<()> {
+        match self {
+            Store::Noop(store) => store.wait().await,
+            Store::DirectFs(store) => store.wait().await,
+            Store::RuntimeDirectFs(store) => store.wait().await,
         }
     }
 }

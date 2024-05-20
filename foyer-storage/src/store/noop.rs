@@ -17,6 +17,7 @@ use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::Phanto
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
+use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
@@ -24,11 +25,15 @@ use crate::storage::{EnqueueHandle, Storage};
 
 use crate::error::Result;
 
-pub struct NoopStore<K, V, S>(PhantomData<(K, V, S)>)
+pub struct NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug;
+    S: HashBuilder + Debug,
+{
+    runtime: Handle,
+    _marker: PhantomData<(K, V, S)>,
+}
 
 impl<K, V, S> Debug for NoopStore<K, V, S>
 where
@@ -48,7 +53,10 @@ where
     S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
-        Self(PhantomData)
+        Self {
+            runtime: self.runtime.clone(),
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -64,16 +72,24 @@ where
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
-        Ok(Self(PhantomData))
+        let runtime = Handle::current();
+        Ok(Self {
+            runtime,
+            _marker: PhantomData,
+        })
     }
 
     async fn close(&self) -> Result<()> {
         Ok(())
     }
 
-    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
+    fn pick(&self, _: &Self::Key) -> bool {
+        false
+    }
+
+    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
         let (tx, rx) = oneshot::channel();
-        let _ = tx.send(Ok(false));
+        let _ = tx.send(Ok(force)); // always return `force` here to keep consistency
         EnqueueHandle::new(rx)
     }
 
@@ -113,6 +129,10 @@ where
     fn stats(&self) -> Arc<DeviceStats> {
         Arc::default()
     }
+
+    async fn wait(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -131,7 +151,7 @@ mod tests {
     async fn test_none_store() {
         let memory = cache_for_test();
         let store = NoopStore::open(()).await.unwrap();
-        assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384])).await.unwrap());
+        assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384]), false).await.unwrap());
         assert!(store.load(&0).await.unwrap().is_none());
         store.delete(&0).await.unwrap();
         store.destroy().await.unwrap();

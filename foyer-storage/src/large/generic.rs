@@ -298,14 +298,22 @@ where
         })
     }
 
-    async fn close(&self) -> Result<()> {
-        self.inner.active.store(false, Ordering::Relaxed);
+    async fn wait(&self) -> Result<()> {
         try_join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await?;
         join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueHandle {
+    async fn close(&self) -> Result<()> {
+        self.inner.active.store(false, Ordering::Relaxed);
+        self.wait().await
+    }
+
+    fn pick(&self, key: &K) -> bool {
+        self.inner.admission_picker.pick(&self.inner.stats, key)
+    }
+
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
@@ -320,7 +328,7 @@ where
                 return;
             }
 
-            if this.inner.admission_picker.pick(&this.inner.stats, entry.key()) {
+            if force || this.pick(entry.key()) {
                 let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
                 this.inner.flushers[sequence as usize % this.inner.flushers.len()]
                     .submit(Submission::CacheEntry { entry, tx }, sequence);
@@ -496,8 +504,12 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
-        self.enqueue(entry)
+    fn pick(&self, key: &Self::Key) -> bool {
+        self.pick(key)
+    }
+
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
+        self.enqueue(entry, force)
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -530,6 +542,10 @@ where
 
     fn stats(&self) -> Arc<DeviceStats> {
         self.inner.device.stat().clone()
+    }
+
+    async fn wait(&self) -> Result<()> {
+        self.wait().await
     }
 }
 
@@ -664,8 +680,8 @@ mod tests {
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(store.enqueue(e1.clone()).await.unwrap());
-        assert!(store.enqueue(e2).await.unwrap());
+        assert!(store.enqueue(e1.clone(), false).await.unwrap());
+        assert!(store.enqueue(e2, false).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -676,8 +692,8 @@ mod tests {
         let e3 = memory.insert(3, vec![3; 7 * KB]);
         let e4 = memory.insert(4, vec![4; 6 * KB]);
 
-        assert!(store.enqueue(e3).await.unwrap());
-        assert!(store.enqueue(e4).await.unwrap());
+        assert!(store.enqueue(e3, false).await.unwrap());
+        assert!(store.enqueue(e4, false).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -690,7 +706,7 @@ mod tests {
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
-        assert!(store.enqueue(e5).await.unwrap());
+        assert!(store.enqueue(e5, false).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -706,8 +722,8 @@ mod tests {
         // [ [], [e3, e4], [e5], [e6, e4*] ]
         let e6 = memory.insert(6, vec![6; 7 * KB]);
         let e4v2 = memory.insert(4, vec![!4; 7 * KB]);
-        assert!(store.enqueue(e6).await.unwrap());
-        assert!(store.enqueue(e4v2).await.unwrap());
+        assert!(store.enqueue(e6, false).await.unwrap());
+        assert!(store.enqueue(e4v2, false).await.unwrap());
 
         assert!(store.load(&1).await.unwrap().is_none());
         assert!(store.load(&2).await.unwrap().is_none());
@@ -721,7 +737,7 @@ mod tests {
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
-        assert!(store.enqueue(e1).await.is_err());
+        assert!(store.enqueue(e1, false).await.is_err());
         drop(store);
 
         let store = store_for_test(&memory, dir.path()).await;
@@ -747,7 +763,7 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone())))
+        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone(), false)))
             .await
             .unwrap()
             .into_iter()
@@ -772,7 +788,7 @@ mod tests {
             }
         }
 
-        assert!(store.enqueue(es[3].clone()).await.unwrap());
+        assert!(store.enqueue(es[3].clone(), false).await.unwrap());
         assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -792,7 +808,7 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone())))
+        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone(), false)))
             .await
             .unwrap()
             .into_iter()
@@ -815,7 +831,7 @@ mod tests {
             assert_eq!(store.load(&i).await.unwrap(), None);
         }
 
-        assert!(store.enqueue(es[3].clone()).await.unwrap());
+        assert!(store.enqueue(es[3].clone(), false).await.unwrap());
         assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -836,8 +852,8 @@ mod tests {
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(store.enqueue(e1.clone()).await.unwrap());
-        assert!(!store.enqueue(e2).await.unwrap());
+        assert!(store.enqueue(e1.clone(), false).await.unwrap());
+        assert!(!store.enqueue(e2, false).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -860,7 +876,7 @@ mod tests {
 
         // [ [e0, e1], [e2, e3], [e4, e5], [] ]
         for e in es.iter().take(6).cloned() {
-            assert!(store.enqueue(e).await.unwrap());
+            assert!(store.enqueue(e, false).await.unwrap());
         }
         for i in 0..6 {
             let r = store.load(&i).await.unwrap().unwrap();
@@ -868,7 +884,7 @@ mod tests {
         }
 
         // [ [], [e2, e3], [e4, e5], [e6, e1] ]
-        assert!(store.enqueue(es[6].clone()).await.unwrap());
+        assert!(store.enqueue(es[6].clone(), false).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -890,7 +906,7 @@ mod tests {
         );
 
         // [ [e7, e3], [], [e4, e5], [e6, e1] ]
-        assert!(store.enqueue(es[7].clone()).await.unwrap());
+        assert!(store.enqueue(es[7].clone(), false).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -914,8 +930,8 @@ mod tests {
 
         // [ [e7, e3], [e8, e9], [], [e6, e1] ]
         store.delete(&5).await.unwrap();
-        assert!(store.enqueue(es[8].clone()).await.unwrap());
-        assert!(store.enqueue(es[9].clone()).await.unwrap());
+        assert!(store.enqueue(es[8].clone(), false).await.unwrap());
+        assert!(store.enqueue(es[9].clone(), false).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }

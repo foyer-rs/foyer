@@ -91,7 +91,7 @@ where
         let now = Instant::now();
 
         let entry = self.memory.insert(key, value);
-        self.storage.enqueue(entry.clone());
+        self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
@@ -104,7 +104,7 @@ where
         let now = Instant::now();
 
         let entry = self.memory.insert_with_context(key, value, context);
-        self.storage.enqueue(entry.clone());
+        self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
@@ -117,7 +117,7 @@ where
         let now = Instant::now();
 
         let entry = self.memory.deposit(key, value);
-        self.storage.enqueue(entry.clone());
+        self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
@@ -126,16 +126,32 @@ where
     }
 
     /// Insert disk cache only with cache context.
-    pub fn insert_storage_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+    pub async fn insert_storage_with_fetch<F, FU>(&self, key: K, fetch: F) -> Option<HybridCacheEntry<K, V, S>>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+    {
         let now = Instant::now();
 
-        let entry = self.memory.deposit_with_context(key, value, context);
-        self.storage.enqueue(entry.clone());
+        if !self.storage.pick(&key) {
+            return None;
+        }
+
+        let value = match fetch().await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("[hybrid cache]: error raised when fetching value during `insert_storage_with_fetch`, skip entry, error: {e}");
+                return None;
+            }
+        };
+
+        let entry = self.memory.deposit(key, value);
+        self.storage.enqueue(entry.clone(), true);
 
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        entry
+        Some(entry)
     }
 
     /// Get cached entry with the given key from the hybrid cache..
@@ -232,12 +248,12 @@ where
     /// Check if the hybrid cache contains a cached entry with the given key.
     ///
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
-    pub fn contains<Q>(&self, key: &Q) -> anyhow::Result<bool>
+    pub fn contains<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        Ok(self.memory.contains(key) || self.storage.may_contains(key))
+        self.memory.contains(key) || self.storage.may_contains(key)
     }
 
     /// Clear the hybrid cache.
@@ -271,14 +287,14 @@ where
     S: HashBuilder + Debug,
 {
     /// Fetch and insert a cache entry with the given method if there is a cache miss.
-    pub fn fetch<F, FU>(&self, key: K, f: F) -> HybridFetch<K, V, S>
+    pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<Option<(V, CacheContext)>>> + Send + 'static,
     {
         let store = self.storage.clone();
         self.memory.fetch(key.clone(), || {
-            let future = f();
+            let future = fetch();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from)? {
                     None => {}
@@ -288,5 +304,77 @@ where
                 future.await.map_err(anyhow::Error::from)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::path::Path;
+
+    use crate::*;
+
+    const KB: usize = 1024;
+    const MB: usize = 1024 * 1024;
+
+    async fn open(dir: impl AsRef<Path>) -> HybridCache<u64, Vec<u8>> {
+        HybridCacheBuilder::new()
+            .with_name("test")
+            .memory(4 * MB)
+            .storage()
+            .with_device_config(
+                DirectFsDeviceOptionsBuilder::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB)
+                    .build(),
+            )
+            .build()
+            .await
+            .unwrap()
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let hybrid = open(dir.path()).await;
+
+        let e1 = hybrid.insert(1, vec![1; 7 * KB]);
+        let e2 = hybrid.insert_with_context(2, vec![2; 7 * KB], CacheContext::default());
+        assert_eq!(e1.value(), &vec![1; 7 * KB]);
+        assert_eq!(e2.value(), &vec![2; 7 * KB]);
+
+        let e3 = hybrid.insert_storage(3, vec![3; 7 * KB]);
+        let e4 = hybrid
+            .insert_storage_with_fetch(4, || async move { Ok(vec![4; 7 * KB]) })
+            .await
+            .unwrap();
+        assert_eq!(e3.value(), &vec![3; 7 * KB]);
+        assert_eq!(e4.value(), &vec![4; 7 * KB]);
+
+        let e5 = hybrid
+            .fetch(
+                5,
+                || async move { Ok(Some((vec![5; 7 * KB], CacheContext::default()))) },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(e5.value(), &vec![5; 7 * KB]);
+
+        let e1g = hybrid.get(&1).await.unwrap().unwrap();
+        assert_eq!(e1g.value(), &vec![1; 7 * KB]);
+        let e2g = hybrid.obtain(2).await.unwrap().unwrap();
+        assert_eq!(e2g.value(), &vec![2; 7 * KB]);
+
+        hybrid.storage.wait().await.unwrap();
+
+        assert!(hybrid.contains(&3));
+        hybrid.remove(&3);
+        assert!(!hybrid.contains(&3));
+
+        assert!(hybrid.contains(&4));
+        hybrid.clear().await.unwrap();
+        assert!(!hybrid.contains(&4));
     }
 }

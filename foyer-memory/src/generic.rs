@@ -738,7 +738,7 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
-    pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, f: F) -> GenericFetch<K, V, E, I, S, ER>
+    pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, fetch: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
@@ -763,7 +763,7 @@ where
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
                     let cache = self.clone();
-                    let future = f();
+                    let future = fetch();
                     let join = tokio::spawn(async move {
                         let res = match future.await {
                             Ok(res) => res,
@@ -1196,7 +1196,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_entry() {
+    async fn test_fetch() {
         let cache = fifo(10);
 
         let fetch = || async move {
