@@ -31,12 +31,16 @@ use crate::device::{
 
 use crate::error::{Error, Result};
 
+/// The configurations for the tombstone log.
 #[derive(Debug, Clone)]
 pub struct TombstoneLogConfig {
+    /// Path of the tombstone log.
     pub path: PathBuf,
+    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub flush: bool,
 }
 
+/// The builder for the tombstone log config.
 #[derive(Debug)]
 pub struct TombstoneLogConfigBuilder {
     path: PathBuf,
@@ -44,6 +48,7 @@ pub struct TombstoneLogConfigBuilder {
 }
 
 impl TombstoneLogConfigBuilder {
+    /// Create a new builder for the tombstone log config on the given path.
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().into(),
@@ -51,11 +56,15 @@ impl TombstoneLogConfigBuilder {
         }
     }
 
+    /// Set whether to enable flush.
+    ///
+    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub fn with_flush(mut self, flush: bool) -> Self {
         self.flush = flush;
         self
     }
 
+    /// Build the tombstone log config with the given args.
     pub fn build(self) -> TombstoneLogConfig {
         TombstoneLogConfig {
             path: self.path,

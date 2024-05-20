@@ -15,27 +15,42 @@
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
+/// The admission picker for the disk cache.
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {
+    /// The key type for the admission picker.
     type Key;
 
+    /// Decide whether to pick a key.
     fn pick(&self, stats: &Arc<Statistics>, key: &Self::Key) -> bool;
 }
 
+/// The reinsertion picker for the disk cache.
 pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
+    /// The key type for the reinsertion picker.
     type Key;
 
+    /// Decide whether to pick a key.
     fn pick(&self, stats: &Arc<Statistics>, key: &Self::Key) -> bool;
 }
 
+/// The eviction picker for the disk cache.
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
+    /// Init the eviction picker with information.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(unused_variables)]
     fn init(&mut self, regions: usize, region_size: usize) {}
 
+    /// Pick a region to evict.
+    ///
+    /// `pick` can return `None` if no region can be picked based on its rules, and the next picker will be used.
+    ///
+    /// If no picker picks a region, the disk cache will pick randomly pick one.
     fn pick(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId>;
 
+    /// Notify the picker that a region is ready to pick.
     fn on_region_evictable(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId);
 
+    /// Notify the picker that a region is evicted.
     fn on_region_evict(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>, region: RegionId);
 }
 

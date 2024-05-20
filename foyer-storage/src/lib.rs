@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! A disk cache engine that serves as the disk cache backend of `foyer`.
+
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![warn(missing_docs)]
 
 mod compress;
 mod device;
@@ -33,5 +36,5 @@ pub mod test_utils;
 
 use std::sync::atomic::AtomicU64;
 
-pub type Sequence = u64;
-pub type AtomicSequence = AtomicU64;
+type Sequence = u64;
+type AtomicSequence = AtomicU64;

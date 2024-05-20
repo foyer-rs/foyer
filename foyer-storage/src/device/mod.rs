@@ -36,7 +36,9 @@ pub type RegionId = u32;
 
 pub type IoBuffer = allocator_api2::vec::Vec<u8, &'static AlignedAllocator<ALIGN>>;
 
+/// Options for the device.
 pub trait DeviceOptions: Send + Sync + 'static + Debug + Clone {
+    /// Verify the correctness of the options.
     fn verify(&self) -> Result<()>;
 }
 
@@ -44,6 +46,7 @@ pub trait DeviceOptions: Send + Sync + 'static + Debug + Clone {
 ///
 /// Both i/o block and i/o buffer must be aligned to 4K.
 pub trait Device: Send + Sync + 'static + Sized + Clone {
+    /// Options for the device.
     type Options: DeviceOptions;
 
     /// The capacity of the device, must be 4K aligned.
@@ -52,24 +55,31 @@ pub trait Device: Send + Sync + 'static + Sized + Clone {
     /// The region size of the device, must be 4K aligned.
     fn region_size(&self) -> usize;
 
+    /// Open the device with the given options.
     #[must_use]
     fn open(options: Self::Options) -> impl Future<Output = Result<Self>> + Send;
 
+    /// Write API for the device.
     #[must_use]
     fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> impl Future<Output = Result<()>> + Send;
 
+    /// Read API for the device.
     #[must_use]
     fn read(&self, region: RegionId, offset: u64, len: usize) -> impl Future<Output = Result<IoBuffer>> + Send;
 
+    /// Flush the device, make sure all modifications are persisted safely on the device.
     #[must_use]
     fn flush(&self, region: Option<RegionId>) -> impl Future<Output = Result<()>> + Send;
 }
 
+/// Device extend interfaces.
 pub trait DeviceExt: Device {
+    /// Get the align size of the device.
     fn align(&self) -> usize {
         ALIGN
     }
 
+    /// Get the region count of the device.
     fn regions(&self) -> usize {
         self.capacity() / self.region_size()
     }

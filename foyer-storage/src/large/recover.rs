@@ -38,6 +38,7 @@ use crate::device::{Device, DeviceExt, RegionId};
 use crate::region::{Region, RegionManager};
 use crate::tombstone::Tombstone;
 
+/// The recover mode of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoverMode {
     /// Do not recover disk cache.

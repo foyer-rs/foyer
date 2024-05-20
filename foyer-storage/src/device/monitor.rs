@@ -27,14 +27,20 @@ use crate::{error::Result, Device, DeviceExt, DeviceOptions, DirectFileDevice};
 
 use super::{IoBuffer, RegionId};
 
+/// The statistics information of the device.
 #[derive(Debug, Default)]
 pub struct DeviceStats {
+    /// The read io count of the device.
     pub read_ios: AtomicUsize,
+    /// The read bytes of the device.
     pub read_bytes: AtomicUsize,
 
+    /// The write io count of the device.
     pub write_ios: AtomicUsize,
+    /// The write bytes of the device.
     pub write_bytes: AtomicUsize,
 
+    /// The flush io count of the device.
     pub flush_ios: AtomicUsize,
 }
 

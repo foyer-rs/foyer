@@ -52,14 +52,18 @@ use runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig};
 
 use crate::error::Result;
 
+/// The configurations for the disk cache.
 pub enum StoreConfig<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    /// The configurations for the no-op disk cache.
     Noop,
+    /// The configurations for the disk cache with direct fs device.
     DirectFs(GenericStoreConfig<K, V, S, DirectFsDevice>),
+    /// The configurations for the disk cache with direct fs device and a dedecated runtime.
     RuntimeDirectFs(RuntimeStoreConfig<GenericStore<K, V, S, DirectFsDevice>>),
 }
 
@@ -78,14 +82,18 @@ where
     }
 }
 
+/// The disk cache engine that serves as the storage backend of `foyer`.
 pub enum Store<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    /// No-op disk cache.
     Noop(NoopStore<K, V, S>),
+    /// Disk cache with direct fs device.
     DirectFs(GenericStore<K, V, S, DirectFsDevice>),
+    /// Disk cache with direct fs device and a dedecated runtime.
     RuntimeDirectFs(Runtime<GenericStore<K, V, S, DirectFsDevice>>),
 }
 
@@ -263,9 +271,12 @@ where
     }
 }
 
+/// The configurations for the device.
 #[derive(Debug, Clone)]
 pub enum DeviceConfig {
+    /// No device.
     None,
+    /// The configurations for the driect fs device.
     DirectFs(DirectFsDeviceOptions),
 }
 
@@ -275,6 +286,7 @@ impl From<DirectFsDeviceOptions> for DeviceConfig {
     }
 }
 
+/// The builder of the disk cache.
 pub struct StoreBuilder<K, V, S = RandomState>
 where
     K: StorageKey,

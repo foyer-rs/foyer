@@ -26,13 +26,18 @@ use std::{
     sync::Arc,
 };
 
+/// Options for the direct file device.
 #[derive(Debug, Clone)]
 pub struct DirectFileDeviceOptions {
+    /// Path of the direct file device.
     pub path: PathBuf,
+    /// Capacity of the direct file device.
     pub capacity: usize,
+    /// Region size of the direct file device.
     pub region_size: usize,
 }
 
+/// A device that uses a single direct i/o file.
 #[derive(Debug, Clone)]
 pub struct DirectFileDevice {
     file: Arc<File>,
@@ -68,10 +73,11 @@ impl DeviceOptions for DirectFileDeviceOptions {
 
 impl DirectFileDevice {
     #[cfg(target_os = "linux")]
-    pub const O_DIRECT: i32 = 0x4000;
+    const O_DIRECT: i32 = 0x4000;
 }
 
 impl DirectFileDevice {
+    /// Positioned write API for the direct file device.
     pub async fn pwrite(&self, mut buf: IoBuffer, offset: u64) -> Result<()> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -104,6 +110,7 @@ impl DirectFileDevice {
         .await
     }
 
+    /// Positioned read API for the direct file device.
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
         bits::assert_aligned(self.align() as u64, offset);
 

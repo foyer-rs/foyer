@@ -20,7 +20,7 @@ use std::{path::Path, sync::Arc};
 use ahash::RandomState;
 use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 use foyer_storage::{
-    test_utils::JudgeRecorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, Storage, StoreBuilder,
+    test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, Storage, StoreBuilder,
 };
 
 const KB: usize = 1024;
@@ -32,7 +32,7 @@ const LOOPS: usize = 10;
 async fn test_store(
     memory: Cache<u64, Vec<u8>>,
     builder: impl Fn(&Cache<u64, Vec<u8>>) -> StoreBuilder<u64, Vec<u8>, RandomState>,
-    recorder: Arc<JudgeRecorder<u64>>,
+    recorder: Arc<Recorder<u64>>,
 ) {
     let store = builder(&memory).build().await.unwrap();
 
@@ -126,7 +126,7 @@ async fn test_store(
 fn basic(
     memory: &Cache<u64, Vec<u8>>,
     path: impl AsRef<Path>,
-    recorder: &Arc<JudgeRecorder<u64>>,
+    recorder: &Arc<Recorder<u64>>,
 ) -> StoreBuilder<u64, Vec<u8>> {
     StoreBuilder::new(memory.clone())
         .with_device_config(
@@ -145,7 +145,7 @@ fn basic(
 #[tokio::test]
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(JudgeRecorder::default());
+    let recorder = Arc::new(Recorder::default());
     let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r);
@@ -155,7 +155,7 @@ async fn test_direct_fs_store() {
 #[tokio::test]
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(JudgeRecorder::default());
+    let recorder = Arc::new(Recorder::default());
     let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r).with_compression(Compression::Zstd);
@@ -165,7 +165,7 @@ async fn test_direct_fs_store_zstd() {
 #[tokio::test]
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(JudgeRecorder::default());
+    let recorder = Arc::new(Recorder::default());
     let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4);
@@ -175,7 +175,7 @@ async fn test_direct_fs_store_lz4() {
 #[tokio::test]
 async fn test_runtime_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(JudgeRecorder::default());
+    let recorder = Arc::new(Recorder::default());
     let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>>| {

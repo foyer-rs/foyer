@@ -14,6 +14,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The statistics of the disk cache, which is used by the pickers.
 #[derive(Debug, Default)]
 pub struct Statistics {
     pub(crate) cache_write_bytes: AtomicUsize,
@@ -21,10 +22,12 @@ pub struct Statistics {
 }
 
 impl Statistics {
+    /// Get the disk cache written bytes.
     pub fn cache_write_bytes(&self) -> usize {
         self.cache_write_bytes.load(Ordering::Relaxed)
     }
 
+    /// Get the disk cache read bytes.
     pub fn cache_read_bytes(&self) -> usize {
         self.cache_read_bytes.load(Ordering::Relaxed)
     }
