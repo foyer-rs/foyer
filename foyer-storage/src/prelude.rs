@@ -26,7 +26,7 @@ pub use crate::{
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     statistics::Statistics,
-    storage::{EnqueueFuture, Storage},
+    storage::{EnqueueHandle, Storage},
     store::{
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
         DeviceConfig, Store, StoreBuilder, StoreConfig,

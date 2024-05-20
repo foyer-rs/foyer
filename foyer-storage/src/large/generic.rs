@@ -49,7 +49,7 @@ use crate::{
     region::RegionManager,
     serde::EntryDeserializer,
     statistics::Statistics,
-    storage::{EnqueueFuture, Storage},
+    storage::{EnqueueHandle, Storage},
     tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     AtomicSequence,
 };
@@ -305,11 +305,11 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>) -> EnqueueHandle {
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueFuture::new(rx);
+        let future = EnqueueHandle::new(rx);
 
         let this = self.clone();
 
@@ -388,7 +388,7 @@ where
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -396,7 +396,7 @@ where
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueFuture::new(rx);
+        let future = EnqueueHandle::new(rx);
 
         if !self.inner.active.load(Ordering::Relaxed) {
             tx.send(Err(anyhow::anyhow!("cannot delete entry after closed").into()))
@@ -450,7 +450,7 @@ where
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueFuture::new(rx);
+        let future = EnqueueHandle::new(rx);
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(
             Submission::Tombstone {
                 tombstone: Tombstone { hash: 0, sequence },
@@ -496,7 +496,7 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
         self.enqueue(entry)
     }
 
@@ -508,7 +508,7 @@ where
         self.load(key)
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

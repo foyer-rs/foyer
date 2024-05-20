@@ -30,18 +30,18 @@ use tokio::sync::oneshot;
 use crate::{device::monitor::DeviceStats, error::Result};
 
 #[pin_project]
-pub struct EnqueueFuture {
+pub struct EnqueueHandle {
     #[pin]
     rx: oneshot::Receiver<Result<bool>>,
 }
 
-impl EnqueueFuture {
+impl EnqueueHandle {
     pub(crate) fn new(rx: oneshot::Receiver<Result<bool>>) -> Self {
         Self { rx }
     }
 }
 
-impl Future for EnqueueFuture {
+impl Future for EnqueueHandle {
     type Output = Result<bool>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -64,7 +64,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture;
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle;
 
     #[must_use]
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -72,7 +72,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized;

@@ -31,7 +31,7 @@ use foyer_memory::{Cache, CacheEntry};
 
 use super::{
     device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-    storage::{EnqueueFuture, Storage},
+    storage::{EnqueueHandle, Storage},
     tombstone::TombstoneLogConfig,
 };
 
@@ -146,7 +146,7 @@ where
         }
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> super::storage::EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> super::storage::EnqueueHandle {
         match self {
             Store::Noop(store) => store.enqueue(entry),
             Store::DirectFs(store) => store.enqueue(entry),
@@ -166,7 +166,7 @@ where
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

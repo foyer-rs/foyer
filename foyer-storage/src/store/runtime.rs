@@ -21,7 +21,7 @@ use futures::{Future, FutureExt};
 use crate::device::monitor::DeviceStats;
 use crate::error::Result;
 
-use crate::storage::{EnqueueFuture, Storage};
+use crate::storage::{EnqueueHandle, Storage};
 
 pub struct RuntimeConfigBuilder {
     worker_threads: Option<usize>,
@@ -139,7 +139,7 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueFuture {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
         self.store.enqueue(entry)
     }
 
@@ -152,7 +152,7 @@ where
         self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueFuture
+    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
