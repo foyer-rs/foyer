@@ -710,17 +710,17 @@ where
     V: Value,
     S: HashBuilder,
 {
-    pub fn fetch<F, FU, ER>(&self, key: K, f: F) -> Fetch<K, V, ER, S>
+    pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
         ER: Send + 'static,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch(key, f)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch(key, f)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch(key, f)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, f)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch(key, fetch)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch(key, fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
         }
     }
 }

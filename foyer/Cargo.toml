@@ -18,6 +18,12 @@ foyer-common = { version = "0.6", path = "../foyer-common" }
 foyer-intrusive = { version = "0.5", path = "../foyer-intrusive" }
 foyer-memory = { version = "0.3", path = "../foyer-memory" }
 foyer-storage = { version = "0.7", path = "../foyer-storage" }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+test-log = { workspace = true }
+tokio = { workspace = true }
 
 [features]
 default = []

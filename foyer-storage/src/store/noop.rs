@@ -17,6 +17,7 @@ use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::Phanto
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
+
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
@@ -71,9 +72,13 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
+    fn pick(&self, _: &Self::Key) -> bool {
+        false
+    }
+
+    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
         let (tx, rx) = oneshot::channel();
-        let _ = tx.send(Ok(false));
+        let _ = tx.send(Ok(force)); // always return `force` here to keep consistency
         EnqueueHandle::new(rx)
     }
 
@@ -113,6 +118,10 @@ where
     fn stats(&self) -> Arc<DeviceStats> {
         Arc::default()
     }
+
+    async fn wait(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -131,7 +140,7 @@ mod tests {
     async fn test_none_store() {
         let memory = cache_for_test();
         let store = NoopStore::open(()).await.unwrap();
-        assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384])).await.unwrap());
+        assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384]), false).await.unwrap());
         assert!(store.load(&0).await.unwrap().is_none());
         store.delete(&0).await.unwrap();
         store.destroy().await.unwrap();

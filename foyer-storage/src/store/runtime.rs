@@ -139,8 +139,12 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>) -> EnqueueHandle {
-        self.store.enqueue(entry)
+    fn pick(&self, key: &Self::Key) -> bool {
+        self.store.pick(key)
+    }
+
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
+        self.store.enqueue(entry, force)
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -174,6 +178,10 @@ where
 
     fn stats(&self) -> Arc<DeviceStats> {
         self.store.stats()
+    }
+
+    async fn wait(&self) -> Result<()> {
+        self.store.wait().await
     }
 }
 
@@ -250,7 +258,7 @@ mod tests {
         let config = config_for_test(&memory, dir);
         let store = background.block_on(async move { GenericStore::open(config).await.unwrap() });
 
-        let fs = es.iter().cloned().map(|e| store.enqueue(e)).collect_vec();
+        let fs = es.iter().cloned().map(|e| store.enqueue(e, false)).collect_vec();
         background.block_on(async { try_join_all(fs).await.unwrap() });
 
         let mut fs = vec![];
