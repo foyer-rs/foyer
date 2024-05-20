@@ -29,13 +29,18 @@ use crate::{
     error::{Error, Result},
 };
 
+/// Options for the direct fs device.
 #[derive(Debug, Clone)]
 pub struct DirectFsDeviceOptions {
+    /// Directory of the direct fs device.
     pub dir: PathBuf,
+    /// Capacity of the direct fs device.
     pub capacity: usize,
+    /// Direct i/o file size of the direct fs device.
     pub file_size: usize,
 }
 
+/// A device that uses direct i/o files in a directory of a file system.
 #[derive(Debug, Clone)]
 pub struct DirectFsDevice {
     inner: Arc<DirectFsDeviceInner>,
@@ -75,10 +80,10 @@ impl DeviceOptions for DirectFsDeviceOptions {
 }
 
 impl DirectFsDevice {
-    pub const PREFIX: &'static str = "foyer-storage-direct-fs-";
+    const PREFIX: &'static str = "foyer-storage-direct-fs-";
 
     #[cfg(target_os = "linux")]
-    pub const O_DIRECT: i32 = 0x4000;
+    const O_DIRECT: i32 = 0x4000;
 
     fn filename(region: RegionId) -> String {
         format!("{}{:08}", Self::PREFIX, region)

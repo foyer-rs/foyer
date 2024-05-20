@@ -18,14 +18,19 @@ use anyhow::anyhow;
 
 const NOT_SUPPORT: &str = "compression algorithm not support";
 
+/// The compression algorithm of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
+    /// No compression endabled.
     None,
+    /// Use zstd compression.
     Zstd,
+    /// Use lz4 compression.
     Lz4,
 }
 
 impl Compression {
+    /// Get the u8 that repersent the compression algorithm.
     pub fn to_u8(&self) -> u8 {
         match self {
             Self::None => 0,
@@ -34,6 +39,7 @@ impl Compression {
         }
     }
 
+    /// Get the str that repersent the compression algorithm.
     pub fn to_str(&self) -> &str {
         match self {
             Self::None => "none",

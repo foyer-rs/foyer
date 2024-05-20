@@ -29,6 +29,7 @@ use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 use super::{AdmissionPicker, EvictionPicker, ReinsertionPicker};
 
+/// A picker that always returns `true`.
 pub struct AdmitAllPicker<K>(PhantomData<K>)
 where
     K: StorageKey;
@@ -73,6 +74,7 @@ where
     }
 }
 
+/// A picker that always returns `false`.
 pub struct RejectAllPicker<K>(PhantomData<K>)
 where
     K: Send + Sync + 'static;
@@ -117,6 +119,7 @@ where
     }
 }
 
+/// A picker that picks based on the disk statistics and the given rate limit.
 pub struct RateLimitPicker<K>
 where
     K: StorageKey,
@@ -143,6 +146,7 @@ impl<K> RateLimitPicker<K>
 where
     K: StorageKey,
 {
+    /// Create a rate limit picker with the given rate limit.
     pub fn new(rate: usize) -> Self {
         Self {
             inner: RatedTicket::new(rate as f64),
@@ -189,6 +193,7 @@ where
     }
 }
 
+/// A picker that pick region to eviciton with a FIFO behaviour.
 #[derive(Debug, Default)]
 pub struct FifoPicker {
     queue: VecDeque<RegionId>,

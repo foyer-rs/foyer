@@ -23,6 +23,7 @@ use crate::error::Result;
 
 use crate::storage::{EnqueueHandle, Storage};
 
+/// The builder of the disk cache with a dedicated runtime.
 pub struct RuntimeConfigBuilder {
     worker_threads: Option<usize>,
     thread_name: String,
@@ -35,6 +36,7 @@ impl Default for RuntimeConfigBuilder {
 }
 
 impl RuntimeConfigBuilder {
+    /// Create a new builder of the disk cache with a dedicated runtime.
     pub fn new() -> Self {
         Self {
             worker_threads: None,
@@ -42,16 +44,21 @@ impl RuntimeConfigBuilder {
         }
     }
 
+    /// Set the worker threads of the dedicated runtime.
+    ///
+    /// If the worker threads is not set, the dedicated runtime will use the CPU core count by default.
     pub fn with_worker_threads(mut self, worker_threads: usize) -> Self {
         self.worker_threads = Some(worker_threads);
         self
     }
 
+    /// Set the thread name of the dedicated runtime.
     pub fn with_thread_name(mut self, thread_name: &str) -> Self {
         self.thread_name = thread_name.to_string();
         self
     }
 
+    /// Build the config of the disk cache with a dedicated runtime.
     pub fn build(self) -> RuntimeConfig {
         RuntimeConfig {
             worker_threads: self.worker_threads,
@@ -60,6 +67,7 @@ impl RuntimeConfigBuilder {
     }
 }
 
+/// The dedicated runtime config.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     worker_threads: Option<usize>,

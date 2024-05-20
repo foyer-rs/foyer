@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! Test utils for the `foyer-storage` crate.
+
 use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use foyer_common::code::StorageKey;
@@ -22,6 +24,7 @@ use crate::{
     statistics::Statistics,
 };
 
+/// A picker that only admits key from the given list.
 pub struct BiasedPicker<K, Q> {
     admits: HashSet<Q>,
     _marker: PhantomData<K>,
@@ -37,6 +40,7 @@ where
 }
 
 impl<K, Q> BiasedPicker<K, Q> {
+    /// Create a biased picker with the geiven admit list.
     pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
     where
         Q: Hash + Eq,
@@ -72,30 +76,38 @@ where
     }
 }
 
+/// The record entry for admission and eviction.
 #[derive(Debug, Clone)]
 pub enum Record<K> {
+    /// Admission record entry.
     Admit(K),
+    /// Eviction record entry.
     Evict(K),
 }
 
-pub struct JudgeRecorder<K> {
+/// A recorder that records the cache entry admission and eviciton of a disk cache.
+///
+/// [`Recorder`] should be used as both the admission picker and the reisnertion picker to record.
+pub struct Recorder<K> {
     records: Mutex<Vec<Record<K>>>,
 }
 
-impl<K> Debug for JudgeRecorder<K> {
+impl<K> Debug for Recorder<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JudgeRecorder").finish()
     }
 }
 
-impl<K> JudgeRecorder<K>
+impl<K> Recorder<K>
 where
     K: StorageKey + Clone,
 {
+    /// Dump the record entries of the recorder.
     pub fn dump(&self) -> Vec<Record<K>> {
         self.records.lock().clone()
     }
 
+    /// Get the hash set of the remaining key at the moment.
     pub fn remains(&self) -> HashSet<K> {
         let records = self.dump();
         let mut res = HashSet::default();
@@ -113,7 +125,7 @@ where
     }
 }
 
-impl<K> Default for JudgeRecorder<K>
+impl<K> Default for Recorder<K>
 where
     K: StorageKey,
 {
@@ -124,7 +136,7 @@ where
     }
 }
 
-impl<K> AdmissionPicker for JudgeRecorder<K>
+impl<K> AdmissionPicker for Recorder<K>
 where
     K: StorageKey + Clone,
 {
@@ -136,7 +148,7 @@ where
     }
 }
 
-impl<K> ReinsertionPicker for JudgeRecorder<K>
+impl<K> ReinsertionPicker for Recorder<K>
 where
     K: StorageKey + Clone,
 {
