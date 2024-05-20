@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! An intrusive double linked list implementation.
+
 use std::ptr::NonNull;
 
 use crate::core::{
@@ -19,6 +21,7 @@ use crate::core::{
     pointer::Pointer,
 };
 
+/// The link for the intrusive double linked list.
 #[derive(Debug, Default)]
 pub struct DlistLink {
     prev: Option<NonNull<DlistLink>>,
@@ -27,14 +30,17 @@ pub struct DlistLink {
 }
 
 impl DlistLink {
+    /// Get the `NonNull` pointer of the link.
     pub fn raw(&self) -> NonNull<DlistLink> {
         unsafe { NonNull::new_unchecked(self as *const _ as *mut _) }
     }
 
+    /// Get the pointer of the prev link.
     pub fn prev(&self) -> Option<NonNull<DlistLink>> {
         self.prev
     }
 
+    /// Get the pointer of the next link.
     pub fn next(&self) -> Option<NonNull<DlistLink>> {
         self.next
     }
@@ -49,6 +55,7 @@ impl Link for DlistLink {
     }
 }
 
+/// Intrusive double linked list.
 #[derive(Debug)]
 pub struct Dlist<A>
 where
@@ -80,6 +87,7 @@ impl<A> Dlist<A>
 where
     A: Adapter<Link = DlistLink>,
 {
+    /// Create a new intrusive double linked list.
     pub fn new() -> Self {
         Self {
             head: None,
@@ -90,6 +98,7 @@ where
         }
     }
 
+    /// Get the reference of the first item of the intrusive double linked list.
     pub fn front(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
@@ -98,6 +107,7 @@ where
         }
     }
 
+    /// Get the reference of the last item of the intrusive double linked list.
     pub fn back(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
@@ -106,6 +116,7 @@ where
         }
     }
 
+    /// Get the mutable reference of the first item of the intrusive double linked list.
     pub fn front_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.head
@@ -114,6 +125,7 @@ where
         }
     }
 
+    /// Get the mutable reference of the last item of the intrusive double linked list.
     pub fn back_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         unsafe {
             self.tail
@@ -122,26 +134,31 @@ where
         }
     }
 
+    /// Push an item to the first position of the intrusive double linked list.
     pub fn push_front(&mut self, ptr: A::Pointer) {
         self.iter_mut().insert_after(ptr);
     }
 
+    /// Push an item to the last position of the intrusive double linked list.
     pub fn push_back(&mut self, ptr: A::Pointer) {
         self.iter_mut().insert_before(ptr);
     }
 
+    /// Pop an item from the first position of the intrusive double linked list.
     pub fn pop_front(&mut self) -> Option<A::Pointer> {
         let mut iter = self.iter_mut();
         iter.next();
         iter.remove()
     }
 
+    /// Pop an item from the last position of the intrusive double linked list.
     pub fn pop_back(&mut self) -> Option<A::Pointer> {
         let mut iter = self.iter_mut();
         iter.prev();
         iter.remove()
     }
 
+    /// Get the item reference iterator of the intrusive double linked list.
     pub fn iter(&self) -> DlistIter<'_, A> {
         DlistIter {
             link: None,
@@ -149,6 +166,7 @@ where
         }
     }
 
+    /// Get the item mutable reference iterator of the intrusive double linked list.
     pub fn iter_mut(&mut self) -> DlistIterMut<'_, A> {
         DlistIterMut {
             link: None,
@@ -156,10 +174,12 @@ where
         }
     }
 
+    /// Get the length of the intrusive double linked list.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Check if the intrusive double linked list is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -253,6 +273,7 @@ where
     }
 }
 
+/// Item reference iterator of the intrusive double linked list.
 pub struct DlistIter<'a, A>
 where
     A: Adapter<Link = DlistLink>,
@@ -265,10 +286,12 @@ impl<'a, A> DlistIter<'a, A>
 where
     A: Adapter<Link = DlistLink>,
 {
+    /// Check if the iter is in a valid position.
     pub fn is_valid(&self) -> bool {
         self.link.is_some()
     }
 
+    /// Get the item of the current position.
     pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
@@ -310,15 +333,18 @@ where
         self.link = self.dlist.tail;
     }
 
+    /// Check if the iterator is in the first position of the intrusive double linked list.
     pub fn is_front(&self) -> bool {
         self.link == self.dlist.head
     }
 
+    /// Check if the iterator is in the last position of the intrusive double linked list.
     pub fn is_back(&self) -> bool {
         self.link == self.dlist.tail
     }
 }
 
+/// Item mutable reference iterator of the intrusive double linked list.
 pub struct DlistIterMut<'a, A>
 where
     A: Adapter<Link = DlistLink>,
@@ -331,15 +357,18 @@ impl<'a, A> DlistIterMut<'a, A>
 where
     A: Adapter<Link = DlistLink>,
 {
+    /// Check if the iter is in a valid position.
     pub fn is_valid(&self) -> bool {
         self.link.is_some()
     }
 
+    /// Get the item reference of the current position.
     pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
     }
 
+    /// Get the item mutable reference of the current position.
     pub fn get_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2item(link).as_mut() })
@@ -502,10 +531,12 @@ where
         link.as_mut().next = next;
     }
 
+    /// Check if the iterator is in the first position of the intrusive double linked list.
     pub fn is_front(&self) -> bool {
         self.link == self.dlist.head
     }
 
+    /// Check if the iterator is in the last position of the intrusive double linked list.
     pub fn is_back(&self) -> bool {
         self.link == self.dlist.tail
     }

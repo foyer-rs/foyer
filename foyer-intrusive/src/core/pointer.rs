@@ -26,12 +26,17 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! Pointer trait and utils for the intrusive data structure.
+
 use std::{fmt::Debug, pin::Pin, ptr::NonNull, rc::Rc, sync::Arc};
 
+/// Pointer trait and utils for the intrusive data structure.
+///
 /// # Safety
 ///
 /// Pointer operations MUST be valid.
 pub unsafe trait Pointer {
+    /// Item type for the pointer.
     type Item: ?Sized;
 
     /// # Safety
@@ -39,8 +44,10 @@ pub unsafe trait Pointer {
     /// Pointer operations MUST be valid.
     unsafe fn from_ptr(item: *const Self::Item) -> Self;
 
+    /// Consume the pointer and return the raw pointer of the item.
     fn into_ptr(self) -> *const Self::Item;
 
+    /// Convert the pointer into the raw pointer of the item.
     fn as_ptr(&self) -> *const Self::Item;
 }
 
@@ -48,8 +55,10 @@ pub unsafe trait Pointer {
 ///
 /// Pointer operations MUST be valid.
 pub unsafe trait DowngradablePointerOps: Pointer {
+    /// Weak pointer type for the pointer.
     type WeakPointer;
 
+    /// Downgrade the pointer to a weak pointer.
     fn downgrade(&self) -> Self::WeakPointer;
 }
 

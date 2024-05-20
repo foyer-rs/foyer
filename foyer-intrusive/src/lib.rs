@@ -14,6 +14,9 @@
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #![allow(clippy::new_without_default)]
+#![warn(missing_docs)]
+
+//! Intrusive data structures and utils for foyer.
 
 pub use memoffset::offset_of;
 
