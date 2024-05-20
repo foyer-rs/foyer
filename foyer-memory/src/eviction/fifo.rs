@@ -88,6 +88,7 @@ where
     }
 }
 
+/// Fifo eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FifoConfig {}
 

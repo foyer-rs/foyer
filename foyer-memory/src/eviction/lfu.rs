@@ -28,6 +28,7 @@ use crate::{
     CacheContext,
 };
 
+/// w-TinyLFU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LfuConfig {
     /// `window` capacity ratio of the total cache capacity.
@@ -43,7 +44,14 @@ pub struct LfuConfig {
     /// Must guarantee `window_capacity_ratio + protected_capacity_ratio < 1`.
     pub protected_capacity_ratio: f64,
 
+    /// Error of the count-min sketch.
+    ///
+    /// See [`CMSketchU16::new`].
     pub cmsketch_eps: f64,
+
+    /// Confidence of the count-min sketch.
+    ///
+    /// See [`CMSketchU16::new`].
     pub cmsketch_confidence: f64,
 }
 

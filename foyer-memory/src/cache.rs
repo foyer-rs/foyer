@@ -60,6 +60,7 @@ pub type S3FifoCacheEntry<K, V, S = RandomState> =
 pub type S3FifoFetch<K, V, ER, S = RandomState> =
     GenericFetch<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S, ER>;
 
+/// A cached entry holder of the in-memory cache.
 #[derive(Debug)]
 pub enum CacheEntry<K, V, S = RandomState>
 where
@@ -67,9 +68,13 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// A cached entry holder of the in-memory FIFO cache.
     Fifo(FifoCacheEntry<K, V, S>),
+    /// A cached entry holder of the in-memory LRU cache.
     Lru(LruCacheEntry<K, V, S>),
+    /// A cached entry holder of the in-memory LFU cache.
     Lfu(LfuCacheEntry<K, V, S>),
+    /// A cached entry holder of the in-memory S3FIFO cache.
     S3Fifo(S3FifoCacheEntry<K, V, S>),
 }
 
@@ -157,6 +162,7 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Key hash of the cached entry.
     pub fn hash(&self) -> u64 {
         match self {
             CacheEntry::Fifo(entry) => entry.hash(),
@@ -166,6 +172,7 @@ where
         }
     }
 
+    /// Key of the cached entry.
     pub fn key(&self) -> &K {
         match self {
             CacheEntry::Fifo(entry) => entry.key(),
@@ -175,6 +182,7 @@ where
         }
     }
 
+    /// Value of the cached entry.
     pub fn value(&self) -> &V {
         match self {
             CacheEntry::Fifo(entry) => entry.value(),
@@ -184,6 +192,7 @@ where
         }
     }
 
+    /// Context of the cached entry.
     pub fn context(&self) -> CacheContext {
         match self {
             CacheEntry::Fifo(entry) => entry.context().clone().into(),
@@ -193,6 +202,7 @@ where
         }
     }
 
+    /// Weight of the cached entry.
     pub fn weight(&self) -> usize {
         match self {
             CacheEntry::Fifo(entry) => entry.weight(),
@@ -202,6 +212,7 @@ where
         }
     }
 
+    /// External reference count of the cached entry.
     pub fn refs(&self) -> usize {
         match self {
             CacheEntry::Fifo(entry) => entry.refs(),
@@ -211,6 +222,7 @@ where
         }
     }
 
+    /// If the cached entry is updated and outdated.
     pub fn is_outdated(&self) -> bool {
         match self {
             CacheEntry::Fifo(entry) => entry.is_outdated(),
@@ -221,11 +233,16 @@ where
     }
 }
 
+/// Eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EvictionConfig {
+    /// FIFO eviction algorithm config.
     Fifo(FifoConfig),
+    /// LRU eviction algorithm config.
     Lru(LruConfig),
+    /// LFU eviction algorithm config.
     Lfu(LfuConfig),
+    /// S3FIFO eviction algorithm config.
     S3Fifo(S3FifoConfig),
 }
 
@@ -253,6 +270,7 @@ impl From<S3FifoConfig> for EvictionConfig {
     }
 }
 
+/// In-memory cache builder.
 pub struct CacheBuilder<K, V, S>
 where
     K: Key,
@@ -275,6 +293,7 @@ where
     K: Key,
     V: Value,
 {
+    /// Create a new in-memory cache builder.
     pub fn new(capacity: usize) -> Self {
         Self {
             name: "foyer".to_string(),
@@ -401,15 +420,20 @@ where
     }
 }
 
+/// In-memory cache with plug-and-play algorithms.
 pub enum Cache<K, V, S = RandomState>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
+    /// In-memory FIFO cache.
     Fifo(Arc<FifoCache<K, V, S>>),
+    /// In-memory LRU cache.
     Lru(Arc<LruCache<K, V, S>>),
+    /// In-memory LFU cache.
     Lfu(Arc<LfuCache<K, V, S>>),
+    /// In-memory S3FIFO cache.
     S3Fifo(Arc<S3FifoCache<K, V, S>>),
 }
 
@@ -451,6 +475,7 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Insert cache entry to the in-memory cache.
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
@@ -460,6 +485,7 @@ where
         }
     }
 
+    /// Insert cache entry with cache context to the in-memory cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
@@ -469,6 +495,11 @@ where
         }
     }
 
+    /// Temporarily insert cache entry to the in-memory cache.
+    ///
+    /// The entry will be removed as soon as the returned entry is dropped.
+    ///
+    /// The entry will become a normal entry after it is accessed.
     pub fn deposit(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit(key, value).into(),
@@ -478,6 +509,11 @@ where
         }
     }
 
+    /// Temporarily insert cache entry with cache context to the in-memory cache.
+    ///
+    /// The entry will be removed as soon as the returned entry is dropped.
+    ///
+    /// The entry will become a normal entry after it is accessed.
     pub fn deposit_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
@@ -487,6 +523,7 @@ where
         }
     }
 
+    /// Remove a cached entry with the given key from the in-memory cache.
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
@@ -500,6 +537,9 @@ where
         }
     }
 
+    /// Remove the first-to-evict entry from the in-memory cache.
+    ///
+    /// Note: The entry may be reinserted based on the eviction algorithm.
     pub fn pop(&self) -> Option<CacheEntry<K, V, S>> {
         match self {
             Cache::Fifo(cache) => cache.pop().map(CacheEntry::from),
@@ -509,6 +549,9 @@ where
         }
     }
 
+    /// Remove the estimated first-to-evict entry from the in-memory cache.
+    ///
+    /// Note: The entry may be reinserted based on the eviction algorithm.
     pub fn pop_corase(&self) -> Option<CacheEntry<K, V, S>> {
         match self {
             Cache::Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
@@ -518,6 +561,7 @@ where
         }
     }
 
+    /// Get cached entry with the given key from the in-memory cache.
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
@@ -531,6 +575,7 @@ where
         }
     }
 
+    /// Check if the in-memory cache contains a cached entry with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -544,6 +589,9 @@ where
         }
     }
 
+    /// Access the cached entry with the given key but don't return.
+    ///
+    /// Note: This method can be used to update the cache eviction information and order based on the algorithm.
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -557,6 +605,7 @@ where
         }
     }
 
+    /// Clear the in-memory cache.
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),
@@ -566,6 +615,7 @@ where
         }
     }
 
+    /// Get the capacity of the in-memory cache.
     pub fn capacity(&self) -> usize {
         match self {
             Cache::Fifo(cache) => cache.capacity(),
@@ -575,6 +625,7 @@ where
         }
     }
 
+    /// Get the usage of the in-memory cache.
     pub fn usage(&self) -> usize {
         match self {
             Cache::Fifo(cache) => cache.usage(),
@@ -584,6 +635,7 @@ where
         }
     }
 
+    /// Get the hash builder of the in-memory cache.
     pub fn hash_builder(&self) -> &S {
         match self {
             Cache::Fifo(cache) => cache.hash_builder(),
@@ -594,15 +646,20 @@ where
     }
 }
 
+/// A future that is used to get entry value from the remote storage for the in-memory cache.
 pub enum Fetch<K, V, ER, S = RandomState>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
+    /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
     Fifo(FifoFetch<K, V, ER, S>),
+    /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
     Lru(LruFetch<K, V, ER, S>),
+    /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
     Lfu(LfuFetch<K, V, ER, S>),
+    /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
     S3Fifo(S3FifoFetch<K, V, ER, S>),
 }
 
@@ -669,10 +726,14 @@ where
     }
 }
 
+/// The state of [`Fetch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchState {
+    /// Cache hit.
     Hit,
+    /// Cache miss, but wait in queue.
     Wait,
+    /// Cache miss, and there is no other waiters at the moment.
     Miss,
 }
 
@@ -682,6 +743,7 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Get the fetch state.
     pub fn state(&self) -> FetchState {
         match self {
             Fetch::Fifo(FifoFetch::Hit(_))
@@ -710,6 +772,11 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Get the cached entry with the given key from the in-memory cache.
+    ///
+    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
+    ///
+    /// The concurrent fetch requests will be deduplicated.
     pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,

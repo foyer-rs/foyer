@@ -120,10 +120,14 @@ where
     }
 }
 
+/// S3FIFO eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3FifoConfig {
+    /// Capacity ratio of the small S3FIFO queue.
     pub small_queue_capacity_ratio: f64,
+    /// Capacity ratio of the ghost S3FIFO queue.
     pub ghost_queue_capacity_ratio: f64,
+    /// Minimum access times when population entry from small queue to main queue.
     pub small_to_main_freq_threshold: u8,
 }
 
