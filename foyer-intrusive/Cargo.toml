@@ -11,8 +11,5 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bytes = "1"
-foyer-common = { version = "0.6", path = "../foyer-common" }
 itertools = "0.12"
 memoffset = "0.9"
-parking_lot = "0.12"
