@@ -745,7 +745,7 @@ where
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
-        ER: Send + 'static,
+        ER: Send + 'static + Debug,
     {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -772,6 +772,9 @@ where
                             Ok((value, context)) => (value, context),
                             Err(e) => {
                                 let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
+                                tracing::debug!(
+                                    "[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}"
+                                );
                                 shard.waiters.remove(&key);
                                 return Err(e);
                             }

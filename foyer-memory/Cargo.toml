@@ -23,6 +23,7 @@ libc = "0.2"
 parking_lot = "0.12"
 serde = { workspace = true }
 tokio = { workspace = true }
+tracing = "0.1"
 
 [dev-dependencies]
 anyhow = "1"
