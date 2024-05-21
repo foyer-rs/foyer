@@ -20,6 +20,7 @@ pub use crate::{
         monitor::DeviceStats,
         Device, DeviceExt, DeviceOptions,
     },
+    error::{Error, Result},
     large::recover::RecoverMode,
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RejectAllPicker},

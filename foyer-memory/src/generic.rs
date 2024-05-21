@@ -74,7 +74,7 @@ where
     capacity: usize,
     usage: Arc<AtomicUsize>,
 
-    waiters: HashMap<K, Vec<oneshot::Sender<Option<GenericCacheEntry<K, V, E, I, S>>>>>,
+    waiters: HashMap<K, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, S>>>>,
 
     state: Arc<CacheSharedState<E::Handle>>,
 }
@@ -417,8 +417,8 @@ where
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, S>),
-    Wait(oneshot::Receiver<Option<GenericCacheEntry<K, V, E, I, S>>>),
-    Miss(JoinHandle<std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>>),
+    Wait(oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>),
+    Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
 }
 
 impl<K, V, E, I, S, ER> Default for GenericFetch<K, V, E, I, S, ER>
@@ -445,13 +445,13 @@ where
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = std::result::Result<Option<GenericCacheEntry<K, V, E, I, S>>, ER>;
+    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match &mut *self {
             Self::Invalid => unreachable!(),
             Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
-                GenericFetch::Hit(entry) => Some(entry),
+                GenericFetch::Hit(entry) => entry,
                 _ => unreachable!(),
             })),
             Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
@@ -575,10 +575,10 @@ where
 
         if let Some(waiters) = waiters {
             for waiter in waiters {
-                let _ = waiter.send(Some(GenericCacheEntry {
+                let _ = waiter.send(GenericCacheEntry {
                     cache: self.clone(),
                     ptr: entry.ptr,
-                }));
+                });
             }
         }
 
@@ -744,7 +744,7 @@ where
     pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, fetch: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<Option<(V, CacheContext)>, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
@@ -768,29 +768,16 @@ where
                     let cache = self.clone();
                     let future = fetch();
                     let join = tokio::spawn(async move {
-                        let res = match future.await {
-                            Ok(res) => res,
+                        let (value, context) = match future.await {
+                            Ok((value, context)) => (value, context),
                             Err(e) => {
                                 let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
                                 shard.waiters.remove(&key);
                                 return Err(e);
                             }
                         };
-                        match res {
-                            Some((value, context)) => Ok(Some(cache.insert_with_context(key, value, context))),
-                            None => {
-                                if let Some(waiters) = cache.shards[hash as usize % cache.shards.len()]
-                                    .lock()
-                                    .waiters
-                                    .remove(&key)
-                                {
-                                    for waiter in waiters {
-                                        let _ = waiter.send(None);
-                                    }
-                                }
-                                Ok(None)
-                            }
-                        }
+                        let entry = cache.insert_with_context(key, value, context);
+                        Ok(entry)
                     });
                     GenericFetch::Miss(join)
                 }
@@ -1204,28 +1191,15 @@ mod tests {
 
         let fetch = || async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok::<_, anyhow::Error>(Some(("111".to_string(), CacheContext::default())))
+            Ok::<_, anyhow::Error>(("111".to_string(), CacheContext::default()))
         };
 
-        let e1 = cache.fetch(1, fetch).await.unwrap().unwrap();
-        let e2 = cache.fetch(1, fetch).await.unwrap().unwrap();
-        let e3 = cache.fetch(1, fetch).await.unwrap().unwrap();
+        let e1 = cache.fetch(1, fetch).await.unwrap();
+        let e2 = cache.fetch(1, fetch).await.unwrap();
+        let e3 = cache.fetch(1, fetch).await.unwrap();
 
         assert_eq!(e1.value(), "111");
         assert_eq!(e2.value(), "111");
         assert_eq!(e3.value(), "111");
-
-        let fetch = || async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok::<_, anyhow::Error>(None::<(String, _)>)
-        };
-
-        let e4 = cache.fetch(2, fetch).await.unwrap();
-        let e5 = cache.fetch(2, fetch).await.unwrap();
-        let e6 = cache.fetch(2, fetch).await.unwrap();
-
-        assert!(e4.is_none());
-        assert!(e5.is_none());
-        assert!(e6.is_none());
     }
 }
