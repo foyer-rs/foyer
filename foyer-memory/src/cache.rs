@@ -781,7 +781,7 @@ where
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
-        ER: Send + 'static,
+        ER: Send + 'static + Debug,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),

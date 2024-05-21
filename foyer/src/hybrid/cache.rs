@@ -189,6 +189,7 @@ where
                 self.metrics.hybrid_miss_duration.record(now.elapsed());
                 Ok(None)
             }
+            Err(ObtainFetchError::RecvError(_)) => Ok(None),
             Err(ObtainFetchError::Err(e)) => Err(e),
         }
     }
@@ -258,14 +259,16 @@ where
     }
 }
 
+#[derive(Debug)]
 enum ObtainFetchError {
     NotExist,
+    RecvError(oneshot::error::RecvError),
     Err(anyhow::Error),
 }
 
 impl From<oneshot::error::RecvError> for ObtainFetchError {
     fn from(e: oneshot::error::RecvError) -> Self {
-        Self::Err(e.into())
+        Self::RecvError(e)
     }
 }
 
