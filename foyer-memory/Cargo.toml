@@ -18,7 +18,7 @@ foyer-common = { version = "0.6", path = "../foyer-common" }
 foyer-intrusive = { version = "0.5", path = "../foyer-intrusive" }
 futures = "0.3"
 hashbrown = "0.14"
-itertools = "0.12"
+itertools = { workspace = true }
 libc = "0.2"
 parking_lot = "0.12"
 serde = { workspace = true }

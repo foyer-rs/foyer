@@ -16,7 +16,7 @@ bitmaps = "3"
 bytes = "1"
 cfg-if = "1"
 hashbrown = "0.14"
-itertools = "0.12"
+itertools = { workspace = true }
 libc = "0.2"
 nix = { version = "0.28", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }

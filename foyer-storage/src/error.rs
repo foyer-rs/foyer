@@ -14,23 +14,41 @@
 
 use std::fmt::{Debug, Display};
 
+/// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Encoding/decoding error with `bincode`.
     #[error("bincode error: {0}")]
     Bincode(#[from] bincode::Error),
     #[error(transparent)]
+    /// Multiple error list.
     Multiple(MultipleError),
+    /// Entry magic mismatch.
     #[error("magiac mismatch, expected: {expected}, get: {get}")]
-    MagicMismatch { expected: u32, get: u32 },
+    MagicMismatch {
+        /// Expected magic.
+        expected: u32,
+        /// Gotten magic.
+        get: u32,
+    },
+    /// Entry checksum mismatch.
     #[error("checksum mismatch, expected: {expected}, get: {get}")]
-    ChecksumMismatch { expected: u64, get: u64 },
+    ChecksumMismatch {
+        /// Expected checksum.
+        expected: u64,
+        /// Gotten checksum.
+        get: u64,
+    },
+    /// Other error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
 impl Error {
+    /// Combine multiple errors into one error.
     pub fn multiple(errs: Vec<Error>) -> Self {
         Self::Multiple(MultipleError(errs))
     }
@@ -53,4 +71,5 @@ impl Display for MultipleError {
     }
 }
 
+/// Disk cache result type.
 pub type Result<T> = core::result::Result<T, Error>;
