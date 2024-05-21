@@ -35,6 +35,7 @@ pub use storage::{
 pub use crate::hybrid::{
     builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
     cache::{HybridCache, HybridCacheEntry, HybridFetch},
+    writer::{HybridCacheStorageWriter, HybridCacheWriter},
 };
 
 /// In-memory cache.

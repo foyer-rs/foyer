@@ -23,6 +23,10 @@ use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
 use foyer_storage::{DeviceStats, Storage, Store};
 use tokio::sync::oneshot;
 
+use crate::HybridCacheWriter;
+
+use super::writer::HybridCacheStorageWriter;
+
 /// A cached entry holder of the hybrid cache.
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
 
@@ -111,48 +115,6 @@ where
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
         entry
-    }
-
-    /// Insert disk cache only.
-    pub fn insert_storage(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
-        let now = Instant::now();
-
-        let entry = self.memory.deposit(key, value);
-        self.storage.enqueue(entry.clone(), false);
-
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
-
-        entry
-    }
-
-    /// Insert disk cache only with cache context.
-    pub async fn insert_storage_with_fetch<F, FU>(&self, key: K, fetch: F) -> Option<HybridCacheEntry<K, V, S>>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
-    {
-        let now = Instant::now();
-
-        if !self.storage.pick(&key) {
-            return None;
-        }
-
-        let value = match fetch().await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("[hybrid cache]: error raised when fetching value during `insert_storage_with_fetch`, skip entry, error: {e}");
-                return None;
-            }
-        };
-
-        let entry = self.memory.deposit(key, value);
-        self.storage.enqueue(entry.clone(), true);
-
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
-
-        Some(entry)
     }
 
     /// Get cached entry with the given key from the hybrid cache.
@@ -276,6 +238,24 @@ where
     pub fn stats(&self) -> Arc<DeviceStats> {
         self.storage.stats()
     }
+
+    /// Create a new [`HybridCacheWriter`].
+    pub fn writer(&self, key: K) -> HybridCacheWriter<K, V, S> {
+        HybridCacheWriter::new(self.clone(), key)
+    }
+
+    /// Create a new [`HybridCacheStorageWriter`].
+    pub fn storage_writer(&self, key: K) -> HybridCacheStorageWriter<K, V, S> {
+        HybridCacheStorageWriter::new(self.clone(), key)
+    }
+
+    pub(crate) fn storage(&self) -> &Store<K, V, S> {
+        &self.storage
+    }
+
+    pub(crate) fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
+    }
 }
 
 enum ObtainFetchError {
@@ -320,7 +300,9 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::path::Path;
+    use std::{borrow::Borrow, fmt::Debug, hash::Hash, path::Path, sync::Arc};
+
+    use storage::test_utils::BiasedPicker;
 
     use crate::*;
 
@@ -343,6 +325,30 @@ mod tests {
             .unwrap()
     }
 
+    async fn open_with_biased_admission_picker<Q>(
+        dir: impl AsRef<Path>,
+        admits: impl IntoIterator<Item = Q>,
+    ) -> HybridCache<u64, Vec<u8>>
+    where
+        u64: Borrow<Q>,
+        Q: Hash + Eq + Send + Sync + 'static + Debug,
+    {
+        HybridCacheBuilder::new()
+            .with_name("test")
+            .memory(4 * MB)
+            .storage()
+            .with_device_config(
+                DirectFsDeviceOptionsBuilder::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB)
+                    .build(),
+            )
+            .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
+            .build()
+            .await
+            .unwrap()
+    }
+
     #[test_log::test(tokio::test)]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
@@ -354,10 +360,10 @@ mod tests {
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
-        let e3 = hybrid.insert_storage(3, vec![3; 7 * KB]);
+        let e3 = hybrid.storage_writer(3).insert(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
-            .insert_storage_with_fetch(4, || async move { Ok(vec![4; 7 * KB]) })
-            .await
+            .storage_writer(4)
+            .insert_with_context(vec![4; 7 * KB], CacheContext::default())
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -382,5 +388,34 @@ mod tests {
         assert!(hybrid.contains(&4));
         hybrid.clear().await.unwrap();
         assert!(!hybrid.contains(&4));
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_writer() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
+
+        let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
+        let e2 = hybrid
+            .writer(2)
+            .insert_with_context(vec![2; 7 * KB], CacheContext::default());
+
+        assert_eq!(e1.value(), &vec![1; 7 * KB]);
+        assert_eq!(e2.value(), &vec![2; 7 * KB]);
+
+        let e3 = hybrid.writer(3).storage().insert(vec![3; 7 * KB]).unwrap();
+        let e4 = hybrid
+            .writer(4)
+            .insert_with_context(vec![4; 7 * KB], CacheContext::default());
+
+        assert_eq!(e3.value(), &vec![3; 7 * KB]);
+        assert_eq!(e4.value(), &vec![4; 7 * KB]);
+
+        let r5 = hybrid.writer(5).storage().insert(vec![5; 7 * KB]);
+        assert!(r5.is_none());
+
+        let e5 = hybrid.writer(5).storage().force().insert(vec![5; 7 * KB]).unwrap();
+        assert_eq!(e5.value(), &vec![5; 7 * KB]);
     }
 }
