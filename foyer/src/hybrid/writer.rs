@@ -107,11 +107,12 @@ where
     }
 
     /// Force the disk cache to admit the writer.
-    pub fn force(&mut self) {
+    pub fn force(mut self) -> Self {
         self.picked = Some(true);
+        self
     }
 
-    fn insert_storage_inner(
+    fn insert_inner(
         mut self,
         value: V,
         context: Option<CacheContext>,
@@ -138,12 +139,12 @@ where
     }
 
     /// Insert the entry to the disk cache only.
-    pub fn insert_storage(self, value: V) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_storage_inner(value, None).map(|(e, _)| e)
+    pub fn insert(self, value: V) -> Option<HybridCacheEntry<K, V, S>> {
+        self.insert_inner(value, None).map(|(e, _)| e)
     }
 
     /// Insert the entry with context to the disk cache only.
-    pub fn insert_storage_with_context(self, value: V, context: CacheContext) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_storage_inner(value, Some(context)).map(|(e, _)| e)
+    pub fn insert_with_context(self, value: V, context: CacheContext) -> Option<HybridCacheEntry<K, V, S>> {
+        self.insert_inner(value, Some(context)).map(|(e, _)| e)
     }
 }

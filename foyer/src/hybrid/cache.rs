@@ -300,7 +300,9 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::path::Path;
+    use std::{borrow::Borrow, fmt::Debug, hash::Hash, path::Path, sync::Arc};
+
+    use storage::test_utils::BiasedPicker;
 
     use crate::*;
 
@@ -323,6 +325,30 @@ mod tests {
             .unwrap()
     }
 
+    async fn open_with_biased_admission_picker<Q>(
+        dir: impl AsRef<Path>,
+        admits: impl IntoIterator<Item = Q>,
+    ) -> HybridCache<u64, Vec<u8>>
+    where
+        u64: Borrow<Q>,
+        Q: Hash + Eq + Send + Sync + 'static + Debug,
+    {
+        HybridCacheBuilder::new()
+            .with_name("test")
+            .memory(4 * MB)
+            .storage()
+            .with_device_config(
+                DirectFsDeviceOptionsBuilder::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB)
+                    .build(),
+            )
+            .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
+            .build()
+            .await
+            .unwrap()
+    }
+
     #[test_log::test(tokio::test)]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
@@ -334,10 +360,10 @@ mod tests {
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
-        let e3 = hybrid.storage_writer(3).insert_storage(vec![3; 7 * KB]).unwrap();
+        let e3 = hybrid.storage_writer(3).insert(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
             .storage_writer(4)
-            .insert_storage_with_context(vec![4; 7 * KB], CacheContext::default())
+            .insert_with_context(vec![4; 7 * KB], CacheContext::default())
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -362,5 +388,34 @@ mod tests {
         assert!(hybrid.contains(&4));
         hybrid.clear().await.unwrap();
         assert!(!hybrid.contains(&4));
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_writer() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
+
+        let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
+        let e2 = hybrid
+            .writer(2)
+            .insert_with_context(vec![2; 7 * KB], CacheContext::default());
+
+        assert_eq!(e1.value(), &vec![1; 7 * KB]);
+        assert_eq!(e2.value(), &vec![2; 7 * KB]);
+
+        let e3 = hybrid.writer(3).storage().insert(vec![3; 7 * KB]).unwrap();
+        let e4 = hybrid
+            .writer(4)
+            .insert_with_context(vec![4; 7 * KB], CacheContext::default());
+
+        assert_eq!(e3.value(), &vec![3; 7 * KB]);
+        assert_eq!(e4.value(), &vec![4; 7 * KB]);
+
+        let r5 = hybrid.writer(5).storage().insert(vec![5; 7 * KB]);
+        assert!(r5.is_none());
+
+        let e5 = hybrid.writer(5).storage().force().insert(vec![5; 7 * KB]).unwrap();
+        assert_eq!(e5.value(), &vec![5; 7 * KB]);
     }
 }
