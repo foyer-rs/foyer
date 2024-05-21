@@ -23,6 +23,10 @@ use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
 use foyer_storage::{DeviceStats, Storage, Store};
 use tokio::sync::oneshot;
 
+use crate::HybridCacheWriter;
+
+use super::writer::HybridCacheStorageWriter;
+
 /// A cached entry holder of the hybrid cache.
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
 
@@ -111,48 +115,6 @@ where
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
         entry
-    }
-
-    /// Insert disk cache only.
-    pub fn insert_storage(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
-        let now = Instant::now();
-
-        let entry = self.memory.deposit(key, value);
-        self.storage.enqueue(entry.clone(), false);
-
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
-
-        entry
-    }
-
-    /// Insert disk cache only with cache context.
-    pub async fn insert_storage_with_fetch<F, FU>(&self, key: K, fetch: F) -> Option<HybridCacheEntry<K, V, S>>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
-    {
-        let now = Instant::now();
-
-        if !self.storage.pick(&key) {
-            return None;
-        }
-
-        let value = match fetch().await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::warn!("[hybrid cache]: error raised when fetching value during `insert_storage_with_fetch`, skip entry, error: {e}");
-                return None;
-            }
-        };
-
-        let entry = self.memory.deposit(key, value);
-        self.storage.enqueue(entry.clone(), true);
-
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
-
-        Some(entry)
     }
 
     /// Get cached entry with the given key from the hybrid cache.
@@ -276,6 +238,24 @@ where
     pub fn stats(&self) -> Arc<DeviceStats> {
         self.storage.stats()
     }
+
+    /// Create a new [`HybridCacheWriter`].
+    pub fn writer(&self, key: K) -> HybridCacheWriter<K, V, S> {
+        HybridCacheWriter::new(self.clone(), key)
+    }
+
+    /// Create a new [`HybridCacheStorageWriter`].
+    pub fn storage_writer(&self, key: K) -> HybridCacheStorageWriter<K, V, S> {
+        HybridCacheStorageWriter::new(self.clone(), key)
+    }
+
+    pub(crate) fn storage(&self) -> &Store<K, V, S> {
+        &self.storage
+    }
+
+    pub(crate) fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
+    }
 }
 
 enum ObtainFetchError {
@@ -354,10 +334,10 @@ mod tests {
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
-        let e3 = hybrid.insert_storage(3, vec![3; 7 * KB]);
+        let e3 = hybrid.storage_writer(3).insert_storage(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
-            .insert_storage_with_fetch(4, || async move { Ok(vec![4; 7 * KB]) })
-            .await
+            .storage_writer(4)
+            .insert_storage_with_context(vec![4; 7 * KB], CacheContext::default())
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
