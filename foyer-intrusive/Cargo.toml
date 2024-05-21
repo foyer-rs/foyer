@@ -11,5 +11,5 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.12"
+itertools = { workspace = true }
 memoffset = "0.9"
