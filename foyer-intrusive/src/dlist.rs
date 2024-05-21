@@ -636,10 +636,10 @@ mod tests {
         let mut iter = l.iter_mut();
         iter.next();
         iter.next();
-        assert_eq!(iter.get().unwrap().val, 2);
+        assert_eq!(DlistIterMut::get(&iter).unwrap().val, 2);
         let i2 = iter.remove();
         assert_eq!(i2.unwrap().val, 2);
-        assert_eq!(iter.get().unwrap().val, 3);
+        assert_eq!(DlistIterMut::get(&iter).unwrap().val, 3);
         let v = l.iter_mut().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1, 3]);
         assert_eq!(l.len(), 2);
