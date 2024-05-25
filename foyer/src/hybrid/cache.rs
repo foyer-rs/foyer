@@ -287,15 +287,29 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
+        let now = Instant::now();
+
         let store = self.storage.clone();
         let future = fetch();
-        self.memory.fetch(key.clone(), || async move {
-            match store.load(&key).await.map_err(anyhow::Error::from)? {
-                None => {}
-                Some((k, _)) if key != k => {}
-                Some((_, v)) => return Ok((v, CacheContext::default())),
+        self.memory.fetch(key.clone(), || {
+            let metrics = self.metrics.clone();
+            async move {
+                match store.load(&key).await.map_err(anyhow::Error::from)? {
+                    None => {}
+                    Some((k, _)) if key != k => {}
+                    Some((_, v)) => {
+                        metrics.hybrid_hit.increment(1);
+                        metrics.hybrid_hit_duration.record(now.elapsed());
+
+                        return Ok((v, CacheContext::default()));
+                    }
+                }
+
+                metrics.hybrid_miss.increment(1);
+                metrics.hybrid_miss_duration.record(now.elapsed());
+
+                future.await.map_err(anyhow::Error::from)
             }
-            future.await.map_err(anyhow::Error::from)
         })
     }
 }
