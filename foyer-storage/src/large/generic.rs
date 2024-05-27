@@ -95,6 +95,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
+            .field("name", &self.name)
             .field("memory", &self.memory)
             .field("device_config", &self.device_config)
             .field("compression", &self.compression)

@@ -60,8 +60,8 @@ impl HybridCacheBuilder {
         V: StorageValue,
     {
         HybridCacheBuilderPhaseMemory {
+            builder: CacheBuilder::new(capacity).with_name(&self.name),
             name: self.name,
-            builder: CacheBuilder::new(capacity),
         }
     }
 }
