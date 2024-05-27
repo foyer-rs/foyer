@@ -1,3 +1,30 @@
+## 2024-05-27
+
+| crate | version |
+| - | - |
+| foyer | 0.9.0 |
+| foyer-common | 0.7.0 |
+| foyer-intrusive | 0.6.0 |
+| foyer-memory | 0.4.0 |
+| foyer-storage | 0.8.0 |
+| foyer-bench | 0.1.0 |
+
+<details>
+
+### Changes
+
+- Refine the storage engine to reduce the overhead and boost the performance.
+  - Hybrid cache memory overhead reduced by ~50%.
+  - Hybrid cache operation latency reduced by ~80%.
+- Replace `prometheus` with `metrics` to support more flexible metrics collection.
+- Introduce `foyer-bench` to replace the original `foyer-storage-bench` for better benchmarking.
+- Fulfill rust docs for public APIs.
+- Introduce tombstone log for updatable persistent cache.
+- Reduce unnecessary dependencies.
+- More details: [foyer - Project Dashboard](https://github.com/users/MrCroxx/projects/4).
+
+</details>
+
 ## 2024-04-28
 
 | crate | version |
