@@ -24,13 +24,13 @@
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.8"
+foyer = "0.9"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.8", features = ["nightly"] }
+foyer = { version = "0.9", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -171,7 +171,7 @@ More examples and details can be found [here](https://github.com/MrCroxx/foyer/t
 
 ## Supported Rust Versions
 
-*foyer* is built against the latest stable release. The minimum supported version is 1.76. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+*foyer* is built against the recent stable release. The minimum supported version is 1.76. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
 ## Development state & Roadmap
 
@@ -185,4 +185,4 @@ Contributions for *foyer* are warmly welcomed! 🥰
 
 Don't forget to pass `make fast` (which means fast check & test) locally before submitting a PR. 🚀
 
-If you want to run a broader range of checks locally, rur `make full`. 🙌
+If you want to run a broader range of checks locally, run `make full`. 🙌
