@@ -22,7 +22,7 @@ use std::{
     },
 };
 
-use foyer_common::{code::StorageKey, rated_ticket::RatedTicket};
+use foyer_common::{code::StorageKey, rated_ticket::RatedTicket, strict_assert};
 use itertools::Itertools;
 
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
@@ -244,7 +244,7 @@ impl EvictionPicker for InvalidRatioPicker {
     }
 
     fn pick(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
-        debug_assert!(self.region_size > 0);
+        strict_assert!(self.region_size > 0);
 
         let mut info = evictable
             .iter()

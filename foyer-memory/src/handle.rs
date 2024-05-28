@@ -14,7 +14,10 @@
 
 use bitflags::bitflags;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    strict_assert,
+};
 
 use crate::context::Context;
 
@@ -97,7 +100,7 @@ impl<T, C> BaseHandle<T, C> {
     /// Init handle with args.
     #[inline(always)]
     pub fn init(&mut self, hash: u64, data: T, weight: usize, context: C) {
-        debug_assert!(self.entry.is_none());
+        strict_assert!(self.entry.is_none());
         assert_ne!(weight, 0);
         self.hash = hash;
         self.entry = Some((data, context));
@@ -109,7 +112,7 @@ impl<T, C> BaseHandle<T, C> {
     /// Take key and value from the handle and reset it to the uninited state.
     #[inline(always)]
     pub fn take(&mut self) -> (T, C, usize) {
-        debug_assert!(self.entry.is_some());
+        strict_assert!(self.entry.is_some());
         unsafe {
             self.entry
                 .take()
@@ -141,7 +144,7 @@ impl<T, C> BaseHandle<T, C> {
     /// Panics if the handle is uninited.
     #[inline(always)]
     pub fn data_unwrap_unchecked(&self) -> &T {
-        debug_assert!(self.entry.is_some());
+        strict_assert!(self.entry.is_some());
         unsafe { self.entry.as_ref().map(|entry| &entry.0).unwrap_unchecked() }
     }
 
@@ -152,7 +155,7 @@ impl<T, C> BaseHandle<T, C> {
     /// Panics if the handle is uninited.
     #[inline(always)]
     pub fn context(&self) -> &C {
-        debug_assert!(self.entry.is_some());
+        strict_assert!(self.entry.is_some());
         unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
     }
 

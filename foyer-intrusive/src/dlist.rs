@@ -16,6 +16,8 @@
 
 use std::ptr::NonNull;
 
+use foyer_common::{strict_assert, strict_assert_eq};
+
 use crate::core::{
     adapter::{Adapter, Link},
     pointer::Pointer,
@@ -227,7 +229,7 @@ where
     /// `link` MUST be in this [`Dlist`].
     pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> A::Pointer {
         let mut iter = self.iter_mut_from_raw(link);
-        debug_assert!(iter.is_valid());
+        strict_assert!(iter.is_valid());
         iter.remove().unwrap_unchecked()
     }
 
@@ -259,9 +261,9 @@ where
     ///
     /// `self` must be empty. `src` will be set empty after operation.
     pub unsafe fn replace_with(&mut self, src: &mut Dlist<A>) {
-        debug_assert!(self.head.is_none());
-        debug_assert!(self.tail.is_none());
-        debug_assert_eq!(self.len, 0);
+        strict_assert!(self.head.is_none());
+        strict_assert!(self.tail.is_none());
+        strict_assert_eq!(self.len, 0);
 
         self.head = src.head;
         self.tail = src.tail;
@@ -417,7 +419,7 @@ where
                 return None;
             }
 
-            debug_assert!(self.is_valid());
+            strict_assert!(self.is_valid());
             let mut link = self.link.unwrap_unchecked();
 
             let item = self.dlist.adapter.link2item(link);

@@ -19,7 +19,7 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, metrics::Metrics};
+use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 
@@ -269,8 +269,8 @@ where
             )
             .await?;
 
-        debug_assert_eq!(self.buffer.len(), self.device.align());
-        debug_assert_eq!(self.buffer.capacity(), self.device.align());
+        strict_assert_eq!(self.buffer.len(), self.device.align());
+        strict_assert_eq!(self.buffer.capacity(), self.device.align());
 
         Ok(())
     }

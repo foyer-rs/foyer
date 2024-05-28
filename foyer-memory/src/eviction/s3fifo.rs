@@ -18,6 +18,7 @@ use std::{
     ptr::NonNull,
 };
 
+use foyer_common::{strict_assert, strict_assert_eq};
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
@@ -250,8 +251,8 @@ where
 
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
-        debug_assert_eq!(handle.freq, 0);
-        debug_assert_eq!(handle.queue, Queue::None);
+        strict_assert_eq!(handle.freq, 0);
+        strict_assert_eq!(handle.queue, Queue::None);
 
         if self.ghost_queue.contains(handle.base().hash()) {
             handle.queue = Queue::Main;
@@ -275,8 +276,8 @@ where
             handle.base_mut().set_in_eviction(false);
             Some(ptr)
         } else {
-            debug_assert!(self.small_queue.is_empty());
-            debug_assert!(self.main_queue.is_empty());
+            strict_assert!(self.small_queue.is_empty());
+            strict_assert!(self.main_queue.is_empty());
             None
         }
     }
@@ -299,7 +300,7 @@ where
                     .iter_mut_from_raw(ptr.as_mut().link.raw())
                     .remove()
                     .unwrap_unchecked();
-                debug_assert_eq!(p, ptr);
+                strict_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;
                 handle.freq = 0;
@@ -313,7 +314,7 @@ where
                     .iter_mut_from_raw(ptr.as_mut().link.raw())
                     .remove()
                     .unwrap_unchecked();
-                debug_assert_eq!(p, ptr);
+                strict_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;
                 handle.freq = 0;

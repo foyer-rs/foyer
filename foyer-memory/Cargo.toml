@@ -34,6 +34,10 @@ zipf = "7.0.1"
 
 [features]
 deadlock = ["parking_lot/deadlock_detection"]
+strict_assertions = [
+    "foyer-common/strict_assertions",
+    "foyer-intrusive/strict_assertions",
+]
 
 [[bench]]
 name = "bench_hit_ratio"
