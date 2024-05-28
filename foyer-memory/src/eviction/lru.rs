@@ -14,7 +14,7 @@
 
 use std::{fmt::Debug, ptr::NonNull};
 
-use foyer_common::{strict_assert, strict_assert_eq};
+use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
 use foyer_intrusive::{
     core::adapter::Link,
     dlist::{Dlist, DlistLink},
@@ -146,7 +146,7 @@ where
             strict_assert!(!self.high_priority_list.is_empty());
 
             // overflow last entry in high priority pool to low priority pool
-            let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
+            let mut ptr = self.high_priority_list.pop_front().strict_unwrap_unchecked();
             strict_assert!(ptr.as_ref().in_high_priority_pool);
             ptr.as_mut().in_high_priority_pool = false;
             self.high_priority_weight -= ptr.as_ref().base().weight();
@@ -256,13 +256,13 @@ where
         let mut res = Vec::with_capacity(self.len());
 
         while !self.list.is_empty() {
-            let mut ptr = self.list.pop_front().unwrap_unchecked();
+            let mut ptr = self.list.pop_front().strict_unwrap_unchecked();
             ptr.as_mut().base_mut().set_in_eviction(false);
             res.push(ptr);
         }
 
         while !self.high_priority_list.is_empty() {
-            let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
+            let mut ptr = self.high_priority_list.pop_front().strict_unwrap_unchecked();
             ptr.as_mut().base_mut().set_in_eviction(false);
             ptr.as_mut().in_high_priority_pool = false;
             self.high_priority_weight -= ptr.as_ref().base().weight();
