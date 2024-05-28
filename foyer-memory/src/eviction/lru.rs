@@ -16,7 +16,7 @@ use std::{fmt::Debug, ptr::NonNull};
 
 use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
 use foyer_intrusive::{
-    core::adapter::Link,
+    adapter::Link,
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
@@ -92,7 +92,7 @@ where
     }
 }
 
-intrusive_adapter! { LruHandleDlistAdapter<T> = NonNull<LruHandle<T>>: LruHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
+intrusive_adapter! { LruHandleDlistAdapter<T> = LruHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
 impl<T> Default for LruHandle<T>
 where
@@ -289,7 +289,6 @@ unsafe impl<T> Sync for Lru<T> where T: Send + Sync + 'static {}
 #[cfg(test)]
 pub mod tests {
 
-    use foyer_intrusive::core::pointer::Pointer;
     use itertools::Itertools;
 
     use super::*;
@@ -321,15 +320,15 @@ pub mod tests {
         let _ = Box::from_raw(ptr.as_ptr());
     }
 
-    unsafe fn dump_test_lru(lru: &TestLru) -> (Vec<NonNull<TestLruHandle>>, Vec<NonNull<TestLruHandle>>) {
+    unsafe fn dump_test_lru(lru: &TestLru) -> (Vec<u64>, Vec<u64>) {
         (
             lru.list
                 .iter()
-                .map(|handle| NonNull::new_unchecked(handle.as_ptr() as *mut _))
+                .map(|handle| *handle.base().data_unwrap_unchecked())
                 .collect_vec(),
             lru.high_priority_list
                 .iter()
-                .map(|handle| NonNull::new_unchecked(handle.as_ptr() as *mut _))
+                .map(|handle| *handle.base().data_unwrap_unchecked())
                 .collect_vec(),
         )
     }
@@ -365,27 +364,21 @@ pub mod tests {
             assert_eq!(lru.len(), 4);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(dump_test_lru(&lru), (vec![], vec![ptrs[0], ptrs[1], ptrs[2], ptrs[3]]));
+            assert_eq!(dump_test_lru(&lru), (vec![], vec![0, 1, 2, 3]));
 
             // 0, [1, 2, 3, 4]
             lru.push(ptrs[4]);
             assert_eq!(lru.len(), 5);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![ptrs[0]], vec![ptrs[1], ptrs[2], ptrs[3], ptrs[4]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![0], vec![1, 2, 3, 4]));
 
             // 0, 10, [1, 2, 3, 4]
             lru.push(ptrs[10]);
             assert_eq!(lru.len(), 6);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![ptrs[0], ptrs[10]], vec![ptrs[1], ptrs[2], ptrs[3], ptrs[4]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![0, 10], vec![1, 2, 3, 4]));
 
             // 10, [1, 2, 3, 4]
             let p0 = lru.pop().unwrap();
@@ -393,27 +386,21 @@ pub mod tests {
             assert_eq!(lru.len(), 5);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![ptrs[10]], vec![ptrs[1], ptrs[2], ptrs[3], ptrs[4]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![10], vec![1, 2, 3, 4]));
 
             // 10, [1, 3, 4]
             lru.remove(ptrs[2]);
             assert_eq!(lru.len(), 4);
             assert_eq!(lru.high_priority_weight, 3);
             assert_eq!(lru.high_priority_list.len(), 3);
-            assert_eq!(dump_test_lru(&lru), (vec![ptrs[10]], vec![ptrs[1], ptrs[3], ptrs[4]]));
+            assert_eq!(dump_test_lru(&lru), (vec![10], vec![1, 3, 4]));
 
             // 10, 11, [1, 3, 4]
             lru.push(ptrs[11]);
             assert_eq!(lru.len(), 5);
             assert_eq!(lru.high_priority_weight, 3);
             assert_eq!(lru.high_priority_list.len(), 3);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (vec![ptrs[10], ptrs[11]], vec![ptrs[1], ptrs[3], ptrs[4]])
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![10, 11], vec![1, 3, 4]));
 
             // 10, 11, 1, [3, 4, 5, 6]
             lru.push(ptrs[5]);
@@ -421,26 +408,14 @@ pub mod tests {
             assert_eq!(lru.len(), 7);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (
-                    vec![ptrs[10], ptrs[11], ptrs[1]],
-                    vec![ptrs[3], ptrs[4], ptrs[5], ptrs[6]]
-                )
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![10, 11, 1], vec![3, 4, 5, 6]));
 
             // 10, 11, 1, 3, [4, 5, 6, 0]
             lru.push(ptrs[0]);
             assert_eq!(lru.len(), 8);
             assert_eq!(lru.high_priority_weight, 4);
             assert_eq!(lru.high_priority_list.len(), 4);
-            assert_eq!(
-                dump_test_lru(&lru),
-                (
-                    vec![ptrs[10], ptrs[11], ptrs[1], ptrs[3]],
-                    vec![ptrs[4], ptrs[5], ptrs[6], ptrs[0]]
-                )
-            );
+            assert_eq!(dump_test_lru(&lru), (vec![10, 11, 1, 3], vec![4, 5, 6, 0]));
 
             let ps = lru.clear();
             assert_eq!(ps, [10, 11, 1, 3, 4, 5, 6, 0].map(|i| ptrs[i]));

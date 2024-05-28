@@ -17,7 +17,7 @@ use std::{fmt::Debug, ptr::NonNull};
 use cmsketch::CMSketchU16;
 use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq, strict_assert_ne};
 use foyer_intrusive::{
-    core::adapter::Link,
+    adapter::Link,
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
@@ -108,7 +108,7 @@ where
     }
 }
 
-intrusive_adapter! { LfuHandleDlistAdapter<T> = NonNull<LfuHandle<T>>: LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
+intrusive_adapter! { LfuHandleDlistAdapter<T> = LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
 impl<T> Default for LfuHandle<T>
 where

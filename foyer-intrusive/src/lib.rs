@@ -44,5 +44,5 @@ macro_rules! container_of {
     };
 }
 
-pub mod core;
+pub mod adapter;
 pub mod dlist;
