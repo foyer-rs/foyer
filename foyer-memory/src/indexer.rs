@@ -16,7 +16,7 @@ use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
-use foyer_common::code::Key;
+use foyer_common::{code::Key, strict_assert};
 
 use crate::handle::KeyedHandle;
 
@@ -76,7 +76,7 @@ where
     unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.base().is_in_indexer());
+        strict_assert!(!handle.base().is_in_indexer());
         handle.base_mut().set_in_indexer(true);
 
         match self.table.entry(
@@ -87,7 +87,7 @@ where
             HashTableEntry::Occupied(mut o) => {
                 std::mem::swap(o.get_mut(), &mut ptr);
                 let b = ptr.as_mut().base_mut();
-                debug_assert!(b.is_in_indexer());
+                strict_assert!(b.is_in_indexer());
                 b.set_in_indexer(false);
                 Some(ptr)
             }
@@ -118,7 +118,7 @@ where
             HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();
                 let b = p.as_mut().base_mut();
-                debug_assert!(b.is_in_indexer());
+                strict_assert!(b.is_in_indexer());
                 b.set_in_indexer(false);
                 Some(p)
             }

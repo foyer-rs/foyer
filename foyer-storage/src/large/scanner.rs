@@ -15,6 +15,7 @@
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    strict_assert, strict_assert_eq,
 };
 
 use crate::{
@@ -71,8 +72,8 @@ where
         );
         let end = std::cmp::min(self.region.size(), end);
         let read_len = end - self.offset as usize;
-        debug_assert!(bits::is_aligned(self.region.align(), read_len));
-        debug_assert!(read_len >= len);
+        strict_assert!(bits::is_aligned(self.region.align(), read_len));
+        strict_assert!(read_len >= len);
 
         let buffer = self.region.read(self.offset, read_len).await?;
         self.buffer = buffer;
@@ -107,7 +108,7 @@ where
     }
 
     async fn current(&mut self) -> Result<Option<EntryHeader>> {
-        debug_assert!(bits::is_aligned(self.region.align() as u64, self.offset));
+        strict_assert!(bits::is_aligned(self.region.align() as u64, self.offset));
 
         if self.offset as usize >= self.region.size() {
             // reach region EOF
@@ -215,7 +216,7 @@ where
 
         let buf = self.cache.read(info.addr.offset as _, info.addr.len as _).await?;
         let (h, key, value) = EntryDeserializer::deserialize(buf)?;
-        debug_assert_eq!(header, h);
+        strict_assert_eq!(header, h);
 
         self.step(&header).await;
 

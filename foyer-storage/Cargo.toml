@@ -47,3 +47,7 @@ test-log = { workspace = true }
 default = []
 deadlock = ["parking_lot/deadlock_detection"]
 nightly = ["allocator-api2/nightly"]
+strict_assertions = [
+    "foyer-common/strict_assertions",
+    "foyer-memory/strict_assertions",
+]

@@ -26,9 +26,9 @@ use crate::statistics::Statistics;
 use crate::Sequence;
 
 use foyer_common::async_batch_pipeline::{AsyncBatchPipeline, LeaderToken};
-use foyer_common::bits;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_common::metrics::Metrics;
+use foyer_common::{bits, strict_assert_eq};
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 
@@ -275,7 +275,7 @@ where
     ) {
         tracing::trace!("[flusher]: submit tombstone with sequence: {sequence}");
 
-        debug_assert_eq!(tombstone.sequence, sequence);
+        strict_assert_eq!(tombstone.sequence, sequence);
 
         let append = |state: &mut BatchState<K, V, S, D>| {
             state.tombstones.push((tombstone, stats, tx));
@@ -384,7 +384,7 @@ where
 
     fn reinsertion(&self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>, sequence: Sequence) {
         tracing::trace!("[flusher]: submit reinsertion with sequence: {sequence}");
-        debug_assert_eq!(sequence, 0);
+        strict_assert_eq!(sequence, 0);
 
         let append = |state: &mut BatchState<K, V, S, D>| {
             self.may_init_batch_state(state);
@@ -464,7 +464,7 @@ where
                 let mut s = BatchState::default();
                 if let Some(group) = state.groups.last() {
                     let mut writer = group.writer.clone();
-                    debug_assert_eq!(
+                    strict_assert_eq!(
                         writer.offset as usize + group.buffer.len(),
                         writer.size,
                         "offset ({offset}) + buffer len ({buf_len}) = total ({total}) != size ({size})",

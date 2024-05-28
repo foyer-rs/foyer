@@ -14,6 +14,7 @@
 
 use std::{fmt::Debug, ptr::NonNull};
 
+use foyer_common::{strict_assert, strict_assert_eq};
 use foyer_intrusive::{
     core::adapter::Link,
     dlist::{Dlist, DlistLink},
@@ -142,11 +143,11 @@ where
 {
     unsafe fn may_overflow_high_priority_pool(&mut self) {
         while self.high_priority_weight > self.high_priority_weight_capacity {
-            debug_assert!(!self.high_priority_list.is_empty());
+            strict_assert!(!self.high_priority_list.is_empty());
 
             // overflow last entry in high priority pool to low priority pool
             let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
-            debug_assert!(ptr.as_ref().in_high_priority_pool);
+            strict_assert!(ptr.as_ref().in_high_priority_pool);
             ptr.as_mut().in_high_priority_pool = false;
             self.high_priority_weight -= ptr.as_ref().base().weight();
             self.list.push_back(ptr);
@@ -184,7 +185,7 @@ where
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.link.is_linked());
+        strict_assert!(!handle.link.is_linked());
 
         match handle.base().context() {
             LruContext::HighPriority => {
@@ -207,7 +208,7 @@ where
         let mut ptr = self.list.pop_front().or_else(|| self.high_priority_list.pop_front())?;
 
         let handle = ptr.as_mut();
-        debug_assert!(!handle.link.is_linked());
+        strict_assert!(!handle.link.is_linked());
 
         if handle.in_high_priority_pool {
             self.high_priority_weight -= handle.base().weight();
@@ -225,18 +226,18 @@ where
         let handle = ptr.as_mut();
 
         if handle.base().is_in_eviction() {
-            debug_assert!(handle.link.is_linked());
+            strict_assert!(handle.link.is_linked());
             self.remove(ptr);
             self.push(ptr);
         } else {
-            debug_assert!(!handle.link.is_linked());
+            strict_assert!(!handle.link.is_linked());
             self.push(ptr);
         }
     }
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
-        debug_assert!(handle.link.is_linked());
+        strict_assert!(handle.link.is_linked());
 
         if handle.in_high_priority_pool {
             self.high_priority_weight -= handle.base.weight();
@@ -246,7 +247,7 @@ where
             self.list.remove_raw(handle.link.raw());
         }
 
-        debug_assert!(!handle.link.is_linked());
+        strict_assert!(!handle.link.is_linked());
 
         handle.base_mut().set_in_eviction(false);
     }
@@ -268,7 +269,7 @@ where
             res.push(ptr);
         }
 
-        debug_assert_eq!(self.high_priority_weight, 0);
+        strict_assert_eq!(self.high_priority_weight, 0);
 
         res
     }

@@ -30,6 +30,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     metrics::Metrics,
     object_pool::ObjectPool,
+    strict_assert, strict_assert_eq,
 };
 use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
@@ -127,15 +128,15 @@ where
 
         self.evict(weight, last_reference_entries);
 
-        debug_assert!(!ptr.as_ref().base().is_in_indexer());
+        strict_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
             self.state.metrics.memory_replace.increment(1);
 
-            debug_assert!(!old.as_ref().base().is_in_indexer());
+            strict_assert!(!old.as_ref().base().is_in_indexer());
             if old.as_ref().base().is_in_eviction() {
                 self.eviction.remove(old);
             }
-            debug_assert!(!old.as_ref().base().is_in_eviction());
+            strict_assert!(!old.as_ref().base().is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
             if let Some(entry) = self.try_release_handle(old, false) {
                 last_reference_entries.push(entry);
@@ -143,12 +144,12 @@ where
         } else {
             self.state.metrics.memory_insert.increment(1);
         }
-        debug_assert!(ptr.as_ref().base().is_in_indexer());
+        strict_assert!(ptr.as_ref().base().is_in_indexer());
 
         ptr.as_mut().base_mut().set_deposit(deposit);
         if !deposit {
             self.eviction.push(ptr);
-            debug_assert!(ptr.as_ref().base().is_in_eviction());
+            strict_assert!(ptr.as_ref().base().is_in_eviction());
         }
 
         self.usage.fetch_add(weight, Ordering::Relaxed);
@@ -174,7 +175,7 @@ where
             }
         };
         let base = ptr.as_mut().base_mut();
-        debug_assert!(base.is_in_indexer());
+        strict_assert!(base.is_in_indexer());
 
         base.set_deposit(false);
         base.inc_refs();
@@ -220,8 +221,8 @@ where
             self.eviction.remove(ptr);
         }
 
-        debug_assert!(!handle.base().is_in_indexer());
-        debug_assert!(!handle.base().is_in_eviction());
+        strict_assert!(!handle.base().is_in_indexer());
+        strict_assert!(!handle.base().is_in_eviction());
 
         handle.base_mut().inc_refs();
 
@@ -236,7 +237,7 @@ where
 
         // If the `ptr` is in the eviction container, it must be the latest version of the key and in the indexer.
         let p = self.remove(handle.base().hash(), handle.key()).unwrap();
-        debug_assert_eq!(ptr, p);
+        strict_assert_eq!(ptr, p);
 
         Some(ptr)
     }
@@ -254,7 +255,7 @@ where
             use std::{collections::HashSet as StdHashSet, hash::RandomState as StdRandomState};
             let ptrs: StdHashSet<_, StdRandomState> = StdHashSet::from_iter(ptrs.iter().copied());
             let eptrs: StdHashSet<_, StdRandomState> = StdHashSet::from_iter(eptrs.iter().copied());
-            debug_assert!((&eptrs - &ptrs).is_empty());
+            assert!((&eptrs - &ptrs).is_empty());
         }
 
         self.state.metrics.memory_remove.increment(ptrs.len() as _);
@@ -262,7 +263,7 @@ where
         // The handles in the indexer covers the handles in the eviction container.
         // So only the handles drained from the indexer need to be released.
         for ptr in ptrs {
-            debug_assert!(!ptr.as_ref().base().is_in_indexer());
+            strict_assert!(!ptr.as_ref().base().is_in_indexer());
             if let Some(entry) = self.try_release_handle(ptr, false) {
                 last_reference_entries.push(entry);
             }
@@ -284,8 +285,8 @@ where
             };
             self.state.metrics.memory_evict.increment(1);
             let base = evicted.as_ref().base();
-            debug_assert!(base.is_in_indexer());
-            debug_assert!(!base.is_in_eviction());
+            strict_assert!(base.is_in_indexer());
+            strict_assert!(!base.is_in_eviction());
             if let Some(entry) = self.try_release_handle(evicted, false) {
                 last_reference_entries.push(entry);
             }
@@ -323,13 +324,13 @@ where
             return None;
         }
 
-        debug_assert!(handle.base().is_inited());
-        debug_assert!(!handle.base().has_refs());
+        strict_assert!(handle.base().is_inited());
+        strict_assert!(!handle.base().has_refs());
 
         if handle.base().is_deposit() {
-            debug_assert!(!handle.base().is_in_eviction());
+            strict_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
-            debug_assert!(!handle.base().is_in_indexer());
+            strict_assert!(!handle.base().is_in_indexer());
         }
 
         // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and
@@ -357,9 +358,9 @@ where
         }
 
         // Here the handle is neither in the indexer nor in the eviction container.
-        debug_assert!(!handle.base().is_in_indexer());
-        debug_assert!(!handle.base().is_in_eviction());
-        debug_assert!(!handle.base().has_refs());
+        strict_assert!(!handle.base().is_in_indexer());
+        strict_assert!(!handle.base().is_in_eviction());
+        strict_assert!(!handle.base().has_refs());
 
         self.state.metrics.memory_release.increment(1);
 
@@ -875,7 +876,7 @@ where
 
         unsafe {
             let base = ptr.as_mut().base_mut();
-            debug_assert!(base.has_refs());
+            strict_assert!(base.has_refs());
             base.inc_refs();
         }
 

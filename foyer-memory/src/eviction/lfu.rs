@@ -15,6 +15,7 @@
 use std::{fmt::Debug, ptr::NonNull};
 
 use cmsketch::CMSketchU16;
+use foyer_common::{strict_assert, strict_assert_eq, strict_assert_ne};
 use foyer_intrusive::{
     core::adapter::Link,
     dlist::{Dlist, DlistLink},
@@ -260,9 +261,9 @@ where
     unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.link.is_linked());
-        debug_assert!(!handle.base().is_in_eviction());
-        debug_assert_eq!(handle.queue, Queue::None);
+        strict_assert!(!handle.link.is_linked());
+        strict_assert!(!handle.base().is_in_eviction());
+        strict_assert_eq!(handle.queue, Queue::None);
 
         self.window.push_back(ptr);
         handle.base_mut().set_in_eviction(true);
@@ -273,7 +274,7 @@ where
 
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_weight > self.window_weight_capacity {
-            debug_assert!(!self.window.is_empty());
+            strict_assert!(!self.window.is_empty());
             let mut ptr = self.window.pop_front().unwrap_unchecked();
             let handle = ptr.as_mut();
             self.decrease_queue_weight(handle);
@@ -306,9 +307,9 @@ where
 
         let handle = ptr.as_mut();
 
-        debug_assert!(!handle.link.is_linked());
-        debug_assert!(handle.base().is_in_eviction());
-        debug_assert_ne!(handle.queue, Queue::None);
+        strict_assert!(!handle.link.is_linked());
+        strict_assert!(handle.base().is_in_eviction());
+        strict_assert_ne!(handle.queue, Queue::None);
 
         self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
@@ -322,23 +323,23 @@ where
 
         match handle.queue {
             Queue::None => {
-                debug_assert!(!handle.link.is_linked());
-                debug_assert!(!handle.base().is_in_eviction());
+                strict_assert!(!handle.link.is_linked());
+                strict_assert!(!handle.base().is_in_eviction());
                 self.push(ptr);
-                debug_assert!(handle.link.is_linked());
-                debug_assert!(handle.base().is_in_eviction());
+                strict_assert!(handle.link.is_linked());
+                strict_assert!(handle.base().is_in_eviction());
             }
             Queue::Window => {
                 // Move to MRU position of `window`.
-                debug_assert!(handle.link.is_linked());
-                debug_assert!(handle.base().is_in_eviction());
+                strict_assert!(handle.link.is_linked());
+                strict_assert!(handle.base().is_in_eviction());
                 self.window.remove_raw(handle.link.raw());
                 self.window.push_back(ptr);
             }
             Queue::Probation => {
                 // Promote to MRU position of `protected`.
-                debug_assert!(handle.link.is_linked());
-                debug_assert!(handle.base().is_in_eviction());
+                strict_assert!(handle.link.is_linked());
+                strict_assert!(handle.base().is_in_eviction());
                 self.probation.remove_raw(handle.link.raw());
                 self.decrease_queue_weight(handle);
                 handle.queue = Queue::Protected;
@@ -347,7 +348,7 @@ where
 
                 // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
                 while self.protected_weight > self.protected_weight_capacity {
-                    debug_assert!(!self.protected.is_empty());
+                    strict_assert!(!self.protected.is_empty());
                     let mut ptr = self.protected.pop_front().unwrap_unchecked();
                     let handle = ptr.as_mut();
                     self.decrease_queue_weight(handle);
@@ -358,8 +359,8 @@ where
             }
             Queue::Protected => {
                 // Move to MRU position of `protected`.
-                debug_assert!(handle.link.is_linked());
-                debug_assert!(handle.base().is_in_eviction());
+                strict_assert!(handle.link.is_linked());
+                strict_assert!(handle.base().is_in_eviction());
                 self.protected.remove_raw(handle.link.raw());
                 self.protected.push_back(ptr);
             }
@@ -373,9 +374,9 @@ where
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
         let handle = ptr.as_mut();
 
-        debug_assert!(handle.link.is_linked());
-        debug_assert!(handle.base().is_in_eviction());
-        debug_assert_ne!(handle.queue, Queue::None);
+        strict_assert!(handle.link.is_linked());
+        strict_assert!(handle.base().is_in_eviction());
+        strict_assert_ne!(handle.queue, Queue::None);
 
         match handle.queue {
             Queue::None => unreachable!(),
@@ -384,7 +385,7 @@ where
             Queue::Protected => self.protected.remove_raw(handle.link.raw()),
         };
 
-        debug_assert!(!handle.link.is_linked());
+        strict_assert!(!handle.link.is_linked());
 
         self.decrease_queue_weight(handle);
         handle.queue = Queue::None;
@@ -396,9 +397,9 @@ where
 
         while !self.is_empty() {
             let ptr = self.pop().unwrap_unchecked();
-            debug_assert!(!ptr.as_ref().base().is_in_eviction());
-            debug_assert!(!ptr.as_ref().link.is_linked());
-            debug_assert_eq!(ptr.as_ref().queue, Queue::None);
+            strict_assert!(!ptr.as_ref().base().is_in_eviction());
+            strict_assert!(!ptr.as_ref().link.is_linked());
+            strict_assert_eq!(ptr.as_ref().queue, Queue::None);
             res.push(ptr);
         }
 
