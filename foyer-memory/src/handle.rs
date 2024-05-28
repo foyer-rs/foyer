@@ -15,6 +15,7 @@
 use bitflags::bitflags;
 
 use foyer_common::{
+    assert::OptionExt,
     code::{Key, Value},
     strict_assert,
 };
@@ -117,7 +118,7 @@ impl<T, C> BaseHandle<T, C> {
             self.entry
                 .take()
                 .map(|(data, context)| (data, context, self.weight))
-                .unwrap_unchecked()
+                .strict_unwrap_unchecked()
         }
     }
 
@@ -145,7 +146,7 @@ impl<T, C> BaseHandle<T, C> {
     #[inline(always)]
     pub fn data_unwrap_unchecked(&self) -> &T {
         strict_assert!(self.entry.is_some());
-        unsafe { self.entry.as_ref().map(|entry| &entry.0).unwrap_unchecked() }
+        unsafe { self.entry.as_ref().map(|entry| &entry.0).strict_unwrap_unchecked() }
     }
 
     /// Get context reference.
@@ -156,7 +157,7 @@ impl<T, C> BaseHandle<T, C> {
     #[inline(always)]
     pub fn context(&self) -> &C {
         strict_assert!(self.entry.is_some());
-        unsafe { self.entry.as_ref().map(|entry| &entry.1).unwrap_unchecked() }
+        unsafe { self.entry.as_ref().map(|entry| &entry.1).strict_unwrap_unchecked() }
     }
 
     /// Get the weight of the handle.

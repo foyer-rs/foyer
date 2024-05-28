@@ -15,7 +15,7 @@
 use std::{fmt::Debug, ptr::NonNull};
 
 use cmsketch::CMSketchU16;
-use foyer_common::{strict_assert, strict_assert_eq, strict_assert_ne};
+use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq, strict_assert_ne};
 use foyer_intrusive::{
     core::adapter::Link,
     dlist::{Dlist, DlistLink},
@@ -275,7 +275,7 @@ where
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_weight > self.window_weight_capacity {
             strict_assert!(!self.window.is_empty());
-            let mut ptr = self.window.pop_front().unwrap_unchecked();
+            let mut ptr = self.window.pop_front().strict_unwrap_unchecked();
             let handle = ptr.as_mut();
             self.decrease_queue_weight(handle);
             handle.queue = Queue::Probation;
@@ -349,7 +349,7 @@ where
                 // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
                 while self.protected_weight > self.protected_weight_capacity {
                     strict_assert!(!self.protected.is_empty());
-                    let mut ptr = self.protected.pop_front().unwrap_unchecked();
+                    let mut ptr = self.protected.pop_front().strict_unwrap_unchecked();
                     let handle = ptr.as_mut();
                     self.decrease_queue_weight(handle);
                     handle.queue = Queue::Probation;
@@ -396,7 +396,7 @@ where
         let mut res = Vec::with_capacity(self.len());
 
         while !self.is_empty() {
-            let ptr = self.pop().unwrap_unchecked();
+            let ptr = self.pop().strict_unwrap_unchecked();
             strict_assert!(!ptr.as_ref().base().is_in_eviction());
             strict_assert!(!ptr.as_ref().link.is_linked());
             strict_assert_eq!(ptr.as_ref().queue, Queue::None);

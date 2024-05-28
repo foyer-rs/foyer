@@ -18,7 +18,7 @@ use std::{
     ptr::NonNull,
 };
 
-use foyer_common::{strict_assert, strict_assert_eq};
+use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
@@ -299,7 +299,7 @@ where
                     .main_queue
                     .iter_mut_from_raw(ptr.as_mut().link.raw())
                     .remove()
-                    .unwrap_unchecked();
+                    .strict_unwrap_unchecked();
                 strict_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;
@@ -313,7 +313,7 @@ where
                     .small_queue
                     .iter_mut_from_raw(ptr.as_mut().link.raw())
                     .remove()
-                    .unwrap_unchecked();
+                    .strict_unwrap_unchecked();
                 strict_assert_eq!(p, ptr);
 
                 handle.queue = Queue::None;

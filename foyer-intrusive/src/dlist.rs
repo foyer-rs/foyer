@@ -16,7 +16,7 @@
 
 use std::ptr::NonNull;
 
-use foyer_common::{strict_assert, strict_assert_eq};
+use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
 
 use crate::core::{
     adapter::{Adapter, Link},
@@ -230,7 +230,7 @@ where
     pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> A::Pointer {
         let mut iter = self.iter_mut_from_raw(link);
         strict_assert!(iter.is_valid());
-        iter.remove().unwrap_unchecked()
+        iter.remove().strict_unwrap_unchecked()
     }
 
     /// Create mutable iterator directly on raw link.
@@ -420,7 +420,7 @@ where
             }
 
             strict_assert!(self.is_valid());
-            let mut link = self.link.unwrap_unchecked();
+            let mut link = self.link.strict_unwrap_unchecked();
 
             let item = self.dlist.adapter.link2item(link);
             let ptr = A::Pointer::from_ptr(item.as_ptr());

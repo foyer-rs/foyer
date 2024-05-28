@@ -44,3 +44,26 @@ macro_rules! strict_assert_ne {
         debug_assert_ne!($($arg)*);
     }
 }
+
+/// Extend functions for [`Option`].
+pub trait OptionExt<T>: Sized {
+    /// Use `unwrap_unchecked` by default. Use `unwrap` when feature "strict_assertions" is enabled.
+    ///
+    /// # Safety
+    ///
+    /// See [`Option::unwrap_unchecked`].
+    unsafe fn strict_unwrap_unchecked(self) -> T;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    unsafe fn strict_unwrap_unchecked(self) -> T {
+        #[cfg(feature = "strict_assertions")]
+        {
+            self.unwrap()
+        }
+        #[cfg(not(feature = "strict_assertions"))]
+        {
+            unsafe { self.unwrap_unchecked() }
+        }
+    }
+}
