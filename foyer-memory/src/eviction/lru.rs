@@ -146,6 +146,7 @@ where
 
             // overflow last entry in high priority pool to low priority pool
             let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
+            debug_assert!(ptr.as_ref().in_high_priority_pool);
             ptr.as_mut().in_high_priority_pool = false;
             self.high_priority_weight -= ptr.as_ref().base().weight();
             self.list.push_back(ptr);
@@ -210,6 +211,7 @@ where
 
         if handle.in_high_priority_pool {
             self.high_priority_weight -= handle.base().weight();
+            handle.in_high_priority_pool = false;
         }
 
         handle.base_mut().set_in_eviction(false);
@@ -239,9 +241,12 @@ where
         if handle.in_high_priority_pool {
             self.high_priority_weight -= handle.base.weight();
             self.high_priority_list.remove_raw(handle.link.raw());
+            handle.in_high_priority_pool = false;
         } else {
             self.list.remove_raw(handle.link.raw());
         }
+
+        debug_assert!(!handle.link.is_linked());
 
         handle.base_mut().set_in_eviction(false);
     }
@@ -258,6 +263,7 @@ where
         while !self.high_priority_list.is_empty() {
             let mut ptr = self.high_priority_list.pop_front().unwrap_unchecked();
             ptr.as_mut().base_mut().set_in_eviction(false);
+            ptr.as_mut().in_high_priority_pool = false;
             self.high_priority_weight -= ptr.as_ref().base().weight();
             res.push(ptr);
         }
