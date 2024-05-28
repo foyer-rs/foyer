@@ -33,8 +33,8 @@ pub struct DlistLink {
 
 impl DlistLink {
     /// Get the `NonNull` pointer of the link.
-    pub fn raw(&self) -> NonNull<DlistLink> {
-        unsafe { NonNull::new_unchecked(self as *const _ as *mut _) }
+    pub fn raw(&mut self) -> NonNull<DlistLink> {
+        unsafe { NonNull::new_unchecked(self as *mut _) }
     }
 
     /// Get the pointer of the prev link.
