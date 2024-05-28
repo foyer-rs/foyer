@@ -123,6 +123,10 @@ where
         last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle> {
         let mut handle = self.state.object_pool.acquire();
+        strict_assert!(!handle.base().has_refs());
+        strict_assert!(!handle.base().is_in_indexer());
+        strict_assert!(!handle.base().is_in_eviction());
+
         handle.init(hash, (key, value), weight, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
@@ -566,6 +570,7 @@ where
             let waiters = shard.waiters.remove(&key);
             let mut ptr = shard.emplace(hash, key, value, weight, context.into(), deposit, &mut to_deallocate);
             if let Some(waiters) = waiters.as_ref() {
+                // Increase the reference count within the lock section.
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
             }
             let entry = GenericCacheEntry {
