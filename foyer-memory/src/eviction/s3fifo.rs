@@ -74,7 +74,7 @@ where
     }
 }
 
-intrusive_adapter! { S3FifoHandleDlistAdapter<T> = NonNull<S3FifoHandle<T>>: S3FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
+intrusive_adapter! { S3FifoHandleDlistAdapter<T> = S3FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
 impl<T> S3FifoHandle<T>
 where

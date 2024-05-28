@@ -58,7 +58,7 @@ where
     }
 }
 
-intrusive_adapter! { FifoHandleDlistAdapter<T> = NonNull<FifoHandle<T>>: FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
+intrusive_adapter! { FifoHandleDlistAdapter<T> = FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
 
 impl<T> Default for FifoHandle<T>
 where

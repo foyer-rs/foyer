@@ -18,10 +18,7 @@ use std::ptr::NonNull;
 
 use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
 
-use crate::core::{
-    adapter::{Adapter, Link},
-    pointer::Pointer,
-};
+use crate::adapter::{Adapter, Link};
 
 /// The link for the intrusive double linked list.
 #[derive(Debug, Default)]
@@ -101,60 +98,60 @@ where
     }
 
     /// Get the reference of the first item of the intrusive double linked list.
-    pub fn front(&self) -> Option<&<A::Pointer as Pointer>::Item> {
+    pub fn front(&self) -> Option<&A::Item> {
         unsafe {
             self.head
-                .map(|link| self.adapter.link2item(link))
+                .map(|link| self.adapter.link2ptr(link))
                 .map(|link| link.as_ref())
         }
     }
 
     /// Get the reference of the last item of the intrusive double linked list.
-    pub fn back(&self) -> Option<&<A::Pointer as Pointer>::Item> {
+    pub fn back(&self) -> Option<&A::Item> {
         unsafe {
             self.tail
-                .map(|link| self.adapter.link2item(link))
+                .map(|link| self.adapter.link2ptr(link))
                 .map(|link| link.as_ref())
         }
     }
 
     /// Get the mutable reference of the first item of the intrusive double linked list.
-    pub fn front_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
+    pub fn front_mut(&mut self) -> Option<&mut A::Item> {
         unsafe {
             self.head
-                .map(|link| self.adapter.link2item(link))
+                .map(|link| self.adapter.link2ptr(link))
                 .map(|mut link| link.as_mut())
         }
     }
 
     /// Get the mutable reference of the last item of the intrusive double linked list.
-    pub fn back_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
+    pub fn back_mut(&mut self) -> Option<&mut A::Item> {
         unsafe {
             self.tail
-                .map(|link| self.adapter.link2item(link))
+                .map(|link| self.adapter.link2ptr(link))
                 .map(|mut link| link.as_mut())
         }
     }
 
     /// Push an item to the first position of the intrusive double linked list.
-    pub fn push_front(&mut self, ptr: A::Pointer) {
+    pub fn push_front(&mut self, ptr: NonNull<A::Item>) {
         self.iter_mut().insert_after(ptr);
     }
 
     /// Push an item to the last position of the intrusive double linked list.
-    pub fn push_back(&mut self, ptr: A::Pointer) {
+    pub fn push_back(&mut self, ptr: NonNull<A::Item>) {
         self.iter_mut().insert_before(ptr);
     }
 
     /// Pop an item from the first position of the intrusive double linked list.
-    pub fn pop_front(&mut self) -> Option<A::Pointer> {
+    pub fn pop_front(&mut self) -> Option<NonNull<A::Item>> {
         let mut iter = self.iter_mut();
         iter.next();
         iter.remove()
     }
 
     /// Pop an item from the last position of the intrusive double linked list.
-    pub fn pop_back(&mut self) -> Option<A::Pointer> {
+    pub fn pop_back(&mut self) -> Option<NonNull<A::Item>> {
         let mut iter = self.iter_mut();
         iter.prev();
         iter.remove()
@@ -191,8 +188,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
-        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_ref())
+    pub unsafe fn prev_of_raw(&self, link: NonNull<DlistLink>) -> Option<&A::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2ptr(link).as_ref())
     }
 
     /// Get the mutable prev element of the given `link`.
@@ -200,8 +197,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
-        link.as_ref().prev().map(|link| self.adapter.link2item(link).as_mut())
+    pub unsafe fn prev_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut A::Item> {
+        link.as_ref().prev().map(|link| self.adapter.link2ptr(link).as_mut())
     }
 
     /// Get the next element of the given `link`.
@@ -209,8 +206,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_of_raw(&self, link: NonNull<DlistLink>) -> Option<&<A::Pointer as Pointer>::Item> {
-        link.as_ref().next().map(|link| self.adapter.link2item(link).as_ref())
+    pub unsafe fn next_of_raw(&self, link: NonNull<DlistLink>) -> Option<&A::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2ptr(link).as_ref())
     }
 
     /// Get the mutable next element of the given `link`.
@@ -218,8 +215,8 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut <A::Pointer as Pointer>::Item> {
-        link.as_ref().next().map(|link| self.adapter.link2item(link).as_mut())
+    pub unsafe fn next_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut A::Item> {
+        link.as_ref().next().map(|link| self.adapter.link2ptr(link).as_mut())
     }
 
     /// Remove an node that holds the given raw link.
@@ -227,7 +224,7 @@ where
     /// # Safety
     ///
     /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> A::Pointer {
+    pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> NonNull<A::Item> {
         let mut iter = self.iter_mut_from_raw(link);
         strict_assert!(iter.is_valid());
         iter.remove().strict_unwrap_unchecked()
@@ -273,6 +270,11 @@ where
         src.tail = None;
         src.len = 0;
     }
+
+    /// Get the intrusive adapter of the double linked list.
+    pub fn adapter(&self) -> &A {
+        &self.adapter
+    }
 }
 
 /// Item reference iterator of the intrusive double linked list.
@@ -294,9 +296,9 @@ where
     }
 
     /// Get the item of the current position.
-    pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
+    pub fn get(&self) -> Option<&A::Item> {
         self.link
-            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
+            .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_ref() })
     }
 
     /// Move to next.
@@ -365,15 +367,15 @@ where
     }
 
     /// Get the item reference of the current position.
-    pub fn get(&self) -> Option<&<A::Pointer as Pointer>::Item> {
+    pub fn get(&self) -> Option<&A::Item> {
         self.link
-            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_ref() })
+            .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_ref() })
     }
 
     /// Get the item mutable reference of the current position.
-    pub fn get_mut(&mut self) -> Option<&mut <A::Pointer as Pointer>::Item> {
+    pub fn get_mut(&mut self) -> Option<&mut A::Item> {
         self.link
-            .map(|link| unsafe { self.dlist.adapter.link2item(link).as_mut() })
+            .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_mut() })
     }
 
     /// Move to next.
@@ -413,7 +415,7 @@ where
     }
 
     /// Removes the current item from [`Dlist`] and move next.
-    pub fn remove(&mut self) -> Option<A::Pointer> {
+    pub fn remove(&mut self) -> Option<NonNull<A::Item>> {
         unsafe {
             if !self.is_valid() {
                 return None;
@@ -422,8 +424,7 @@ where
             strict_assert!(self.is_valid());
             let mut link = self.link.strict_unwrap_unchecked();
 
-            let item = self.dlist.adapter.link2item(link);
-            let ptr = A::Pointer::from_ptr(item.as_ptr());
+            let ptr = self.dlist.adapter.link2ptr(link);
 
             // fix head and tail if node is either of that
             let mut prev = link.as_ref().prev;
@@ -458,10 +459,9 @@ where
     /// Link a new ptr before the current one.
     ///
     /// If iter is on null, link to tail.
-    pub fn insert_before(&mut self, ptr: A::Pointer) {
+    pub fn insert_before(&mut self, ptr: NonNull<A::Item>) {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
-            let mut link_new = self.dlist.adapter.item2link(item_new);
+            let mut link_new = self.dlist.adapter.ptr2link(ptr);
             assert!(!link_new.as_ref().is_linked());
 
             match self.link {
@@ -485,10 +485,9 @@ where
     /// Link a new ptr after the current one.
     ///
     /// If iter is on null, link to head.
-    pub fn insert_after(&mut self, ptr: A::Pointer) {
+    pub fn insert_after(&mut self, ptr: NonNull<A::Item>) {
         unsafe {
-            let item_new = NonNull::new_unchecked(A::Pointer::into_ptr(ptr) as *mut _);
-            let mut link_new = self.dlist.adapter.item2link(item_new);
+            let mut link_new = self.dlist.adapter.ptr2link(ptr);
             assert!(!link_new.as_ref().is_linked());
 
             match self.link {
@@ -548,12 +547,12 @@ impl<'a, A> Iterator for DlistIter<'a, A>
 where
     A: Adapter<Link = DlistLink>,
 {
-    type Item = &'a <A::Pointer as Pointer>::Item;
+    type Item = &'a A::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
         match self.link {
-            Some(link) => Some(unsafe { self.dlist.adapter.link2item(link).as_ref() }),
+            Some(link) => Some(unsafe { self.dlist.adapter.link2ptr(link).as_ref() }),
             None => None,
         }
     }
@@ -563,12 +562,12 @@ impl<'a, A> Iterator for DlistIterMut<'a, A>
 where
     A: Adapter<Link = DlistLink>,
 {
-    type Item = &'a mut <A::Pointer as Pointer>::Item;
+    type Item = &'a mut A::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next();
         match self.link {
-            Some(link) => Some(unsafe { self.dlist.adapter.link2item(link).as_mut() }),
+            Some(link) => Some(unsafe { self.dlist.adapter.link2ptr(link).as_mut() }),
             None => None,
         }
     }
@@ -578,7 +577,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use itertools::Itertools;
 
@@ -604,32 +602,31 @@ mod tests {
     struct DlistAdapter;
 
     unsafe impl Adapter for DlistAdapter {
-        type Pointer = Box<DlistItem>;
-
+        type Item = DlistItem;
         type Link = DlistLink;
 
         fn new() -> Self {
             Self
         }
 
-        unsafe fn link2item(&self, link: NonNull<Self::Link>) -> NonNull<<Self::Pointer as Pointer>::Item> {
-            NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link) as *mut _)
+        unsafe fn link2ptr(&self, link: NonNull<Self::Link>) -> NonNull<Self::Item> {
+            NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link))
         }
 
-        unsafe fn item2link(&self, item: NonNull<<Self::Pointer as Pointer>::Item>) -> NonNull<Self::Link> {
+        unsafe fn ptr2link(&self, item: NonNull<Self::Item>) -> NonNull<Self::Link> {
             NonNull::new_unchecked((item.as_ptr() as *const u8).add(std::mem::offset_of!(DlistItem, link)) as *mut _)
         }
     }
 
-    intrusive_adapter! { DlistArcAdapter = Arc<DlistItem>: DlistItem { link: DlistLink } }
+    intrusive_adapter! { DlistArcAdapter = DlistItem { link: DlistLink } }
 
     #[test]
     fn test_dlist_simple() {
         let mut l = Dlist::<DlistAdapter>::new();
 
-        l.push_back(Box::new(DlistItem::new(2)));
-        l.push_front(Box::new(DlistItem::new(1)));
-        l.push_back(Box::new(DlistItem::new(3)));
+        l.push_back(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(DlistItem::new(2)))) });
+        l.push_front(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(DlistItem::new(1)))) });
+        l.push_back(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(DlistItem::new(3)))) });
 
         let v = l.iter_mut().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1, 2, 3]);
@@ -639,35 +636,21 @@ mod tests {
         iter.next();
         iter.next();
         assert_eq!(DlistIterMut::get(&iter).unwrap().val, 2);
-        let i2 = iter.remove();
-        assert_eq!(i2.unwrap().val, 2);
+        let p2 = iter.remove();
+        let i2 = unsafe { Box::from_raw(p2.unwrap().as_ptr()) };
+        assert_eq!(i2.val, 2);
         assert_eq!(DlistIterMut::get(&iter).unwrap().val, 3);
         let v = l.iter_mut().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1, 3]);
         assert_eq!(l.len(), 2);
 
-        let i3 = l.pop_back();
-        assert_eq!(i3.unwrap().val, 3);
-        let i1 = l.pop_front();
-        assert_eq!(i1.unwrap().val, 1);
+        let p3 = l.pop_back();
+        let i3 = unsafe { Box::from_raw(p3.unwrap().as_ptr()) };
+        assert_eq!(i3.val, 3);
+        let p1 = l.pop_front();
+        let i1 = unsafe { Box::from_raw(p1.unwrap().as_ptr()) };
+        assert_eq!(i1.val, 1);
         assert!(l.pop_front().is_none());
         assert_eq!(l.len(), 0);
-    }
-
-    #[test]
-    fn test_arc_drop() {
-        let mut l = Dlist::<DlistArcAdapter>::new();
-
-        let items = (0..10).map(|i| Arc::new(DlistItem::new(i))).collect_vec();
-        for item in items.iter() {
-            l.push_back(item.clone());
-        }
-        for item in items.iter() {
-            assert_eq!(Arc::strong_count(item), 2);
-        }
-        drop(l);
-        for item in items.iter() {
-            assert_eq!(Arc::strong_count(item), 1);
-        }
     }
 }

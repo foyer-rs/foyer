@@ -27,10 +27,10 @@
 /// use foyer_intrusive::container_of;
 ///
 /// struct S { x: u32, y: u32 };
-/// let container = S { x: 1, y: 2 };
-/// let field = &container.x;
-/// let container2: *const S = unsafe { container_of!(field, S, x) };
-/// assert_eq!(&container as *const S, container2);
+/// let mut container = S { x: 1, y: 2 };
+/// let field = &mut container.x;
+/// let container2: *mut S = unsafe { container_of!(field, S, x) };
+/// assert_eq!(&mut container as *mut S, container2);
 /// ```
 ///
 /// # Safety
@@ -40,9 +40,9 @@
 #[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).sub(std::mem::offset_of!($container, $field)) as *const $container
+        ($ptr as *mut _ as *const u8).sub(std::mem::offset_of!($container, $field)) as *mut $container
     };
 }
 
-pub mod core;
+pub mod adapter;
 pub mod dlist;
