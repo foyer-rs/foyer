@@ -209,7 +209,7 @@ impl<T, C> BaseHandle<T, C> {
 
     #[inline(always)]
     pub fn is_in_indexer(&self) -> bool {
-        !(self.flags & BaseHandleFlags::IN_INDEXER).is_empty()
+        self.flags.contains(BaseHandleFlags::IN_INDEXER)
     }
 
     #[inline(always)]
@@ -223,7 +223,7 @@ impl<T, C> BaseHandle<T, C> {
 
     #[inline(always)]
     pub fn is_in_eviction(&self) -> bool {
-        !(self.flags & BaseHandleFlags::IN_EVICTION).is_empty()
+        self.flags.contains(BaseHandleFlags::IN_EVICTION)
     }
 
     #[inline(always)]
@@ -237,7 +237,7 @@ impl<T, C> BaseHandle<T, C> {
 
     #[inline(always)]
     pub fn is_deposit(&self) -> bool {
-        !(self.flags & BaseHandleFlags::IS_DEPOSIT).is_empty()
+        self.flags.contains(BaseHandleFlags::IS_DEPOSIT)
     }
 }
 
