@@ -617,7 +617,7 @@ mod tests {
         }
 
         unsafe fn item2link(&self, item: NonNull<<Self::Pointer as Pointer>::Item>) -> NonNull<Self::Link> {
-            NonNull::new_unchecked((item.as_ptr() as *const u8).add(crate::offset_of!(DlistItem, link)) as *mut _)
+            NonNull::new_unchecked((item.as_ptr() as *const u8).add(std::mem::offset_of!(DlistItem, link)) as *mut _)
         }
     }
 
