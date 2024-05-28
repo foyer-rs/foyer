@@ -14,8 +14,8 @@
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker, LfuConfig,
-    RateLimitPicker, RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
+    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -172,6 +172,9 @@ pub struct Args {
 
     #[arg(long, default_value_t = 0.8)]
     invalid_ratio: f64,
+
+    #[arg(long, default_value = "lfu")]
+    eviction: String,
 }
 
 #[derive(Debug)]
@@ -357,10 +360,19 @@ async fn main() {
 
     create_dir_all(&args.dir).unwrap();
 
-    let mut builder = HybridCacheBuilder::new()
+    let builder = HybridCacheBuilder::new()
         .memory(args.mem * MIB as usize)
-        .with_shards(args.shards)
-        .with_eviction_config(LfuConfig::default())
+        .with_shards(args.shards);
+
+    let builder = match args.eviction.as_str() {
+        "lru" => builder.with_eviction_config(LruConfig::default()),
+        "lfu" => builder.with_eviction_config(LfuConfig::default()),
+        "fifo" => builder.with_eviction_config(FifoConfig::default()),
+        "s3fifo" => builder.with_eviction_config(S3FifoConfig::default()),
+        _ => panic!("unsupported eviction algorithm: {}", args.eviction),
+    };
+
+    let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
         .with_device_config(
