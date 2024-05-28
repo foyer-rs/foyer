@@ -145,12 +145,11 @@ where
         }
         debug_assert!(ptr.as_ref().base().is_in_indexer());
 
+        ptr.as_mut().base_mut().set_deposit(deposit);
         if !deposit {
             self.eviction.push(ptr);
             debug_assert!(ptr.as_ref().base().is_in_eviction());
         }
-
-        ptr.as_mut().base_mut().set_deposit(deposit);
 
         self.usage.fetch_add(weight, Ordering::Relaxed);
         self.state.metrics.memory_usage.increment(weight as f64);
@@ -328,7 +327,9 @@ where
         debug_assert!(!handle.base().has_refs());
 
         if handle.base().is_deposit() {
+            debug_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
+            debug_assert!(!handle.base().is_in_indexer());
         }
 
         // If the entry is not updated or removed from the cache, try to reinsert it or remove it from the indexer and
@@ -940,16 +941,18 @@ where
 mod tests {
     use std::time::Duration;
 
-    use rand::{rngs::SmallRng, RngCore, SeedableRng};
+    use rand::{rngs::SmallRng, Rng, RngCore, SeedableRng};
 
     use super::*;
     use crate::{
-        cache::{FifoCache, FifoCacheEntry, LruCache, LruCacheEntry},
+        cache::{FifoCache, FifoCacheEntry, LfuCache, LruCache, LruCacheEntry, S3FifoCache},
         eviction::{
             fifo::{FifoConfig, FifoHandle},
             lru::LruConfig,
             test_utils::TestEviction,
         },
+        indexer::HashTableIndexer,
+        LfuConfig, S3FifoConfig,
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
@@ -960,32 +963,94 @@ mod tests {
         is_send_sync_static::<LruCache<(), ()>>();
     }
 
-    #[test]
-    fn test_cache_fuzzy() {
-        const CAPACITY: usize = 256;
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
+    fn fuzzy<E>(cache: Arc<GenericCache<u64, u64, E, HashTableIndexer<u64, E::Handle>>>)
+    where
+        E: Eviction,
+        E::Handle: KeyedHandle<Key = u64, Data = (u64, u64)>,
+    {
+        let handles = (0..8)
+            .map(|i| {
+                let c = cache.clone();
+                std::thread::spawn(move || {
+                    let mut rng = SmallRng::seed_from_u64(i);
+                    for _ in 0..100000 {
+                        let key = rng.next_u64();
+                        if let Some(entry) = c.get(&key) {
+                            assert_eq!(key, *entry);
+                            drop(entry);
+                            continue;
+                        }
+                        c.insert_with_context(
+                            key,
+                            key,
+                            if rng.gen_bool(0.5) {
+                                CacheContext::Default
+                            } else {
+                                CacheContext::LowPriority
+                            },
+                        );
+                    }
+                })
+            })
+            .collect_vec();
 
-        let config = GenericCacheConfig {
+        handles.into_iter().for_each(|handle| handle.join().unwrap());
+
+        assert_eq!(cache.usage(), cache.capacity());
+    }
+
+    #[test]
+    fn test_fifo_cache_fuzzy() {
+        fuzzy(Arc::new(FifoCache::<u64, u64>::new(GenericCacheConfig {
             name: "test".to_string(),
-            capacity: CAPACITY,
+            capacity: 256,
             shards: 4,
-            eviction_config: FifoConfig {},
+            eviction_config: FifoConfig::default(),
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
-        };
-        let cache = Arc::new(FifoCache::<u64, u64>::new(config));
+        })))
+    }
 
-        let mut rng = SmallRng::seed_from_u64(114514);
-        for _ in 0..100000 {
-            let key = rng.next_u64();
-            if let Some(entry) = cache.get(&key) {
-                assert_eq!(key, *entry);
-                drop(entry);
-                continue;
-            }
-            cache.insert(key, key);
-        }
-        assert_eq!(cache.usage(), CAPACITY);
+    #[test]
+    fn test_lru_cache_fuzzy() {
+        fuzzy(Arc::new(LruCache::<u64, u64>::new(GenericCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: LruConfig::default(),
+            object_pool_capacity: 16,
+            hash_builder: RandomState::default(),
+            weighter: Arc::new(|_, _| 1),
+        })))
+    }
+
+    #[test]
+    fn test_lfu_cache_fuzzy() {
+        fuzzy(Arc::new(LfuCache::<u64, u64>::new(GenericCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: LfuConfig::default(),
+            object_pool_capacity: 16,
+            hash_builder: RandomState::default(),
+            weighter: Arc::new(|_, _| 1),
+        })))
+    }
+
+    #[test]
+    fn test_s3fifo_cache_fuzzy() {
+        fuzzy(Arc::new(S3FifoCache::<u64, u64>::new(GenericCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: S3FifoConfig::default(),
+            object_pool_capacity: 16,
+            hash_builder: RandomState::default(),
+            weighter: Arc::new(|_, _| 1),
+        })))
     }
 
     fn fifo(capacity: usize) -> Arc<FifoCache<u64, String>> {
