@@ -181,5 +181,6 @@ mod tests {
         l.push_front(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(DlistItem::new(1)))) });
         let v = l.iter().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1]);
+        let _ = unsafe { Box::from_raw(l.pop_front().unwrap().as_ptr()) };
     }
 }
