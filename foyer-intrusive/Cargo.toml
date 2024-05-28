@@ -13,7 +13,6 @@ readme = "../README.md"
 [dependencies]
 foyer-common = { version = "0.7", path = "../foyer-common" }
 itertools = { workspace = true }
-memoffset = "0.9"
 
 [features]
 strict_assertions = ["foyer-common/strict_assertions"]

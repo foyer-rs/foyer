@@ -18,8 +18,6 @@
 
 //! Intrusive data structures and utils for foyer.
 
-pub use memoffset::offset_of;
-
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one
 /// of its fields.
 ///
@@ -42,7 +40,7 @@ pub use memoffset::offset_of;
 #[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $field)) as *const $container
+        ($ptr as *const _ as *const u8).sub(std::mem::offset_of!($container, $field)) as *const $container
     };
 }
 

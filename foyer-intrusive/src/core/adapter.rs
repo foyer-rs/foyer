@@ -139,7 +139,7 @@ macro_rules! intrusive_adapter {
                 &self,
                 item: std::ptr::NonNull<<Self::Pointer as $crate::core::pointer::Pointer>::Item>,
             ) -> std::ptr::NonNull<Self::Link> {
-                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add($crate::offset_of!($item, $field)) as *mut Self::Link)
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add(std::mem::offset_of!($item, $field)) as *mut Self::Link)
             }
         }
 
