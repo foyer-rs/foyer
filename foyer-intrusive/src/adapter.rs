@@ -119,7 +119,7 @@ macro_rules! intrusive_adapter {
             }
 
             unsafe fn link2ptr(&self, link: std::ptr::NonNull<Self::Link>) -> std::ptr::NonNull<Self::Item> {
-                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $field) as *mut _)
+                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $field))
             }
 
             unsafe fn ptr2link(&self, item: std::ptr::NonNull<Self::Item>) -> std::ptr::NonNull<Self::Link> {

@@ -610,7 +610,7 @@ mod tests {
         }
 
         unsafe fn link2ptr(&self, link: NonNull<Self::Link>) -> NonNull<Self::Item> {
-            NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link) as *mut _)
+            NonNull::new_unchecked(crate::container_of!(link.as_ptr(), DlistItem, link))
         }
 
         unsafe fn ptr2link(&self, item: NonNull<Self::Item>) -> NonNull<Self::Link> {
