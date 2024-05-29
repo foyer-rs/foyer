@@ -233,6 +233,8 @@ where
             strict_assert!(!handle.link.is_linked());
             self.push(ptr);
         }
+
+        strict_assert!(handle.base().is_in_eviction());
     }
 
     unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
