@@ -236,7 +236,12 @@ where
             picker.init(device.regions(), device.region_size());
         }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
-        let region_manager = RegionManager::new(device.clone(), eviction_pickers, reclaim_semaphore.clone());
+        let region_manager = RegionManager::new(
+            device.clone(),
+            eviction_pickers,
+            reclaim_semaphore.clone(),
+            metrics.clone(),
+        );
         let sequence = AtomicSequence::default();
 
         RecoverRunner::run(
