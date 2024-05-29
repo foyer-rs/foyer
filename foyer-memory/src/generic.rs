@@ -757,7 +757,7 @@ where
     {
         let hash = self.hash_builder.hash_one(&key);
 
-        let entry = {
+        {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
@@ -771,34 +771,31 @@ where
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    Some(GenericFetch::Wait(rx))
+                    return GenericFetch::Wait(rx);
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
                     shard.state.metrics.memory_fetch.increment(1);
-                    None
                 }
             }
         }
-        .unwrap_or_else(|| {
-            let cache = self.clone();
-            let future = fetch();
-            let join = tokio::spawn(async move {
-                let (value, context) = match future.await {
-                    Ok((value, context)) => (value, context),
-                    Err(e) => {
-                        let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
-                        tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
-                        shard.waiters.remove(&key);
-                        return Err(e);
-                    }
-                };
-                let entry = cache.insert_with_context(key, value, context);
-                Ok(entry)
-            });
-            GenericFetch::Miss(join)
+
+        let cache = self.clone();
+        let future = fetch();
+        let join = tokio::spawn(async move {
+            let (value, context) = match future.await {
+                Ok((value, context)) => (value, context),
+                Err(e) => {
+                    let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
+                    tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
+                    shard.waiters.remove(&key);
+                    return Err(e);
+                }
+            };
+            let entry = cache.insert_with_context(key, value, context);
+            Ok(entry)
         });
-        entry
+        GenericFetch::Miss(join)
     }
 }
 
