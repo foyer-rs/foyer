@@ -19,7 +19,7 @@ foyer = { version = "0.9", path = "../foyer" }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }
-metrics = "0.22"
+metrics = { workspace = true }
 metrics-exporter-prometheus = "0.14"
 opentelemetry = { version = "0.22", optional = true }
 opentelemetry-otlp = { version = "0.15", optional = true }
