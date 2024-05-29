@@ -947,6 +947,7 @@ where
 mod tests {
     use std::time::Duration;
 
+    use futures::future::try_join_all;
     use rand::{rngs::SmallRng, Rng, RngCore, SeedableRng};
 
     use super::*;
@@ -1259,21 +1260,67 @@ mod tests {
         // It's okay for this is not a common situation and is not supposed to happen in real workload.
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_fetch() {
         let cache = fifo(10);
 
-        let fetch = || async move {
+        let fetch = |s: &'static str| async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok::<_, anyhow::Error>(("111".to_string(), CacheContext::default()))
+            Ok::<_, anyhow::Error>((s.to_string(), CacheContext::default()))
         };
 
-        let e1 = cache.fetch(1, fetch).await.unwrap();
-        let e2 = cache.fetch(1, fetch).await.unwrap();
-        let e3 = cache.fetch(1, fetch).await.unwrap();
+        let e1s = try_join_all([
+            cache.fetch(1, || fetch("111")),
+            cache.fetch(1, || fetch("111")),
+            cache.fetch(1, || fetch("111")),
+        ])
+        .await
+        .unwrap();
+
+        assert_eq!(e1s[0].value(), "111");
+        assert_eq!(e1s[1].value(), "111");
+        assert_eq!(e1s[2].value(), "111");
+
+        let e1 = cache.fetch(1, || fetch("111")).await.unwrap();
 
         assert_eq!(e1.value(), "111");
-        assert_eq!(e2.value(), "111");
-        assert_eq!(e3.value(), "111");
+        assert_eq!(e1.refs(), 4);
+
+        let c = cache.clone();
+        let h2 = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            c.insert(2, "222222".to_string())
+        });
+        let e2s = try_join_all([
+            cache.fetch(2, || fetch("222")),
+            cache.fetch(2, || fetch("222")),
+            cache.fetch(2, || fetch("222")),
+        ])
+        .await
+        .unwrap();
+        let e2 = h2.await.unwrap();
+
+        assert_eq!(e2s[0].value(), "222");
+        assert_eq!(e2s[1].value(), "222222");
+        assert_eq!(e2s[2].value(), "222222");
+        assert_eq!(e2.value(), "222222");
+
+        assert_eq!(e2s[0].refs(), 1);
+        assert_eq!(e2s[1].refs(), 3);
+        assert_eq!(e2s[2].refs(), 3);
+        assert_eq!(e2.refs(), 3);
+
+        let c = cache.clone();
+        let h3a = tokio::spawn(async move { c.fetch(3, || fetch("333")).await.unwrap() });
+        let c = cache.clone();
+        let h3b = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::timeout(Duration::from_millis(10), c.fetch(3, || fetch("333"))).await
+        });
+
+        let _ = h3b.await.unwrap();
+        let e3 = h3a.await.unwrap();
+        assert_eq!(e3.value(), "333");
+        assert_eq!(e3.refs(), 1);
     }
 }
