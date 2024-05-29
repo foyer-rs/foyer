@@ -16,7 +16,7 @@
 
 use std::ptr::NonNull;
 
-use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
+use foyer_common::{assert::OptionExt, strict_assert};
 
 use crate::adapter::{Adapter, Link};
 
@@ -99,38 +99,22 @@ where
 
     /// Get the reference of the first item of the intrusive double linked list.
     pub fn front(&self) -> Option<&A::Item> {
-        unsafe {
-            self.head
-                .map(|link| self.adapter.link2ptr(link))
-                .map(|link| link.as_ref())
-        }
+        unsafe { self.head.map(|link| self.adapter.link2ptr(link).as_ref()) }
     }
 
     /// Get the reference of the last item of the intrusive double linked list.
     pub fn back(&self) -> Option<&A::Item> {
-        unsafe {
-            self.tail
-                .map(|link| self.adapter.link2ptr(link))
-                .map(|link| link.as_ref())
-        }
+        unsafe { self.tail.map(|link| self.adapter.link2ptr(link).as_ref()) }
     }
 
     /// Get the mutable reference of the first item of the intrusive double linked list.
     pub fn front_mut(&mut self) -> Option<&mut A::Item> {
-        unsafe {
-            self.head
-                .map(|link| self.adapter.link2ptr(link))
-                .map(|mut link| link.as_mut())
-        }
+        unsafe { self.head.map(|link| self.adapter.link2ptr(link).as_mut()) }
     }
 
     /// Get the mutable reference of the last item of the intrusive double linked list.
     pub fn back_mut(&mut self) -> Option<&mut A::Item> {
-        unsafe {
-            self.tail
-                .map(|link| self.adapter.link2ptr(link))
-                .map(|mut link| link.as_mut())
-        }
+        unsafe { self.tail.map(|link| self.adapter.link2ptr(link).as_mut()) }
     }
 
     /// Push an item to the first position of the intrusive double linked list.
@@ -183,42 +167,6 @@ where
         self.len() == 0
     }
 
-    /// Get the prev element of the given `link`.
-    ///
-    /// # Safety
-    ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_of_raw(&self, link: NonNull<DlistLink>) -> Option<&A::Item> {
-        link.as_ref().prev().map(|link| self.adapter.link2ptr(link).as_ref())
-    }
-
-    /// Get the mutable prev element of the given `link`.
-    ///
-    /// # Safety
-    ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn prev_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut A::Item> {
-        link.as_ref().prev().map(|link| self.adapter.link2ptr(link).as_mut())
-    }
-
-    /// Get the next element of the given `link`.
-    ///
-    /// # Safety
-    ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_of_raw(&self, link: NonNull<DlistLink>) -> Option<&A::Item> {
-        link.as_ref().next().map(|link| self.adapter.link2ptr(link).as_ref())
-    }
-
-    /// Get the mutable next element of the given `link`.
-    ///
-    /// # Safety
-    ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn next_mut_of_raw(&self, link: NonNull<DlistLink>) -> Option<&mut A::Item> {
-        link.as_ref().next().map(|link| self.adapter.link2ptr(link).as_mut())
-    }
-
     /// Remove an node that holds the given raw link.
     ///
     /// # Safety
@@ -252,23 +200,6 @@ where
             link: Some(link),
             dlist: self,
         }
-    }
-
-    /// # Safety
-    ///
-    /// `self` must be empty. `src` will be set empty after operation.
-    pub unsafe fn replace_with(&mut self, src: &mut Dlist<A>) {
-        strict_assert!(self.head.is_none());
-        strict_assert!(self.tail.is_none());
-        strict_assert_eq!(self.len, 0);
-
-        self.head = src.head;
-        self.tail = src.tail;
-        self.len = src.len;
-
-        src.head = None;
-        src.tail = None;
-        src.len = 0;
     }
 
     /// Get the intrusive adapter of the double linked list.
@@ -423,7 +354,6 @@ where
 
             strict_assert!(self.is_valid());
             let mut link = self.link.strict_unwrap_unchecked();
-
             let ptr = self.dlist.adapter.link2ptr(link);
 
             // fix head and tail if node is either of that

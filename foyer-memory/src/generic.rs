@@ -233,7 +233,7 @@ where
         Some(ptr)
     }
 
-    /// Remove a key based on the eviction algorithm if exists.s
+    /// Remove a key based on the eviction algorithm if exists.
     unsafe fn pop(&mut self) -> Option<NonNull<E::Handle>> {
         let ptr = self.eviction.pop()?;
 
@@ -572,6 +572,7 @@ where
             if let Some(waiters) = waiters.as_ref() {
                 // Increase the reference count within the lock section.
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
+                strict_assert_eq!(ptr.as_ref().base().refs(), waiters.len() + 1);
             }
             let entry = GenericCacheEntry {
                 cache: self.clone(),
@@ -756,49 +757,45 @@ where
     {
         let hash = self.hash_builder.hash_one(&key);
 
-        unsafe {
+        {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
-            if let Some(ptr) = shard.get(hash, &key) {
+
+            if let Some(ptr) = unsafe { shard.get(hash, &key) } {
                 return GenericFetch::Hit(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
                 });
             }
-            let entry = match shard.waiters.entry(key.clone()) {
+            match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
-                    GenericFetch::Wait(rx)
+                    shard.state.metrics.memory_queue.increment(1);
+                    return GenericFetch::Wait(rx);
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
-                    let cache = self.clone();
-                    let future = fetch();
-                    let join = tokio::spawn(async move {
-                        let (value, context) = match future.await {
-                            Ok((value, context)) => (value, context),
-                            Err(e) => {
-                                let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
-                                tracing::debug!(
-                                    "[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}"
-                                );
-                                shard.waiters.remove(&key);
-                                return Err(e);
-                            }
-                        };
-                        let entry = cache.insert_with_context(key, value, context);
-                        Ok(entry)
-                    });
-                    GenericFetch::Miss(join)
+                    shard.state.metrics.memory_fetch.increment(1);
+                }
+            }
+        }
+
+        let cache = self.clone();
+        let future = fetch();
+        let join = tokio::spawn(async move {
+            let (value, context) = match future.await {
+                Ok((value, context)) => (value, context),
+                Err(e) => {
+                    let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
+                    tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
+                    shard.waiters.remove(&key);
+                    return Err(e);
                 }
             };
-            match entry {
-                GenericFetch::Wait(_) => shard.state.metrics.memory_queue.increment(1),
-                GenericFetch::Miss(_) => shard.state.metrics.memory_fetch.increment(1),
-                _ => unreachable!(),
-            };
-            entry
-        }
+            let entry = cache.insert_with_context(key, value, context);
+            Ok(entry)
+        });
+        GenericFetch::Miss(join)
     }
 }
 
