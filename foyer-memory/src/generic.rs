@@ -347,9 +347,12 @@ where
                 let was_in_eviction = handle.base().is_in_eviction();
                 self.eviction.release(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
-                    if was_in_eviction {
+                    if !was_in_eviction {
                         self.state.metrics.memory_reinsert.increment(1);
                     }
+                    strict_assert!(ptr.as_ref().base().is_in_indexer());
+                    strict_assert!(ptr.as_ref().base().is_in_eviction());
+                    strict_assert!(!handle.base().has_refs());
                     return None;
                 }
             }
