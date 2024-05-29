@@ -740,6 +740,12 @@ where
         // Do not deallocate data within the lock section.
         drop(entry);
     }
+
+    unsafe fn inc_refs(&self, mut ptr: NonNull<E::Handle>) {
+        let shard = self.shards[ptr.as_ref().base().hash() as usize % self.shards.len()].lock();
+        ptr.as_mut().base_mut().inc_refs();
+        drop(shard);
+    }
 }
 
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
@@ -877,17 +883,10 @@ where
     S: HashBuilder,
 {
     fn clone(&self) -> Self {
-        let mut ptr = self.ptr;
-
-        unsafe {
-            let base = ptr.as_mut().base_mut();
-            strict_assert!(base.has_refs());
-            base.inc_refs();
-        }
-
+        unsafe { self.cache.inc_refs(self.ptr) };
         Self {
             cache: self.cache.clone(),
-            ptr,
+            ptr: self.ptr,
         }
     }
 }
