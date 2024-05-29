@@ -61,6 +61,12 @@ pub struct Metrics {
     pub storage_disk_read_duration: Histogram,
     pub storage_disk_flush_duration: Histogram,
 
+    pub storage_region_total: Gauge,
+    pub storage_region_clean: Gauge,
+    pub storage_region_evictable: Gauge,
+
+    pub storage_region_size_bytes: Gauge,
+
     /* hybrid cache metrics */
     pub hybrid_insert: Counter,
     pub hybrid_hit: Counter,
@@ -143,6 +149,15 @@ impl Metrics {
         let storage_disk_flush_duration =
             histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "flush");
 
+        let storage_region_total =
+            gauge!(format!("foyer_storage_region"), "name" => name.to_string(), "type" => "total");
+        let storage_region_clean =
+            gauge!(format!("foyer_storage_region"), "name" => name.to_string(), "type" => "clean");
+        let storage_region_evictable =
+            gauge!(format!("foyer_storage_region"), "name" => name.to_string(), "type" => "evictable");
+
+        let storage_region_size_bytes = gauge!(format!("foyer_storage_region_size_bytes"), "name" => name.to_string());
+
         /* hybrid cache metrics */
 
         let hybrid_insert = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "insert");
@@ -192,6 +207,10 @@ impl Metrics {
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,
+            storage_region_total,
+            storage_region_clean,
+            storage_region_evictable,
+            storage_region_size_bytes,
 
             hybrid_insert,
             hybrid_hit,
