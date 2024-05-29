@@ -944,7 +944,7 @@ where
 mod tests {
     use std::time::Duration;
 
-    use futures::future::try_join_all;
+    use futures::future::{join_all, try_join_all};
     use rand::{rngs::SmallRng, Rng, RngCore, SeedableRng};
 
     use super::*;
@@ -1266,6 +1266,8 @@ mod tests {
             Ok::<_, anyhow::Error>((s.to_string(), CacheContext::default()))
         };
 
+        /* fetch with waiters */
+
         let e1s = try_join_all([
             cache.fetch(1, || fetch("111")),
             cache.fetch(1, || fetch("111")),
@@ -1282,6 +1284,8 @@ mod tests {
 
         assert_eq!(e1.value(), "111");
         assert_eq!(e1.refs(), 4);
+
+        /* insert before fetch finish */
 
         let c = cache.clone();
         let h2 = tokio::spawn(async move {
@@ -1307,6 +1311,8 @@ mod tests {
         assert_eq!(e2s[2].refs(), 3);
         assert_eq!(e2.refs(), 3);
 
+        /* fetch cancel */
+
         let c = cache.clone();
         let h3a = tokio::spawn(async move { c.fetch(3, || fetch("333")).await.unwrap() });
         let c = cache.clone();
@@ -1319,5 +1325,23 @@ mod tests {
         let e3 = h3a.await.unwrap();
         assert_eq!(e3.value(), "333");
         assert_eq!(e3.refs(), 1);
+
+        /* fetch error */
+
+        let r4s = join_all([
+            cache.fetch(4, || async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Err(anyhow::anyhow!("fetch error"))
+            }),
+            cache.fetch(4, || fetch("444")),
+        ])
+        .await;
+
+        assert!(r4s[0].is_err());
+        assert!(r4s[1].is_err());
+
+        let e4 = cache.fetch(4, || fetch("444")).await.unwrap();
+        assert_eq!(e4.value(), "444");
+        assert_eq!(e4.refs(), 1);
     }
 }
