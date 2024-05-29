@@ -277,7 +277,7 @@ fn init_logger() {
 
     let trace_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
         SERVICE_NAME,
-        "foyer-storage-bench",
+        "foyer-bench",
     )]));
     let batch_config = BatchConfigBuilder::default()
         .with_max_queue_size(1048576)
@@ -444,7 +444,7 @@ async fn main() {
 
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
-        tracing::warn!("foyer-storage-bench is cancelled with CTRL-C");
+        tracing::warn!("foyer-bench is cancelled with CTRL-C");
         stop_tx.send(()).unwrap();
     });
 

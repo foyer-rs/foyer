@@ -27,6 +27,7 @@ test-log = { version = "0.2", default-features = false, features = [
     "color",
 ] }
 itertools = "0.13"
+metrics = "0.23"
 
 [profile.release]
 debug = true
