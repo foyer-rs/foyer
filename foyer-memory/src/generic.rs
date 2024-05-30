@@ -233,19 +233,6 @@ where
         Some(ptr)
     }
 
-    /// Remove a key based on the eviction algorithm if exists.
-    unsafe fn pop(&mut self) -> Option<NonNull<E::Handle>> {
-        let ptr = self.eviction.pop()?;
-
-        let handle = ptr.as_ref();
-
-        // If the `ptr` is in the eviction container, it must be the latest version of the key and in the indexer.
-        let p = self.remove(handle.base().hash(), handle.key()).unwrap();
-        strict_assert_eq!(ptr, p);
-
-        Some(ptr)
-    }
-
     /// Clear all cache entries.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
@@ -268,6 +255,7 @@ where
         // So only the handles drained from the indexer need to be released.
         for ptr in ptrs {
             strict_assert!(!ptr.as_ref().base().is_in_indexer());
+            strict_assert!(!ptr.as_ref().base().is_in_eviction());
             if let Some(entry) = self.try_release_handle(ptr, false) {
                 last_reference_entries.push(entry);
             }
@@ -609,55 +597,6 @@ where
         unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             shard.remove(hash, key).map(|ptr| GenericCacheEntry {
-                cache: self.clone(),
-                ptr,
-            })
-        }
-    }
-
-    pub fn pop(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, S>> {
-        let mut shards = self.shards.iter().map(|shard| shard.lock()).collect_vec();
-
-        let shard = self
-            .usages
-            .iter()
-            .enumerate()
-            .fold((None, 0), |(largest_shard, largest_shard_usage), (shard, usage)| {
-                let usage = usage.load(Ordering::Acquire);
-                if usage > largest_shard_usage {
-                    (Some(shard), usage)
-                } else {
-                    (largest_shard, largest_shard_usage)
-                }
-            })
-            .0?;
-
-        unsafe {
-            shards[shard].pop().map(|ptr| GenericCacheEntry {
-                cache: self.clone(),
-                ptr,
-            })
-        }
-    }
-
-    pub fn pop_corase(self: &Arc<Self>) -> Option<GenericCacheEntry<K, V, E, I, S>> {
-        let shard = self
-            .usages
-            .iter()
-            .enumerate()
-            .fold((None, 0), |(largest_shard, largest_shard_usage), (shard, usage)| {
-                let usage = usage.load(Ordering::Relaxed);
-                if usage > largest_shard_usage {
-                    (Some(shard), usage)
-                } else {
-                    (largest_shard, largest_shard_usage)
-                }
-            })
-            .0?;
-
-        unsafe {
-            let mut shard = self.shards[shard].lock();
-            shard.pop().map(|ptr| GenericCacheEntry {
                 cache: self.clone(),
                 ptr,
             })

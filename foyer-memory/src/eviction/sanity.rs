@@ -70,7 +70,10 @@ where
     }
 
     unsafe fn clear(&mut self) -> Vec<std::ptr::NonNull<Self::Handle>> {
-        self.eviction.clear()
+        let res = self.eviction.clear();
+        res.iter()
+            .for_each(|ptr| assert!(!ptr.as_ref().base().is_in_eviction()));
+        res
     }
 
     fn len(&self) -> usize {
