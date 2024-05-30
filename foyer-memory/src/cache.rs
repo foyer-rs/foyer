@@ -28,37 +28,45 @@ use crate::{
         lfu::{Lfu, LfuHandle},
         lru::{Lru, LruHandle},
         s3fifo::{S3Fifo, S3FifoHandle},
+        sanity::SanityEviction,
     },
     generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
-    indexer::HashTableIndexer,
+    indexer::{hash_table::HashTableIndexer, sanity::SanityIndexer},
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
 
 pub type FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
+    GenericCache<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
 pub type FifoCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S>;
+    GenericCacheEntry<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
 pub type FifoFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, Fifo<(K, V)>, HashTableIndexer<K, FifoHandle<(K, V)>>, S, ER>;
+    GenericFetch<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S, ER>;
 
-pub type LruCache<K, V, S = RandomState> = GenericCache<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
+pub type LruCache<K, V, S = RandomState> =
+    GenericCache<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
 pub type LruCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S>;
+    GenericCacheEntry<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
 pub type LruFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, Lru<(K, V)>, HashTableIndexer<K, LruHandle<(K, V)>>, S, ER>;
+    GenericFetch<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S, ER>;
 
-pub type LfuCache<K, V, S = RandomState> = GenericCache<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
+pub type LfuCache<K, V, S = RandomState> =
+    GenericCache<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
 pub type LfuCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S>;
+    GenericCacheEntry<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
 pub type LfuFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, Lfu<(K, V)>, HashTableIndexer<K, LfuHandle<(K, V)>>, S, ER>;
+    GenericFetch<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S, ER>;
 
 pub type S3FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
-pub type S3FifoCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S>;
+    GenericCache<K, V, SanityEviction<S3Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>, S>;
+pub type S3FifoCacheEntry<K, V, S = RandomState> = GenericCacheEntry<
+    K,
+    V,
+    SanityEviction<S3Fifo<(K, V)>>,
+    SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>,
+    S,
+>;
 pub type S3FifoFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, S3Fifo<(K, V)>, HashTableIndexer<K, S3FifoHandle<(K, V)>>, S, ER>;
+    GenericFetch<K, V, SanityEviction<S3Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>, S, ER>;
 
 /// A cached entry holder of the in-memory cache.
 #[derive(Debug)]

@@ -39,6 +39,7 @@ strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-intrusive/strict_assertions",
 ]
+sanity = ["strict_assertions"]
 
 [[bench]]
 name = "bench_hit_ratio"

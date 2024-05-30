@@ -16,6 +16,8 @@ use std::ptr::NonNull;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::handle::Handle;
+
 pub trait EvictionConfig: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 impl<T> EvictionConfig for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 
@@ -23,7 +25,7 @@ impl<T> EvictionConfig for T where T: Send + Sync + 'static + Clone + Serialize 
 ///
 /// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
 pub trait Eviction: Send + Sync + 'static {
-    type Handle;
+    type Handle: Handle;
     type Config: EvictionConfig;
 
     /// Create a new empty eviction container.
@@ -99,6 +101,8 @@ pub mod fifo;
 pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
+
+pub mod sanity;
 
 #[cfg(test)]
 pub mod test_utils;

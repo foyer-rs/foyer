@@ -20,22 +20,7 @@ use foyer_common::{code::Key, strict_assert};
 
 use crate::handle::KeyedHandle;
 
-pub trait Indexer: Send + Sync + 'static {
-    type Key: Key;
-    type Handle: KeyedHandle<Key = Self::Key>;
-
-    fn new() -> Self;
-    unsafe fn insert(&mut self, handle: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
-    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
-}
+use super::Indexer;
 
 pub struct HashTableIndexer<K, H>
 where
