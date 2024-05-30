@@ -22,14 +22,15 @@ check-all:
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
-	cargo clippy --all-targets --features strict_assertions
+	cargo clippy --all-targets --features sanity
+	cargo clippy --all-targets
 
 test:
-	RUST_BACKTRACE=1 cargo nextest run --all --features strict_assertions
+	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity"
 	RUST_BACKTRACE=1 cargo test --doc
 
 test-ignored:
-	RUST_BACKTRACE=1 cargo nextest run --run-ignored ignored-only --no-capture --workspace --features strict_assertions
+	RUST_BACKTRACE=1 cargo nextest run --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity"
 
 test-all: test test-ignored
 

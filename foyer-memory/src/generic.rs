@@ -957,7 +957,7 @@ mod tests {
             lru::LruConfig,
             test_utils::TestEviction,
         },
-        indexer::HashTableIndexer,
+        indexer::{hash_table::HashTableIndexer, sanity::SanityIndexer},
         LfuConfig, S3FifoConfig,
     };
 
@@ -971,7 +971,7 @@ mod tests {
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    fn fuzzy<E>(cache: Arc<GenericCache<u64, u64, E, HashTableIndexer<u64, E::Handle>>>)
+    fn fuzzy<E>(cache: Arc<GenericCache<u64, u64, E, SanityIndexer<HashTableIndexer<u64, E::Handle>>>>)
     where
         E: Eviction,
         E::Handle: KeyedHandle<Key = u64, Data = (u64, u64)>,

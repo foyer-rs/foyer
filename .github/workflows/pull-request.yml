@@ -129,13 +129,13 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace
+          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity"
       - name: Run rust test with coverage
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity"
       - name: Run examples with coverage
         env:
           RUST_BACKTRACE: 1
@@ -151,7 +151,7 @@ jobs:
           CI: true
         run: |
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info

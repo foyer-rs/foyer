@@ -49,3 +49,4 @@ trace = [
     "opentelemetry-semantic-conventions",
 ]
 strict_assertions = ["foyer/strict_assertions"]
+sanity = ["foyer/sanity"]
