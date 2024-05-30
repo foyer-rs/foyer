@@ -545,30 +545,6 @@ where
         }
     }
 
-    /// Remove the first-to-evict entry from the in-memory cache.
-    ///
-    /// Note: The entry may be reinserted based on the eviction algorithm.
-    pub fn pop(&self) -> Option<CacheEntry<K, V, S>> {
-        match self {
-            Cache::Fifo(cache) => cache.pop().map(CacheEntry::from),
-            Cache::Lru(cache) => cache.pop().map(CacheEntry::from),
-            Cache::Lfu(cache) => cache.pop().map(CacheEntry::from),
-            Cache::S3Fifo(cache) => cache.pop().map(CacheEntry::from),
-        }
-    }
-
-    /// Remove the estimated first-to-evict entry from the in-memory cache.
-    ///
-    /// Note: The entry may be reinserted based on the eviction algorithm.
-    pub fn pop_corase(&self) -> Option<CacheEntry<K, V, S>> {
-        match self {
-            Cache::Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
-            Cache::Lru(cache) => cache.pop_corase().map(CacheEntry::from),
-            Cache::Lfu(cache) => cache.pop_corase().map(CacheEntry::from),
-            Cache::S3Fifo(cache) => cache.pop_corase().map(CacheEntry::from),
-        }
-    }
-
     /// Get cached entry with the given key from the in-memory cache.
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
