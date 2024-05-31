@@ -319,7 +319,8 @@ where
         strict_assert!(handle.base().is_inited());
         strict_assert!(!handle.base().has_refs());
 
-        if handle.base().is_deposit() {
+        // If the entry is deposit (emplace by deposit & never read), remove it from indexer to skip reinsertion.
+        if handle.base().is_in_indexer() && handle.base().is_deposit() {
             strict_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
             strict_assert!(!handle.base().is_in_indexer());
@@ -335,6 +336,7 @@ where
                 let was_in_eviction = handle.base().is_in_eviction();
                 self.eviction.release(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
+                    // The entry is not yep evicted, do NOT release it.
                     if !was_in_eviction {
                         self.state.metrics.memory_reinsert.increment(1);
                     }
@@ -1074,6 +1076,17 @@ mod tests {
         drop(e);
         assert_eq!(cache.usage(), 6);
         assert_eq!(cache.get(&42).unwrap().value(), "answer");
+    }
+
+    #[test]
+    fn test_deposit_replace() {
+        let cache = lru(100);
+        let e1 = cache.deposit(42, "wrong answer".to_string());
+        let e2 = cache.insert(42, "answer".to_string());
+        drop(e1);
+        drop(e2);
+        assert_eq!(cache.get(&42).unwrap().value(), "answer");
+        assert_eq!(cache.usage(), 6);
     }
 
     #[test]
