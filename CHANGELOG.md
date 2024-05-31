@@ -6,7 +6,7 @@
 | foyer-common | 0.7.1 |
 | foyer-intrusive | 0.7.0 |
 | foyer-memory | 0.5.0 |
-| foyer-storage | 0.8.0 |
+| foyer-storage | 0.8.1 |
 | foyer-bench | 0.1.1 |
 
 <details>
