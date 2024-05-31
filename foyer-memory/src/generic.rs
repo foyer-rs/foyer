@@ -319,7 +319,7 @@ where
         strict_assert!(handle.base().is_inited());
         strict_assert!(!handle.base().has_refs());
 
-        // If the entry is depoist (emplace by deposit & never read), remove it from indexer to skip reinsertion.
+        // If the entry is deposit (emplace by deposit & never read), remove it from indexer to skip reinsertion.
         if handle.base().is_in_indexer() && handle.base().is_deposit() {
             strict_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
