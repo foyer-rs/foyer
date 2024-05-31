@@ -319,6 +319,7 @@ where
         strict_assert!(handle.base().is_inited());
         strict_assert!(!handle.base().has_refs());
 
+        // If the entry is depoist (emplace by deposit & never read), remove it from indexer to skip reinsertion.
         if handle.base().is_in_indexer() && handle.base().is_deposit() {
             strict_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
@@ -335,6 +336,7 @@ where
                 let was_in_eviction = handle.base().is_in_eviction();
                 self.eviction.release(ptr);
                 if ptr.as_ref().base().is_in_eviction() {
+                    // The entry is not yep evicted, do NOT release it.
                     if !was_in_eviction {
                         self.state.metrics.memory_reinsert.increment(1);
                     }
