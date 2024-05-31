@@ -319,7 +319,7 @@ where
         strict_assert!(handle.base().is_inited());
         strict_assert!(!handle.base().has_refs());
 
-        if handle.base().is_deposit() {
+        if handle.base().is_in_indexer() && handle.base().is_deposit() {
             strict_assert!(!handle.base().is_in_eviction());
             self.indexer.remove(handle.base().hash(), handle.key());
             strict_assert!(!handle.base().is_in_indexer());
@@ -1074,6 +1074,17 @@ mod tests {
         drop(e);
         assert_eq!(cache.usage(), 6);
         assert_eq!(cache.get(&42).unwrap().value(), "answer");
+    }
+
+    #[test]
+    fn test_deposit_replace() {
+        let cache = lru(100);
+        let e1 = cache.deposit(42, "wrong answer".to_string());
+        let e2 = cache.insert(42, "answer".to_string());
+        drop(e1);
+        drop(e2);
+        assert_eq!(cache.get(&42).unwrap().value(), "answer");
+        assert_eq!(cache.usage(), 6);
     }
 
     #[test]
