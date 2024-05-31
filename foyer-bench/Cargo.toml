@@ -20,11 +20,11 @@ futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }
 metrics = { workspace = true }
-metrics-exporter-prometheus = "0.14"
-opentelemetry = { version = "0.22", optional = true }
-opentelemetry-otlp = { version = "0.15", optional = true }
+metrics-exporter-prometheus = "0.15"
+opentelemetry = { version = "0.23", optional = true }
+opentelemetry-otlp = { version = "0.16", optional = true }
 opentelemetry-semantic-conventions = { version = "0.15", optional = true }
-opentelemetry_sdk = { version = "0.22", features = [
+opentelemetry_sdk = { version = "0.23", features = [
     "rt-tokio",
     "trace",
 ], optional = true }
@@ -34,7 +34,7 @@ serde = { workspace = true }
 serde_bytes = "0.11.14"
 tokio = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = { version = "0.23", optional = true }
+tracing-opentelemetry = { version = "0.24", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"
 
