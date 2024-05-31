@@ -1,6 +1,6 @@
 [package]
 name = "foyer-intrusive"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "intrusive data structures for foyer - the hybrid cache for Rust"

@@ -1,3 +1,29 @@
+## 2024-05-31
+
+| crate | version |
+| - | - |
+| foyer | 0.9.1 |
+| foyer-intrusive | 0.7.0 |
+| foyer-memory | 0.5.0 |
+| foyer-storage | 0.8.0 |
+| foyer-bench | 0.1.1 |
+
+<details>
+
+### Changes
+
+- Fix "attempt to subtract with overflow" panic after cloning cache entry. [#543](https://github.com/MrCroxx/foyer/issues/543).
+- Fix "assertion failed: base.is_in_indexer()" panic after replacing deposit entry. [#547](https://github.com/MrCroxx/foyer/issues/547).
+- Fix setting name for in-memory cache.
+- Add region related metrics.
+- Introduce `strict_assertions` and `sanity` feature for debugging.
+- `foyer-bench` support setting eviction algorithm.
+- Upgrade `metrics` to `0.23`.
+- Remove `pop()` related interface from the in-memory cache.
+- Refine intrusive data structure implementation.
+
+</details>
+
 ## 2024-05-27
 
 | crate | version |
