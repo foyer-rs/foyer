@@ -1,3 +1,22 @@
+## 2024-06-03
+
+| crate | version |
+| - | - |
+| foyer | 0.9.2 |
+| foyer-common | 0.7.2 |
+| foyer-intrusive | 0.7.1 |
+| foyer-memory | 0.5.1 |
+| foyer-storage | 0.8.2 |
+| foyer-bench | 0.1.2 |
+
+<details>
+
+### Changes
+
+- Support customized cache event listener.
+
+</details>
+
 ## 2024-05-31
 
 | crate | version |
