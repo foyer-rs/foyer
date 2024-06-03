@@ -21,6 +21,7 @@ use ahash::RandomState;
 pub use common::{
     buf::{BufExt, BufMutExt},
     code::{Key, StorageKey, StorageValue, Value},
+    event::EventListener,
     range::RangeBoundsExt,
 };
 pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};

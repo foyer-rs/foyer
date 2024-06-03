@@ -31,6 +31,8 @@ pub mod buf;
 pub mod code;
 /// A concurrent count down util.
 pub mod countdown;
+/// Components for monitoring internal events.
+pub mod event;
 /// The shared metrics for foyer.
 pub mod metrics;
 /// A concurrent object pool.

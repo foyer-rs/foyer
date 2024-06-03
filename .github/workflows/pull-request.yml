@@ -144,6 +144,7 @@ jobs:
           cargo llvm-cov --no-report run --example memory
           cargo llvm-cov --no-report run --example hybrid
           cargo llvm-cov --no-report run --example hybrid_full
+          cargo llvm-cov --no-report run --example event_listener
       - name: Run foyer-bench with coverage
         if: matrix.os == 'ubuntu-latest'
         env:
