@@ -572,8 +572,8 @@ where
         }
 
         // Do not deallocate data within the lock section.
-        for (k, v, _c, _w) in to_release {
-            if let Some(listener) = self.context.event_listener.as_ref() {
+        if let Some(listener) = self.context.event_listener.as_ref() {
+            for (k, v, _c, _w) in to_release {
                 listener.on_memory_release(k, v);
             }
         }
@@ -647,8 +647,8 @@ where
         }
 
         // Do not deallocate data within the lock section.
-        for (k, v, _c, _w) in to_release {
-            if let Some(listener) = self.context.event_listener.as_ref() {
+        if let Some(listener) = self.context.event_listener.as_ref() {
+            for (k, v, _c, _w) in to_release {
                 listener.on_memory_release(k, v);
             }
         }
@@ -678,8 +678,8 @@ where
         };
 
         // Do not deallocate data within the lock section.
-        if let Some((k, v, _c, _w)) = entry {
-            if let Some(listener) = self.context.event_listener.as_ref() {
+        if let Some(listener) = self.context.event_listener.as_ref() {
+            if let Some((k, v, _c, _w)) = entry {
                 listener.on_memory_release(k, v);
             }
         }
