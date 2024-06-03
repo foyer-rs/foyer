@@ -12,16 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+mod analyze;
+mod rate;
+mod text;
+
 use bytesize::MIB;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
     LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-
-mod analyze;
-mod rate;
-mod text;
 
 use std::{
     collections::BTreeMap,
@@ -51,6 +51,10 @@ use text::text;
 use tokio::sync::broadcast;
 
 use crate::analyze::IoStat;
+
+#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
@@ -322,6 +326,9 @@ fn init_logger() {
 #[tokio::main]
 async fn main() {
     init_logger();
+
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+    tracing::info!("[foyer bench]: jemalloc is enabled.");
 
     #[cfg(feature = "deadlock")]
     {
