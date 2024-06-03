@@ -43,6 +43,7 @@ example:
 	cargo run --example memory
 	cargo run --example hybrid
 	cargo run --example hybrid_full
+	cargo run --example event_listener
 
 full: check-all test-all example udeps
 

@@ -19,7 +19,10 @@ use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use foyer_common::code::{HashBuilder, Key, Value};
+use foyer_common::{
+    code::{HashBuilder, Key, Value},
+    event::EventListener,
+};
 
 use crate::{
     context::CacheContext,
@@ -294,6 +297,8 @@ where
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
+
+    event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 }
 
 impl<K, V> CacheBuilder<K, V, RandomState>
@@ -318,6 +323,7 @@ where
             object_pool_capacity: 1024,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
+            event_listener: None,
         }
     }
 }
@@ -376,12 +382,19 @@ where
             object_pool_capacity: self.object_pool_capacity,
             hash_builder,
             weighter: self.weighter,
+            event_listener: self.event_listener,
         }
     }
 
     /// Set in-memory cache weighter.
     pub fn with_weighter(mut self, weighter: impl Weighter<K, V>) -> Self {
         self.weighter = Arc::new(weighter);
+        self
+    }
+
+    /// Set event listener.
+    pub fn with_event_listener(mut self, event_listener: Arc<dyn EventListener<Key = K, Value = V>>) -> Self {
+        self.event_listener = Some(event_listener);
         self
     }
 
@@ -396,6 +409,7 @@ where
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -405,6 +419,7 @@ where
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -414,6 +429,7 @@ where
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                event_listener: self.event_listener,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -423,6 +439,7 @@ where
                 object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                event_listener: self.event_listener,
             }))),
         }
     }

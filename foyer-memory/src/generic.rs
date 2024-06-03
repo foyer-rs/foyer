@@ -28,6 +28,7 @@ use std::{
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, Key, Value},
+    event::EventListener,
     metrics::Metrics,
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
@@ -52,15 +53,16 @@ use crate::{
 pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
-struct CacheSharedState<T> {
+struct SharedState<K, V, T> {
     metrics: Arc<Metrics>,
     /// The object pool to avoid frequent handle allocating, shared by all shards.
     object_pool: ObjectPool<Box<T>>,
+    event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(clippy::type_complexity)]
-struct CacheShard<K, V, E, I, S>
+struct GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
@@ -77,10 +79,10 @@ where
 
     waiters: HashMap<K, Vec<oneshot::Sender<GenericCacheEntry<K, V, E, I, S>>>>,
 
-    state: Arc<CacheSharedState<E::Handle>>,
+    state: Arc<SharedState<K, V, E::Handle>>,
 }
 
-impl<K, V, E, I, S> CacheShard<K, V, E, I, S>
+impl<K, V, E, I, S> GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
     V: Value,
@@ -93,7 +95,7 @@ where
         capacity: usize,
         eviction_config: &E::Config,
         usage: Arc<AtomicUsize>,
-        context: Arc<CacheSharedState<E::Handle>>,
+        context: Arc<SharedState<K, V, E::Handle>>,
     ) -> Self {
         let indexer = I::new();
         let eviction = unsafe { E::new(capacity, eviction_config) };
@@ -120,7 +122,7 @@ where
         weight: usize,
         context: <E::Handle as Handle>::Context,
         deposit: bool,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
+        to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle> {
         let mut handle = self.state.object_pool.acquire();
         strict_assert!(!handle.base().has_refs());
@@ -130,7 +132,7 @@ where
         handle.init(hash, (key, value), weight, context);
         let mut ptr = unsafe { NonNull::new_unchecked(Box::into_raw(handle)) };
 
-        self.evict(weight, last_reference_entries);
+        self.evict(weight, to_release);
 
         strict_assert!(!ptr.as_ref().base().is_in_indexer());
         if let Some(old) = self.indexer.insert(ptr) {
@@ -143,7 +145,7 @@ where
             strict_assert!(!old.as_ref().base().is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
             if let Some(entry) = self.try_release_handle(old, false) {
-                last_reference_entries.push(entry);
+                to_release.push(entry);
             }
         } else {
             self.state.metrics.memory_insert.increment(1);
@@ -236,7 +238,7 @@ where
     /// Clear all cache entries.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    unsafe fn clear(&mut self, last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
+    unsafe fn clear(&mut self, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Avoid collecting here?
         let ptrs = self.indexer.drain().collect_vec();
         let eptrs = self.eviction.clear();
@@ -257,18 +259,14 @@ where
             strict_assert!(!ptr.as_ref().base().is_in_indexer());
             strict_assert!(!ptr.as_ref().base().is_in_eviction());
             if let Some(entry) = self.try_release_handle(ptr, false) {
-                last_reference_entries.push(entry);
+                to_release.push(entry);
             }
         }
     }
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    unsafe fn evict(
-        &mut self,
-        weight: usize,
-        last_reference_entries: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
-    ) {
+    unsafe fn evict(&mut self, weight: usize, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         while self.usage.load(Ordering::Relaxed) + weight > self.capacity {
             let evicted = match self.eviction.pop() {
@@ -280,7 +278,7 @@ where
             strict_assert!(base.is_in_indexer());
             strict_assert!(!base.is_in_eviction());
             if let Some(entry) = self.try_release_handle(evicted, false) {
-                last_reference_entries.push(entry);
+                to_release.push(entry);
             }
         }
     }
@@ -372,20 +370,6 @@ where
     }
 }
 
-impl<K, V, E, I, S> Drop for CacheShard<K, V, E, I, S>
-where
-    K: Key,
-    V: Value,
-    E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
-    I: Indexer<Key = K, Handle = E::Handle>,
-    S: HashBuilder,
-{
-    fn drop(&mut self) {
-        unsafe { self.clear(&mut vec![]) }
-    }
-}
-
 pub struct GenericCacheConfig<K, V, E, S = RandomState>
 where
     K: Key,
@@ -401,6 +385,7 @@ where
     pub object_pool_capacity: usize,
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<K, V>>,
+    pub event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -470,12 +455,12 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
-    shards: Vec<Mutex<CacheShard<K, V, E, I, S>>>,
+    shards: Vec<Mutex<GenericCacheShard<K, V, E, I, S>>>,
 
     capacity: usize,
     usages: Vec<Arc<AtomicUsize>>,
 
-    context: Arc<CacheSharedState<E::Handle>>,
+    context: Arc<SharedState<K, V, E::Handle>>,
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
@@ -496,16 +481,19 @@ where
         let metrics = Arc::new(Metrics::new(&config.name));
 
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
-        let context = Arc::new(CacheSharedState {
+        let context = Arc::new(SharedState {
             metrics: metrics.clone(),
             object_pool: ObjectPool::new_with_create(config.object_pool_capacity, Box::default),
+            event_listener: config.event_listener,
         });
 
         let shard_capacity = config.capacity / config.shards;
 
         let shards = usages
             .iter()
-            .map(|usage| CacheShard::new(shard_capacity, &config.eviction_config, usage.clone(), context.clone()))
+            .map(|usage| {
+                GenericCacheShard::new(shard_capacity, &config.eviction_config, usage.clone(), context.clone())
+            })
             .map(Mutex::new)
             .collect_vec();
 
@@ -556,12 +544,12 @@ where
         let hash = self.hash_builder.hash_one(&key);
         let weight = (self.weighter)(&key, &value);
 
-        let mut to_deallocate = vec![];
+        let mut to_release = vec![];
 
         let (entry, waiters) = unsafe {
             let mut shard = self.shards[hash as usize % self.shards.len()].lock();
             let waiters = shard.waiters.remove(&key);
-            let mut ptr = shard.emplace(hash, key, value, weight, context.into(), deposit, &mut to_deallocate);
+            let mut ptr = shard.emplace(hash, key, value, weight, context.into(), deposit, &mut to_release);
             if let Some(waiters) = waiters.as_ref() {
                 // Increase the reference count within the lock section.
                 ptr.as_mut().base_mut().inc_refs_by(waiters.len());
@@ -584,7 +572,11 @@ where
         }
 
         // Do not deallocate data within the lock section.
-        drop(to_deallocate);
+        for (k, v, _c, _w) in to_release {
+            if let Some(listener) = self.context.event_listener.as_ref() {
+                listener.on_memory_release(k, v);
+            }
+        }
 
         entry
     }
@@ -648,10 +640,17 @@ where
     }
 
     pub fn clear(&self) {
-        let mut to_deallocate = vec![];
+        let mut to_release = vec![];
         for shard in self.shards.iter() {
             let mut shard = shard.lock();
-            unsafe { shard.clear(&mut to_deallocate) };
+            unsafe { shard.clear(&mut to_release) };
+        }
+
+        // Do not deallocate data within the lock section.
+        for (k, v, _c, _w) in to_release {
+            if let Some(listener) = self.context.event_listener.as_ref() {
+                listener.on_memory_release(k, v);
+            }
         }
     }
 
@@ -679,7 +678,11 @@ where
         };
 
         // Do not deallocate data within the lock section.
-        drop(entry);
+        if let Some((k, v, _c, _w)) = entry {
+            if let Some(listener) = self.context.event_listener.as_ref() {
+                listener.on_memory_release(k, v);
+            }
+        }
     }
 
     unsafe fn inc_refs(&self, mut ptr: NonNull<E::Handle>) {
@@ -746,6 +749,20 @@ where
             Ok(entry)
         });
         GenericFetch::Miss(join)
+    }
+}
+
+impl<K, V, E, I, S> Drop for GenericCache<K, V, E, I, S>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    S: HashBuilder,
+{
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -842,7 +859,7 @@ where
     S: HashBuilder,
 {
     fn drop(&mut self) {
-        unsafe { self.cache.try_release_external_handle(self.ptr) }
+        unsafe { self.cache.try_release_external_handle(self.ptr) };
     }
 }
 
@@ -958,6 +975,7 @@ mod tests {
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
+            event_listener: None,
         })))
     }
 
@@ -971,6 +989,7 @@ mod tests {
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
+            event_listener: None,
         })))
     }
 
@@ -984,6 +1003,7 @@ mod tests {
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
+            event_listener: None,
         })))
     }
 
@@ -997,6 +1017,7 @@ mod tests {
             object_pool_capacity: 16,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
+            event_listener: None,
         })))
     }
 
@@ -1009,6 +1030,7 @@ mod tests {
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
+            event_listener: None,
         };
         Arc::new(FifoCache::<u64, String>::new(config))
     }
@@ -1024,6 +1046,7 @@ mod tests {
             object_pool_capacity: 1,
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
+            event_listener: None,
         };
         Arc::new(LruCache::<u64, String>::new(config))
     }

@@ -30,3 +30,7 @@ path = "hybrid.rs"
 [[example]]
 name = "hybrid_full"
 path = "hybrid_full.rs"
+
+[[example]]
+name = "event_listener"
+path = "event_listener.rs"
