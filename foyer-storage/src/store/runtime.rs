@@ -17,6 +17,7 @@ use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
 use futures::{Future, FutureExt};
+use tokio::runtime::Handle;
 
 use crate::device::monitor::DeviceStats;
 use crate::error::Result;
@@ -190,6 +191,10 @@ where
 
     async fn wait(&self) -> Result<()> {
         self.store.wait().await
+    }
+
+    fn runtime(&self) -> &Handle {
+        self.runtime.handle()
     }
 }
 

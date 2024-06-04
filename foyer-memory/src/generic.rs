@@ -708,6 +708,20 @@ where
         FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
+        self.fetch_with_runtime(key, fetch, &tokio::runtime::Handle::current())
+    }
+
+    pub fn fetch_with_runtime<F, FU, ER>(
+        self: &Arc<Self>,
+        key: K,
+        fetch: F,
+        runtime: &tokio::runtime::Handle,
+    ) -> GenericFetch<K, V, E, I, S, ER>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
         let hash = self.hash_builder.hash_one(&key);
 
         {
@@ -735,7 +749,7 @@ where
 
         let cache = self.clone();
         let future = fetch();
-        let join = tokio::spawn(async move {
+        let join = runtime.spawn(async move {
             let (value, context) = match future.await {
                 Ok((value, context)) => (value, context),
                 Err(e) => {

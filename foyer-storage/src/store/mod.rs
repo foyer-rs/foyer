@@ -28,6 +28,7 @@ use std::{
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::{Cache, CacheEntry};
+use tokio::runtime::Handle;
 
 use super::{
     device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
@@ -231,6 +232,14 @@ where
             Store::Noop(store) => store.wait().await,
             Store::DirectFs(store) => store.wait().await,
             Store::RuntimeDirectFs(store) => store.wait().await,
+        }
+    }
+
+    fn runtime(&self) -> &Handle {
+        match self {
+            Store::Noop(store) => store.runtime(),
+            Store::DirectFs(store) => store.runtime(),
+            Store::RuntimeDirectFs(store) => store.runtime(),
         }
     }
 }

@@ -25,7 +25,7 @@ use std::{
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use pin_project::pin_project;
-use tokio::sync::oneshot;
+use tokio::{runtime::Handle, sync::oneshot};
 
 use crate::{device::monitor::DeviceStats, error::Result};
 
@@ -114,4 +114,9 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     /// Wait for the ongoing flush and reclaim tasks to finish.
     #[must_use]
     fn wait(&self) -> impl Future<Output = Result<()>> + Send;
+
+    /// Get disk cache runtime handle.
+    ///
+    /// The runtime is determined during the opening phase.
+    fn runtime(&self) -> &Handle;
 }

@@ -18,6 +18,7 @@ use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::Phanto
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
+use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
@@ -25,11 +26,15 @@ use crate::storage::{EnqueueHandle, Storage};
 
 use crate::error::Result;
 
-pub struct NoopStore<K, V, S>(PhantomData<(K, V, S)>)
+pub struct NoopStore<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug;
+    S: HashBuilder + Debug,
+{
+    runtime: Handle,
+    _marker: PhantomData<(K, V, S)>,
+}
 
 impl<K, V, S> Debug for NoopStore<K, V, S>
 where
@@ -49,7 +54,10 @@ where
     S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
-        Self(PhantomData)
+        Self {
+            runtime: self.runtime.clone(),
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -65,7 +73,10 @@ where
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
-        Ok(Self(PhantomData))
+        Ok(Self {
+            runtime: Handle::current(),
+            _marker: PhantomData,
+        })
     }
 
     async fn close(&self) -> Result<()> {
@@ -121,6 +132,10 @@ where
 
     async fn wait(&self) -> Result<()> {
         Ok(())
+    }
+
+    fn runtime(&self) -> &Handle {
+        &self.runtime
     }
 }
 
