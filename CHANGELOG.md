@@ -1,3 +1,17 @@
+## 2024-06-04
+
+| crate | version |
+| - | - |
+| foyer-storage | 0.8.3 |
+
+<details>
+
+### Changes
+
+- Fix "invalid argument (code: 22)" on target aarch64.
+
+</details>
+
 ## 2024-06-03
 
 | crate | version |
