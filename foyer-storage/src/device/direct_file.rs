@@ -72,11 +72,6 @@ impl DeviceOptions for DirectFileDeviceOptions {
 }
 
 impl DirectFileDevice {
-    #[cfg(target_os = "linux")]
-    const O_DIRECT: i32 = 0x4000;
-}
-
-impl DirectFileDevice {
     /// Positioned write API for the direct file device.
     pub async fn pwrite(&self, mut buf: IoBuffer, offset: u64) -> Result<()> {
         bits::assert_aligned(self.align() as u64, offset);
@@ -177,7 +172,7 @@ impl Device for DirectFileDevice {
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            opts.custom_flags(Self::O_DIRECT);
+            opts.custom_flags(libc::O_DIRECT);
         }
 
         let file = opts.open(&options.path)?;
