@@ -82,9 +82,6 @@ impl DeviceOptions for DirectFsDeviceOptions {
 impl DirectFsDevice {
     const PREFIX: &'static str = "foyer-storage-direct-fs-";
 
-    #[cfg(target_os = "linux")]
-    const O_DIRECT: i32 = 0x4000;
-
     fn filename(region: RegionId) -> String {
         format!("{}{:08}", Self::PREFIX, region)
     }
@@ -128,7 +125,7 @@ impl Device for DirectFsDevice {
                     #[cfg(target_os = "linux")]
                     {
                         use std::os::unix::fs::OpenOptionsExt;
-                        opts.custom_flags(Self::O_DIRECT);
+                        opts.custom_flags(libc::O_DIRECT);
                     }
 
                     let file = opts.open(path)?;
