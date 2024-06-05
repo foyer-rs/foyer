@@ -1,3 +1,20 @@
+## 2024-06-05
+
+| crate | version |
+| - | - |
+| foyer | 0.9.3 |
+| foyer-memory | 0.5.2 |
+| foyer-storage | 0.8.4 |
+
+<details>
+
+### Changes
+
+- Hybird cache `fetch()` use the dedicated runtime by default if enabled.
+- Separate `fetch()` and `fetch_with_runtime()` interface for in-memory cache.
+
+</details>
+
 ## 2024-06-04
 
 | crate | version |
