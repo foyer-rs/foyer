@@ -282,6 +282,9 @@ where
     S: HashBuilder + Debug,
 {
     /// Fetch and insert a cache entry with the given method if there is a cache miss.
+    ///
+    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+    /// runtime. Otherwise, the user's runtime will be used.
     pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
