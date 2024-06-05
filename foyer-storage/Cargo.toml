@@ -22,7 +22,7 @@ bincode = "1"
 bitflags = "2.3.1"
 bytes = "1"
 either = "1"
-foyer-common = { version = "0.7.2", path = "../foyer-common" }
+foyer-common = { version = "0.7.3", path = "../foyer-common" }
 foyer-memory = { version = "0.5.2", path = "../foyer-memory" }
 futures = "0.3"
 itertools = { workspace = true }

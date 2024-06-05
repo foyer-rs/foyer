@@ -14,7 +14,7 @@ rust-version = "1.77"
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
-foyer-common = { version = "0.7.2", path = "../foyer-common" }
+foyer-common = { version = "0.7.3", path = "../foyer-common" }
 foyer-memory = { version = "0.5.2", path = "../foyer-memory" }
 foyer-storage = { version = "0.8.4", path = "../foyer-storage" }
 tokio = { workspace = true }

@@ -14,8 +14,8 @@ readme = "../README.md"
 ahash = "0.8"
 bitflags = "2"
 cmsketch = "0.2"
-foyer-common = { version = "0.7.2", path = "../foyer-common" }
-foyer-intrusive = { version = "0.7.1", path = "../foyer-intrusive" }
+foyer-common = { version = "0.7.3", path = "../foyer-common" }
+foyer-intrusive = { version = "0.7.2", path = "../foyer-intrusive" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
