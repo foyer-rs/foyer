@@ -282,6 +282,9 @@ where
     S: HashBuilder + Debug,
 {
     /// Fetch and insert a cache entry with the given method if there is a cache miss.
+    ///
+    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+    /// runtime. Otherwise, the user's runtime will be used.
     pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
@@ -291,26 +294,30 @@ where
 
         let store = self.storage.clone();
         let future = fetch();
-        self.memory.fetch(key.clone(), || {
-            let metrics = self.metrics.clone();
-            async move {
-                match store.load(&key).await.map_err(anyhow::Error::from)? {
-                    None => {}
-                    Some((k, _)) if key != k => {}
-                    Some((_, v)) => {
-                        metrics.hybrid_hit.increment(1);
-                        metrics.hybrid_hit_duration.record(now.elapsed());
+        self.memory.fetch_with_runtime(
+            key.clone(),
+            || {
+                let metrics = self.metrics.clone();
+                async move {
+                    match store.load(&key).await.map_err(anyhow::Error::from)? {
+                        None => {}
+                        Some((k, _)) if key != k => {}
+                        Some((_, v)) => {
+                            metrics.hybrid_hit.increment(1);
+                            metrics.hybrid_hit_duration.record(now.elapsed());
 
-                        return Ok((v, CacheContext::default()));
+                            return Ok((v, CacheContext::default()));
+                        }
                     }
+
+                    metrics.hybrid_miss.increment(1);
+                    metrics.hybrid_miss_duration.record(now.elapsed());
+
+                    future.await.map_err(anyhow::Error::from)
                 }
-
-                metrics.hybrid_miss.increment(1);
-                metrics.hybrid_miss_duration.record(now.elapsed());
-
-                future.await.map_err(anyhow::Error::from)
-            }
-        })
+            },
+            self.storage().runtime(),
+        )
     }
 }
 

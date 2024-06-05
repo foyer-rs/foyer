@@ -488,6 +488,10 @@ where
 
         Ok(())
     }
+
+    fn runtime(&self) -> &Handle {
+        &self.inner.runtime
+    }
 }
 
 impl<K, V, S, D> Storage for GenericStore<K, V, S, D>
@@ -552,6 +556,10 @@ where
 
     async fn wait(&self) -> Result<()> {
         self.wait().await
+    }
+
+    fn runtime(&self) -> &Handle {
+        self.runtime()
     }
 }
 

@@ -791,6 +791,32 @@ where
             Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
         }
     }
+
+    /// Get the cached entry with the given key from the in-memory cache.
+    ///
+    /// The fetch task will be spawned in the give `runtime`.
+    ///
+    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
+    ///
+    /// The concurrent fetch requests will be deduplicated.
+    pub fn fetch_with_runtime<F, FU, ER>(
+        &self,
+        key: K,
+        fetch: F,
+        runtime: &tokio::runtime::Handle,
+    ) -> Fetch<K, V, ER, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
+        match self {
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
+        }
+    }
 }
 
 #[cfg(test)]
