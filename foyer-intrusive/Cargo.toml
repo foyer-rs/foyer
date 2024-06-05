@@ -1,6 +1,6 @@
 [package]
 name = "foyer-intrusive"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "intrusive data structures for foyer - the hybrid cache for Rust"
@@ -11,7 +11,7 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-foyer-common = { version = "0.7", path = "../foyer-common" }
+foyer-common = { version = "0.7.3", path = "../foyer-common" }
 itertools = { workspace = true }
 
 [features]
