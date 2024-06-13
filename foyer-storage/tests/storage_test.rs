@@ -68,7 +68,7 @@ async fn test_store(
 
     drop(store);
 
-    for _ in 0..LOOPS {
+    for l in 0..LOOPS {
         let store = builder(&memory).build().await.unwrap();
 
         let remains = recorder.remains();
@@ -85,9 +85,9 @@ async fn test_store(
                 None => None,
             };
             if remains.contains(&i) {
-                assert_eq!(value, Some(vec![i as u8; 1 * KB]));
+                assert_eq!(value, Some(vec![i as u8; 1 * KB]), "value mismatch, loop: {l}, i: {i}");
             } else {
-                assert!(value.is_none());
+                assert!(value.is_none(), "phantom value, loop: {l}, i: {i}");
             }
         }
 
@@ -142,7 +142,7 @@ fn basic(
         .with_flush(true)
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
@@ -152,7 +152,7 @@ async fn test_direct_fs_store() {
     test_store(memory, builder, recorder).await;
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
@@ -162,7 +162,7 @@ async fn test_direct_fs_store_zstd() {
     test_store(memory, builder, recorder).await;
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
@@ -172,7 +172,7 @@ async fn test_direct_fs_store_lz4() {
     test_store(memory, builder, recorder).await;
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_runtime_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
