@@ -209,6 +209,9 @@ impl RegionRecoverRunner {
                         break;
                     }
                 }
+                Ok(Some(info)) if info.sequence < infos.last().map(|last: &EntryInfo| last.sequence).unwrap_or(0) => {
+                    break
+                }
                 Ok(Some(info)) => infos.push(info),
                 Ok(None) => break,
             }
