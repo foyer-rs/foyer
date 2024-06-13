@@ -216,6 +216,9 @@ where
             }
         }
 
+        let picked_count = futures.len();
+        let unpicked_count = unpicked.len();
+
         self.runtime.spawn(async move {
             if let Err(e) = try_join_all(futures).await {
                 tracing::warn!(
@@ -229,7 +232,7 @@ where
             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
         }
 
-        tracing::debug!("[reclaimer]: Finish reclaiming region {id}.");
+        tracing::debug!("[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}.");
 
         region.stats().reset();
 
