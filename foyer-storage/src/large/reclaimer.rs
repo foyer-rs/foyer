@@ -232,7 +232,9 @@ where
             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
         }
 
-        tracing::debug!("[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}.");
+        tracing::debug!(
+            "[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}."
+        );
 
         region.stats().reset();
 
