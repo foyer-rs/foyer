@@ -19,7 +19,7 @@ use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
 };
-use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch};
+use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
 use tokio::sync::oneshot;
 
@@ -294,7 +294,7 @@ where
 
         let store = self.storage.clone();
         let future = fetch();
-        self.memory.fetch_with_runtime(
+        let ret = self.memory.fetch_with_runtime(
             key.clone(),
             || {
                 let metrics = self.metrics.clone();
@@ -317,7 +317,14 @@ where
                 }
             },
             self.storage().runtime(),
-        )
+        );
+
+        if ret.state() == FetchState::Hit {
+            self.metrics.hybrid_hit.increment(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed());
+        }
+
+        ret
     }
 }
 
