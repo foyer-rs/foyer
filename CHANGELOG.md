@@ -1,3 +1,20 @@
+## 2024-06-14
+
+| crate | version |
+| - | - |
+| foyer | 0.9.4 |
+| foyer-storage | 0.8.5 |
+| foyer-bench | 0.1.4 |
+
+<details>
+
+### Changes
+
+- Fix phantom entries after foyer storage recovery. [#560](https://github.com/MrCroxx/foyer/pull/560)
+- Fix hybrid cache hit metrics with `fetch()` interface. [#563](https://github.com/MrCroxx/foyer/pull/563)
+
+</details>
+
 ## 2024-06-05
 
 | crate | version |
