@@ -702,6 +702,7 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
+    #[minitrace::trace(short_name = true)]
     pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, fetch: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,

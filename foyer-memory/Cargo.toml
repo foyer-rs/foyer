@@ -24,6 +24,7 @@ parking_lot = "0.12"
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
+minitrace = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1"
@@ -40,6 +41,7 @@ strict_assertions = [
     "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
+mtrace = ["minitrace/enable"]
 
 [[bench]]
 name = "bench_hit_ratio"

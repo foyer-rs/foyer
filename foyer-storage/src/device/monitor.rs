@@ -84,21 +84,11 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<D> Device for Monitored<D>
+impl<D> Monitored<D>
 where
     D: Device,
 {
-    type Options = MonitoredOptions<D>;
-
-    fn capacity(&self) -> usize {
-        self.device.capacity()
-    }
-
-    fn region_size(&self) -> usize {
-        self.device.region_size()
-    }
-
-    async fn open(options: Self::Options) -> Result<Self> {
+    async fn open(options: MonitoredOptions<D>) -> Result<Self> {
         let device = D::open(options.options).await?;
         Ok(Self {
             device,
@@ -107,6 +97,7 @@ where
         })
     }
 
+    #[minitrace::trace(short_name = true)]
     async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
         let now = Instant::now();
 
@@ -123,6 +114,7 @@ where
         res
     }
 
+    #[minitrace::trace(short_name = true)]
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
         let now = Instant::now();
 
@@ -139,6 +131,7 @@ where
         res
     }
 
+    #[minitrace::trace(short_name = true)]
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
@@ -153,7 +146,39 @@ where
     }
 }
 
+impl<D> Device for Monitored<D>
+where
+    D: Device,
+{
+    type Options = MonitoredOptions<D>;
+
+    fn capacity(&self) -> usize {
+        self.device.capacity()
+    }
+
+    fn region_size(&self) -> usize {
+        self.device.region_size()
+    }
+
+    async fn open(options: Self::Options) -> Result<Self> {
+        Self::open(options).await
+    }
+
+    async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+        self.write(buf, region, offset).await
+    }
+
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+        self.read(region, offset, len).await
+    }
+
+    async fn flush(&self, region: Option<RegionId>) -> Result<()> {
+        self.flush(region).await
+    }
+}
+
 impl Monitored<DirectFileDevice> {
+    #[minitrace::trace(short_name = true)]
     pub async fn pwrite(&self, buf: IoBuffer, offset: u64) -> Result<()> {
         let now = Instant::now();
 
@@ -170,6 +195,7 @@ impl Monitored<DirectFileDevice> {
         res
     }
 
+    #[minitrace::trace(short_name = true)]
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
         let now = Instant::now();
 

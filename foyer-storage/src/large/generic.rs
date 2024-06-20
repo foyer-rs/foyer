@@ -349,6 +349,7 @@ where
         future
     }
 
+    #[minitrace::trace(short_name = true)]
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
     where
         K: Borrow<Q>,

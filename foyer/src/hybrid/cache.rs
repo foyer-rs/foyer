@@ -21,6 +21,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
+use minitrace::prelude::*;
 use tokio::sync::oneshot;
 
 use crate::HybridCacheWriter;
@@ -93,6 +94,8 @@ where
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let _guard = Span::root(func_name!(), SpanContext::random()).set_local_parent();
+
         let now = Instant::now();
 
         let entry = self.memory.insert(key, value);
@@ -106,6 +109,8 @@ where
 
     /// Insert cache entry with cache context to the hybrid cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let _guard = Span::root(func_name!(), SpanContext::random()).set_local_parent();
+
         let now = Instant::now();
 
         let entry = self.memory.insert_with_context(key, value, context);
@@ -123,6 +128,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
+        let span = Span::root(func_name!(), SpanContext::random());
+
         let now = Instant::now();
 
         let record_hit = || {
@@ -139,7 +146,7 @@ where
             return Ok(Some(entry));
         }
 
-        if let Some((k, v)) = self.storage.load(key).await? {
+        if let Some((k, v)) = self.storage.load(key).in_span(span).await? {
             if k.borrow() != key {
                 record_miss();
                 return Ok(None);
@@ -161,11 +168,14 @@ where
     where
         K: Clone,
     {
+        let span = Span::root(func_name!(), SpanContext::random());
+
         let now = Instant::now();
 
-        let res = self
-            .memory
-            .fetch(key.clone(), || {
+        let fetch = {
+            let _guard = Span::enter_with_parent("fetch", &span);
+
+            self.memory.fetch(key.clone(), || {
                 let store = self.storage.clone();
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
@@ -176,7 +186,9 @@ where
                     }
                 }
             })
-            .await;
+        };
+
+        let res = fetch.in_span(Span::enter_with_parent("poll", &span)).await;
 
         match res {
             Ok(entry) => {
@@ -200,6 +212,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        let _guard = Span::root(func_name!(), SpanContext::random()).set_local_parent();
+
         let now = Instant::now();
 
         self.memory.remove(key);

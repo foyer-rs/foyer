@@ -28,6 +28,8 @@ test-log = { version = "0.2", default-features = false, features = [
 ] }
 itertools = "0.13"
 metrics = "0.23"
+minitrace = "0.6"
+minitrace-jaeger = "0.6"
 
 [profile.release]
 debug = true

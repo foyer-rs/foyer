@@ -265,12 +265,12 @@ mod arc_bytes {
 }
 
 #[cfg(feature = "tokio-console")]
-fn init_logger() {
+fn setup() {
     console_subscriber::init();
 }
 
 #[cfg(feature = "trace")]
-fn init_logger() {
+fn setup() {
     use opentelemetry_sdk::{
         trace::{BatchConfigBuilder, Config},
         Resource,
@@ -309,8 +309,16 @@ fn init_logger() {
         .init();
 }
 
-#[cfg(not(any(feature = "tokio-console", feature = "trace")))]
-fn init_logger() {
+#[cfg(feature = "mtrace")]
+fn setup() {
+    use minitrace::collector::Config;
+    // let reporter = minitrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
+    // minitrace::set_reporter(reporter, Config::default())
+    minitrace::set_reporter(minitrace::collector::ConsoleReporter, Config::default())
+}
+
+#[cfg(not(any(feature = "tokio-console", feature = "trace", feature = "mtrace")))]
+fn setup() {
     use tracing_subscriber::{prelude::*, EnvFilter};
 
     tracing_subscriber::registry()
@@ -323,12 +331,22 @@ fn init_logger() {
         .init();
 }
 
+#[cfg(not(any(feature = "mtrace")))]
+fn teardown() {}
+
+#[cfg(feature = "mtrace")]
+fn teardown() {
+    minitrace::flush();
+}
+
 #[tokio::main]
 async fn main() {
-    init_logger();
+    setup();
 
     #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
-    tracing::info!("[foyer bench]: jemalloc is enabled.");
+    {
+        tracing::info!("[foyer bench]: jemalloc is enabled.");
+    }
 
     #[cfg(feature = "deadlock")]
     {
@@ -473,6 +491,8 @@ async fn main() {
     handle_signal.abort();
 
     println!("\nTotal:\n{}", analysis);
+
+    teardown();
 }
 
 async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
