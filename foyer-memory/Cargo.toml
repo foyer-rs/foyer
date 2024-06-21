@@ -20,11 +20,11 @@ futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 libc = "0.2"
+minitrace = { workspace = true }
 parking_lot = "0.12"
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
-minitrace = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1"

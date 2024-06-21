@@ -19,7 +19,7 @@ mod text;
 use bytesize::MIB;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig,
+    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -29,7 +29,7 @@ use std::{
     net::SocketAddr,
     ops::{Deref, Range},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -179,6 +179,22 @@ pub struct Args {
 
     #[arg(long, default_value = "lfu")]
     eviction: String,
+
+    /// Record insert trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
+    trace_insert_ns: usize,
+    /// Record get trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
+    trace_get_ns: usize,
+    /// Record obtain trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
+    trace_obtain_ns: usize,
+    /// Record remove trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
+    trace_remove_ns: usize,
+    /// Record fetch trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
+    trace_fetch_ns: usize,
 }
 
 #[derive(Debug)]
@@ -316,8 +332,7 @@ fn setup() {
     minitrace::set_reporter(
         reporter,
         Config::default().batch_report_interval(Duration::from_millis(1)),
-    )
-    // minitrace::set_reporter(minitrace::collector::ConsoleReporter, Config::default())
+    );
 }
 
 #[cfg(not(any(feature = "tokio-console", feature = "trace", feature = "mtrace")))]
@@ -388,7 +403,16 @@ async fn main() {
 
     create_dir_all(&args.dir).unwrap();
 
+    let trace_config = TraceConfig {
+        record_hybrid_insert_threshold_ns: AtomicUsize::new(args.trace_insert_ns),
+        record_hybrid_get_threshold_ns: AtomicUsize::new(args.trace_get_ns),
+        record_hybrid_obtain_threshold_ns: AtomicUsize::new(args.trace_obtain_ns),
+        record_hybrid_remove_threshold_ns: AtomicUsize::new(args.trace_remove_ns),
+        record_hybrid_fetch_threshold_ns: AtomicUsize::new(args.trace_fetch_ns),
+    };
+
     let builder = HybridCacheBuilder::new()
+        .with_trace_config(trace_config)
         .memory(args.mem * MIB as usize)
         .with_shards(args.shards);
 

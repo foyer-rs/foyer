@@ -23,6 +23,7 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets --features sanity
+	cargo clippy --all-targets --features mtrace
 	cargo clippy --all-targets
 
 test:

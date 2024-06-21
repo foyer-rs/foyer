@@ -31,10 +31,5 @@ metrics = "0.23"
 minitrace = "0.6"
 minitrace-jaeger = "0.6"
 
-
 [profile.release]
 debug = true
-
-# [patch.crates-io]
-# minitrace = { path = "../minitrace-rust/minitrace" }
-# minitrace-jaeger = { path = "../minitrace-rust/minitrace-jaeger" }
