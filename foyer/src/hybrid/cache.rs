@@ -39,14 +39,8 @@ use super::writer::HybridCacheStorageWriter;
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
-            // println!(
-            //     "threshold: {}, op: {}",
-            //     $self.trace_config.$threshold.load(Ordering::Relaxed),
-            //     elapsed.as_nanos() as usize,
-            // );
             if (elapsed.as_nanos() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
                 $span.cancel();
-                // println!("cancel!");
             }
         }
     };
