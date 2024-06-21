@@ -46,6 +46,8 @@ use crate::{
     CacheContext,
 };
 
+use minitrace::prelude::*;
+
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.
 ///
@@ -702,7 +704,6 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
-    #[minitrace::trace(short_name = true)]
     pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, fetch: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
@@ -749,7 +750,7 @@ where
         }
 
         let cache = self.clone();
-        let future = fetch();
+        let future = fetch().in_span(Span::enter_with_local_parent("spawned"));
         let join = runtime.spawn(async move {
             let (value, context) = match future.await {
                 Ok((value, context)) => (value, context),
