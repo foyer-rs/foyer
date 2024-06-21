@@ -10,3 +10,5 @@ docker-compose.override.yaml
 
 perf.data*
 flamegraph.svg
+
+trace.txt

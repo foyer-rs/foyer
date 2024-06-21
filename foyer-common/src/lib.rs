@@ -45,6 +45,8 @@ pub mod rate;
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
+/// Trace related components.
+pub mod trace;
 
 /// File system utils.
 #[cfg(any(target_os = "linux", target_os = "macos"))]

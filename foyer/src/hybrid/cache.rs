@@ -12,20 +12,39 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, sync::Arc, time::Instant};
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+    sync::{atomic::Ordering, Arc},
+    time::Instant,
+};
 
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
+    trace::TraceConfig,
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
+use minitrace::prelude::*;
 use tokio::sync::oneshot;
 
 use crate::HybridCacheWriter;
 
 use super::writer::HybridCacheStorageWriter;
+
+macro_rules! try_cancel {
+    ($self:ident, $span:ident, $threshold:ident) => {
+        if let Some(elapsed) = $span.elapsed() {
+            if (elapsed.as_nanos() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
+                $span.cancel();
+            }
+        }
+    };
+}
 
 /// A cached entry holder of the hybrid cache.
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
@@ -40,6 +59,7 @@ where
     memory: Cache<K, V, S>,
     storage: Store<K, V, S>,
     metrics: Arc<Metrics>,
+    trace_config: Arc<TraceConfig>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -52,6 +72,7 @@ where
         f.debug_struct("HybridCache")
             .field("memory", &self.memory)
             .field("storage", &self.storage)
+            .field("trace_config", &self.trace_config)
             .finish()
     }
 }
@@ -67,6 +88,7 @@ where
             memory: self.memory.clone(),
             storage: self.storage.clone(),
             metrics: self.metrics.clone(),
+            trace_config: self.trace_config.clone(),
         }
     }
 }
@@ -77,13 +99,25 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub(crate) fn new(name: String, memory: Cache<K, V, S>, storage: Store<K, V, S>) -> Self {
+    pub(crate) fn new(
+        name: String,
+        memory: Cache<K, V, S>,
+        storage: Store<K, V, S>,
+        trace_config: TraceConfig,
+    ) -> Self {
         let metrics = Arc::new(Metrics::new(&name));
+        let trace_config = Arc::new(trace_config);
         Self {
             memory,
             storage,
             metrics,
+            trace_config,
         }
+    }
+
+    /// Access the trace config.
+    pub fn trace_config(&self) -> &TraceConfig {
+        &self.trace_config
     }
 
     /// Access the in-memory cache.
@@ -93,6 +127,9 @@ where
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let mut span = Span::root(func_name!(), SpanContext::random());
+        let _guard = span.set_local_parent();
+
         let now = Instant::now();
 
         let entry = self.memory.insert(key, value);
@@ -101,11 +138,16 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
+        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
+
         entry
     }
 
     /// Insert cache entry with cache context to the hybrid cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let mut span = Span::root(func_name!(), SpanContext::random());
+        let _guard = span.set_local_parent();
+
         let now = Instant::now();
 
         let entry = self.memory.insert_with_context(key, value, context);
@@ -113,6 +155,8 @@ where
 
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
+
+        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
 
         entry
     }
@@ -123,6 +167,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
+        let mut span = Span::root(func_name!(), SpanContext::random());
+
         let now = Instant::now();
 
         let record_hit = || {
@@ -134,20 +180,30 @@ where
             self.metrics.hybrid_miss_duration.record(now.elapsed());
         };
 
+        let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
             record_hit();
+            try_cancel!(self, span, record_hybrid_get_threshold_ns);
             return Ok(Some(entry));
         }
+        drop(guard);
 
-        if let Some((k, v)) = self.storage.load(key).await? {
+        if let Some((k, v)) = self
+            .storage
+            .load(key)
+            .in_span(Span::enter_with_parent("poll", &span))
+            .await?
+        {
             if k.borrow() != key {
                 record_miss();
                 return Ok(None);
             }
             record_hit();
+            try_cancel!(self, span, record_hybrid_get_threshold_ns);
             return Ok(Some(self.memory.insert(k, v)));
         }
         record_miss();
+        try_cancel!(self, span, record_hybrid_get_threshold_ns);
         Ok(None)
     }
 
@@ -161,36 +217,47 @@ where
     where
         K: Clone,
     {
+        let mut span = Span::root(func_name!(), SpanContext::random());
+
         let now = Instant::now();
 
-        let res = self
-            .memory
-            .fetch(key.clone(), || {
-                let store = self.storage.clone();
-                async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from) {
-                        Err(e) => Err(ObtainFetchError::Err(e)),
-                        Ok(None) => Err(ObtainFetchError::NotExist),
-                        Ok(Some((k, _))) if key != k => Err(ObtainFetchError::NotExist),
-                        Ok(Some((_, v))) => Ok((v, CacheContext::default())),
-                    }
+        let guard = span.set_local_parent();
+        let fetch = self.memory.fetch(key.clone(), || {
+            let store = self.storage.clone();
+            async move {
+                match store.load(&key).await.map_err(anyhow::Error::from) {
+                    Err(e) => Err(ObtainFetchError::Err(e)),
+                    Ok(None) => Err(ObtainFetchError::NotExist),
+                    Ok(Some((k, _))) if key != k => Err(ObtainFetchError::NotExist),
+                    Ok(Some((_, v))) => Ok((v, CacheContext::default())),
                 }
-            })
-            .await;
+            }
+        });
+        drop(guard);
+
+        let res = fetch.in_span(Span::enter_with_parent("poll", &span)).await;
 
         match res {
             Ok(entry) => {
                 self.metrics.hybrid_hit.increment(1);
                 self.metrics.hybrid_hit_duration.record(now.elapsed());
+                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increment(1);
                 self.metrics.hybrid_miss_duration.record(now.elapsed());
+                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
                 Ok(None)
             }
-            Err(ObtainFetchError::RecvError(_)) => Ok(None),
-            Err(ObtainFetchError::Err(e)) => Err(e),
+            Err(ObtainFetchError::RecvError(_)) => {
+                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                Ok(None)
+            }
+            Err(ObtainFetchError::Err(e)) => {
+                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                Err(e)
+            }
         }
     }
 
@@ -200,6 +267,9 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        let mut span = Span::root(func_name!(), SpanContext::random());
+        let _guard = span.set_local_parent();
+
         let now = Instant::now();
 
         self.memory.remove(key);
@@ -207,6 +277,8 @@ where
 
         self.metrics.hybrid_remove.increment(1);
         self.metrics.hybrid_remove_duration.record(now.elapsed());
+
+        try_cancel!(self, span, record_hybrid_remove_threshold_ns);
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -290,6 +362,12 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
+        let span = if SpanContext::current_local_parent().is_none() {
+            Some(Span::root(func_name!(), SpanContext::random()))
+        } else {
+            None
+        };
+
         let now = Instant::now();
 
         let store = self.storage.clone();
@@ -322,6 +400,10 @@ where
         if ret.state() == FetchState::Hit {
             self.metrics.hybrid_hit.increment(1);
             self.metrics.hybrid_hit_duration.record(now.elapsed());
+        }
+
+        if let Some(mut span) = span {
+            try_cancel!(self, span, record_hybrid_fetch_threshold_ns);
         }
 
         ret

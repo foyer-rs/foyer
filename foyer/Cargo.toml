@@ -17,6 +17,7 @@ anyhow = "1"
 foyer-common = { version = "0.7.3", path = "../foyer-common" }
 foyer-memory = { version = "0.5.2", path = "../foyer-memory" }
 foyer-storage = { version = "0.8.5", path = "../foyer-storage" }
+minitrace = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
 
@@ -34,3 +35,4 @@ strict_assertions = [
     "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
+mtrace = ["minitrace/enable", "foyer-memory/mtrace", "foyer-storage/mtrace"]

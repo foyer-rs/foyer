@@ -18,6 +18,7 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
+    trace::TraceConfig,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
@@ -31,6 +32,7 @@ use crate::HybridCache;
 pub struct HybridCacheBuilder<K, V> {
     name: String,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+    trace_config: TraceConfig,
 }
 
 impl<K, V> Default for HybridCacheBuilder<K, V> {
@@ -45,6 +47,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
         Self {
             name: "foyer".to_string(),
             event_listener: None,
+            trace_config: TraceConfig::default(),
         }
     }
 
@@ -66,6 +69,14 @@ impl<K, V> HybridCacheBuilder<K, V> {
         self
     }
 
+    /// Set trace config.
+    ///
+    /// Default: Only operations over 1s will be recorded.
+    pub fn with_trace_config(mut self, trace_config: TraceConfig) -> Self {
+        self.trace_config = trace_config;
+        self
+    }
+
     /// Continue to modify the in-memory cache configurations.
     pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, RandomState>
     where
@@ -79,6 +90,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
         HybridCacheBuilderPhaseMemory {
             builder,
             name: self.name,
+            trace_config: self.trace_config,
         }
     }
 }
@@ -91,6 +103,7 @@ where
     S: HashBuilder + Debug,
 {
     name: String,
+    trace_config: TraceConfig,
     builder: CacheBuilder<K, V, S>,
 }
 
@@ -106,6 +119,7 @@ where
         let builder = self.builder.with_shards(shards);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            trace_config: self.trace_config,
             builder,
         }
     }
@@ -117,6 +131,7 @@ where
         let builder = self.builder.with_eviction_config(eviction_config.into());
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            trace_config: self.trace_config,
             builder,
         }
     }
@@ -130,6 +145,7 @@ where
         let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            trace_config: self.trace_config,
             builder,
         }
     }
@@ -142,6 +158,7 @@ where
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            trace_config: self.trace_config,
             builder,
         }
     }
@@ -151,6 +168,7 @@ where
         let builder = self.builder.with_weighter(weighter);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            trace_config: self.trace_config,
             builder,
         }
     }
@@ -161,6 +179,7 @@ where
         HybridCacheBuilderPhaseStorage {
             builder: StoreBuilder::new(memory.clone()).with_name(&self.name),
             name: self.name,
+            trace_config: self.trace_config,
             memory,
         }
     }
@@ -174,6 +193,7 @@ where
     S: HashBuilder + Debug,
 {
     name: String,
+    trace_config: TraceConfig,
     memory: Cache<K, V, S>,
     builder: StoreBuilder<K, V, S>,
 }
@@ -189,6 +209,7 @@ where
         let builder = self.builder.with_device_config(device_config);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -201,6 +222,7 @@ where
         let builder = self.builder.with_flush(flush);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -213,6 +235,7 @@ where
         let builder = self.builder.with_indexer_shards(indexer_shards);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -227,6 +250,7 @@ where
         let builder = self.builder.with_recover_mode(recover_mode);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -239,6 +263,7 @@ where
         let builder = self.builder.with_recover_concurrency(recover_concurrency);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -253,6 +278,7 @@ where
         let builder = self.builder.with_flushers(flushers);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -267,6 +293,7 @@ where
         let builder = self.builder.with_reclaimers(reclaimers);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -281,6 +308,7 @@ where
         let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -300,6 +328,7 @@ where
         let builder = self.builder.with_eviction_pickers(eviction_pickers);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -314,6 +343,7 @@ where
         let builder = self.builder.with_admission_picker(admission_picker);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -332,6 +362,7 @@ where
         let builder = self.builder.with_reinsertion_picker(reinsertion_picker);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -344,6 +375,7 @@ where
         let builder = self.builder.with_compression(compression);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -357,6 +389,7 @@ where
         let builder = self.builder.with_tombstone_log_config(tombstone_log_config);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -367,6 +400,7 @@ where
         let builder = self.builder.with_runtime_config(runtime_config);
         Self {
             name: self.name,
+            trace_config: self.trace_config,
             memory: self.memory,
             builder,
         }
@@ -375,6 +409,6 @@ where
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let storage = self.builder.build().await?;
-        Ok(HybridCache::new(self.name, self.memory, storage))
+        Ok(HybridCache::new(self.name, self.memory, storage, self.trace_config))
     }
 }

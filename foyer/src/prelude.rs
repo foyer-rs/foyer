@@ -23,6 +23,7 @@ pub use common::{
     code::{Key, StorageKey, StorageValue, Value},
     event::EventListener,
     range::RangeBoundsExt,
+    trace::TraceConfig,
 };
 pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
 pub use storage::{

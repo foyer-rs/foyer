@@ -111,6 +111,7 @@ jobs:
         run: |
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
+          cargo clippy --all-targets --features mtrace -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov

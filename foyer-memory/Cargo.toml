@@ -20,6 +20,7 @@ futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 libc = "0.2"
+minitrace = { workspace = true }
 parking_lot = "0.12"
 serde = { workspace = true }
 tokio = { workspace = true }
@@ -40,6 +41,7 @@ strict_assertions = [
     "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
+mtrace = ["minitrace/enable"]
 
 [[bench]]
 name = "bench_hit_ratio"

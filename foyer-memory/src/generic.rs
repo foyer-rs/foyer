@@ -46,6 +46,8 @@ use crate::{
     CacheContext,
 };
 
+use minitrace::prelude::*;
+
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.
 ///
@@ -748,7 +750,7 @@ where
         }
 
         let cache = self.clone();
-        let future = fetch();
+        let future = fetch().in_span(Span::enter_with_local_parent("spawned"));
         let join = runtime.spawn(async move {
             let (value, context) = match future.await {
                 Ok((value, context)) => (value, context),
