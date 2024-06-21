@@ -315,7 +315,7 @@ where
     reclaimers: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    admision_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     compression: Compression,
     tombstone_log_config: Option<TombstoneLogConfig>,
@@ -343,7 +343,7 @@ where
             reclaimers: 1,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
-            admision_picker: Arc::<AdmitAllPicker<K>>::default(),
+            admission_picker: Arc::<AdmitAllPicker<K>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
             compression: Compression::None,
             tombstone_log_config: None,
@@ -452,7 +452,7 @@ where
     ///
     /// Default: [`AdmitAllPicker`].
     pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker<Key = K>>) -> Self {
-        self.admision_picker = admission_picker;
+        self.admission_picker = admission_picker;
         self
     }
 
@@ -520,7 +520,7 @@ where
                     reclaimers: self.reclaimers,
                     clean_region_threshold,
                     eviction_pickers: self.eviction_pickers,
-                    admission_picker: self.admision_picker,
+                    admission_picker: self.admission_picker,
                     reinsertion_picker: self.reinsertion_picker,
                     tombstone_log_config: self.tombstone_log_config,
                 }))
@@ -541,7 +541,7 @@ where
                         reclaimers: self.reclaimers,
                         clean_region_threshold,
                         eviction_pickers: self.eviction_pickers,
-                        admission_picker: self.admision_picker,
+                        admission_picker: self.admission_picker,
                         reinsertion_picker: self.reinsertion_picker,
                         tombstone_log_config: self.tombstone_log_config,
                     },
