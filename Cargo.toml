@@ -35,5 +35,6 @@ minitrace-jaeger = "0.6"
 debug = true
 
 [patch.crates-io]
+# Remove the following two patches after minitrace releases a new version.
 minitrace = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
 minitrace-jaeger = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
