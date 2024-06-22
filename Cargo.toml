@@ -33,3 +33,7 @@ minitrace-jaeger = "0.6"
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+minitrace = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
+minitrace-jaeger = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
