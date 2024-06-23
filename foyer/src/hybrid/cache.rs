@@ -17,7 +17,10 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Instant,
 };
 
@@ -35,6 +38,38 @@ use tokio::sync::oneshot;
 use crate::HybridCacheWriter;
 
 use super::writer::HybridCacheStorageWriter;
+
+macro_rules! root_span {
+    ($self:ident, mut $name:ident) => {
+        root_span!($self, (mut) $name)
+    };
+    ($self:ident, $name:ident) => {
+        root_span!($self, $name)
+    };
+    ($self:ident, ($mut:tt) $name:ident) => {
+        let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) {
+            Span::root(func_name!(), SpanContext::random())
+        } else {
+            Span::noop()
+        };
+    };
+}
+
+macro_rules! root_span_if_not_exist {
+    ($self:ident, mut $name:ident) => {
+        root_span!($self, (mut) $name)
+    };
+    ($self:ident, $name:ident) => {
+        root_span!($self, $name)
+    };
+    ($self:ident, ($mut:tt) $name:ident) => {
+        let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) && SpanContext::current_local_parent().is_none() {
+            Span::root(func_name!(), SpanContext::random())
+        } else {
+            Span::noop()
+        };
+    };
+}
 
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
@@ -60,6 +95,7 @@ where
     storage: Store<K, V, S>,
     metrics: Arc<Metrics>,
     trace_config: Arc<TraceConfig>,
+    trace: Arc<AtomicBool>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -89,6 +125,7 @@ where
             storage: self.storage.clone(),
             metrics: self.metrics.clone(),
             trace_config: self.trace_config.clone(),
+            trace: self.trace.clone(),
         }
     }
 }
@@ -107,11 +144,13 @@ where
     ) -> Self {
         let metrics = Arc::new(Metrics::new(&name));
         let trace_config = Arc::new(trace_config);
+        let trace = Arc::new(AtomicBool::new(false));
         Self {
             memory,
             storage,
             metrics,
             trace_config,
+            trace,
         }
     }
 
@@ -125,9 +164,25 @@ where
         &self.memory
     }
 
+    /// Enable tracing.
+    pub fn enable_tracing(&self) {
+        self.trace.store(true, Ordering::Relaxed);
+    }
+
+    /// Disable tracing.
+    pub fn disable_tracing(&self) {
+        self.trace.store(true, Ordering::Relaxed);
+    }
+
+    /// Return `true` if tracing is enabled.
+    pub fn is_tracing_enabled(&self) -> bool {
+        self.trace.load(Ordering::Relaxed)
+    }
+
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
-        let mut span = Span::root(func_name!(), SpanContext::random());
+        root_span!(self, mut span);
+
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -145,7 +200,8 @@ where
 
     /// Insert cache entry with cache context to the hybrid cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
-        let mut span = Span::root(func_name!(), SpanContext::random());
+        root_span!(self, mut span);
+
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -167,7 +223,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
-        let mut span = Span::root(func_name!(), SpanContext::random());
+        root_span!(self, mut span);
 
         let now = Instant::now();
 
@@ -217,7 +273,7 @@ where
     where
         K: Clone,
     {
-        let mut span = Span::root(func_name!(), SpanContext::random());
+        root_span!(self, mut span);
 
         let now = Instant::now();
 
@@ -267,7 +323,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let mut span = Span::root(func_name!(), SpanContext::random());
+        root_span!(self, mut span);
+
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -362,11 +419,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
-        let span = if SpanContext::current_local_parent().is_none() {
-            Some(Span::root(func_name!(), SpanContext::random()))
-        } else {
-            None
-        };
+        root_span_if_not_exist!(self, mut span);
 
         let now = Instant::now();
 
@@ -402,9 +455,7 @@ where
             self.metrics.hybrid_hit_duration.record(now.elapsed());
         }
 
-        if let Some(mut span) = span {
-            try_cancel!(self, span, record_hybrid_fetch_threshold_ns);
-        }
+        try_cancel!(self, span, record_hybrid_fetch_threshold_ns);
 
         ret
     }
