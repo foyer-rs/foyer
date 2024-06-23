@@ -1,3 +1,7 @@
+<p align="center">
+    <img src="https://raw.githubusercontent.com/MrCroxx/foyer/main/etc/logo/slogan.min.svg" />
+</p>
+
 # foyer
 
 ![Crates.io Version](https://img.shields.io/crates/v/foyer)
