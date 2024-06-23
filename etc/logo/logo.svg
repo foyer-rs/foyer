@@ -1,5 +1,6 @@
-<svg width="180" height="140" viewBox="0 0 180 140" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M160 64L80 28L0 72L80 108L160 64Z" fill="#0477BF"/>
-<path d="M180 36L100 0L20 44L100 80L180 36Z" fill="#3DE0F2"/>
-<path d="M0 140V72L60 98.5L0 140Z" fill="#0661A5"/>
+<svg width="174" height="200" viewBox="0 0 174 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M87 0L173.603 50V150L87 200L0.397461 150V50L87 0Z" fill="#E6FCFF"/>
+<path opacity="0.8" fill-rule="evenodd" clip-rule="evenodd" d="M43.5 74.8853L0.397461 50V99.7705L43.5 74.8853ZM0.397461 100.229L43.3013 125L0.397461 149.771V100.229Z" fill="#0B4D7F"/>
+<path opacity="0.8" fill-rule="evenodd" clip-rule="evenodd" d="M86.6025 150L173.205 100L86.6025 50L0 100L86.6025 150Z" fill="#0477BF"/>
+<path opacity="0.8" fill-rule="evenodd" clip-rule="evenodd" d="M87 100L173.603 50L87 0L0.397461 50L87 100Z" fill="#3DE0F2"/>
 </svg>
