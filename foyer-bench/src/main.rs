@@ -468,6 +468,9 @@ async fn main() {
 
     let hybrid = builder.build().await.unwrap();
 
+    #[cfg(feature = "mtrace")]
+    hybrid.enable_tracing();
+
     let stats = hybrid.stats();
 
     let iostat_start = IoStat::snapshot(&stats);
