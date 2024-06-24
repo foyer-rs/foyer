@@ -299,6 +299,8 @@ where
     weighter: Arc<dyn Weighter<K, V>>,
 
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+
+    thread_local_cache_capacity: usize,
 }
 
 impl<K, V> CacheBuilder<K, V, RandomState>
@@ -324,6 +326,7 @@ where
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         }
     }
 }
@@ -383,6 +386,7 @@ where
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
+            thread_local_cache_capacity: self.thread_local_cache_capacity,
         }
     }
 
@@ -398,6 +402,12 @@ where
         self
     }
 
+    /// Set thread local cache capacity.
+    pub fn with_thread_local_cache_capacity(mut self, thread_local_cache_capacity: usize) -> Self {
+        self.thread_local_cache_capacity = thread_local_cache_capacity;
+        self
+    }
+
     /// Build in-memory cache with the given configuration.
     pub fn build(self) -> Cache<K, V, S> {
         match self.eviction_config {
@@ -410,6 +420,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                thread_local_cache_capacity: self.thread_local_cache_capacity,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -420,6 +431,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                thread_local_cache_capacity: self.thread_local_cache_capacity,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -430,6 +442,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                thread_local_cache_capacity: self.thread_local_cache_capacity,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -440,6 +453,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                thread_local_cache_capacity: self.thread_local_cache_capacity,
             }))),
         }
     }
