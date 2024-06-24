@@ -73,6 +73,7 @@ impl DeviceOptions for DirectFileDeviceOptions {
 
 impl DirectFileDevice {
     /// Positioned write API for the direct file device.
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
     pub async fn pwrite(&self, mut buf: IoBuffer, offset: u64) -> Result<()> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -106,6 +107,7 @@ impl DirectFileDevice {
     }
 
     /// Positioned read API for the direct file device.
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::pread")]
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -157,6 +159,7 @@ impl Device for DirectFileDevice {
         self.region_size
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::open")]
     async fn open(options: Self::Options) -> Result<Self> {
         let runtime = Handle::current();
 
@@ -187,6 +190,7 @@ impl Device for DirectFileDevice {
         })
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::write")]
     async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -205,6 +209,7 @@ impl Device for DirectFileDevice {
         self.pwrite(buf, poffset).await
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::read")]
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -221,6 +226,7 @@ impl Device for DirectFileDevice {
         self.pread(poffset, len).await
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_file::flush")]
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
         asyncify_with_runtime(&self.runtime, move || file.sync_all().map_err(Error::from)).await

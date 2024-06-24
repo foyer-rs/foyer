@@ -52,4 +52,4 @@ strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-memory/strict_assertions",
 ]
-mtrace = ["minitrace/enable", "foyer-memory/mtrace"]
+mtrace = ["minitrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]

@@ -41,7 +41,7 @@ strict_assertions = [
     "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
-mtrace = ["minitrace/enable"]
+mtrace = ["minitrace/enable", "foyer-common/mtrace"]
 
 [[bench]]
 name = "bench_hit_ratio"

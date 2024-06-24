@@ -102,6 +102,7 @@ impl Device for DirectFsDevice {
         self.inner.file_size
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_fs::open")]
     async fn open(options: Self::Options) -> Result<Self> {
         let runtime = Handle::current();
 
@@ -148,6 +149,7 @@ impl Device for DirectFsDevice {
         })
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_fs::write")]
     async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -180,6 +182,7 @@ impl Device for DirectFsDevice {
         .await
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_fs::read")]
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -219,6 +222,7 @@ impl Device for DirectFsDevice {
         Ok(buffer)
     }
 
+    #[minitrace::trace(name = "foyer::storage::device::direct_fs::flush")]
     async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
         let flush = |region: RegionId| {
             let file = self.file(region).clone();
