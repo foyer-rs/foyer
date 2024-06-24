@@ -97,7 +97,7 @@ where
         })
     }
 
-    #[minitrace::trace(short_name = true)]
+    #[minitrace::trace(name = "foyer::storage::device::monitor::write")]
     async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
         let now = Instant::now();
 
@@ -114,7 +114,7 @@ where
         res
     }
 
-    #[minitrace::trace(short_name = true)]
+    #[minitrace::trace(name = "foyer::storage::device::monitor::read")]
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
         let now = Instant::now();
 
@@ -131,7 +131,7 @@ where
         res
     }
 
-    #[minitrace::trace(short_name = true)]
+    #[minitrace::trace(name = "foyer::storage::device::monitor::flush")]
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
@@ -178,7 +178,7 @@ where
 }
 
 impl Monitored<DirectFileDevice> {
-    #[minitrace::trace(short_name = true)]
+    #[minitrace::trace(name = "foyer::storage::device::monitor::pwrite")]
     pub async fn pwrite(&self, buf: IoBuffer, offset: u64) -> Result<()> {
         let now = Instant::now();
 
@@ -195,7 +195,7 @@ impl Monitored<DirectFileDevice> {
         res
     }
 
-    #[minitrace::trace(short_name = true)]
+    #[minitrace::trace(name = "foyer::storage::device::monitor::pread")]
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
         let now = Instant::now();
 

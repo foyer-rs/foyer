@@ -40,15 +40,15 @@ use crate::HybridCacheWriter;
 use super::writer::HybridCacheStorageWriter;
 
 macro_rules! root_span {
-    ($self:ident, mut $name:ident) => {
-        root_span!($self, (mut) $name)
+    ($self:ident, mut $name:ident, $label:expr) => {
+        root_span!($self, (mut) $name, $label)
     };
-    ($self:ident, $name:ident) => {
-        root_span!($self, $name)
+    ($self:ident, $name:ident, $label:expr) => {
+        root_span!($self, $name, $label)
     };
-    ($self:ident, ($mut:tt) $name:ident) => {
+    ($self:ident, ($mut:tt) $name:ident, $label:expr) => {
         let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) {
-            Span::root(func_name!(), SpanContext::random())
+            Span::root($label, SpanContext::random())
         } else {
             Span::noop()
         };
@@ -56,15 +56,15 @@ macro_rules! root_span {
 }
 
 macro_rules! root_span_if_not_exist {
-    ($self:ident, mut $name:ident) => {
-        root_span!($self, (mut) $name)
+    ($self:ident, mut $name:ident, $label:expr) => {
+        root_span!($self, (mut) $name, $label)
     };
-    ($self:ident, $name:ident) => {
-        root_span!($self, $name)
+    ($self:ident, $name:ident, $label:expr) => {
+        root_span!($self, $name, $label)
     };
-    ($self:ident, ($mut:tt) $name:ident) => {
+    ($self:ident, ($mut:tt) $name:ident, $label:expr) => {
         let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) && SpanContext::current_local_parent().is_none() {
-            Span::root(func_name!(), SpanContext::random())
+            Span::root($label, SpanContext::random())
         } else {
             Span::noop()
         };
@@ -181,7 +181,7 @@ where
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, mut span);
+        root_span!(self, mut span, "foyer::hybrid::cache::insert");
 
         let _guard = span.set_local_parent();
 
@@ -200,7 +200,7 @@ where
 
     /// Insert cache entry with cache context to the hybrid cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, mut span);
+        root_span!(self, mut span, "foyer::hybrid::cache::insert_with_context");
 
         let _guard = span.set_local_parent();
 
@@ -223,7 +223,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
-        root_span!(self, mut span);
+        root_span!(self, mut span, "foyer::hybrid::cache::get");
 
         let now = Instant::now();
 
@@ -247,7 +247,7 @@ where
         if let Some((k, v)) = self
             .storage
             .load(key)
-            .in_span(Span::enter_with_parent("poll", &span))
+            .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
             .await?
         {
             if k.borrow() != key {
@@ -273,7 +273,7 @@ where
     where
         K: Clone,
     {
-        root_span!(self, mut span);
+        root_span!(self, mut span, "foyer::hybrid::cache::obtain");
 
         let now = Instant::now();
 
@@ -291,7 +291,7 @@ where
         });
         drop(guard);
 
-        let res = fetch.in_span(Span::enter_with_parent("poll", &span)).await;
+        let res = fetch.await;
 
         match res {
             Ok(entry) => {
@@ -323,7 +323,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        root_span!(self, mut span);
+        root_span!(self, mut span, "foyer::hybrid::cache::remove");
 
         let _guard = span.set_local_parent();
 
@@ -419,7 +419,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
-        root_span_if_not_exist!(self, mut span);
+        root_span_if_not_exist!(self, mut span, "foyer::hybrid::cache::fetch");
 
         let now = Instant::now();
 

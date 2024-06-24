@@ -35,4 +35,9 @@ strict_assertions = [
     "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
-mtrace = ["minitrace/enable", "foyer-memory/mtrace", "foyer-storage/mtrace"]
+mtrace = [
+    "minitrace/enable",
+    "foyer-common/mtrace",
+    "foyer-memory/mtrace",
+    "foyer-storage/mtrace",
+]

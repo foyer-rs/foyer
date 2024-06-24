@@ -61,6 +61,8 @@ use super::{
     recover::{RecoverMode, RecoverRunner},
 };
 
+use minitrace::prelude::*;
+
 pub struct GenericStoreConfig<K, V, S, D>
 where
     K: StorageKey,
@@ -349,7 +351,6 @@ where
         future
     }
 
-    #[minitrace::trace(short_name = true)]
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
     where
         K: Borrow<Q>,
@@ -401,6 +402,7 @@ where
 
             Ok(Some((k, v)))
         }
+        .in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"))
     }
 
     fn delete<Q>(&self, key: &Q) -> EnqueueHandle

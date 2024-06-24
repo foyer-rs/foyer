@@ -12,7 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::atomic::AtomicUsize;
+use minitrace::{future::InSpan, prelude::*};
+
+use std::{
+    pin::Pin,
+    sync::atomic::AtomicUsize,
+    task::{Context, Poll},
+};
+
+use futures::Future;
+use pin_project::pin_project;
 
 /// Configurations for trace.
 #[derive(Debug)]
@@ -38,5 +47,36 @@ impl Default for TraceConfig {
             record_hybrid_remove_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
             record_hybrid_fetch_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
         }
+    }
+}
+
+/// A wrapper for future to trace with minitrace.
+#[pin_project]
+pub struct Traced<F> {
+    #[pin]
+    future: InSpan<F>,
+}
+
+impl<F> Traced<F> {
+    /// Create a traced future with the given label.
+    pub fn new(future: F, label: &'static str) -> Self
+    where
+        F: Future,
+    {
+        Self {
+            future: future.in_span(Span::enter_with_local_parent(label)),
+        }
+    }
+}
+
+impl<F> Future for Traced<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        this.future.as_mut().poll(cx)
     }
 }

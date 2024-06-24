@@ -32,11 +32,12 @@ use foyer_common::{
     metrics::Metrics,
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
+    trace::Traced,
 };
 use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
-use parking_lot::Mutex;
+use parking_lot::{lock_api::MutexGuard, Mutex, RawMutex};
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
@@ -403,7 +404,7 @@ where
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, S>),
-    Wait(oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>),
+    Wait(Traced<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>),
     Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
 }
 
@@ -510,10 +511,12 @@ where
         }
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::insert")]
     pub fn insert(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, S> {
         self.insert_with_context(key, value, CacheContext::default())
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::insert_with_context")]
     pub fn insert_with_context(
         self: &Arc<Self>,
         key: K,
@@ -523,10 +526,12 @@ where
         self.emplace(key, value, context, false)
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::deposit")]
     pub fn deposit(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, S> {
         self.deposit_with_context(key, value, CacheContext::default())
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::deposit_with_context")]
     pub fn deposit_with_context(
         self: &Arc<Self>,
         key: K,
@@ -536,6 +541,7 @@ where
         self.emplace(key, value, context, true)
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::emplace")]
     fn emplace(
         self: &Arc<Self>,
         key: K,
@@ -549,7 +555,7 @@ where
         let mut to_release = vec![];
 
         let (entry, waiters) = unsafe {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
             let waiters = shard.waiters.remove(&key);
             let mut ptr = shard.emplace(hash, key, value, weight, context.into(), deposit, &mut to_release);
             if let Some(waiters) = waiters.as_ref() {
@@ -583,6 +589,7 @@ where
         entry
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::remove")]
     pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
@@ -591,7 +598,7 @@ where
         let hash = self.hash_builder.hash_one(key);
 
         unsafe {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
             shard.remove(hash, key).map(|ptr| GenericCacheEntry {
                 cache: self.clone(),
                 ptr,
@@ -599,6 +606,7 @@ where
         }
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::get")]
     pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
@@ -607,7 +615,7 @@ where
         let hash = self.hash_builder.hash_one(key);
 
         unsafe {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
             shard.get(hash, key).map(|ptr| GenericCacheEntry {
                 cache: self.clone(),
                 ptr,
@@ -623,7 +631,7 @@ where
         let hash = self.hash_builder.hash_one(key);
 
         unsafe {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
             shard.contains(hash, key)
         }
     }
@@ -636,11 +644,12 @@ where
         let hash = self.hash_builder.hash_one(key);
 
         unsafe {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
             shard.touch(hash, key)
         }
     }
 
+    #[minitrace::trace(name = "foyer::memory::generic::clear")]
     pub fn clear(&self) {
         let mut to_release = vec![];
         for shard in self.shards.iter() {
@@ -675,7 +684,7 @@ where
     unsafe fn try_release_external_handle(&self, ptr: NonNull<E::Handle>) {
         let entry = {
             let base = ptr.as_ref().base();
-            let mut shard = self.shards[base.hash() as usize % self.shards.len()].lock();
+            let mut shard = self.shard(base.hash() as usize % self.shards.len());
             shard.try_release_external_handle(ptr)
         };
 
@@ -688,9 +697,14 @@ where
     }
 
     unsafe fn inc_refs(&self, mut ptr: NonNull<E::Handle>) {
-        let shard = self.shards[ptr.as_ref().base().hash() as usize % self.shards.len()].lock();
+        let shard = self.shard(ptr.as_ref().base().hash() as usize % self.shards.len());
         ptr.as_mut().base_mut().inc_refs();
         drop(shard);
+    }
+
+    #[minitrace::trace(name = "foyer::memory::generic::shard")]
+    fn shard(&self, shard: usize) -> MutexGuard<'_, RawMutex, GenericCacheShard<K, V, E, I, S>> {
+        self.shards[shard].lock()
     }
 }
 
@@ -727,7 +741,7 @@ where
         let hash = self.hash_builder.hash_one(&key);
 
         {
-            let mut shard = self.shards[hash as usize % self.shards.len()].lock();
+            let mut shard = self.shard(hash as usize % self.shards.len());
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
                 return GenericFetch::Hit(GenericCacheEntry {
@@ -740,7 +754,7 @@ where
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    return GenericFetch::Wait(rx);
+                    return GenericFetch::Wait(Traced::new(rx, "foyer::memory::generic::fetch_with_runtime::wait"));
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
@@ -750,20 +764,30 @@ where
         }
 
         let cache = self.clone();
-        let future = fetch().in_span(Span::enter_with_local_parent("spawned"));
-        let join = runtime.spawn(async move {
-            let (value, context) = match future.await {
-                Ok((value, context)) => (value, context),
-                Err(e) => {
-                    let mut shard = cache.shards[hash as usize % cache.shards.len()].lock();
-                    tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
-                    shard.waiters.remove(&key);
-                    return Err(e);
-                }
-            };
-            let entry = cache.insert_with_context(key, value, context);
-            Ok(entry)
-        });
+        let future = fetch();
+        let join = runtime.spawn(
+            async move {
+                let (value, context) = match future
+                    .in_span(Span::enter_with_local_parent(
+                        "foyer::memory::generic::fetch_with_runtime::fetch",
+                    ))
+                    .await
+                {
+                    Ok((value, context)) => (value, context),
+                    Err(e) => {
+                        let mut shard = cache.shard(hash as usize % cache.shards.len());
+                        tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
+                        shard.waiters.remove(&key);
+                        return Err(e);
+                    }
+                };
+                let entry = cache.insert_with_context(key, value, context);
+                Ok(entry)
+            }
+            .in_span(Span::enter_with_local_parent(
+                "foyer::memory::generic::fetch_with_runtime::spawn",
+            )),
+        );
         GenericFetch::Miss(join)
     }
 }

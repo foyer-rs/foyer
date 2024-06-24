@@ -175,7 +175,6 @@ where
         }
     }
 
-    #[minitrace::trace(short_name = true)]
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
     where
         Self::Key: Borrow<Q>,

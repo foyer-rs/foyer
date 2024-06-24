@@ -14,6 +14,8 @@ readme = "../README.md"
 bytes = "1"
 cfg-if = "1"
 crossbeam = "0.8"
+futures = "0.3"
+pin-project = "1"
 hashbrown = "0.14"
 itertools = { workspace = true }
 metrics = { workspace = true }
@@ -22,6 +24,7 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 rustversion = "1.0"
 serde = { workspace = true }
 tokio = { workspace = true }
+minitrace = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
@@ -29,3 +32,4 @@ rand = "0.8.5"
 
 [features]
 strict_assertions = []
+mtrace = ["minitrace/enable"]
