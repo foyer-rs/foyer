@@ -15,16 +15,16 @@ bytes = "1"
 cfg-if = "1"
 crossbeam = "0.8"
 futures = "0.3"
-pin-project = "1"
 hashbrown = "0.14"
 itertools = { workspace = true }
 metrics = { workspace = true }
+minitrace = { workspace = true }
 nix = { version = "0.29", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+pin-project = "1"
 rustversion = "1.0"
 serde = { workspace = true }
 tokio = { workspace = true }
-minitrace = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
