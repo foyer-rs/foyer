@@ -28,13 +28,8 @@ test-log = { version = "0.2", default-features = false, features = [
 ] }
 itertools = "0.13"
 metrics = "0.23"
-minitrace = "0.6"
-minitrace-jaeger = "0.6"
+minitrace = "0.6.7"
+minitrace-jaeger = "0.6.7"
 
 [profile.release]
 debug = true
-
-[patch.crates-io]
-# Remove the following two patches after minitrace releases a new version.
-minitrace = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
-minitrace-jaeger = { git = "https://github.com/tikv/minitrace-rust", rev = "eb84d3d" }
