@@ -181,20 +181,20 @@ pub struct Args {
     eviction: String,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_insert_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_insert_us: usize,
     /// Record get trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_get_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_get_us: usize,
     /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_obtain_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_obtain_us: usize,
     /// Record remove trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_remove_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_remove_us: usize,
     /// Record fetch trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_fetch_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_fetch_us: usize,
 }
 
 #[derive(Debug)]
@@ -401,11 +401,11 @@ async fn main() {
     create_dir_all(&args.dir).unwrap();
 
     let trace_config = TraceConfig {
-        record_hybrid_insert_threshold_ns: AtomicUsize::new(args.trace_insert_ns),
-        record_hybrid_get_threshold_ns: AtomicUsize::new(args.trace_get_ns),
-        record_hybrid_obtain_threshold_ns: AtomicUsize::new(args.trace_obtain_ns),
-        record_hybrid_remove_threshold_ns: AtomicUsize::new(args.trace_remove_ns),
-        record_hybrid_fetch_threshold_ns: AtomicUsize::new(args.trace_fetch_ns),
+        record_hybrid_insert_threshold_us: AtomicUsize::new(args.trace_insert_us),
+        record_hybrid_get_threshold_us: AtomicUsize::new(args.trace_get_us),
+        record_hybrid_obtain_threshold_us: AtomicUsize::new(args.trace_obtain_us),
+        record_hybrid_remove_threshold_us: AtomicUsize::new(args.trace_remove_us),
+        record_hybrid_fetch_threshold_us: AtomicUsize::new(args.trace_fetch_us),
     };
 
     let builder = HybridCacheBuilder::new()

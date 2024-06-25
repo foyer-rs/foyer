@@ -74,7 +74,7 @@ macro_rules! root_span_if_not_exist {
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
-            if (elapsed.as_nanos() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
+            if (elapsed.as_micros() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
                 $span.cancel();
             }
         }
@@ -193,7 +193,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
+        try_cancel!(self, span, record_hybrid_insert_threshold_us);
 
         entry
     }
@@ -212,7 +212,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
+        try_cancel!(self, span, record_hybrid_insert_threshold_us);
 
         entry
     }
@@ -239,7 +239,7 @@ where
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_ns);
+            try_cancel!(self, span, record_hybrid_get_threshold_us);
             return Ok(Some(entry));
         }
         drop(guard);
@@ -255,11 +255,11 @@ where
                 return Ok(None);
             }
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_ns);
+            try_cancel!(self, span, record_hybrid_get_threshold_us);
             return Ok(Some(self.memory.insert(k, v)));
         }
         record_miss();
-        try_cancel!(self, span, record_hybrid_get_threshold_ns);
+        try_cancel!(self, span, record_hybrid_get_threshold_us);
         Ok(None)
     }
 
@@ -297,21 +297,21 @@ where
             Ok(entry) => {
                 self.metrics.hybrid_hit.increment(1);
                 self.metrics.hybrid_hit_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increment(1);
                 self.metrics.hybrid_miss_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(None)
             }
             Err(ObtainFetchError::RecvError(_)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(None)
             }
             Err(ObtainFetchError::Err(e)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Err(e)
             }
         }
@@ -335,7 +335,7 @@ where
         self.metrics.hybrid_remove.increment(1);
         self.metrics.hybrid_remove_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_remove_threshold_ns);
+        try_cancel!(self, span, record_hybrid_remove_threshold_us);
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -455,7 +455,7 @@ where
             self.metrics.hybrid_hit_duration.record(now.elapsed());
         }
 
-        try_cancel!(self, span, record_hybrid_fetch_threshold_ns);
+        try_cancel!(self, span, record_hybrid_fetch_threshold_us);
 
         ret
     }

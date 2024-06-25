@@ -26,26 +26,26 @@ use pin_project::pin_project;
 /// Configurations for trace.
 #[derive(Debug)]
 pub struct TraceConfig {
-    /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in ns.
-    pub record_hybrid_insert_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `get` operation in ns.
-    pub record_hybrid_get_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `obtain` operation in ns.
-    pub record_hybrid_obtain_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `remove` operation in ns.
-    pub record_hybrid_remove_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `fetch` operation in ns.
-    pub record_hybrid_fetch_threshold_ns: AtomicUsize,
+    /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in us.
+    pub record_hybrid_insert_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `get` operation in us.
+    pub record_hybrid_get_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `obtain` operation in us.
+    pub record_hybrid_obtain_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `remove` operation in us.
+    pub record_hybrid_remove_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `fetch` operation in us.
+    pub record_hybrid_fetch_threshold_us: AtomicUsize,
 }
 
 impl Default for TraceConfig {
     fn default() -> Self {
         Self {
-            record_hybrid_insert_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_get_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_obtain_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_remove_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_fetch_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
+            record_hybrid_insert_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_get_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_obtain_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_remove_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_fetch_threshold_us: AtomicUsize::from(1000 * 1000),
         }
     }
 }
