@@ -769,7 +769,7 @@ where
             async move {
                 let (value, context) = match future
                     .in_span(Span::enter_with_local_parent(
-                        "foyer::memory::generic::fetch_with_runtime::fetch",
+                        "foyer::memory::generic::fetch_with_runtime::fn",
                     ))
                     .await
                 {

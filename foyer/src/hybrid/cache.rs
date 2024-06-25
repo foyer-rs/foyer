@@ -430,7 +430,10 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    future.await.map_err(anyhow::Error::from)
+                    future
+                        .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
+                        .await
+                        .map_err(anyhow::Error::from)
                 }
             },
             self.storage().runtime(),
