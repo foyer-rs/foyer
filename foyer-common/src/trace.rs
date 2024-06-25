@@ -52,7 +52,7 @@ impl Default for TraceConfig {
     }
 }
 
-/// [`InRootSpan`] provides similar features like [`minitrace::future::InSpan`] with more controlls.
+/// [`InRootSpan`] provides similar features like [`minitrace::future::InSpan`] with more controls.
 #[pin_project]
 pub struct InRootSpan<F> {
     #[pin]
@@ -98,13 +98,10 @@ where
 
         let mut root = this.root.take().unwrap();
 
-        match (root.elapsed(), this.threshold.as_ref()) {
-            (Some(elapsed), Some(threshold)) => {
-                if &elapsed < threshold {
-                    root.cancel();
-                }
+        if let (Some(elapsed), Some(threshold)) = (root.elapsed(), this.threshold.as_ref()) {
+            if &elapsed < threshold {
+                root.cancel();
             }
-            _ => {}
         }
 
         Poll::Ready(res)
