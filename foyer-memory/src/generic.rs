@@ -32,7 +32,6 @@ use foyer_common::{
     metrics::Metrics,
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
-    trace::Traced,
 };
 use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
@@ -47,7 +46,7 @@ use crate::{
     CacheContext,
 };
 
-use minitrace::prelude::*;
+use minitrace::{future::InSpan, prelude::*};
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.
@@ -117,6 +116,7 @@ where
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
+    #[minitrace::trace(name = "foyer::memory::generic::shard::emplace")]
     unsafe fn emplace(
         &mut self,
         hash: u64,
@@ -269,6 +269,7 @@ where
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
+    #[minitrace::trace(name = "foyer::memory::generic::shard::evict")]
     unsafe fn evict(&mut self, weight: usize, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         while self.usage.load(Ordering::Relaxed) + weight > self.capacity {
@@ -404,7 +405,7 @@ where
 {
     Invalid,
     Hit(GenericCacheEntry<K, V, E, I, S>),
-    Wait(Traced<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>),
+    Wait(InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>),
     Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
 }
 
@@ -754,7 +755,9 @@ where
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    return GenericFetch::Wait(Traced::new(rx, "foyer::memory::generic::fetch_with_runtime::wait"));
+                    return GenericFetch::Wait(rx.in_span(Span::enter_with_local_parent(
+                        "foyer::memory::generic::fetch_with_runtime::wait",
+                    )));
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
