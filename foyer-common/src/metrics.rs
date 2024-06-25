@@ -77,6 +77,7 @@ pub struct Metrics {
     pub hybrid_hit_duration: Histogram,
     pub hybrid_miss_duration: Histogram,
     pub hybrid_remove_duration: Histogram,
+    pub hybrid_fetch_duration: Histogram,
 }
 
 impl Debug for Metrics {
@@ -173,6 +174,8 @@ impl Metrics {
             histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "miss");
         let hybrid_remove_duration =
             histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "remove");
+        let hybrid_fetch_duration =
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "fetch");
 
         Self {
             memory_insert,
@@ -220,6 +223,7 @@ impl Metrics {
             hybrid_hit_duration,
             hybrid_miss_duration,
             hybrid_remove_duration,
+            hybrid_fetch_duration,
         }
     }
 }
