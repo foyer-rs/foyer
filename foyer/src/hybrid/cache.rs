@@ -55,22 +55,6 @@ macro_rules! root_span {
     };
 }
 
-macro_rules! root_span_if_not_exist {
-    ($self:ident, mut $name:ident, $label:expr) => {
-        root_span!($self, (mut) $name, $label)
-    };
-    ($self:ident, $name:ident, $label:expr) => {
-        root_span!($self, $name, $label)
-    };
-    ($self:ident, ($mut:tt) $name:ident, $label:expr) => {
-        let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) && SpanContext::current_local_parent().is_none() {
-            Span::root($label, SpanContext::random())
-        } else {
-            Span::noop()
-        };
-    };
-}
-
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
@@ -419,7 +403,9 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
-        root_span_if_not_exist!(self, mut span, "foyer::hybrid::cache::fetch");
+        root_span!(self, mut span, "foyer::hybrid::cache::fetch");
+
+        let _guard = span.set_local_parent();
 
         let now = Instant::now();
 
