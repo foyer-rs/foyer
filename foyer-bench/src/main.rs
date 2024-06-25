@@ -18,8 +18,8 @@ mod text;
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
+    CacheContext, DirectFsDeviceOptionsBuilder, FetchState, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder,
+    InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -699,12 +699,25 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let idx = w + c * step;
 
         let time = Instant::now();
-        let res = hybrid.obtain(idx).await.unwrap();
+        let fetch = hybrid.fetch(idx, || {
+            let entry_size = OsRng.gen_range(context.entry_size_range.clone());
+            async move {
+                Ok((
+                    Value {
+                        inner: Arc::new(text(idx as usize, entry_size)),
+                    },
+                    CacheContext::default(),
+                ))
+            }
+        });
+        let hit = fetch.state() == FetchState::Hit;
+        let miss_lat = time.elapsed().as_micros() as u64;
+        let entry = fetch.await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
         let record = start.elapsed() > context.warm_up;
 
-        if let Some(entry) = res {
+        if hit {
             let entry_size = entry.len();
             assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
@@ -722,8 +735,8 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
                 context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
         } else if record {
-            if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
-                tracing::error!("metrics error: {:?}, value: {}", e, lat);
+            if let Err(e) = context.metrics.get_miss_lats.write().record(miss_lat) {
+                tracing::error!("metrics error: {:?}, value: {}", e, miss_lat);
             }
             context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
