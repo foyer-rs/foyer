@@ -18,8 +18,8 @@ mod text;
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
+    CacheContext, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder,
+    InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -48,7 +48,7 @@ use rand::{
 use rate::RateLimiter;
 use serde::{Deserialize, Serialize};
 use text::text;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 
 use crate::analyze::IoStat;
 
@@ -185,20 +185,20 @@ pub struct Args {
     thread_local_cache_capacity: usize,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_insert_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_insert_us: usize,
     /// Record get trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_get_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_get_us: usize,
     /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_obtain_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_obtain_us: usize,
     /// Record remove trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_remove_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_remove_us: usize,
     /// Record fetch trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000 * 1000)]
-    trace_fetch_ns: usize,
+    #[arg(long, default_value_t = 1000 * 1000)]
+    trace_fetch_us: usize,
 }
 
 #[derive(Debug)]
@@ -405,11 +405,11 @@ async fn main() {
     create_dir_all(&args.dir).unwrap();
 
     let trace_config = TraceConfig {
-        record_hybrid_insert_threshold_ns: AtomicUsize::new(args.trace_insert_ns),
-        record_hybrid_get_threshold_ns: AtomicUsize::new(args.trace_get_ns),
-        record_hybrid_obtain_threshold_ns: AtomicUsize::new(args.trace_obtain_ns),
-        record_hybrid_remove_threshold_ns: AtomicUsize::new(args.trace_remove_ns),
-        record_hybrid_fetch_threshold_ns: AtomicUsize::new(args.trace_fetch_ns),
+        record_hybrid_insert_threshold_us: AtomicUsize::new(args.trace_insert_us),
+        record_hybrid_get_threshold_us: AtomicUsize::new(args.trace_get_us),
+        record_hybrid_obtain_threshold_us: AtomicUsize::new(args.trace_obtain_us),
+        record_hybrid_remove_threshold_us: AtomicUsize::new(args.trace_remove_us),
+        record_hybrid_fetch_threshold_us: AtomicUsize::new(args.trace_fetch_us),
     };
 
     let builder = HybridCacheBuilder::new()
@@ -703,13 +703,35 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let c = rng.gen_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
+        let (miss_tx, mut miss_rx) = oneshot::channel();
+
         let time = Instant::now();
-        let res = hybrid.obtain(idx).await.unwrap();
+
+        let fetch = hybrid.fetch(idx, || {
+            let context = context.clone();
+            async move {
+                let _ = miss_tx.send(time.elapsed());
+                let entry_size = OsRng.gen_range(context.entry_size_range.clone());
+                Ok((
+                    Value {
+                        inner: Arc::new(text(idx as usize, entry_size)),
+                    },
+                    CacheContext::default(),
+                ))
+            }
+        });
+
+        let entry = fetch.await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
+        let (hit, miss_lat) = if let Ok(elapsed) = miss_rx.try_recv() {
+            (false, elapsed.as_micros() as u64)
+        } else {
+            (true, 0)
+        };
         let record = start.elapsed() > context.warm_up;
 
-        if let Some(entry) = res {
+        if hit {
             let entry_size = entry.len();
             assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
@@ -727,8 +749,8 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
                 context.metrics.get_bytes.fetch_add(entry_size, Ordering::Relaxed);
             }
         } else if record {
-            if let Err(e) = context.metrics.get_miss_lats.write().record(lat) {
-                tracing::error!("metrics error: {:?}, value: {}", e, lat);
+            if let Err(e) = context.metrics.get_miss_lats.write().record(miss_lat) {
+                tracing::error!("metrics error: {:?}, value: {}", e, miss_lat);
             }
             context.metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }

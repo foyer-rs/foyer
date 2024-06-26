@@ -12,71 +12,106 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use minitrace::{future::InSpan, prelude::*};
+use minitrace::prelude::*;
 
 use std::{
+    ops::Deref,
     pin::Pin,
     sync::atomic::AtomicUsize,
     task::{Context, Poll},
+    time::Duration,
 };
 
-use futures::Future;
+use futures::{ready, Future};
 use pin_project::pin_project;
 
 /// Configurations for trace.
 #[derive(Debug)]
 pub struct TraceConfig {
-    /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in ns.
-    pub record_hybrid_insert_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `get` operation in ns.
-    pub record_hybrid_get_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `obtain` operation in ns.
-    pub record_hybrid_obtain_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `remove` operation in ns.
-    pub record_hybrid_remove_threshold_ns: AtomicUsize,
-    /// Threshold for recording the hybrid cache `fetch` operation in ns.
-    pub record_hybrid_fetch_threshold_ns: AtomicUsize,
+    /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in us.
+    pub record_hybrid_insert_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `get` operation in us.
+    pub record_hybrid_get_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `obtain` operation in us.
+    pub record_hybrid_obtain_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `remove` operation in us.
+    pub record_hybrid_remove_threshold_us: AtomicUsize,
+    /// Threshold for recording the hybrid cache `fetch` operation in us.
+    pub record_hybrid_fetch_threshold_us: AtomicUsize,
 }
 
 impl Default for TraceConfig {
     fn default() -> Self {
         Self {
-            record_hybrid_insert_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_get_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_obtain_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_remove_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
-            record_hybrid_fetch_threshold_ns: AtomicUsize::from(1000 * 1000 * 1000),
+            record_hybrid_insert_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_get_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_obtain_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_remove_threshold_us: AtomicUsize::from(1000 * 1000),
+            record_hybrid_fetch_threshold_us: AtomicUsize::from(1000 * 1000),
         }
     }
 }
 
-/// A wrapper for future to trace with minitrace.
+/// [`InRootSpan`] provides similar features like [`minitrace::future::InSpan`] with more controls.
 #[pin_project]
-pub struct Traced<F> {
+pub struct InRootSpan<F> {
     #[pin]
-    future: InSpan<F>,
+    inner: F,
+
+    root: Option<Span>,
+    threshold: Option<Duration>,
 }
 
-impl<F> Traced<F> {
-    /// Create a traced future with the given label.
-    pub fn new(future: F, label: &'static str) -> Self
+impl<F> InRootSpan<F> {
+    /// Create a traced future with the given root span.
+    pub fn new(inner: F, root: Span) -> Self
     where
         F: Future,
     {
         Self {
-            future: future.in_span(Span::enter_with_local_parent(label)),
+            inner,
+            root: Some(root),
+            threshold: None,
         }
+    }
+
+    /// Set record threshold for the root span.
+    ///
+    /// If the duration of the root span is lower than the threshold, the root span will not be recorded.
+    pub fn with_threshold(mut self, threshold: Duration) -> Self {
+        self.threshold = Some(threshold);
+        self
     }
 }
 
-impl<F> Future for Traced<F>
+impl<F> Future for InRootSpan<F>
 where
     F: Future,
 {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        this.future.as_mut().poll(cx)
+        let this = self.project();
+
+        let _guard = this.root.as_ref().map(|s| s.set_local_parent());
+        let res = ready!(this.inner.poll(cx));
+
+        let mut root = this.root.take().unwrap();
+
+        if let (Some(elapsed), Some(threshold)) = (root.elapsed(), this.threshold.as_ref()) {
+            if &elapsed < threshold {
+                root.cancel();
+            }
+        }
+
+        Poll::Ready(res)
+    }
+}
+
+impl<F> Deref for InRootSpan<F> {
+    type Target = F;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }

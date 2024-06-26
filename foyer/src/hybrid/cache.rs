@@ -21,14 +21,14 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    trace::TraceConfig,
+    trace::{InRootSpan, TraceConfig},
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
@@ -44,26 +44,10 @@ macro_rules! root_span {
         root_span!($self, (mut) $name, $label)
     };
     ($self:ident, $name:ident, $label:expr) => {
-        root_span!($self, $name, $label)
+        root_span!($self, () $name, $label)
     };
-    ($self:ident, ($mut:tt) $name:ident, $label:expr) => {
-        let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) {
-            Span::root($label, SpanContext::random())
-        } else {
-            Span::noop()
-        };
-    };
-}
-
-macro_rules! root_span_if_not_exist {
-    ($self:ident, mut $name:ident, $label:expr) => {
-        root_span!($self, (mut) $name, $label)
-    };
-    ($self:ident, $name:ident, $label:expr) => {
-        root_span!($self, $name, $label)
-    };
-    ($self:ident, ($mut:tt) $name:ident, $label:expr) => {
-        let $mut $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) && SpanContext::current_local_parent().is_none() {
+    ($self:ident, ($($mut:tt)?) $name:ident, $label:expr) => {
+        let $($mut)? $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) {
             Span::root($label, SpanContext::random())
         } else {
             Span::noop()
@@ -74,7 +58,7 @@ macro_rules! root_span_if_not_exist {
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
-            if (elapsed.as_nanos() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
+            if (elapsed.as_micros() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
                 $span.cancel();
             }
         }
@@ -193,7 +177,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
+        try_cancel!(self, span, record_hybrid_insert_threshold_us);
 
         entry
     }
@@ -212,7 +196,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_ns);
+        try_cancel!(self, span, record_hybrid_insert_threshold_us);
 
         entry
     }
@@ -239,7 +223,7 @@ where
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_ns);
+            try_cancel!(self, span, record_hybrid_get_threshold_us);
             return Ok(Some(entry));
         }
         drop(guard);
@@ -255,11 +239,11 @@ where
                 return Ok(None);
             }
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_ns);
+            try_cancel!(self, span, record_hybrid_get_threshold_us);
             return Ok(Some(self.memory.insert(k, v)));
         }
         record_miss();
-        try_cancel!(self, span, record_hybrid_get_threshold_ns);
+        try_cancel!(self, span, record_hybrid_get_threshold_us);
         Ok(None)
     }
 
@@ -297,21 +281,21 @@ where
             Ok(entry) => {
                 self.metrics.hybrid_hit.increment(1);
                 self.metrics.hybrid_hit_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increment(1);
                 self.metrics.hybrid_miss_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(None)
             }
             Err(ObtainFetchError::RecvError(_)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Ok(None)
             }
             Err(ObtainFetchError::Err(e)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_ns);
+                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
                 Err(e)
             }
         }
@@ -335,7 +319,7 @@ where
         self.metrics.hybrid_remove.increment(1);
         self.metrics.hybrid_remove_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_remove_threshold_ns);
+        try_cancel!(self, span, record_hybrid_remove_threshold_us);
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -402,7 +386,7 @@ impl From<oneshot::error::RecvError> for ObtainFetchError {
 }
 
 /// The future generated by [`HybridCache::fetch`].
-pub type HybridFetch<K, V, S = RandomState> = Fetch<K, V, anyhow::Error, S>;
+pub type HybridFetch<K, V, S = RandomState> = InRootSpan<Fetch<K, V, anyhow::Error, S>>;
 
 impl<K, V, S> HybridCache<K, V, S>
 where
@@ -419,13 +403,15 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
     {
-        root_span_if_not_exist!(self, mut span, "foyer::hybrid::cache::fetch");
+        root_span!(self, span, "foyer::hybrid::cache::fetch");
+
+        let _guard = span.set_local_parent();
 
         let now = Instant::now();
 
         let store = self.storage.clone();
         let future = fetch();
-        let ret = self.memory.fetch_with_runtime(
+        let res = self.memory.fetch_with_runtime(
             key.clone(),
             || {
                 let metrics = self.metrics.clone();
@@ -444,20 +430,25 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    future.await.map_err(anyhow::Error::from)
+                    future
+                        .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
+                        .await
+                        .map_err(anyhow::Error::from)
                 }
             },
             self.storage().runtime(),
         );
 
-        if ret.state() == FetchState::Hit {
+        if res.state() == FetchState::Hit {
             self.metrics.hybrid_hit.increment(1);
             self.metrics.hybrid_hit_duration.record(now.elapsed());
         }
 
-        try_cancel!(self, span, record_hybrid_fetch_threshold_ns);
-
-        ret
+        InRootSpan::new(res, span).with_threshold(Duration::from_micros(
+            self.trace_config
+                .record_hybrid_fetch_threshold_us
+                .load(Ordering::Relaxed) as _,
+        ))
     }
 }
 
