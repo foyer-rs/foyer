@@ -698,12 +698,15 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let c = rng.gen_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
-        let time = Instant::now();
         let (miss_tx, mut miss_rx) = oneshot::channel();
+
+        let time = Instant::now();
+
         let fetch = hybrid.fetch(idx, || {
-            let entry_size = OsRng.gen_range(context.entry_size_range.clone());
+            let context = context.clone();
             async move {
                 let _ = miss_tx.send(time.elapsed());
+                let entry_size = OsRng.gen_range(context.entry_size_range.clone());
                 Ok((
                     Value {
                         inner: Arc::new(text(idx as usize, entry_size)),
@@ -715,12 +718,12 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let entry = fetch.await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
+
         let (hit, miss_lat) = if let Ok(elapsed) = miss_rx.try_recv() {
             (false, elapsed.as_micros() as u64)
         } else {
             (true, 0)
         };
-
         let record = start.elapsed() > context.warm_up;
 
         if hit {
