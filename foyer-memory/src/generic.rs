@@ -24,7 +24,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use ahash::RandomState;
@@ -35,6 +35,7 @@ use foyer_common::{
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
 };
+use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{lock_api::MutexGuard, Mutex, RawMutex};
@@ -396,10 +397,99 @@ where
 
 type GenericFetchHit<K, V, E, I, S> = Option<GenericCacheEntry<K, V, E, I, S>>;
 type GenericFetchWait<K, V, E, I, S> = InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>;
-type GenericFetchMiss<K, V, E, I, S, ER> = JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>;
+type GenericFetchMiss<K, V, E, I, S, ER, T> =
+    JoinHandle<std::result::Result<(GenericCacheEntry<K, V, E, I, S>, T), ER>>;
+
+/// The state of [`Fetch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchState {
+    /// Cache hit.
+    Hit,
+    /// Cache miss, but wait in queue.
+    Wait,
+    /// Cache miss, and there is no other waiters at the moment.
+    Miss,
+}
+
+#[pin_project]
+pub struct GenericFetch<K, V, E, I, S, ER, T = ()>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    S: HashBuilder,
+{
+    #[pin]
+    inner: GenericFetchInner<K, V, E, I, S, ER, T>,
+
+    ext: T,
+}
+
+impl<K, V, E, I, S, ER, T> GenericFetch<K, V, E, I, S, ER, T>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    S: HashBuilder,
+{
+    fn new(inner: GenericFetchInner<K, V, E, I, S, ER, T>) -> Self
+    where
+        T: Default,
+    {
+        Self {
+            inner,
+            ext: T::default(),
+        }
+    }
+
+    pub fn state(&self) -> FetchState {
+        match self.inner {
+            GenericFetchInner::Hit(_) => FetchState::Hit,
+            GenericFetchInner::Wait(_) => FetchState::Wait,
+            GenericFetchInner::Miss(_) => FetchState::Miss,
+        }
+    }
+
+    pub fn ext(&self) -> &T {
+        &self.ext
+    }
+}
+
+impl<K, V, E, I, S, ER, T> Future for GenericFetch<K, V, E, I, S, ER, T>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    S: HashBuilder,
+    ER: From<oneshot::error::RecvError>,
+    T: Default,
+{
+    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.inner.poll(cx));
+
+        let res = match res {
+            Ok((entry, ext)) => {
+                *this.ext = ext;
+                Ok(entry)
+            }
+            Err(e) => Err(e),
+        };
+
+        Poll::Ready(res)
+    }
+}
 
 #[pin_project(project = GenericFetchInnerProj)]
-pub enum GenericFetch<K, V, E, I, S, ER>
+enum GenericFetchInner<K, V, E, I, S, ER, T>
 where
     K: Key,
     V: Value,
@@ -410,10 +500,10 @@ where
 {
     Hit(GenericFetchHit<K, V, E, I, S>),
     Wait(#[pin] GenericFetchWait<K, V, E, I, S>),
-    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER>),
+    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, T>),
 }
 
-impl<K, V, E, I, S, ER> Future for GenericFetch<K, V, E, I, S, ER>
+impl<K, V, E, I, S, ER, T> Future for GenericFetchInner<K, V, E, I, S, ER, T>
 where
     K: Key,
     V: Value,
@@ -422,13 +512,17 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
+    T: Default,
 {
-    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
+    type Output = std::result::Result<(GenericCacheEntry<K, V, E, I, S>, T), ER>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            GenericFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap())),
-            GenericFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()),
+            GenericFetchInnerProj::Hit(opt) => Poll::Ready(Ok((opt.take().unwrap(), T::default()))),
+            GenericFetchInnerProj::Wait(waiter) => waiter
+                .poll(cx)
+                .map(|res| res.map(|v| (v, T::default())))
+                .map_err(|err| err.into()),
             GenericFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }
@@ -711,7 +805,12 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(key, CacheContext::default(), fetch, &tokio::runtime::Handle::current())
+        self.fetch_inner(
+            key,
+            CacheContext::default(),
+            || fetch().map(|res| res.map(|v| (v, ()))),
+            &tokio::runtime::Handle::current(),
+        )
     }
 
     pub fn fetch_with_context<F, FU, ER>(
@@ -725,20 +824,26 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current())
+        self.fetch_inner(
+            key,
+            context,
+            || fetch().map(|res| res.map(|v| (v, ()))),
+            &tokio::runtime::Handle::current(),
+        )
     }
 
-    pub fn fetch_inner<F, FU, ER>(
+    pub fn fetch_inner<F, FU, ER, T>(
         self: &Arc<Self>,
         key: K,
         context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
-    ) -> GenericFetch<K, V, E, I, S, ER>
+    ) -> GenericFetch<K, V, E, I, S, ER, T>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<(V, T), ER>> + Send + 'static,
         ER: Send + 'static + Debug,
+        T: Send + Sync + 'static + Default,
     {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -746,19 +851,19 @@ where
             let mut shard = self.shard(hash as usize % self.shards.len());
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
-                return GenericFetch::Hit(Some(GenericCacheEntry {
+                return GenericFetch::new(GenericFetchInner::Hit(Some(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
-                }));
+                })));
             }
             match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    return GenericFetch::Wait(rx.in_span(Span::enter_with_local_parent(
+                    return GenericFetch::new(GenericFetchInner::Wait(rx.in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::wait",
-                    )));
+                    ))));
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
@@ -771,13 +876,13 @@ where
         let future = fetch();
         let join = runtime.spawn(
             async move {
-                let value = match future
+                let (value, ext) = match future
                     .in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::fn",
                     ))
                     .await
                 {
-                    Ok(value) => value,
+                    Ok((value, ext)) => (value, ext),
                     Err(e) => {
                         let mut shard = cache.shard(hash as usize % cache.shards.len());
                         tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
@@ -786,13 +891,13 @@ where
                     }
                 };
                 let entry = cache.insert_with_context(key, value, context);
-                Ok(entry)
+                Ok((entry, ext))
             }
             .in_span(Span::enter_with_local_parent(
                 "foyer::memory::generic::fetch_with_runtime::spawn",
             )),
         );
-        GenericFetch::Miss(join)
+        GenericFetch::new(GenericFetchInner::Miss(join))
     }
 }
 
