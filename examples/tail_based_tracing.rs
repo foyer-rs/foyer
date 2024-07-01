@@ -61,6 +61,7 @@ fn init_exporter() {
     panic!("Either jeager or opentelemetry feature must be enabled!");
 }
 
+/// NOTE: To run this example, please enable feature "mtrace" and either "jaeger" or "ot".
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_exporter();
