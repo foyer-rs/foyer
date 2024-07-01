@@ -70,6 +70,7 @@ mod eviction;
 mod generic;
 mod handle;
 mod indexer;
+mod local;
 mod prelude;
 
 pub use prelude::*;

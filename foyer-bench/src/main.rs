@@ -180,6 +180,10 @@ pub struct Args {
     #[arg(long, default_value = "lfu")]
     eviction: String,
 
+    /// Thread local cache capacity per thread. (MB)
+    #[arg(long, default_value_t = 0)]
+    thread_local_cache_capacity: usize,
+
     /// Record insert trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_insert_us: usize,
@@ -422,6 +426,7 @@ async fn main() {
 
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
+        .with_thread_local_cache_capacity(args.thread_local_cache_capacity * MIB as usize)
         .storage()
         .with_device_config(
             DirectFsDeviceOptionsBuilder::new(&args.dir)

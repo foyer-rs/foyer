@@ -173,6 +173,18 @@ where
         }
     }
 
+    /// Set thread local cache capacity.
+    pub fn with_thread_local_cache_capacity(self, thread_local_cache_capacity: usize) -> Self {
+        let builder = self
+            .builder
+            .with_thread_local_cache_capacity(thread_local_cache_capacity);
+        HybridCacheBuilderPhaseMemory {
+            name: self.name,
+            trace_config: self.trace_config,
+            builder,
+        }
+    }
+
     /// Continue to modify the in-memory cache configurations.
     pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();

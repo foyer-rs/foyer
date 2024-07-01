@@ -23,6 +23,7 @@ libc = "0.2"
 minitrace = { workspace = true }
 parking_lot = "0.12"
 serde = { workspace = true }
+thread_local = "1.1"
 tokio = { workspace = true }
 tracing = "0.1"
 

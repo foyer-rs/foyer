@@ -14,6 +14,7 @@
 
 use std::{
     borrow::Borrow,
+    cell::RefCell,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -37,12 +38,14 @@ use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{lock_api::MutexGuard, Mutex, RawMutex};
+use thread_local::ThreadLocal;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     eviction::Eviction,
     handle::{Handle, HandleExt, KeyedHandle},
     indexer::Indexer,
+    local::LocalCache,
     CacheContext,
 };
 
@@ -390,6 +393,7 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<K, V>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+    pub thread_local_cache_capacity: usize,
 }
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -459,6 +463,9 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
+    thread_local_cache: Option<ThreadLocal<RefCell<LocalCache<K, V, E, I, S>>>>,
+    thread_local_cache_capacity: usize,
+
     shards: Vec<Mutex<GenericCacheShard<K, V, E, I, S>>>,
 
     capacity: usize,
@@ -501,7 +508,15 @@ where
             .map(Mutex::new)
             .collect_vec();
 
+        let thread_local_cache = if config.thread_local_cache_capacity > 0 {
+            Some(ThreadLocal::new())
+        } else {
+            None
+        };
+
         Self {
+            thread_local_cache,
+            thread_local_cache_capacity: config.thread_local_cache_capacity,
             shards,
             capacity: config.capacity,
             usages,
@@ -615,13 +630,34 @@ where
     {
         let hash = self.hash_builder.hash_one(key);
 
-        unsafe {
+        if let Some(local) = self.thread_local_cache.as_ref() {
+            if let Some(entry) = local
+                .get_or(|| RefCell::new(LocalCache::new(self.thread_local_cache_capacity)))
+                .borrow()
+                .get(hash, key)
+            {
+                return Some(entry);
+            }
+        }
+
+        let ret = unsafe {
             let mut shard = self.shard(hash as usize % self.shards.len());
             shard.get(hash, key).map(|ptr| GenericCacheEntry {
                 cache: self.clone(),
                 ptr,
             })
+        };
+
+        if let Some(entry) = ret.as_ref() {
+            if let Some(local) = self.thread_local_cache.as_ref() {
+                local
+                    .get_or(|| RefCell::new(LocalCache::new(self.thread_local_cache_capacity)))
+                    .borrow_mut()
+                    .insert(entry);
+            }
         }
+
+        ret
     }
 
     pub fn contains<Q>(self: &Arc<Self>, key: &Q) -> bool
@@ -1019,6 +1055,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         })))
     }
 
@@ -1033,6 +1070,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         })))
     }
 
@@ -1047,6 +1085,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         })))
     }
 
@@ -1061,6 +1100,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         })))
     }
 
@@ -1074,6 +1114,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         };
         Arc::new(FifoCache::<u64, String>::new(config))
     }
@@ -1090,6 +1131,7 @@ mod tests {
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, v: &String| v.len()),
             event_listener: None,
+            thread_local_cache_capacity: 0,
         };
         Arc::new(LruCache::<u64, String>::new(config))
     }
