@@ -1,6 +1,6 @@
 [default.extend-words]
-
-[default.extend-identifiers]
+# "ot" short for "OpenTelemetry"
+ot = "ot"
 
 [files]
 extend-exclude = [

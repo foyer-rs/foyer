@@ -16,8 +16,28 @@ ahash = "0.8"
 anyhow = "1"
 chrono = "0.4"
 foyer = { version = "*", path = "../foyer" }
+minitrace = { workspace = true }
+minitrace-jaeger = { workspace = true, optional = true }
+minitrace-opentelemetry = { workspace = true, optional = true }
+opentelemetry = { version = "0.23", optional = true }
+opentelemetry-otlp = { version = "0.16", optional = true }
+opentelemetry-semantic-conventions = { version = "0.15", optional = true }
+opentelemetry_sdk = { version = "0.23", features = [
+    "rt-tokio",
+    "trace",
+], optional = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
+
+[features]
+jaeger = ["minitrace-jaeger"]
+ot = [
+    "minitrace-opentelemetry",
+    "opentelemetry",
+    "opentelemetry-otlp",
+    "opentelemetry-semantic-conventions",
+    "opentelemetry_sdk",
+]
 
 [[example]]
 name = "memory"
@@ -34,3 +54,7 @@ path = "hybrid_full.rs"
 [[example]]
 name = "event_listener"
 path = "event_listener.rs"
+
+[[example]]
+name = "tail_based_tracing"
+path = "tail_based_tracing.rs"

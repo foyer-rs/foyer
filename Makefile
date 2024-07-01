@@ -45,6 +45,8 @@ example:
 	cargo run --example hybrid
 	cargo run --example hybrid_full
 	cargo run --example event_listener
+	cargo run --features "mtrace,jaeger" --example tail_based_tracing
+	cargo run --features "mtrace,ot" --example tail_based_tracing
 
 full: check-all test-all example udeps
 

@@ -20,8 +20,15 @@
 
 - **Hybrid Cache**: Seamlessly integrates both in-memory and disk-based caching for optimal performance and flexibility.
 - **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
-- **Thread Safety**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
+- **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
 - **User-Friendly Interface**: Offers a simple and intuitive API, making cache integration effortless and accessible for developers of all levels.
+- **Out-of-the-Box Observability**: Integrate popular observation systems such as Prometheus, Grafana, Opentelemetry, and Jaeger in just *ONE* line.
+
+## Projects Using *foyer*
+
+Feel free to open a PR and add your projects here:
+
+- [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 
 ## Usage
 
@@ -169,7 +176,10 @@ async fn mock() -> Result<String> {
 }
 ```
 
-### Other Cases
+### Other Examples
+
+- [Event Listener](https://github.com/MrCroxx/foyer/tree/main/examples/event_listener.rs)
+- [Tail-based Tracing](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs)
 
 More examples and details can be found [here](https://github.com/MrCroxx/foyer/tree/main/examples).
 
@@ -177,7 +187,7 @@ More examples and details can be found [here](https://github.com/MrCroxx/foyer/t
 
 *foyer* is built against the recent stable release. The minimum supported version is 1.77. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
-## Development state & Roadmap
+## Development State & Roadmap
 
 Currently, *foyer* is still under heavy development.
 
