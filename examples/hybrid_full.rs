@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    CacheContext, DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeConfigBuilder, TombstoneLogConfigBuilder,
+    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
+    RuntimeConfigBuilder, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
     let e = hybrid
         .fetch(20230512, || async {
             let value = mock().await?;
-            Ok((value, CacheContext::default()))
+            Ok(value)
         })
         .await?;
     assert_eq!(e.key(), &20230512);

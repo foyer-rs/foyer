@@ -18,8 +18,8 @@ mod text;
 
 use bytesize::MIB;
 use foyer::{
-    CacheContext, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder,
-    InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TracingConfig,
+    DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
+    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TracingConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -706,12 +706,9 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             async move {
                 let _ = miss_tx.send(time.elapsed());
                 let entry_size = OsRng.gen_range(context.entry_size_range.clone());
-                Ok((
-                    Value {
-                        inner: Arc::new(text(idx as usize, entry_size)),
-                    },
-                    CacheContext::default(),
-                ))
+                Ok(Value {
+                    inner: Arc::new(text(idx as usize, entry_size)),
+                })
             }
         });
 
