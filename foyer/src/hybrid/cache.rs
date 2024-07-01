@@ -35,7 +35,6 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
-use futures::FutureExt;
 use minitrace::prelude::*;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
@@ -482,6 +481,7 @@ where
         let future = fetch();
         let inner = self.memory.fetch_inner(
             key.clone(),
+            context,
             || {
                 let metrics = self.metrics.clone();
                 let enqueue = enqueue.clone();
@@ -493,7 +493,7 @@ where
                             metrics.hybrid_hit.increment(1);
                             metrics.hybrid_hit_duration.record(now.elapsed());
 
-                            return Ok((v, context));
+                            return Ok(v);
                         }
                     }
 
@@ -503,7 +503,6 @@ where
                     enqueue.store(true, Ordering::Release);
 
                     future
-                        .map(|res| res.map(|v| (v, context)))
                         .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
                         .await
                         .map_err(anyhow::Error::from)

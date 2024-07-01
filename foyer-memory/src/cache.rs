@@ -826,17 +826,23 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER>(&self, key: K, fetch: F, runtime: &tokio::runtime::Handle) -> Fetch<K, V, ER, S>
+    pub fn fetch_inner<F, FU, ER>(
+        &self,
+        key: K,
+        context: CacheContext,
+        fetch: F,
+        runtime: &tokio::runtime::Handle,
+    ) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, fetch, runtime)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
         }
     }
 }
