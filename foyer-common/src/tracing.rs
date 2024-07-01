@@ -17,7 +17,7 @@ use minitrace::prelude::*;
 use std::{
     ops::Deref,
     pin::Pin,
-    sync::atomic::AtomicUsize,
+    sync::atomic::{AtomicUsize, Ordering},
     task::{Context, Poll},
     time::Duration,
 };
@@ -25,22 +25,23 @@ use std::{
 use futures::{ready, Future};
 use pin_project::pin_project;
 
-/// Configurations for trace.
+/// Configurations for tracing.
 #[derive(Debug)]
-pub struct TraceConfig {
+pub struct TracingConfig {
     /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in us.
-    pub record_hybrid_insert_threshold_us: AtomicUsize,
+    record_hybrid_insert_threshold_us: AtomicUsize,
     /// Threshold for recording the hybrid cache `get` operation in us.
-    pub record_hybrid_get_threshold_us: AtomicUsize,
+    record_hybrid_get_threshold_us: AtomicUsize,
     /// Threshold for recording the hybrid cache `obtain` operation in us.
-    pub record_hybrid_obtain_threshold_us: AtomicUsize,
+    record_hybrid_obtain_threshold_us: AtomicUsize,
     /// Threshold for recording the hybrid cache `remove` operation in us.
-    pub record_hybrid_remove_threshold_us: AtomicUsize,
+    record_hybrid_remove_threshold_us: AtomicUsize,
     /// Threshold for recording the hybrid cache `fetch` operation in us.
-    pub record_hybrid_fetch_threshold_us: AtomicUsize,
+    record_hybrid_fetch_threshold_us: AtomicUsize,
 }
 
-impl Default for TraceConfig {
+impl Default for TracingConfig {
+    /// All thresholds are set to `1s`.
     fn default() -> Self {
         Self {
             record_hybrid_insert_threshold_us: AtomicUsize::from(1000 * 1000),
@@ -49,6 +50,63 @@ impl Default for TraceConfig {
             record_hybrid_remove_threshold_us: AtomicUsize::from(1000 * 1000),
             record_hybrid_fetch_threshold_us: AtomicUsize::from(1000 * 1000),
         }
+    }
+}
+
+impl TracingConfig {
+    /// Set the threshold for recording the hybrid cache `insert` and `insert_with_context` operation.
+    pub fn set_record_hybrid_insert_threshold(&self, threshold: Duration) {
+        self.record_hybrid_insert_threshold_us
+            .store(threshold.as_micros() as _, Ordering::Relaxed);
+    }
+
+    /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation.
+    pub fn record_hybrid_insert_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_insert_threshold_us.load(Ordering::Relaxed) as _)
+    }
+
+    /// Set the threshold for recording the hybrid cache `get` operation.
+    pub fn set_record_hybrid_get_threshold(&self, threshold: Duration) {
+        self.record_hybrid_get_threshold_us
+            .store(threshold.as_micros() as _, Ordering::Relaxed);
+    }
+
+    /// Threshold for recording the hybrid cache `get` operation.
+    pub fn record_hybrid_get_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_get_threshold_us.load(Ordering::Relaxed) as _)
+    }
+
+    /// Set the threshold for recording the hybrid cache `obtain` operation.
+    pub fn set_record_hybrid_obtain_threshold(&self, threshold: Duration) {
+        self.record_hybrid_obtain_threshold_us
+            .store(threshold.as_micros() as _, Ordering::Relaxed);
+    }
+
+    /// Threshold for recording the hybrid cache `obtain` operation.
+    pub fn record_hybrid_obtain_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_obtain_threshold_us.load(Ordering::Relaxed) as _)
+    }
+
+    /// Set the threshold for recording the hybrid cache `remove` operation.
+    pub fn set_record_hybrid_remove_threshold(&self, threshold: Duration) {
+        self.record_hybrid_remove_threshold_us
+            .store(threshold.as_micros() as _, Ordering::Relaxed);
+    }
+
+    /// Threshold for recording the hybrid cache `remove` operation.
+    pub fn record_hybrid_remove_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_remove_threshold_us.load(Ordering::Relaxed) as _)
+    }
+
+    /// Set the threshold for recording the hybrid cache `fetch` operation.
+    pub fn set_record_hybrid_fetch_threshold(&self, threshold: Duration) {
+        self.record_hybrid_fetch_threshold_us
+            .store(threshold.as_micros() as _, Ordering::Relaxed);
+    }
+
+    /// Threshold for recording the hybrid cache `fetch` operation.
+    pub fn record_hybrid_fetch_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_fetch_threshold_us.load(Ordering::Relaxed) as _)
     }
 }
 
