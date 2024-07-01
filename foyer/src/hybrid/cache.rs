@@ -274,7 +274,7 @@ where
                     Err(e) => Err(ObtainFetchError::Err(e)),
                     Ok(None) => Err(ObtainFetchError::NotExist),
                     Ok(Some((k, _))) if key != k => Err(ObtainFetchError::NotExist),
-                    Ok(Some((_, v))) => Ok((v, CacheContext::default())),
+                    Ok(Some((_, v))) => Ok(v),
                 }
             }
         });
@@ -449,14 +449,26 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Fetch and insert a cache entry with the given method if there is a cache miss.
+    /// Fetch and insert a cache entry with the given key and method if there is a cache miss.
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
     pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<(V, CacheContext)>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+    {
+        self.fetch_with_context(key, CacheContext::default(), fetch)
+    }
+
+    /// Fetch and insert a cache entry with the given key, context, and method if there is a cache miss.
+    ///
+    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+    /// runtime. Otherwise, the user's runtime will be used.
+    pub fn fetch_with_context<F, FU>(&self, key: K, context: CacheContext, fetch: F) -> HybridFetch<K, V, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
         root_span!(self, span, "foyer::hybrid::cache::fetch");
 
@@ -467,8 +479,9 @@ where
         let store = self.storage.clone();
         let enqueue = Arc::<AtomicBool>::default();
         let future = fetch();
-        let inner = self.memory.fetch_with_runtime(
+        let inner = self.memory.fetch_inner(
             key.clone(),
+            context,
             || {
                 let metrics = self.metrics.clone();
                 let enqueue = enqueue.clone();
@@ -480,7 +493,7 @@ where
                             metrics.hybrid_hit.increment(1);
                             metrics.hybrid_hit_duration.record(now.elapsed());
 
-                            return Ok((v, CacheContext::default()));
+                            return Ok(v);
                         }
                     }
 
@@ -584,10 +597,7 @@ mod tests {
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
 
-        let e5 = hybrid
-            .fetch(5, || async move { Ok((vec![5; 7 * KB], CacheContext::default())) })
-            .await
-            .unwrap();
+        let e5 = hybrid.fetch(5, || async move { Ok(vec![5; 7 * KB]) }).await.unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
 
         let e1g = hybrid.get(&1).await.unwrap().unwrap();

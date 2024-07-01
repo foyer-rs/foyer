@@ -768,10 +768,6 @@ where
             | Fetch::Lru(LruFetch::Miss(_))
             | Fetch::Lfu(LfuFetch::Miss(_))
             | Fetch::S3Fifo(S3FifoFetch::Miss(_)) => FetchState::Miss,
-            Fetch::Fifo(FifoFetch::Invalid)
-            | Fetch::Lru(LruFetch::Invalid)
-            | Fetch::Lfu(LfuFetch::Invalid)
-            | Fetch::S3Fifo(S3FifoFetch::Invalid) => unreachable!(),
         }
     }
 }
@@ -791,7 +787,7 @@ where
     pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
         match self {
@@ -802,6 +798,26 @@ where
         }
     }
 
+    /// Get the cached entry with the given key and context from the in-memory cache.
+    ///
+    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
+    ///
+    /// The concurrent fetch requests will be deduplicated.
+    #[minitrace::trace(name = "foyer::memory::cache::fetch_with_context")]
+    pub fn fetch_with_context<F, FU, ER>(&self, key: K, context: CacheContext, fetch: F) -> Fetch<K, V, ER, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
+        match self {
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
+        }
+    }
+
     /// Get the cached entry with the given key from the in-memory cache.
     ///
     /// The fetch task will be spawned in the give `runtime`.
@@ -809,22 +825,24 @@ where
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    pub fn fetch_with_runtime<F, FU, ER>(
+    #[doc(hidden)]
+    pub fn fetch_inner<F, FU, ER>(
         &self,
         key: K,
+        context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
     ) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_runtime(key, fetch, runtime)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
         }
     }
 }
@@ -919,7 +937,7 @@ mod tests {
                 let entry = cache
                     .fetch(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, tokio::sync::oneshot::error::RecvError>((i, CacheContext::Default))
+                        Ok::<_, tokio::sync::oneshot::error::RecvError>(i)
                     })
                     .await
                     .unwrap();

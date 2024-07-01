@@ -18,11 +18,13 @@ use std::{
     future::Future,
     hash::Hash,
     ops::Deref,
+    pin::Pin,
     ptr::NonNull,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    task::{Context, Poll},
 };
 
 use ahash::RandomState;
@@ -33,10 +35,10 @@ use foyer_common::{
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
 };
-use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{lock_api::MutexGuard, Mutex, RawMutex};
+use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
@@ -392,8 +394,11 @@ where
     pub event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(clippy::type_complexity)]
+type GenericFetchHit<K, V, E, I, S> = Option<GenericCacheEntry<K, V, E, I, S>>;
+type GenericFetchWait<K, V, E, I, S> = InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>;
+type GenericFetchMiss<K, V, E, I, S, ER> = JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>;
+
+#[pin_project(project = GenericFetchInnerProj)]
 pub enum GenericFetch<K, V, E, I, S, ER>
 where
     K: Key,
@@ -403,24 +408,9 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
 {
-    Invalid,
-    Hit(GenericCacheEntry<K, V, E, I, S>),
-    Wait(InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>),
-    Miss(JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>),
-}
-
-impl<K, V, E, I, S, ER> Default for GenericFetch<K, V, E, I, S, ER>
-where
-    K: Key,
-    V: Value,
-    E: Eviction,
-    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
-    I: Indexer<Key = K, Handle = E::Handle>,
-    S: HashBuilder,
-{
-    fn default() -> Self {
-        Self::Invalid
-    }
+    Hit(GenericFetchHit<K, V, E, I, S>),
+    Wait(#[pin] GenericFetchWait<K, V, E, I, S>),
+    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER>),
 }
 
 impl<K, V, E, I, S, ER> Future for GenericFetch<K, V, E, I, S, ER>
@@ -435,15 +425,11 @@ where
 {
     type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        match &mut *self {
-            Self::Invalid => unreachable!(),
-            Self::Hit(_) => std::task::Poll::Ready(Ok(match std::mem::take(&mut *self) {
-                GenericFetch::Hit(entry) => entry,
-                _ => unreachable!(),
-            })),
-            Self::Wait(waiter) => waiter.poll_unpin(cx).map_err(|err| err.into()),
-            Self::Miss(join_handle) => join_handle.poll_unpin(cx).map(|join_result| join_result.unwrap()),
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            GenericFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap())),
+            GenericFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()),
+            GenericFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }
 }
@@ -722,21 +708,36 @@ where
     pub fn fetch<F, FU, ER>(self: &Arc<Self>, key: K, fetch: F) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_with_runtime(key, fetch, &tokio::runtime::Handle::current())
+        self.fetch_inner(key, CacheContext::default(), fetch, &tokio::runtime::Handle::current())
     }
 
-    pub fn fetch_with_runtime<F, FU, ER>(
+    pub fn fetch_with_context<F, FU, ER>(
         self: &Arc<Self>,
         key: K,
+        context: CacheContext,
+        fetch: F,
+    ) -> GenericFetch<K, V, E, I, S, ER>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
+        self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current())
+    }
+
+    pub fn fetch_inner<F, FU, ER>(
+        self: &Arc<Self>,
+        key: K,
+        context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
     ) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, CacheContext), ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
         let hash = self.hash_builder.hash_one(&key);
@@ -745,10 +746,10 @@ where
             let mut shard = self.shard(hash as usize % self.shards.len());
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
-                return GenericFetch::Hit(GenericCacheEntry {
+                return GenericFetch::Hit(Some(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
-                });
+                }));
             }
             match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
@@ -770,13 +771,13 @@ where
         let future = fetch();
         let join = runtime.spawn(
             async move {
-                let (value, context) = match future
+                let value = match future
                     .in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::fn",
                     ))
                     .await
                 {
-                    Ok((value, context)) => (value, context),
+                    Ok(value) => value,
                     Err(e) => {
                         let mut shard = cache.shard(hash as usize % cache.shards.len());
                         tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
@@ -1283,7 +1284,7 @@ mod tests {
 
         let fetch = |s: &'static str| async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok::<_, anyhow::Error>((s.to_string(), CacheContext::default()))
+            Ok::<_, anyhow::Error>(s.to_string())
         };
 
         /* fetch with waiters */
