@@ -421,7 +421,7 @@ where
         let res = ready!(this.inner.poll(cx));
 
         if let Ok(entry) = res.as_ref() {
-            if this.enqueue.load(Ordering::Relaxed) {
+            if this.enqueue.load(Ordering::Acquire) {
                 this.storage.enqueue(entry.clone(), false);
             }
         }
@@ -487,7 +487,7 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    enqueue.store(true, Ordering::Relaxed);
+                    enqueue.store(true, Ordering::Release);
 
                     future
                         .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))

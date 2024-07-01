@@ -321,6 +321,7 @@ where
         self.inner.admission_picker.pick(&self.inner.stats, key)
     }
 
+    #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
     fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
         let now = Instant::now();
 
