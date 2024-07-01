@@ -21,14 +21,14 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    trace::{InRootSpan, TraceConfig},
+    tracing::{InRootSpan, TracingConfig},
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
@@ -47,7 +47,7 @@ macro_rules! root_span {
         root_span!($self, () $name, $label)
     };
     ($self:ident, ($($mut:tt)?) $name:ident, $label:expr) => {
-        let $($mut)? $name = if $self.trace.load(std::sync::atomic::Ordering::Relaxed) {
+        let $($mut)? $name = if $self.tracing.load(std::sync::atomic::Ordering::Relaxed) {
             Span::root($label, SpanContext::random())
         } else {
             Span::noop()
@@ -58,7 +58,7 @@ macro_rules! root_span {
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
-            if (elapsed.as_micros() as usize) < $self.trace_config.$threshold.load(Ordering::Relaxed) {
+            if elapsed < $self.tracing_config.$threshold() {
                 $span.cancel();
             }
         }
@@ -78,8 +78,8 @@ where
     memory: Cache<K, V, S>,
     storage: Store<K, V, S>,
     metrics: Arc<Metrics>,
-    trace_config: Arc<TraceConfig>,
-    trace: Arc<AtomicBool>,
+    tracing_config: Arc<TracingConfig>,
+    tracing: Arc<AtomicBool>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -92,7 +92,8 @@ where
         f.debug_struct("HybridCache")
             .field("memory", &self.memory)
             .field("storage", &self.storage)
-            .field("trace_config", &self.trace_config)
+            .field("tracing_config", &self.tracing_config)
+            .field("tracing", &self.tracing)
             .finish()
     }
 }
@@ -108,8 +109,8 @@ where
             memory: self.memory.clone(),
             storage: self.storage.clone(),
             metrics: self.metrics.clone(),
-            trace_config: self.trace_config.clone(),
-            trace: self.trace.clone(),
+            tracing_config: self.tracing_config.clone(),
+            tracing: self.tracing.clone(),
         }
     }
 }
@@ -124,23 +125,23 @@ where
         name: String,
         memory: Cache<K, V, S>,
         storage: Store<K, V, S>,
-        trace_config: TraceConfig,
+        tracing_config: TracingConfig,
     ) -> Self {
         let metrics = Arc::new(Metrics::new(&name));
-        let trace_config = Arc::new(trace_config);
+        let tracing_config = Arc::new(tracing_config);
         let trace = Arc::new(AtomicBool::new(false));
         Self {
             memory,
             storage,
             metrics,
-            trace_config,
-            trace,
+            tracing_config,
+            tracing: trace,
         }
     }
 
     /// Access the trace config.
-    pub fn trace_config(&self) -> &TraceConfig {
-        &self.trace_config
+    pub fn tracing_config(&self) -> &TracingConfig {
+        &self.tracing_config
     }
 
     /// Access the in-memory cache.
@@ -150,17 +151,17 @@ where
 
     /// Enable tracing.
     pub fn enable_tracing(&self) {
-        self.trace.store(true, Ordering::Relaxed);
+        self.tracing.store(true, Ordering::Relaxed);
     }
 
     /// Disable tracing.
     pub fn disable_tracing(&self) {
-        self.trace.store(true, Ordering::Relaxed);
+        self.tracing.store(true, Ordering::Relaxed);
     }
 
     /// Return `true` if tracing is enabled.
     pub fn is_tracing_enabled(&self) -> bool {
-        self.trace.load(Ordering::Relaxed)
+        self.tracing.load(Ordering::Relaxed)
     }
 
     /// Insert cache entry to the hybrid cache.
@@ -177,7 +178,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_us);
+        try_cancel!(self, span, record_hybrid_insert_threshold);
 
         entry
     }
@@ -196,7 +197,7 @@ where
         self.metrics.hybrid_insert.increment(1);
         self.metrics.hybrid_insert_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold_us);
+        try_cancel!(self, span, record_hybrid_insert_threshold);
 
         entry
     }
@@ -223,7 +224,7 @@ where
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_us);
+            try_cancel!(self, span, record_hybrid_get_threshold);
             return Ok(Some(entry));
         }
         drop(guard);
@@ -239,11 +240,11 @@ where
                 return Ok(None);
             }
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold_us);
+            try_cancel!(self, span, record_hybrid_get_threshold);
             return Ok(Some(self.memory.insert(k, v)));
         }
         record_miss();
-        try_cancel!(self, span, record_hybrid_get_threshold_us);
+        try_cancel!(self, span, record_hybrid_get_threshold);
         Ok(None)
     }
 
@@ -281,21 +282,21 @@ where
             Ok(entry) => {
                 self.metrics.hybrid_hit.increment(1);
                 self.metrics.hybrid_hit_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increment(1);
                 self.metrics.hybrid_miss_duration.record(now.elapsed());
-                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
             Err(ObtainFetchError::RecvError(_)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
             Err(ObtainFetchError::Err(e)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold_us);
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Err(e)
             }
         }
@@ -319,7 +320,7 @@ where
         self.metrics.hybrid_remove.increment(1);
         self.metrics.hybrid_remove_duration.record(now.elapsed());
 
-        try_cancel!(self, span, record_hybrid_remove_threshold_us);
+        try_cancel!(self, span, record_hybrid_remove_threshold);
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -444,11 +445,7 @@ where
             self.metrics.hybrid_hit_duration.record(now.elapsed());
         }
 
-        InRootSpan::new(res, span).with_threshold(Duration::from_micros(
-            self.trace_config
-                .record_hybrid_fetch_threshold_us
-                .load(Ordering::Relaxed) as _,
-        ))
+        InRootSpan::new(res, span).with_threshold(self.tracing_config.record_hybrid_fetch_threshold())
     }
 }
 

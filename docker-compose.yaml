@@ -51,6 +51,7 @@ services:
     command:
       - '--collector.otlp.enabled=true'
     ports:
+      # https://www.jaegertracing.io/docs/1.58/getting-started/
       - 6831:6831/udp
       - 6832:6832/udp
       - 16686:16686

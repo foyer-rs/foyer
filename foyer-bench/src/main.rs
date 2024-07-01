@@ -19,7 +19,7 @@ mod text;
 use bytesize::MIB;
 use foyer::{
     CacheContext, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder,
-    InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TraceConfig,
+    InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TracingConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -29,7 +29,7 @@ use std::{
     net::SocketAddr,
     ops::{Deref, Range},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -295,7 +295,7 @@ fn setup() {
     use tracing::Level;
     use tracing_subscriber::{filter::Targets, prelude::*};
 
-    let trace_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
+    let tracing_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
         SERVICE_NAME,
         "foyer-bench",
     )]));
@@ -308,7 +308,7 @@ fn setup() {
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .with_trace_config(trace_config)
+        .with_tracing_config(tracing_config)
         .with_batch_config(batch_config)
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .unwrap();
@@ -400,16 +400,15 @@ async fn main() {
 
     create_dir_all(&args.dir).unwrap();
 
-    let trace_config = TraceConfig {
-        record_hybrid_insert_threshold_us: AtomicUsize::new(args.trace_insert_us),
-        record_hybrid_get_threshold_us: AtomicUsize::new(args.trace_get_us),
-        record_hybrid_obtain_threshold_us: AtomicUsize::new(args.trace_obtain_us),
-        record_hybrid_remove_threshold_us: AtomicUsize::new(args.trace_remove_us),
-        record_hybrid_fetch_threshold_us: AtomicUsize::new(args.trace_fetch_us),
-    };
+    let tracing_config = TracingConfig::default();
+    tracing_config.set_record_hybrid_insert_threshold(Duration::from_micros(args.trace_insert_us as _));
+    tracing_config.set_record_hybrid_get_threshold(Duration::from_micros(args.trace_get_us as _));
+    tracing_config.set_record_hybrid_obtain_threshold(Duration::from_micros(args.trace_obtain_us as _));
+    tracing_config.set_record_hybrid_remove_threshold(Duration::from_micros(args.trace_remove_us as _));
+    tracing_config.set_record_hybrid_fetch_threshold(Duration::from_micros(args.trace_fetch_us as _));
 
     let builder = HybridCacheBuilder::new()
-        .with_trace_config(trace_config)
+        .with_tracing_config(tracing_config)
         .memory(args.mem * MIB as usize)
         .with_shards(args.shards);
 
