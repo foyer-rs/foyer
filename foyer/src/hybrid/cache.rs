@@ -30,11 +30,13 @@ use std::{
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
+    future::Diversion,
     metrics::Metrics,
     tracing::{InRootSpan, TracingConfig},
 };
-use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchState};
+use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
 use foyer_storage::{DeviceStats, Storage, Store};
+use futures::FutureExt;
 use minitrace::prelude::*;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
@@ -404,7 +406,6 @@ where
     #[pin]
     inner: Fetch<K, V, anyhow::Error, S>,
 
-    enqueue: Arc<AtomicBool>,
     storage: Store<K, V, S>,
 }
 
@@ -417,11 +418,11 @@ where
     type Output = anyhow::Result<CacheEntry<K, V, S>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let res = ready!(this.inner.poll(cx));
+        let mut this = self.project();
+        let res = ready!(this.inner.as_mut().poll(cx));
 
         if let Ok(entry) = res.as_ref() {
-            if this.enqueue.load(Ordering::Acquire) {
+            if this.inner.store().is_some() {
                 this.storage.enqueue(entry.clone(), false);
             }
         }
@@ -477,35 +478,41 @@ where
         let now = Instant::now();
 
         let store = self.storage.clone();
-        let enqueue = Arc::<AtomicBool>::default();
+
         let future = fetch();
         let inner = self.memory.fetch_inner(
             key.clone(),
             context,
             || {
                 let metrics = self.metrics.clone();
-                let enqueue = enqueue.clone();
+
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from)? {
+                    let load = match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(load) => load,
+                        Err(e) => return Err(e).into(),
+                    };
+
+                    match load {
                         None => {}
                         Some((k, _)) if key != k => {}
                         Some((_, v)) => {
                             metrics.hybrid_hit.increment(1);
                             metrics.hybrid_hit_duration.record(now.elapsed());
 
-                            return Ok(v);
+                            return Ok(v).into();
                         }
                     }
 
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    enqueue.store(true, Ordering::Release);
-
                     future
+                        .map(|res| Diversion {
+                            target: res,
+                            store: Some(FetchMark),
+                        })
                         .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
                         .await
-                        .map_err(anyhow::Error::from)
                 }
             },
             self.storage().runtime(),
@@ -518,7 +525,6 @@ where
 
         let inner = HybridFetchInner {
             inner,
-            enqueue,
             storage: self.storage.clone(),
         };
 

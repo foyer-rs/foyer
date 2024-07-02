@@ -33,6 +33,8 @@ pub mod code;
 pub mod countdown;
 /// Components for monitoring internal events.
 pub mod event;
+/// Future extensions.
+pub mod future;
 /// The shared metrics for foyer.
 pub mod metrics;
 /// A concurrent object pool.

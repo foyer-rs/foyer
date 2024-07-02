@@ -31,6 +31,7 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
+    future::{Diversion, DiversionFuture},
     metrics::Metrics,
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
@@ -396,10 +397,31 @@ where
 
 type GenericFetchHit<K, V, E, I, S> = Option<GenericCacheEntry<K, V, E, I, S>>;
 type GenericFetchWait<K, V, E, I, S> = InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>;
-type GenericFetchMiss<K, V, E, I, S, ER> = JoinHandle<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>>;
+type GenericFetchMiss<K, V, E, I, S, ER, DFS> =
+    JoinHandle<Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, DFS>>;
+
+/// The state of [`Fetch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchState {
+    /// Cache hit.
+    Hit,
+    /// Cache miss, but wait in queue.
+    Wait,
+    /// Cache miss, and there is no other waiters at the moment.
+    Miss,
+}
+
+/// A mark for fetch calls.
+pub struct FetchMark;
+
+pub type GenericFetch<K, V, E, I, S, ER> = DiversionFuture<
+    GenericFetchInner<K, V, E, I, S, ER>,
+    std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>,
+    FetchMark,
+>;
 
 #[pin_project(project = GenericFetchInnerProj)]
-pub enum GenericFetch<K, V, E, I, S, ER>
+pub enum GenericFetchInner<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -410,10 +432,28 @@ where
 {
     Hit(GenericFetchHit<K, V, E, I, S>),
     Wait(#[pin] GenericFetchWait<K, V, E, I, S>),
-    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER>),
+    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, FetchMark>),
 }
 
-impl<K, V, E, I, S, ER> Future for GenericFetch<K, V, E, I, S, ER>
+impl<K, V, E, I, S, ER> GenericFetchInner<K, V, E, I, S, ER>
+where
+    K: Key,
+    V: Value,
+    E: Eviction,
+    E::Handle: KeyedHandle<Key = K, Data = (K, V)>,
+    I: Indexer<Key = K, Handle = E::Handle>,
+    S: HashBuilder,
+{
+    pub fn state(&self) -> FetchState {
+        match self {
+            GenericFetchInner::Hit(_) => FetchState::Hit,
+            GenericFetchInner::Wait(_) => FetchState::Wait,
+            GenericFetchInner::Miss(_) => FetchState::Miss,
+        }
+    }
+}
+
+impl<K, V, E, I, S, ER> Future for GenericFetchInner<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -423,12 +463,12 @@ where
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>;
+    type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, FetchMark>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            GenericFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap())),
-            GenericFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()),
+            GenericFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
+            GenericFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()).map(Diversion::from),
             GenericFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }
@@ -728,7 +768,7 @@ where
         self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current())
     }
 
-    pub fn fetch_inner<F, FU, ER>(
+    pub fn fetch_inner<F, FU, ER, ID>(
         self: &Arc<Self>,
         key: K,
         context: CacheContext,
@@ -737,8 +777,9 @@ where
     ) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
     {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -746,19 +787,19 @@ where
             let mut shard = self.shard(hash as usize % self.shards.len());
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
-                return GenericFetch::Hit(Some(GenericCacheEntry {
+                return GenericFetch::new(GenericFetchInner::Hit(Some(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
-                }));
+                })));
             }
             match shard.waiters.entry(key.clone()) {
                 HashMapEntry::Occupied(mut o) => {
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    return GenericFetch::Wait(rx.in_span(Span::enter_with_local_parent(
+                    return GenericFetch::new(GenericFetchInner::Wait(rx.in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::wait",
-                    )));
+                    ))));
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
@@ -771,28 +812,32 @@ where
         let future = fetch();
         let join = runtime.spawn(
             async move {
-                let value = match future
+                let Diversion { target, store } = future
                     .in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::fn",
                     ))
                     .await
-                {
+                    .into();
+                let value = match target {
                     Ok(value) => value,
                     Err(e) => {
                         let mut shard = cache.shard(hash as usize % cache.shards.len());
                         tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
                         shard.waiters.remove(&key);
-                        return Err(e);
+                        return Diversion { target: Err(e), store };
                     }
                 };
                 let entry = cache.insert_with_context(key, value, context);
-                Ok(entry)
+                Diversion {
+                    target: Ok(entry),
+                    store,
+                }
             }
             .in_span(Span::enter_with_local_parent(
                 "foyer::memory::generic::fetch_with_runtime::spawn",
             )),
         );
-        GenericFetch::Miss(join)
+        GenericFetch::new(GenericFetchInner::Miss(join))
     }
 }
 

@@ -15,13 +15,15 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
-use futures::{Future, FutureExt};
+use futures::Future;
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
+    future::Diversion,
 };
 
 use crate::{
@@ -33,7 +35,7 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoHandle},
         sanity::SanityEviction,
     },
-    generic::{GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
+    generic::{FetchMark, FetchState, GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
     indexer::{hash_table::HashTableIndexer, sanity::SanityIndexer},
     FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
 };
@@ -657,6 +659,7 @@ where
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
+#[pin_project(project = FetchProj)]
 pub enum Fetch<K, V, ER, S = RandomState>
 where
     K: Key,
@@ -664,13 +667,13 @@ where
     S: HashBuilder,
 {
     /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
-    Fifo(FifoFetch<K, V, ER, S>),
+    Fifo(#[pin] FifoFetch<K, V, ER, S>),
     /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
-    Lru(LruFetch<K, V, ER, S>),
+    Lru(#[pin] LruFetch<K, V, ER, S>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
-    Lfu(LfuFetch<K, V, ER, S>),
+    Lfu(#[pin] LfuFetch<K, V, ER, S>),
     /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(S3FifoFetch<K, V, ER, S>),
+    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S>),
 }
 
 impl<K, V, ER, S> From<FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
@@ -726,25 +729,14 @@ where
 {
     type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        match &mut *self {
-            Fetch::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        match self.project() {
+            FetchProj::Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::Lru(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
         }
     }
-}
-
-/// The state of [`Fetch`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FetchState {
-    /// Cache hit.
-    Hit,
-    /// Cache miss, but wait in queue.
-    Wait,
-    /// Cache miss, and there is no other waiters at the moment.
-    Miss,
 }
 
 impl<K, V, ER, S> Fetch<K, V, ER, S>
@@ -756,18 +748,21 @@ where
     /// Get the fetch state.
     pub fn state(&self) -> FetchState {
         match self {
-            Fetch::Fifo(FifoFetch::Hit(_))
-            | Fetch::Lru(LruFetch::Hit(_))
-            | Fetch::Lfu(LfuFetch::Hit(_))
-            | Fetch::S3Fifo(S3FifoFetch::Hit(_)) => FetchState::Hit,
-            Fetch::Fifo(FifoFetch::Wait(_))
-            | Fetch::Lru(LruFetch::Wait(_))
-            | Fetch::Lfu(LfuFetch::Wait(_))
-            | Fetch::S3Fifo(S3FifoFetch::Wait(_)) => FetchState::Wait,
-            Fetch::Fifo(FifoFetch::Miss(_))
-            | Fetch::Lru(LruFetch::Miss(_))
-            | Fetch::Lfu(LfuFetch::Miss(_))
-            | Fetch::S3Fifo(S3FifoFetch::Miss(_)) => FetchState::Miss,
+            Fetch::Fifo(fetch) => fetch.state(),
+            Fetch::Lru(fetch) => fetch.state(),
+            Fetch::Lfu(fetch) => fetch.state(),
+            Fetch::S3Fifo(fetch) => fetch.state(),
+        }
+    }
+
+    /// Get the ext of the fetch.
+    #[doc(hidden)]
+    pub fn store(&self) -> &Option<FetchMark> {
+        match self {
+            Fetch::Fifo(fetch) => fetch.store(),
+            Fetch::Lru(fetch) => fetch.store(),
+            Fetch::Lfu(fetch) => fetch.store(),
+            Fetch::S3Fifo(fetch) => fetch.store(),
         }
     }
 }
@@ -826,7 +821,7 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER>(
+    pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: K,
         context: CacheContext,
@@ -835,8 +830,9 @@ where
     ) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
