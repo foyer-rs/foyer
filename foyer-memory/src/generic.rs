@@ -412,14 +412,17 @@ pub enum FetchState {
     Miss,
 }
 
-pub type GenericFetch<K, V, E, I, S, ER, DFS = ()> = DiversionFuture<
-    GenericFetchInner<K, V, E, I, S, ER, DFS>,
+/// A mark for fetch calls.
+pub struct FetchMark;
+
+pub type GenericFetch<K, V, E, I, S, ER> = DiversionFuture<
+    GenericFetchInner<K, V, E, I, S, ER>,
     std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>,
-    DFS,
+    FetchMark,
 >;
 
 #[pin_project(project = GenericFetchInnerProj)]
-pub enum GenericFetchInner<K, V, E, I, S, ER, DFS>
+pub enum GenericFetchInner<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -430,10 +433,10 @@ where
 {
     Hit(GenericFetchHit<K, V, E, I, S>),
     Wait(#[pin] GenericFetchWait<K, V, E, I, S>),
-    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, DFS>),
+    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, FetchMark>),
 }
 
-impl<K, V, E, I, S, ER, DFS> GenericFetchInner<K, V, E, I, S, ER, DFS>
+impl<K, V, E, I, S, ER> GenericFetchInner<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -451,7 +454,7 @@ where
     }
 }
 
-impl<K, V, E, I, S, ER, DFS> Future for GenericFetchInner<K, V, E, I, S, ER, DFS>
+impl<K, V, E, I, S, ER> Future for GenericFetchInner<K, V, E, I, S, ER>
 where
     K: Key,
     V: Value,
@@ -461,7 +464,7 @@ where
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, DFS>;
+    type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, FetchMark>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -752,7 +755,7 @@ where
         self.fetch_inner(
             key,
             CacheContext::default(),
-            || fetch().map(|res| res.into()),
+            || fetch().map(|res| res),
             &tokio::runtime::Handle::current(),
         )
     }
@@ -771,23 +774,23 @@ where
         self.fetch_inner(
             key,
             context,
-            || fetch().map(|res| res.into()),
+            || fetch().map(|res| res),
             &tokio::runtime::Handle::current(),
         )
     }
 
-    pub fn fetch_inner<F, FU, ER, DFS>(
+    pub fn fetch_inner<F, FU, ER, ID>(
         self: &Arc<Self>,
         key: K,
         context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
-    ) -> GenericFetch<K, V, E, I, S, ER, DFS>
+    ) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = Diversion<std::result::Result<V, ER>, DFS>> + Send + 'static,
+        FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        DFS: Send + Sync + 'static,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
     {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -824,7 +827,8 @@ where
                     .in_span(Span::enter_with_local_parent(
                         "foyer::memory::generic::fetch_with_runtime::fn",
                     ))
-                    .await;
+                    .await
+                    .into();
                 let value = match target {
                     Ok(value) => value,
                     Err(e) => {

@@ -74,15 +74,16 @@ impl<FU, T, S> Deref for DiversionFuture<FU, T, S> {
     }
 }
 
-impl<FU, T, S> Future for DiversionFuture<FU, T, S>
+impl<FU, T, S, I> Future for DiversionFuture<FU, T, S>
 where
-    FU: Future<Output = Diversion<T, S>>,
+    FU: Future<Output = I>,
+    I: Into<Diversion<T, S>>,
 {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let Diversion { target, store } = ready!(this.inner.poll(cx));
+        let Diversion { target, store } = ready!(this.inner.poll(cx)).into();
         *this.store = store;
         Poll::Ready(target)
     }
@@ -105,7 +106,7 @@ mod tests {
             }
         },));
 
-        let question = poll_fn(|cx| f.as_mut().poll(cx)).await;
+        let question: String = poll_fn(|cx| f.as_mut().poll(cx)).await;
         let answer = f.store().unwrap();
 
         assert_eq!(
