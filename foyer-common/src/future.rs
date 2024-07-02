@@ -44,7 +44,7 @@ where
     }
 }
 
-/// [`DiversionFuture`] is a future warpper that partially store and partially return the future result.
+/// [`DiversionFuture`] is a future wrapper that partially store and partially return the future result.
 #[pin_project]
 pub struct DiversionFuture<FU, T, S> {
     #[pin]
