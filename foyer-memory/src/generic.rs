@@ -36,7 +36,6 @@ use foyer_common::{
     object_pool::ObjectPool,
     strict_assert, strict_assert_eq,
 };
-use futures::FutureExt;
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{lock_api::MutexGuard, Mutex, RawMutex};
@@ -752,12 +751,7 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(
-            key,
-            CacheContext::default(),
-            || fetch().map(|res| res),
-            &tokio::runtime::Handle::current(),
-        )
+        self.fetch_inner(key, CacheContext::default(), fetch, &tokio::runtime::Handle::current())
     }
 
     pub fn fetch_with_context<F, FU, ER>(
@@ -771,12 +765,7 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(
-            key,
-            context,
-            || fetch().map(|res| res),
-            &tokio::runtime::Handle::current(),
-        )
+        self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current())
     }
 
     pub fn fetch_inner<F, FU, ER, ID>(
