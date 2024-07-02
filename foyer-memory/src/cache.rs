@@ -740,7 +740,6 @@ where
     V: Value,
     ER: From<oneshot::error::RecvError>,
     S: HashBuilder,
-    DFS: Default,
 {
     type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
@@ -754,7 +753,7 @@ where
     }
 }
 
-impl<K, V, ER, S, T> Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
@@ -772,7 +771,7 @@ where
 
     /// Get the ext of the fetch.
     #[doc(hidden)]
-    pub fn store(&self) -> &T {
+    pub fn store(&self) -> &Option<DFS> {
         match self {
             Fetch::Fifo(fetch) => fetch.store(),
             Fetch::Lru(fetch) => fetch.store(),
@@ -847,7 +846,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = Diversion<std::result::Result<V, ER>, DFS>> + Send + 'static,
         ER: Send + 'static + Debug,
-        DFS: Default + Send + Sync + 'static,
+        DFS: Send + Sync + 'static,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),

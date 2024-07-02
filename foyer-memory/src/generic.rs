@@ -460,7 +460,6 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
-    DFS: Default,
 {
     type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, DFS>;
 
@@ -788,7 +787,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = Diversion<std::result::Result<V, ER>, DFS>> + Send + 'static,
         ER: Send + 'static + Debug,
-        DFS: Send + Sync + 'static + Default,
+        DFS: Send + Sync + 'static,
     {
         let hash = self.hash_builder.hash_one(&key);
 
@@ -796,7 +795,7 @@ where
             let mut shard = self.shard(hash as usize % self.shards.len());
 
             if let Some(ptr) = unsafe { shard.get(hash, &key) } {
-                return GenericFetch::with_default(GenericFetchInner::Hit(Some(GenericCacheEntry {
+                return GenericFetch::new(GenericFetchInner::Hit(Some(GenericCacheEntry {
                     cache: self.clone(),
                     ptr,
                 })));
@@ -806,9 +805,9 @@ where
                     let (tx, rx) = oneshot::channel();
                     o.get_mut().push(tx);
                     shard.state.metrics.memory_queue.increment(1);
-                    return GenericFetch::with_default(GenericFetchInner::Wait(rx.in_span(
-                        Span::enter_with_local_parent("foyer::memory::generic::fetch_with_runtime::wait"),
-                    )));
+                    return GenericFetch::new(GenericFetchInner::Wait(rx.in_span(Span::enter_with_local_parent(
+                        "foyer::memory::generic::fetch_with_runtime::wait",
+                    ))));
                 }
                 HashMapEntry::Vacant(v) => {
                     v.insert(vec![]);
@@ -845,7 +844,7 @@ where
                 "foyer::memory::generic::fetch_with_runtime::spawn",
             )),
         );
-        GenericFetch::with_default(GenericFetchInner::Miss(join))
+        GenericFetch::new(GenericFetchInner::Miss(join))
     }
 }
 

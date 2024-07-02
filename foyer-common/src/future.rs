@@ -29,17 +29,14 @@ pub struct Diversion<T, S> {
     /// The `target` will be further returned by [`DiversionFuture`].
     pub target: T,
     /// The `store` will be stored in the [`DiversionFuture`].
-    pub store: S,
+    pub store: Option<S>,
 }
 
-impl<T, S> From<T> for Diversion<T, S>
-where
-    S: Default,
-{
+impl<T, S> From<T> for Diversion<T, S> {
     fn from(value: T) -> Self {
         Self {
             target: value,
-            store: S::default(),
+            store: None,
         }
     }
 }
@@ -49,34 +46,22 @@ where
 pub struct DiversionFuture<FU, T, S> {
     #[pin]
     inner: FU,
-    store: S,
+    store: Option<S>,
     _marker: PhantomData<T>,
 }
 
 impl<FU, T, S> DiversionFuture<FU, T, S> {
     /// Create a new [`DiversionFuture`] wrapper.
-    pub fn new(future: FU, init: S) -> Self {
+    pub fn new(future: FU) -> Self {
         Self {
             inner: future,
-            store: init,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Create a new [`DiversionFuture`] wrapper with default store value.
-    pub fn with_default(future: FU) -> Self
-    where
-        S: Default,
-    {
-        Self {
-            inner: future,
-            store: S::default(),
+            store: None,
             _marker: PhantomData,
         }
     }
 
     /// Get the stored state.
-    pub fn store(&self) -> &S {
+    pub fn store(&self) -> &Option<S> {
         &self.store
     }
 }
@@ -113,18 +98,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_diversion_future() {
-        let mut f = pin!(DiversionFuture::new(
-            async move {
-                Diversion {
-                    target: "The answer to life, the universe, and everything.".to_string(),
-                    store: 42,
-                }
-            },
-            0,
-        ));
+        let mut f = pin!(DiversionFuture::new(async move {
+            Diversion {
+                target: "The answer to life, the universe, and everything.".to_string(),
+                store: Some(42),
+            }
+        },));
 
         let question = poll_fn(|cx| f.as_mut().poll(cx)).await;
-        let answer = *f.store();
+        let answer = f.store().unwrap();
 
         assert_eq!(
             (question.as_str(), answer),
