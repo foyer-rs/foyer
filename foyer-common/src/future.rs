@@ -55,8 +55,7 @@ pub struct DiversionFuture<FU, T, S> {
 
 impl<FU, T, S> DiversionFuture<FU, T, S> {
     /// Create a new [`DiversionFuture`] wrapper.
-    pub fn new(future: FU, init: S) -> Self
-where {
+    pub fn new(future: FU, init: S) -> Self {
         Self {
             inner: future,
             store: init,
