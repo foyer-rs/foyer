@@ -15,13 +15,15 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
-use futures::{Future, FutureExt};
+use futures::Future;
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
+    future::Diversion,
 };
 
 use crate::{
@@ -664,6 +666,7 @@ where
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
+#[pin_project(project = FetchProj)]
 pub enum Fetch<K, V, ER, S = RandomState, T = ()>
 where
     K: Key,
@@ -671,13 +674,13 @@ where
     S: HashBuilder,
 {
     /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
-    Fifo(FifoFetch<K, V, ER, S, T>),
+    Fifo(#[pin] FifoFetch<K, V, ER, S, T>),
     /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
-    Lru(LruFetch<K, V, ER, S, T>),
+    Lru(#[pin] LruFetch<K, V, ER, S, T>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
-    Lfu(LfuFetch<K, V, ER, S, T>),
+    Lfu(#[pin] LfuFetch<K, V, ER, S, T>),
     /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(S3FifoFetch<K, V, ER, S, T>),
+    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S, T>),
 }
 
 impl<K, V, ER, S, T> From<FifoFetch<K, V, ER, S, T>> for Fetch<K, V, ER, S, T>
@@ -730,17 +733,23 @@ where
     V: Value,
     ER: From<oneshot::error::RecvError>,
     S: HashBuilder,
-    T: Default,
+    T: Default + Send + Sync + 'static,
 {
     type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        match &mut *self {
-            Fetch::Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::Lru(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::Lfu(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
-            Fetch::S3Fifo(entry) => entry.poll_unpin(cx).map(|res| res.map(CacheEntry::from)),
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        match self.project() {
+            FetchProj::Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::Lru(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
         }
+        // match &mut *self {
+        //     Fetch::Fifo(entry) => entry.poll_unpin(cx),
+        //     Fetch::Lru(entry) => entry.poll_unpin(cx),
+        //     Fetch::Lfu(entry) => entry.poll_unpin(cx),
+        //     Fetch::S3Fifo(entry) => entry.poll_unpin(cx),
+        // }
     }
 }
 
@@ -762,12 +771,12 @@ where
 
     /// Get the ext of the fetch.
     #[doc(hidden)]
-    pub fn ext(&self) -> &T {
+    pub fn store(&self) -> &T {
         match self {
-            Fetch::Fifo(fetch) => fetch.ext(),
-            Fetch::Lru(fetch) => fetch.ext(),
-            Fetch::Lfu(fetch) => fetch.ext(),
-            Fetch::S3Fifo(fetch) => fetch.ext(),
+            Fetch::Fifo(fetch) => fetch.store(),
+            Fetch::Lru(fetch) => fetch.store(),
+            Fetch::Lfu(fetch) => fetch.store(),
+            Fetch::S3Fifo(fetch) => fetch.store(),
         }
     }
 }
@@ -835,7 +844,7 @@ where
     ) -> Fetch<K, V, ER, S, T>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<(V, T), ER>> + Send + 'static,
+        FU: Future<Output = Diversion<std::result::Result<V, ER>, T>> + Send + 'static,
         ER: Send + 'static + Debug,
         T: Default + Send + Sync + 'static,
     {

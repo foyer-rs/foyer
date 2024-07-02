@@ -30,6 +30,7 @@ use std::{
 use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
+    future::Diversion,
     metrics::Metrics,
     tracing::{InRootSpan, TracingConfig},
 };
@@ -421,7 +422,7 @@ where
         let res = ready!(this.inner.as_mut().poll(cx));
 
         if let Ok(entry) = res.as_ref() {
-            if *this.inner.ext() {
+            if *this.inner.store() {
                 this.storage.enqueue(entry.clone(), false);
             }
         }
@@ -486,14 +487,27 @@ where
                 let metrics = self.metrics.clone();
 
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from)? {
+                    let load = match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(load) => load,
+                        Err(e) => {
+                            return Diversion {
+                                target: Err(e),
+                                store: false,
+                            }
+                        }
+                    };
+
+                    match load {
                         None => {}
                         Some((k, _)) if key != k => {}
                         Some((_, v)) => {
                             metrics.hybrid_hit.increment(1);
                             metrics.hybrid_hit_duration.record(now.elapsed());
 
-                            return Ok((v, false));
+                            return Diversion {
+                                target: Ok(v),
+                                store: false,
+                            };
                         }
                     }
 
@@ -501,10 +515,12 @@ where
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
                     future
-                        .map(|res| res.map(|v| (v, true)))
+                        .map(|res| Diversion {
+                            target: res,
+                            store: true,
+                        })
                         .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
                         .await
-                        .map_err(anyhow::Error::from)
                 }
             },
             self.storage().runtime(),
