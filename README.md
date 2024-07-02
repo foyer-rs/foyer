@@ -35,13 +35,13 @@ Feel free to open a PR and add your projects here:
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.9"
+foyer = "0.10"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.9", features = ["nightly"] }
+foyer = { version = "0.10", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache

@@ -1,3 +1,26 @@
+## 2024-07-02
+
+| crate | version |
+| - | - |
+| foyer | 0.10.0 |
+| foyer-common | 0.8.0 |
+| foyer-intrusive | 0.8.0 |
+| foyer-memory | 0.6.0 |
+| foyer-storage | 0.9.0 |
+| foyer-bench | 0.2.0 |
+
+<details>
+
+### Changes
+
+- Introduce tail-based tracing framework with [minitrace](https://github.com/tikv/minitrace-rust). [Tail-based Tracing Example](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs).
+- Fix `fetch()` disk cache refill on in-memory cache miss.
+- Publish *foyer* logo! 
+
+<img src="https://raw.githubusercontent.com/MrCroxx/foyer/main/etc/logo/slogan.min.svg"/>
+
+</details>
+
 ## 2024-06-14
 
 | crate | version |
