@@ -398,8 +398,8 @@ where
 
 type GenericFetchHit<K, V, E, I, S> = Option<GenericCacheEntry<K, V, E, I, S>>;
 type GenericFetchWait<K, V, E, I, S> = InSpan<oneshot::Receiver<GenericCacheEntry<K, V, E, I, S>>>;
-type GenericFetchMiss<K, V, E, I, S, ER, T> =
-    JoinHandle<Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, T>>;
+type GenericFetchMiss<K, V, E, I, S, ER, DFS> =
+    JoinHandle<Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, DFS>>;
 
 /// The state of [`Fetch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,7 +419,7 @@ pub type GenericFetch<K, V, E, I, S, ER, DFS = ()> = DiversionFuture<
 >;
 
 #[pin_project(project = GenericFetchInnerProj)]
-pub enum GenericFetchInner<K, V, E, I, S, ER, T>
+pub enum GenericFetchInner<K, V, E, I, S, ER, DFS>
 where
     K: Key,
     V: Value,
@@ -430,10 +430,10 @@ where
 {
     Hit(GenericFetchHit<K, V, E, I, S>),
     Wait(#[pin] GenericFetchWait<K, V, E, I, S>),
-    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, T>),
+    Miss(#[pin] GenericFetchMiss<K, V, E, I, S, ER, DFS>),
 }
 
-impl<K, V, E, I, S, ER, T> GenericFetchInner<K, V, E, I, S, ER, T>
+impl<K, V, E, I, S, ER, DFS> GenericFetchInner<K, V, E, I, S, ER, DFS>
 where
     K: Key,
     V: Value,
@@ -451,7 +451,7 @@ where
     }
 }
 
-impl<K, V, E, I, S, ER, T> Future for GenericFetchInner<K, V, E, I, S, ER, T>
+impl<K, V, E, I, S, ER, DFS> Future for GenericFetchInner<K, V, E, I, S, ER, DFS>
 where
     K: Key,
     V: Value,
@@ -460,9 +460,9 @@ where
     I: Indexer<Key = K, Handle = E::Handle>,
     S: HashBuilder,
     ER: From<oneshot::error::RecvError>,
-    T: Default,
+    DFS: Default,
 {
-    type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, T>;
+    type Output = Diversion<std::result::Result<GenericCacheEntry<K, V, E, I, S>, ER>, DFS>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -777,18 +777,18 @@ where
         )
     }
 
-    pub fn fetch_inner<F, FU, ER, T>(
+    pub fn fetch_inner<F, FU, ER, DFS>(
         self: &Arc<Self>,
         key: K,
         context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
-    ) -> GenericFetch<K, V, E, I, S, ER, T>
+    ) -> GenericFetch<K, V, E, I, S, ER, DFS>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = Diversion<std::result::Result<V, ER>, T>> + Send + 'static,
+        FU: Future<Output = Diversion<std::result::Result<V, ER>, DFS>> + Send + 'static,
         ER: Send + 'static + Debug,
-        T: Send + Sync + 'static + Default,
+        DFS: Send + Sync + 'static + Default,
     {
         let hash = self.hash_builder.hash_one(&key);
 

@@ -44,22 +44,29 @@ pub type FifoCache<K, V, S = RandomState> =
     GenericCache<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
 pub type FifoCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
-pub type FifoFetch<K, V, ER, S = RandomState, T = ()> =
-    GenericFetch<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S, ER, T>;
+pub type FifoFetch<K, V, ER, S = RandomState, DFS = ()> = GenericFetch<
+    K,
+    V,
+    SanityEviction<Fifo<(K, V)>>,
+    SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>,
+    S,
+    ER,
+    DFS,
+>;
 
 pub type LruCache<K, V, S = RandomState> =
     GenericCache<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
 pub type LruCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
-pub type LruFetch<K, V, ER, S = RandomState, T = ()> =
-    GenericFetch<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S, ER, T>;
+pub type LruFetch<K, V, ER, S = RandomState, DFS = ()> =
+    GenericFetch<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S, ER, DFS>;
 
 pub type LfuCache<K, V, S = RandomState> =
     GenericCache<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
 pub type LfuCacheEntry<K, V, S = RandomState> =
     GenericCacheEntry<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
-pub type LfuFetch<K, V, ER, S = RandomState, T = ()> =
-    GenericFetch<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S, ER, T>;
+pub type LfuFetch<K, V, ER, S = RandomState, DFS = ()> =
+    GenericFetch<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S, ER, DFS>;
 
 pub type S3FifoCache<K, V, S = RandomState> =
     GenericCache<K, V, SanityEviction<S3Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>, S>;
@@ -70,14 +77,14 @@ pub type S3FifoCacheEntry<K, V, S = RandomState> = GenericCacheEntry<
     SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>,
     S,
 >;
-pub type S3FifoFetch<K, V, ER, S = RandomState, T = ()> = GenericFetch<
+pub type S3FifoFetch<K, V, ER, S = RandomState, DFS = ()> = GenericFetch<
     K,
     V,
     SanityEviction<S3Fifo<(K, V)>>,
     SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>,
     S,
     ER,
-    T,
+    DFS,
 >;
 
 /// A cached entry holder of the in-memory cache.
@@ -667,73 +674,73 @@ where
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
 #[pin_project(project = FetchProj)]
-pub enum Fetch<K, V, ER, S = RandomState, T = ()>
+pub enum Fetch<K, V, ER, S = RandomState, DFS = ()>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
     /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
-    Fifo(#[pin] FifoFetch<K, V, ER, S, T>),
+    Fifo(#[pin] FifoFetch<K, V, ER, S, DFS>),
     /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
-    Lru(#[pin] LruFetch<K, V, ER, S, T>),
+    Lru(#[pin] LruFetch<K, V, ER, S, DFS>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
-    Lfu(#[pin] LfuFetch<K, V, ER, S, T>),
+    Lfu(#[pin] LfuFetch<K, V, ER, S, DFS>),
     /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S, T>),
+    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S, DFS>),
 }
 
-impl<K, V, ER, S, T> From<FifoFetch<K, V, ER, S, T>> for Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> From<FifoFetch<K, V, ER, S, DFS>> for Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
-    fn from(entry: FifoFetch<K, V, ER, S, T>) -> Self {
+    fn from(entry: FifoFetch<K, V, ER, S, DFS>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, ER, S, T> From<LruFetch<K, V, ER, S, T>> for Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> From<LruFetch<K, V, ER, S, DFS>> for Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
-    fn from(entry: LruFetch<K, V, ER, S, T>) -> Self {
+    fn from(entry: LruFetch<K, V, ER, S, DFS>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, ER, S, T> From<LfuFetch<K, V, ER, S, T>> for Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> From<LfuFetch<K, V, ER, S, DFS>> for Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
-    fn from(entry: LfuFetch<K, V, ER, S, T>) -> Self {
+    fn from(entry: LfuFetch<K, V, ER, S, DFS>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, ER, S, T> From<S3FifoFetch<K, V, ER, S, T>> for Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> From<S3FifoFetch<K, V, ER, S, DFS>> for Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
-    fn from(entry: S3FifoFetch<K, V, ER, S, T>) -> Self {
+    fn from(entry: S3FifoFetch<K, V, ER, S, DFS>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, ER, S, T> Future for Fetch<K, V, ER, S, T>
+impl<K, V, ER, S, DFS> Future for Fetch<K, V, ER, S, DFS>
 where
     K: Key,
     V: Value,
     ER: From<oneshot::error::RecvError>,
     S: HashBuilder,
-    T: Default + Send + Sync + 'static,
+    DFS: Default,
 {
     type Output = std::result::Result<CacheEntry<K, V, S>, ER>;
 
@@ -744,12 +751,6 @@ where
             FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
             FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
         }
-        // match &mut *self {
-        //     Fetch::Fifo(entry) => entry.poll_unpin(cx),
-        //     Fetch::Lru(entry) => entry.poll_unpin(cx),
-        //     Fetch::Lfu(entry) => entry.poll_unpin(cx),
-        //     Fetch::S3Fifo(entry) => entry.poll_unpin(cx),
-        // }
     }
 }
 
@@ -835,18 +836,18 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, T>(
+    pub fn fetch_inner<F, FU, ER, DFS>(
         &self,
         key: K,
         context: CacheContext,
         fetch: F,
         runtime: &tokio::runtime::Handle,
-    ) -> Fetch<K, V, ER, S, T>
+    ) -> Fetch<K, V, ER, S, DFS>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = Diversion<std::result::Result<V, ER>, T>> + Send + 'static,
+        FU: Future<Output = Diversion<std::result::Result<V, ER>, DFS>> + Send + 'static,
         ER: Send + 'static + Debug,
-        T: Default + Send + Sync + 'static,
+        DFS: Default + Send + Sync + 'static,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
