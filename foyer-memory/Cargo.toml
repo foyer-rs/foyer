@@ -1,6 +1,6 @@
 [package]
 name = "foyer-memory"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "memory cache for foyer - the hybrid cache for Rust"
@@ -14,8 +14,8 @@ readme = "../README.md"
 ahash = "0.8"
 bitflags = "2"
 cmsketch = "0.2"
-foyer-common = { version = "0.7.3", path = "../foyer-common" }
-foyer-intrusive = { version = "0.7.2", path = "../foyer-intrusive" }
+foyer-common = { version = "0.8.0", path = "../foyer-common" }
+foyer-intrusive = { version = "0.8.0", path = "../foyer-intrusive" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
