@@ -21,11 +21,14 @@ use tokio::{
     sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
 };
 
-use super::{flusher::Flusher, indexer::Indexer};
 use crate::{
     device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
-    large::{flusher::Submission, scanner::RegionScanner},
+    large::{
+        flusher::{Flusher, Submission},
+        indexer::Indexer,
+        scanner::RegionScanner,
+    },
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
@@ -45,7 +48,7 @@ impl Reclaimer {
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
-        flushers: Vec<Flusher<K, V, S, D>>,
+        flushers: Vec<Flusher<K, V, S>>,
         stats: Arc<Statistics>,
         flush: bool,
         runtime: Handle,
@@ -97,7 +100,7 @@ where
 
     indexer: Indexer,
 
-    flushers: Vec<Flusher<K, V, S, D>>,
+    flushers: Vec<Flusher<K, V, S>>,
 
     stats: Arc<Statistics>,
 
@@ -199,17 +202,14 @@ where
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
                 let (tx, rx) = oneshot::channel();
                 let future = EnqueueHandle::new(rx);
-                flusher.submit(
-                    Submission::Reinsertion {
-                        reinsertion: Reinsertion {
-                            hash: info.hash,
-                            sequence: info.sequence,
-                            buffer,
-                        },
-                        tx,
+                flusher.submit(Submission::Reinsertion {
+                    reinsertion: Reinsertion {
+                        hash: info.hash,
+                        sequence: info.sequence,
+                        buffer,
                     },
-                    0,
-                );
+                    tx,
+                });
                 futures.push(future);
             } else {
                 unpicked.push(info.hash);

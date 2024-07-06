@@ -152,7 +152,7 @@ where
     device: Monitored<D>,
     region_manager: RegionManager<D>,
 
-    flushers: Vec<Flusher<K, V, S, D>>,
+    flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
@@ -339,8 +339,11 @@ where
 
             if force || this.pick(entry.key()) {
                 let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-                this.inner.flushers[sequence as usize % this.inner.flushers.len()]
-                    .submit(Submission::CacheEntry { entry, tx }, sequence);
+                this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::CacheEntry {
+                    entry,
+                    tx,
+                    sequence,
+                });
             } else {
                 let _ = tx.send(Ok(false));
             }
@@ -432,14 +435,11 @@ where
         let this = self.clone();
         self.inner.runtime.spawn(async move {
             let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(
-                Submission::Tombstone {
-                    tombstone: Tombstone { hash, sequence },
-                    stats,
-                    tx,
-                },
-                sequence,
-            );
+            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
+                tombstone: Tombstone { hash, sequence },
+                stats,
+                tx,
+            });
         });
 
         self.inner.metrics.storage_delete.increment(1);
@@ -462,22 +462,22 @@ where
             return Err(anyhow::anyhow!("cannot delete entry after closed").into());
         }
 
-        // Clear indices.
-        self.inner.indexer.clear();
-
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         let future = EnqueueHandle::new(rx);
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(
-            Submission::Tombstone {
-                tombstone: Tombstone { hash: 0, sequence },
-                stats: None,
-                tx,
-            },
-            sequence,
-        );
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
+            tombstone: Tombstone { hash: 0, sequence },
+            stats: None,
+            tx,
+        });
         future.await?;
+
+        // Clear indices.
+        //
+        // This step must perform after the latest writer finished,
+        // otherwise the indices of the latest batch cannot be cleared.
+        self.inner.indexer.clear();
 
         // Clean regions.
         try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {

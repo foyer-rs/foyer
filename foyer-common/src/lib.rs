@@ -19,8 +19,6 @@
 
 /// Allow enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
-/// A structured async batch pipeline.
-pub mod async_batch_pipeline;
 /// The util that convert the blocking call to async call.
 pub mod asyncify;
 /// The bitwise utils.
