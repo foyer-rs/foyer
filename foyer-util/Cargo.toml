@@ -15,6 +15,7 @@ publish = false
 bitmaps = "3"
 bytes = "1"
 cfg-if = "1"
+futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 libc = "0.2"

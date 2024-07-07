@@ -20,3 +20,6 @@ pub mod erwlock;
 pub mod iostat;
 pub mod judge;
 pub mod slab;
+
+/// A structured async batch pipeline.
+pub mod async_batch_pipeline;
