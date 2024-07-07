@@ -211,7 +211,7 @@ where
             metrics: metrics.clone(),
             runtime: runtime.clone(),
             flight: flight.clone(),
-            threshold: config.buffer_threshold,
+            threshold: config.buffer_threshold / config.flushers,
         };
 
         runtime.spawn(async move {
