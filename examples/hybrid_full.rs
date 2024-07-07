@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
         .with_recover_concurrency(8)
         .with_flushers(2)
         .with_reclaimers(2)
+        .with_buffer_threshold(256 * 1024 * 1024)
         .with_clean_region_threshold(4)
         .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))

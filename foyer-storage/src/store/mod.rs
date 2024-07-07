@@ -312,6 +312,7 @@ where
     recover_concurrency: usize,
     flushers: usize,
     reclaimers: usize,
+    buffer_threshold: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
@@ -340,6 +341,7 @@ where
             recover_concurrency: 8,
             flushers: 1,
             reclaimers: 1,
+            buffer_threshold: usize::MAX,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),
@@ -417,6 +419,18 @@ where
     /// Default: `1`.
     pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
         self.reclaimers = reclaimers;
+        self
+    }
+
+    /// Set the total flush buffer threshold.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: No Limits.
+    pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
+        self.buffer_threshold = threshold;
         self
     }
 
@@ -522,6 +536,7 @@ where
                     admission_picker: self.admission_picker,
                     reinsertion_picker: self.reinsertion_picker,
                     tombstone_log_config: self.tombstone_log_config,
+                    buffer_threshold: self.buffer_threshold,
                 }))
                 .await
             }
@@ -543,6 +558,7 @@ where
                         admission_picker: self.admission_picker,
                         reinsertion_picker: self.reinsertion_picker,
                         tombstone_log_config: self.tombstone_log_config,
+                        buffer_threshold: self.buffer_threshold,
                     },
                     runtime_config,
                 }))
