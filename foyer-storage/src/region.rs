@@ -88,8 +88,13 @@ where
         &self.stats
     }
 
-    pub async fn write(&self, buf: IoBuffer, offset: u64) -> Result<()> {
-        self.device.write(buf, self.id, offset).await
+    pub async fn write(&self, buf: IoBuffer, offset: u64, flush: bool) -> Result<()> {
+        self.device.write(buf, self.id, offset).await?;
+        if flush {
+            self.flush().await?;
+        }
+
+        Ok(())
     }
 
     pub async fn read(&self, offset: u64, len: usize) -> Result<IoBuffer> {
@@ -97,7 +102,7 @@ where
         self.device.read(self.id, offset, len).await
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    async fn flush(&self) -> Result<()> {
         self.device.flush(Some(self.id)).await
     }
 
