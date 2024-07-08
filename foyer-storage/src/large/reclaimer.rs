@@ -25,7 +25,7 @@ use crate::{
     device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
     large::{
-        flusher::{Flusher, Submission},
+        flusher::{Flusher, Submission, SubmissionEnum},
         indexer::Indexer,
         scanner::RegionScanner,
     },
@@ -202,14 +202,16 @@ where
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
                 let (tx, rx) = oneshot::channel();
                 let future = EnqueueHandle::new(rx);
-                flusher.submit(Submission::Reinsertion {
-                    reinsertion: Reinsertion {
-                        hash: info.hash,
-                        sequence: info.sequence,
-                        buffer,
+                flusher.submit(Submission::new(
+                    SubmissionEnum::Reinsertion {
+                        reinsertion: Reinsertion {
+                            hash: info.hash,
+                            sequence: info.sequence,
+                            buffer,
+                        },
                     },
                     tx,
-                });
+                ));
                 futures.push(future);
             } else {
                 unpicked.push(info.hash);
@@ -260,10 +262,7 @@ impl RegionCleaner {
         D: Device,
     {
         let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR);
-        region.write(buf, 0).await?;
-        if flush {
-            region.flush().await?;
-        }
+        region.write(buf, 0, flush).await?;
         Ok(())
     }
 }

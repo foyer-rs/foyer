@@ -55,7 +55,7 @@ use crate::{
 };
 
 use super::{
-    flusher::{Flusher, InvalidStats, Submission},
+    flusher::{Flusher, InvalidStats, Submission, SubmissionEnum},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
@@ -341,11 +341,8 @@ where
 
             if force || this.pick(entry.key()) {
                 let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-                this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::CacheEntry {
-                    entry,
-                    tx,
-                    sequence,
-                });
+                this.inner.flushers[sequence as usize % this.inner.flushers.len()]
+                    .submit(Submission::new(SubmissionEnum::CacheEntry { entry, sequence }, tx));
             } else {
                 let _ = tx.send(Ok(false));
             }
@@ -437,11 +434,13 @@ where
         let this = self.clone();
         self.inner.runtime.spawn(async move {
             let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
-                tombstone: Tombstone { hash, sequence },
-                stats,
+            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::new(
+                SubmissionEnum::Tombstone {
+                    tombstone: Tombstone { hash, sequence },
+                    stats,
+                },
                 tx,
-            });
+            ));
         });
 
         self.inner.metrics.storage_delete.increment(1);
@@ -468,11 +467,13 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         let future = EnqueueHandle::new(rx);
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
-            tombstone: Tombstone { hash: 0, sequence },
-            stats: None,
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::new(
+            SubmissionEnum::Tombstone {
+                tombstone: Tombstone { hash: 0, sequence },
+                stats: None,
+            },
             tx,
-        });
+        ));
         future.await?;
 
         // Clear indices.

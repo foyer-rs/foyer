@@ -53,7 +53,7 @@ pub struct InvalidStats {
 }
 
 #[derive(Debug)]
-pub enum Submission<K, V, S>
+pub enum SubmissionEnum<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
@@ -62,17 +62,36 @@ where
     CacheEntry {
         entry: CacheEntry<K, V, S>,
         sequence: Sequence,
-        tx: oneshot::Sender<Result<bool>>,
     },
     Tombstone {
         tombstone: Tombstone,
         stats: Option<InvalidStats>,
-        tx: oneshot::Sender<Result<bool>>,
     },
     Reinsertion {
         reinsertion: Reinsertion,
-        tx: oneshot::Sender<Result<bool>>,
     },
+}
+
+#[derive(Debug)]
+pub struct Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    inner: SubmissionEnum<K, V, S>,
+    tx: oneshot::Sender<Result<bool>>,
+}
+
+impl<K, V, S> Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    pub fn new(inner: SubmissionEnum<K, V, S>, tx: oneshot::Sender<Result<bool>>) -> Self {
+        Self { inner, tx }
+    }
 }
 
 struct WriteGroup<K, V, S, D>
@@ -341,10 +360,31 @@ where
     }
 
     fn submission(&mut self, submission: Submission<K, V, S>) {
-        match submission {
-            Submission::CacheEntry { entry, sequence, tx } => self.entry(entry, sequence, tx),
-            Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx),
-            Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx),
+        let tx = submission.tx;
+        // Skip if the batch buffer size exceeds the threshold.
+        if self.batch.buffer_size() > self.threshold {
+            let _ = tx.send(Ok(false));
+            return;
+        }
+
+        match submission.inner {
+            SubmissionEnum::CacheEntry { entry, sequence } => {
+                if entry.is_outdated() {
+                    // Skip if the entry is already outdated.
+                    let _ = tx.send(Ok(false));
+                    return;
+                }
+                self.entry(entry, sequence, tx)
+            }
+            SubmissionEnum::Tombstone { tombstone, stats } => self.tombstone(tombstone, stats, tx),
+            SubmissionEnum::Reinsertion { reinsertion } => {
+                if self.indexer.get(reinsertion.hash).is_none() {
+                    // Skip if the entry is no longer in the indexer.
+                    let _ = tx.send(Ok(false));
+                    return;
+                }
+                self.reinsertion(reinsertion, tx)
+            }
         }
     }
 
@@ -356,13 +396,6 @@ where
 
     fn entry(&mut self, entry: CacheEntry<K, V, S>, sequence: Sequence, tx: oneshot::Sender<Result<bool>>) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
-
-        // Skip if the entry is already outdated.
-        // Skip if the batch buffer size exceeds the threshold.
-        if entry.is_outdated() || self.batch.buffer_size() > self.threshold {
-            let _ = tx.send(Ok(false));
-            return;
-        }
 
         self.may_init_batch_state();
         if self.batch.init_time.is_none() {
@@ -437,13 +470,6 @@ where
 
     fn reinsertion(&mut self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>) {
         tracing::trace!("[flusher]: submit reinsertion");
-
-        // Skip if the entry is no longer in the indexer.
-        // Skip if the batch buffer size exceeds the threshold.
-        if self.indexer.get(reinsertion.hash).is_none() || self.batch.buffer_size() > self.threshold {
-            let _ = tx.send(Ok(false));
-            return;
-        }
 
         self.may_init_batch_state();
         if self.batch.init_time.is_none() {
@@ -547,10 +573,7 @@ where
                     // Write buffet to device.
                     if !group.buffer.is_empty() {
                         let aligned = group.buffer.len();
-                        region.write(group.buffer, group.writer.offset).await?;
-                        if flush {
-                            region.flush().await?;
-                        }
+                        region.write(group.buffer, group.writer.offset, flush).await?;
                         stats.cache_write_bytes.fetch_add(aligned, Ordering::Relaxed);
                         let mut indices = group.indices;
                         for (_, addr) in indices.iter_mut() {
