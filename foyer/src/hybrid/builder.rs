@@ -299,6 +299,23 @@ where
         }
     }
 
+    /// Set the total flush buffer threshold.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: No Limits.
+    pub fn with_buffer_threshold(self, threshold: usize) -> Self {
+        let builder = self.builder.with_buffer_threshold(threshold);
+        Self {
+            name: self.name,
+            tracing_config: self.tracing_config,
+            memory: self.memory,
+            builder,
+        }
+    }
+
     /// Set the clean region threshold for the disk cache store.
     ///
     /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.

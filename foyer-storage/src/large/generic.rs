@@ -81,6 +81,7 @@ where
     pub recover_concurrency: usize,
     pub flushers: usize,
     pub reclaimers: usize,
+    pub buffer_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
@@ -107,6 +108,7 @@ where
             .field("recover_concurrency", &self.recover_concurrency)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
+            .field("buffer_threshold", &self.buffer_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("admission_pickers", &self.admission_picker)
@@ -625,6 +627,7 @@ mod tests {
             admission_picker,
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
+            buffer_threshold: usize::MAX,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -654,6 +657,7 @@ mod tests {
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker,
             tombstone_log_config: None,
+            buffer_threshold: usize::MAX,
         };
         GenericStore::open(config).await.unwrap()
     }
@@ -683,6 +687,7 @@ mod tests {
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
+            buffer_threshold: usize::MAX,
         };
         GenericStore::open(config).await.unwrap()
     }

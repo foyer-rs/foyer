@@ -211,6 +211,7 @@ where
             metrics: metrics.clone(),
             runtime: runtime.clone(),
             flight: flight.clone(),
+            threshold: config.buffer_threshold / config.flushers,
         };
 
         runtime.spawn(async move {
@@ -275,6 +276,18 @@ where
     }
 }
 
+impl<K, V, S, D> Batch<K, V, S, D>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+    D: Device,
+{
+    fn buffer_size(&self) -> usize {
+        self.groups.iter().map(|group| group.buffer.len()).sum()
+    }
+}
+
 struct Runner<K, V, S, D>
 where
     K: StorageKey,
@@ -293,6 +306,7 @@ where
 
     compression: Compression,
     flush: bool,
+    threshold: usize,
 
     stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
@@ -344,7 +358,8 @@ where
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         // Skip if the entry is already outdated.
-        if entry.is_outdated() {
+        // Skip if the batch buffer size exceeds the threshold.
+        if entry.is_outdated() || self.batch.buffer_size() > self.threshold {
             let _ = tx.send(Ok(false));
             return;
         }
@@ -423,14 +438,16 @@ where
     fn reinsertion(&mut self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>) {
         tracing::trace!("[flusher]: submit reinsertion");
 
+        // Skip if the entry is no longer in the indexer.
+        // Skip if the batch buffer size exceeds the threshold.
+        if self.indexer.get(reinsertion.hash).is_none() || self.batch.buffer_size() > self.threshold {
+            let _ = tx.send(Ok(false));
+            return;
+        }
+
         self.may_init_batch_state();
         if self.batch.init_time.is_none() {
             self.batch.init_time = Some(Instant::now());
-        }
-
-        if self.indexer.get(reinsertion.hash).is_none() {
-            let _ = tx.send(Ok(false));
-            return;
         }
 
         // Attempt to pick the latest group to write.

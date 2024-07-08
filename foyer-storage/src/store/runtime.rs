@@ -251,6 +251,7 @@ mod tests {
             admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
+            buffer_threshold: usize::MAX,
         }
     }
 
