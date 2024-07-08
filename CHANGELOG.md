@@ -1,3 +1,22 @@
+## 2024-07-08
+
+| crate | version |
+| - | - |
+| foyer | 0.10.1 |
+| foyer-common | 0.8.1 |
+| foyer-intrusive | 0.8.1 |
+| foyer-memory | 0.6.1 |
+| foyer-storage | 0.9.1 |
+| foyer-bench | 0.2.1 |
+
+<details>
+
+### Changes
+
+- Refine write model, make flush buffer threshold configurable to mitigate memory usage spike and OOM.
+
+</details>
+
 ## 2024-07-02
 
 | crate | version |

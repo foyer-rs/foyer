@@ -1,6 +1,6 @@
 [package]
 name = "foyer"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "Hybrid cache for Rust"
@@ -14,9 +14,9 @@ rust-version = "1.77"
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
-foyer-common = { version = "0.8.0", path = "../foyer-common" }
-foyer-memory = { version = "0.6.0", path = "../foyer-memory" }
-foyer-storage = { version = "0.9.0", path = "../foyer-storage" }
+foyer-common = { version = "0.8.1", path = "../foyer-common" }
+foyer-memory = { version = "0.6.1", path = "../foyer-memory" }
+foyer-storage = { version = "0.9.1", path = "../foyer-storage" }
 futures = "0.3"
 minitrace = { workspace = true }
 pin-project = "1"
