@@ -83,6 +83,7 @@ where
     pub admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
+    pub statistics: Arc<Statistics>,
 }
 
 impl<K, V, S> Debug for GenericLargeStorageConfig<K, V, S>
@@ -109,6 +110,7 @@ where
             .field("admission_pickers", &self.admission_picker)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
+            .field("statistics", &self.statistics)
             .finish()
     }
 }
@@ -151,7 +153,7 @@ where
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
 
-    stats: Arc<Statistics>,
+    statistics: Arc<Statistics>,
 
     flush: bool,
 
@@ -186,7 +188,7 @@ where
     async fn open(mut config: GenericLargeStorageConfig<K, V, S>) -> Result<Self> {
         let runtime = Handle::current();
 
-        let stats = Arc::<Statistics>::default();
+        let stats = config.statistics.clone();
 
         let device = config.device.clone();
         let metrics = device.metrics().clone();
@@ -271,7 +273,7 @@ where
                 flushers,
                 reclaimers,
                 admission_picker: config.admission_picker,
-                stats,
+                statistics: stats,
                 flush: config.flush,
                 sequence,
                 runtime,
@@ -293,7 +295,7 @@ where
     }
 
     fn pick(&self, key: &K) -> bool {
-        self.inner.admission_picker.pick(&self.inner.stats, key)
+        self.inner.admission_picker.pick(&self.inner.statistics, key)
     }
 
     #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
@@ -341,7 +343,7 @@ where
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
-        let stats = self.inner.stats.clone();
+        let stats = self.inner.statistics.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
@@ -610,6 +612,7 @@ mod tests {
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
+            statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
@@ -637,6 +640,7 @@ mod tests {
             reinsertion_picker,
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
+            statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
@@ -664,6 +668,7 @@ mod tests {
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_threshold: usize::MAX,
+            statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
     }

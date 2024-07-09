@@ -217,6 +217,7 @@ mod tests {
         },
         picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
         storage::Storage,
+        Statistics,
     };
 
     use super::*;
@@ -265,6 +266,7 @@ mod tests {
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
+            statistics: Arc::<Statistics>::default(),
         }
     }
 
