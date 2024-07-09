@@ -15,7 +15,7 @@
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheContext;
-use foyer_storage::{EnqueueHandle, Storage};
+use foyer_storage::EnqueueHandle;
 use std::{
     fmt::Debug,
     time::{Duration, Instant},

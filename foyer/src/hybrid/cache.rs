@@ -35,7 +35,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig},
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
-use foyer_storage::{DeviceStats, Storage, Store};
+use foyer_storage::{DeviceStats, Store};
 use futures::FutureExt;
 use minitrace::prelude::*;
 use pin_project::pin_project;

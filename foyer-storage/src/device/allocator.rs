@@ -14,13 +14,12 @@
 
 use std::ops::{Deref, DerefMut};
 
-use allocator_api2::{
-    alloc::{AllocError, Allocator, Global},
-    vec::Vec as VecA,
-};
+use allocator_api2::alloc::{AllocError, Allocator, Global};
+
+pub use allocator_api2::vec::Vec as VecA;
 
 #[derive(Debug)]
-pub struct WritableVecA<'a, T, A: Allocator>(pub &'a mut VecA<T, A>);
+pub struct WritableVecA<'a, T, A: Allocator = Global>(pub &'a mut VecA<T, A>);
 
 impl<'a, T, A: Allocator> Deref for WritableVecA<'a, T, A> {
     type Target = VecA<T, A>;

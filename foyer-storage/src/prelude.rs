@@ -27,10 +27,10 @@ pub use crate::{
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     statistics::Statistics,
-    storage::{EnqueueHandle, Storage},
-    store::{
+    storage::{
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
-        DeviceConfig, Store, StoreBuilder, StoreConfig,
+        EnqueueHandle, Storage,
     },
+    store::{DeviceConfig, Store, StoreBuilder, StoreConfig},
     tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
 };
