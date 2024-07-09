@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub mod noop;
-pub mod runtime;
-
 use std::{
     borrow::Borrow,
     fmt::Debug,
@@ -32,7 +29,11 @@ use tokio::runtime::Handle;
 
 use super::{
     device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-    storage::{EnqueueHandle, Storage},
+    storage::{
+        noop::NoopStore,
+        runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig},
+        EnqueueHandle, Storage,
+    },
     tombstone::TombstoneLogConfig,
 };
 
@@ -48,8 +49,6 @@ use crate::{
     },
     FifoPicker, InvalidRatioPicker,
 };
-use noop::NoopStore;
-use runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig};
 
 use crate::error::Result;
 
@@ -128,18 +127,14 @@ where
     }
 }
 
-impl<K, V, S> Storage for Store<K, V, S>
+impl<K, V, S> Store<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Key = K;
-    type Value = V;
-    type BuildHasher = S;
-    type Config = StoreConfig<K, V, S>;
-
-    async fn open(config: Self::Config) -> Result<Self> {
+    /// Open the disk cache with the given configurations.
+    pub async fn open(config: StoreConfig<K, V, S>) -> Result<Self> {
         match config {
             StoreConfig::Noop => Ok(Self::Noop(NoopStore::open(()).await?)),
             StoreConfig::DirectFs(config) => Ok(Self::DirectFs(GenericStore::open(config).await?)),
@@ -147,7 +142,10 @@ where
         }
     }
 
-    async fn close(&self) -> Result<()> {
+    /// Close the disk cache gracefully.
+    ///
+    /// `close` will wait for all ongoing flush and reclaim tasks to finish.
+    pub async fn close(&self) -> Result<()> {
         match self {
             Store::Noop(store) => store.close().await,
             Store::DirectFs(store) => store.close().await,
@@ -155,7 +153,8 @@ where
         }
     }
 
-    fn pick(&self, key: &Self::Key) -> bool {
+    /// Return if the given key can be picked by the admission picker.
+    pub fn pick(&self, key: &K) -> bool {
         match self {
             Store::Noop(store) => store.pick(key),
             Store::DirectFs(store) => store.pick(key),
@@ -163,11 +162,8 @@ where
         }
     }
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        force: bool,
-    ) -> super::storage::EnqueueHandle {
+    /// Push a in-memory cache entry to the disk cache write queue.
+    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> super::storage::EnqueueHandle {
         match self {
             Store::Noop(store) => store.enqueue(entry, force),
             Store::DirectFs(store) => store.enqueue(entry, force),
@@ -175,9 +171,13 @@ where
         }
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
+    /// Load a cache entry from the disk cache.
+    ///
+    /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
+    /// check if the returned key matches the given key.
+    pub fn load<'a, Q>(&'a self, key: &'a Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'a
     where
-        Self::Key: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         match self {
@@ -187,9 +187,10 @@ where
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    /// Delete the cache entry with the given key from the disk cache.
+    pub fn delete<Q>(&self, key: &Q) -> EnqueueHandle
     where
-        Self::Key: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self {
@@ -199,9 +200,12 @@ where
         }
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
+    /// Check if the disk cache contains a cached entry with the given key.
+    ///
+    /// `contains` may return a false-positive result if there is a hash collision with the given key.
+    pub fn may_contains<Q>(&self, key: &Q) -> bool
     where
-        Self::Key: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self {
@@ -211,7 +215,8 @@ where
         }
     }
 
-    async fn destroy(&self) -> Result<()> {
+    /// Delete all cached entries of the disk cache.
+    pub async fn destroy(&self) -> Result<()> {
         match self {
             Store::Noop(store) => store.destroy().await,
             Store::DirectFs(store) => store.destroy().await,
@@ -219,7 +224,8 @@ where
         }
     }
 
-    fn stats(&self) -> Arc<crate::device::monitor::DeviceStats> {
+    /// Get the statistics information of the disk cache.
+    pub fn stats(&self) -> Arc<crate::device::monitor::DeviceStats> {
         match self {
             Store::Noop(store) => store.stats(),
             Store::DirectFs(store) => store.stats(),
@@ -227,7 +233,8 @@ where
         }
     }
 
-    async fn wait(&self) -> Result<()> {
+    /// Wait for the ongoing flush and reclaim tasks to finish.
+    pub async fn wait(&self) -> Result<()> {
         match self {
             Store::Noop(store) => store.wait().await,
             Store::DirectFs(store) => store.wait().await,
@@ -235,7 +242,10 @@ where
         }
     }
 
-    fn runtime(&self) -> &Handle {
+    /// Get disk cache runtime handle.
+    ///
+    /// The runtime is determined during the opening phase.
+    pub fn runtime(&self) -> &Handle {
         match self {
             Store::Noop(store) => store.runtime(),
             Store::DirectFs(store) => store.runtime(),
@@ -249,6 +259,7 @@ enum LoadFuture<F1, F2, F3> {
     DirectFs(F2),
     RuntimeDirectFs(F3),
 }
+
 impl<F1, F2, F3> LoadFuture<F1, F2, F3> {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]

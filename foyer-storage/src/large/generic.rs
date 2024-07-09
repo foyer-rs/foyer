@@ -32,11 +32,6 @@ use foyer_common::{
 use foyer_memory::{Cache, CacheEntry};
 use futures::future::{join_all, try_join_all};
 
-use tokio::{
-    runtime::Handle,
-    sync::{oneshot, Semaphore},
-};
-
 use crate::{
     compress::Compression,
     device::{
@@ -52,6 +47,11 @@ use crate::{
     storage::{EnqueueHandle, Storage},
     tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     AtomicSequence,
+};
+
+use tokio::{
+    runtime::Handle,
+    sync::{oneshot, Semaphore},
 };
 
 use super::{

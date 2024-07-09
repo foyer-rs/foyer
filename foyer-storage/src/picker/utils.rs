@@ -119,14 +119,17 @@ where
     }
 }
 
+struct RateLimitPickerInner {
+    ticket: RatedTicket,
+    last: AtomicUsize,
+}
+
 /// A picker that picks based on the disk statistics and the given rate limit.
 pub struct RateLimitPicker<K>
 where
     K: StorageKey,
 {
-    inner: RatedTicket,
-    last: AtomicUsize,
-
+    inner: Arc<RateLimitPickerInner>,
     _marker: PhantomData<K>,
 }
 
@@ -136,9 +139,21 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RateLimitPicker")
-            .field("inner", &self.inner)
-            .field("last", &self.last)
+            .field("ticker", &self.inner.ticket)
+            .field("last", &self.inner.last)
             .finish()
+    }
+}
+
+impl<K> Clone for RateLimitPicker<K>
+where
+    K: StorageKey,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -148,23 +163,27 @@ where
 {
     /// Create a rate limit picker with the given rate limit.
     pub fn new(rate: usize) -> Self {
-        Self {
-            inner: RatedTicket::new(rate as f64),
+        let inner = RateLimitPickerInner {
+            ticket: RatedTicket::new(rate as f64),
             last: AtomicUsize::default(),
+        };
+
+        Self {
+            inner: Arc::new(inner),
             _marker: PhantomData,
         }
     }
 
     fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
-        let res = self.inner.probe();
+        let res = self.inner.ticket.probe();
 
         let current = stats.cache_write_bytes();
-        let last = self.last.load(Ordering::Relaxed);
+        let last = self.inner.last.load(Ordering::Relaxed);
         let delta = current.saturating_sub(last);
 
         if delta > 0 {
-            self.last.store(current, Ordering::Relaxed);
-            self.inner.reduce(delta as f64);
+            self.inner.last.store(current, Ordering::Relaxed);
+            self.inner.ticket.reduce(delta as f64);
         }
 
         res

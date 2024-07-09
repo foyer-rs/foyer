@@ -20,7 +20,7 @@ use std::{path::Path, sync::Arc};
 use ahash::RandomState;
 use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 use foyer_storage::{
-    test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, Storage, StoreBuilder,
+    test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, StoreBuilder,
 };
 
 const KB: usize = 1024;
