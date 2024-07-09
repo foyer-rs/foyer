@@ -23,7 +23,7 @@ use std::{
 
 use foyer_common::{bits, metrics::Metrics};
 
-use crate::{error::Result, Device, DeviceExt, DeviceOptions, DirectFileDevice};
+use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice};
 
 use super::{IoBuffer, RegionId};
 
@@ -47,7 +47,7 @@ pub struct DeviceStats {
 #[derive(Clone)]
 pub struct MonitoredOptions<D>
 where
-    D: Device,
+    D: Dev,
 {
     pub options: D::Options,
     pub metrics: Arc<Metrics>,
@@ -55,7 +55,7 @@ where
 
 impl<D> Debug for MonitoredOptions<D>
 where
-    D: Device,
+    D: Dev,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MonitoredOptions")
@@ -65,9 +65,9 @@ where
     }
 }
 
-impl<D> DeviceOptions for MonitoredOptions<D>
+impl<D> DevOptions for MonitoredOptions<D>
 where
-    D: Device,
+    D: Dev,
 {
     fn verify(&self) -> Result<()> {
         self.options.verify()
@@ -77,7 +77,7 @@ where
 #[derive(Debug, Clone)]
 pub struct Monitored<D>
 where
-    D: Device,
+    D: Dev,
 {
     device: D,
     stats: Arc<DeviceStats>,
@@ -86,7 +86,7 @@ where
 
 impl<D> Monitored<D>
 where
-    D: Device,
+    D: Dev,
 {
     async fn open(options: MonitoredOptions<D>) -> Result<Self> {
         let device = D::open(options.options).await?;
@@ -146,9 +146,9 @@ where
     }
 }
 
-impl<D> Device for Monitored<D>
+impl<D> Dev for Monitored<D>
 where
-    D: Device,
+    D: Dev,
 {
     type Options = MonitoredOptions<D>;
 
@@ -215,9 +215,13 @@ impl Monitored<DirectFileDevice> {
 
 impl<D> Monitored<D>
 where
-    D: Device,
+    D: Dev,
 {
     pub fn stat(&self) -> &Arc<DeviceStats> {
         &self.stats
+    }
+
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
     }
 }

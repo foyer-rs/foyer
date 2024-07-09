@@ -83,10 +83,6 @@ where
         Ok(())
     }
 
-    fn pick(&self, _: &Self::Key) -> bool {
-        false
-    }
-
     fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(force)); // always return `force` here to keep consistency

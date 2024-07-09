@@ -149,13 +149,6 @@ where
         Ok(())
     }
 
-    fn pick(&self, key: &Self::Key) -> bool {
-        match self.selector.select(key) {
-            Selection::Left => self.left.pick(key),
-            Selection::Right => self.right.pick(key),
-        }
-    }
-
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
         match self.selector.select(entry.key()) {
             Selection::Left => self.left.enqueue(entry, force),

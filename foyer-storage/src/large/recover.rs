@@ -25,7 +25,6 @@ use itertools::Itertools;
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
-use crate::device::monitor::Monitored;
 use crate::error::{Error, Result};
 
 use crate::large::scanner::{EntryInfo, RegionScanner};
@@ -34,7 +33,7 @@ use crate::{AtomicSequence, Sequence};
 use super::generic::GenericLargeStorageConfig;
 use super::indexer::EntryAddress;
 use super::indexer::Indexer;
-use crate::device::{Device, DeviceExt, RegionId};
+use crate::device::{DevExt, MonitoredDevice, RegionId};
 use crate::region::{Region, RegionManager};
 use crate::tombstone::Tombstone;
 
@@ -56,12 +55,12 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    pub async fn run<K, V, S, D>(
-        config: &GenericLargeStorageConfig<K, V, S, D>,
-        device: Monitored<D>,
+    pub async fn run<K, V, S>(
+        config: &GenericLargeStorageConfig<K, V, S>,
+        device: MonitoredDevice,
         sequence: &AtomicSequence,
         indexer: &Indexer,
-        region_manager: &RegionManager<D>,
+        region_manager: &RegionManager,
         tombstones: &[Tombstone],
         runtime: Handle,
     ) -> Result<()>
@@ -69,7 +68,6 @@ impl RecoverRunner {
         K: StorageKey,
         V: StorageValue,
         S: HashBuilder + Debug,
-        D: Device,
     {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
@@ -188,10 +186,7 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run<D>(mode: RecoverMode, region: Region<D>) -> Result<Vec<EntryInfo>>
-    where
-        D: Device,
-    {
+    async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
         assert_ne!(mode, RecoverMode::None);
 
         let mut infos = vec![];

@@ -78,9 +78,6 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     #[must_use]
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
-    /// Return if the given key can be picked by the admission picker.
-    fn pick(&self, key: &Self::Key) -> bool;
-
     /// Push a in-memory cache entry to the disk cache write queue.
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle;
 

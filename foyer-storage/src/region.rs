@@ -37,7 +37,7 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
-    device::{monitor::Monitored, Device, DeviceExt, IoBuffer, RegionId},
+    device::{Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
     error::Result,
     picker::EvictionPicker,
 };
@@ -67,19 +67,13 @@ impl RegionStats {
 /// [ MAGIC | Tombstone Pool Size ]
 /// ```
 #[derive(Debug, Clone)]
-pub struct Region<D>
-where
-    D: Device,
-{
+pub struct Region {
     id: RegionId,
-    device: Monitored<D>,
+    device: MonitoredDevice,
     stats: Arc<RegionStats>,
 }
 
-impl<D> Region<D>
-where
-    D: Device,
-{
+impl Region {
     pub fn id(&self) -> RegionId {
         self.id
     }
@@ -111,11 +105,8 @@ where
 }
 
 #[derive(Clone)]
-pub struct RegionManager<D>
-where
-    D: Device,
-{
-    inner: Arc<RegionManagerInner<D>>,
+pub struct RegionManager {
+    inner: Arc<RegionManagerInner>,
 }
 
 struct Eviction {
@@ -123,16 +114,13 @@ struct Eviction {
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
 }
 
-struct RegionManagerInner<D>
-where
-    D: Device,
-{
-    regions: Vec<Region<D>>,
+struct RegionManagerInner {
+    regions: Vec<Region>,
 
     eviction: Mutex<Eviction>,
 
-    clean_region_tx: Sender<Region<D>>,
-    clean_region_rx: Receiver<Region<D>>,
+    clean_region_tx: Sender<Region>,
+    clean_region_rx: Receiver<Region>,
 
     reclaim_semaphore: Arc<Semaphore>,
     reclaim_semaphore_countdown: Arc<Countdown>,
@@ -140,21 +128,15 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<D> Debug for RegionManager<D>
-where
-    D: Device,
-{
+impl Debug for RegionManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RegionManager").finish()
     }
 }
 
-impl<D> RegionManager<D>
-where
-    D: Device,
-{
+impl RegionManager {
     pub fn new(
-        device: Monitored<D>,
+        device: MonitoredDevice,
         eviction_pickers: Vec<Box<dyn EvictionPicker>>,
         reclaim_semaphore: Arc<Semaphore>,
         metrics: Arc<Metrics>,
@@ -214,7 +196,7 @@ where
         tracing::debug!("[region manager]: Region {region} is marked evictable.");
     }
 
-    pub fn evict(&self) -> Option<Region<D>> {
+    pub fn evict(&self) -> Option<Region> {
         let mut picked = None;
 
         let mut eviction = self.inner.eviction.lock();
@@ -273,7 +255,7 @@ where
         self.inner.metrics.storage_region_clean.increment(1);
     }
 
-    pub fn get_clean_region(&self) -> GetCleanRegionHandle<D> {
+    pub fn get_clean_region(&self) -> GetCleanRegionHandle {
         let clean_region_rx = self.inner.clean_region_rx.clone();
         let reclaim_semaphore = self.inner.reclaim_semaphore.clone();
         let reclaim_semaphore_countdown = self.inner.reclaim_semaphore_countdown.clone();
@@ -310,7 +292,7 @@ where
         self.inner.clean_region_rx.len()
     }
 
-    pub fn region(&self, id: RegionId) -> &Region<D> {
+    pub fn region(&self, id: RegionId) -> &Region {
         &self.inner.regions[id as usize]
     }
 
@@ -325,18 +307,12 @@ where
 
 #[derive(Debug)]
 #[pin_project]
-pub struct GetCleanRegionHandle<D>
-where
-    D: Device,
-{
+pub struct GetCleanRegionHandle {
     #[pin]
-    future: Shared<BoxFuture<'static, Region<D>>>,
+    future: Shared<BoxFuture<'static, Region>>,
 }
 
-impl<D> Clone for GetCleanRegionHandle<D>
-where
-    D: Device,
-{
+impl Clone for GetCleanRegionHandle {
     fn clone(&self) -> Self {
         Self {
             future: self.future.clone(),
@@ -344,22 +320,16 @@ where
     }
 }
 
-impl<D> GetCleanRegionHandle<D>
-where
-    D: Device,
-{
-    pub fn new(future: BoxFuture<'static, Region<D>>) -> Self {
+impl GetCleanRegionHandle {
+    pub fn new(future: BoxFuture<'static, Region>) -> Self {
         Self {
             future: future.shared(),
         }
     }
 }
 
-impl<D> Future for GetCleanRegionHandle<D>
-where
-    D: Device,
-{
-    type Output = Region<D>;
+impl Future for GetCleanRegionHandle {
+    type Output = Region;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();

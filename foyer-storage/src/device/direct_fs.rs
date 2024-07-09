@@ -23,7 +23,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::runtime::Handle;
 
-use super::{Device, DeviceExt, DeviceOptions, RegionId};
+use super::{Dev, DevExt, DevOptions, RegionId};
 use crate::{
     device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
@@ -56,7 +56,7 @@ struct DirectFsDeviceInner {
     runtime: Handle,
 }
 
-impl DeviceOptions for DirectFsDeviceOptions {
+impl DevOptions for DirectFsDeviceOptions {
     fn verify(&self) -> Result<()> {
         if self.file_size == 0 || self.file_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
@@ -91,7 +91,7 @@ impl DirectFsDevice {
     }
 }
 
-impl Device for DirectFsDevice {
+impl Dev for DirectFsDevice {
     type Options = DirectFsDeviceOptions;
 
     fn capacity(&self) -> usize {

@@ -34,10 +34,7 @@ use futures::future::{join_all, try_join_all};
 
 use crate::{
     compress::Compression,
-    device::{
-        monitor::{DeviceStats, Monitored, MonitoredOptions},
-        Device, DeviceExt, RegionId,
-    },
+    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::reclaimer::RegionCleaner,
     picker::{AdmissionPicker, EvictionPicker, ReinsertionPicker},
@@ -63,17 +60,16 @@ use super::{
 
 use minitrace::prelude::*;
 
-pub struct GenericLargeStorageConfig<K, V, S, D>
+pub struct GenericLargeStorageConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     pub memory: Cache<K, V, S>,
 
     pub name: String,
-    pub device_config: D::Options,
+    pub device: MonitoredDevice,
     pub compression: Compression,
     pub flush: bool,
     pub indexer_shards: usize,
@@ -89,18 +85,17 @@ where
     pub tombstone_log_config: Option<TombstoneLogConfig>,
 }
 
-impl<K, V, S, D> Debug for GenericLargeStorageConfig<K, V, S, D>
+impl<K, V, S> Debug for GenericLargeStorageConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
             .field("name", &self.name)
             .field("memory", &self.memory)
-            .field("device_config", &self.device_config)
+            .field("device", &self.device)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
             .field("indexer_shards", &self.indexer_shards)
@@ -118,41 +113,38 @@ where
     }
 }
 
-pub struct GenericLargeStorage<K, V, S, D>
+pub struct GenericLargeStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    inner: Arc<GenericStoreInner<K, V, S, D>>,
+    inner: Arc<GenericStoreInner<K, V, S>>,
 }
 
-impl<K, V, S, D> Debug for GenericLargeStorage<K, V, S, D>
+impl<K, V, S> Debug for GenericLargeStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStore").finish()
     }
 }
 
-struct GenericStoreInner<K, V, S, D>
+struct GenericStoreInner<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     /// Holds the memory cache for reinsertion.
     memory: Cache<K, V, S>,
 
     indexer: Indexer,
-    device: Monitored<D>,
-    region_manager: RegionManager<D>,
+    device: MonitoredDevice,
+    region_manager: RegionManager,
 
     flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
@@ -172,12 +164,11 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S, D> Clone for GenericLargeStorage<K, V, S, D>
+impl<K, V, S> Clone for GenericLargeStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn clone(&self) -> Self {
         Self {
@@ -186,25 +177,19 @@ where
     }
 }
 
-impl<K, V, S, D> GenericLargeStorage<K, V, S, D>
+impl<K, V, S> GenericLargeStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    async fn open(mut config: GenericLargeStorageConfig<K, V, S, D>) -> Result<Self> {
+    async fn open(mut config: GenericLargeStorageConfig<K, V, S>) -> Result<Self> {
         let runtime = Handle::current();
 
-        let metrics = Arc::new(Metrics::new(&config.name));
-
-        let device = Monitored::open(MonitoredOptions {
-            options: config.device_config.clone(),
-            metrics: metrics.clone(),
-        })
-        .await?;
-
         let stats = Arc::<Statistics>::default();
+
+        let device = config.device.clone();
+        let metrics = device.metrics().clone();
 
         let mut tombstones = vec![];
         let tombstone_log = match &config.tombstone_log_config {
@@ -488,17 +473,16 @@ where
     }
 }
 
-impl<K, V, S, D> Storage for GenericLargeStorage<K, V, S, D>
+impl<K, V, S> Storage for GenericLargeStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     type Key = K;
     type Value = V;
     type BuildHasher = S;
-    type Config = GenericLargeStorageConfig<K, V, S, D>;
+    type Config = GenericLargeStorageConfig<K, V, S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -506,10 +490,6 @@ where
 
     async fn close(&self) -> Result<()> {
         self.close().await
-    }
-
-    fn pick(&self, key: &Self::Key) -> bool {
-        self.pick(key)
     }
 
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
@@ -566,7 +546,10 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
-        device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
+        device::{
+            direct_fs::DirectFsDeviceOptions,
+            monitor::{Monitored, MonitoredOptions},
+        },
         picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
         test_utils::BiasedPicker,
         tombstone::TombstoneLogConfigBuilder,
@@ -582,11 +565,25 @@ mod tests {
             .build()
     }
 
+    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+        Monitored::open(MonitoredOptions {
+            options: DirectFsDeviceOptions {
+                dir: dir.as_ref().into(),
+                capacity: 64 * KB,
+                file_size: 16 * KB,
+            }
+            .into(),
+            metrics: Arc::new(Metrics::new("test")),
+        })
+        .await
+        .unwrap()
+    }
+
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
     async fn store_for_test(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
         store_for_test_with_admission_picker(memory, dir, Arc::<AdmitAllPicker<u64>>::default()).await
     }
 
@@ -594,15 +591,12 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         admission_picker: Arc<dyn AdmissionPicker<Key = u64>>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        let device = device_for_test(dir).await;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
-            device_config: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            },
+            device,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
@@ -624,15 +618,12 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        let device = device_for_test(dir).await;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
-            device_config: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            },
+            device,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
@@ -654,15 +645,12 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        let device = device_for_test(dir).await;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
-            device_config: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            },
+            device,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
