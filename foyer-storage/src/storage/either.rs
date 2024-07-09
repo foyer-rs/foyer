@@ -18,9 +18,9 @@ use futures::{
     future::{try_join, Either as EitherFuture},
     Future,
 };
-use tokio::runtime::Handle;
+use tokio::{runtime::Handle, sync::oneshot};
 
-use crate::{error::Result, storage::Storage, DeviceStats, EnqueueHandle};
+use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, EnqueueHandle};
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
@@ -149,10 +149,16 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
+    fn enqueue(
+        &self,
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        buffer: Vec<u8>,
+        info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
         match self.selector.select(entry.key()) {
-            Selection::Left => self.left.enqueue(entry, force),
-            Selection::Right => self.right.enqueue(entry, force),
+            Selection::Left => self.left.enqueue(entry, buffer, info, tx),
+            Selection::Right => self.right.enqueue(entry, buffer, info, tx),
         }
     }
 

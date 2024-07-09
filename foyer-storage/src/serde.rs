@@ -98,6 +98,11 @@ impl EntryHeader {
     }
 }
 
+pub struct KvInfo {
+    pub key_len: usize,
+    pub value_len: usize,
+}
+
 #[derive(Debug)]
 pub struct EntrySerializer;
 
@@ -167,6 +172,48 @@ impl EntrySerializer {
         header.write(&mut buffer[cursor..cursor + EntryHeader::serialized_len()]);
 
         Ok(())
+    }
+
+    pub fn serialize_kv<'a, K, V>(
+        key: &'a K,
+        value: &'a V,
+        compression: &'a Compression,
+        mut buffer: &'a mut Vec<u8>,
+    ) -> Result<KvInfo>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        let mut cursor = buffer.len();
+
+        // serialize value
+        match compression {
+            Compression::None => {
+                bincode::serialize_into(&mut buffer, &value).map_err(Error::from)?;
+            }
+            Compression::Zstd => {
+                let encoder = zstd::Encoder::new(&mut buffer, 0).map_err(Error::from)?.auto_finish();
+                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
+            }
+
+            Compression::Lz4 => {
+                let encoder = lz4::EncoderBuilder::new()
+                    .checksum(lz4::ContentChecksum::NoChecksum)
+                    .auto_flush(true)
+                    .build(&mut buffer)
+                    .map_err(Error::from)?;
+                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
+            }
+        }
+
+        let value_len = buffer.len() - cursor;
+        cursor = buffer.len();
+
+        // serialize key
+        bincode::serialize_into(&mut buffer, &key).map_err(Error::from)?;
+        let key_len = buffer.len() - cursor;
+
+        Ok(KvInfo { key_len, value_len })
     }
 }
 
