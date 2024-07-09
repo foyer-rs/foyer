@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 use crate::{
-    device::{allocator::WritableVecA, monitor::Monitored, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR},
+    device::{allocator::WritableVecA, IoBuffer, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
     region::{GetCleanRegionHandle, RegionManager},
     serde::EntrySerializer,
@@ -38,7 +38,7 @@ use tokio::{
     sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
 };
 
-use crate::{Device, DeviceExt, Sequence};
+use crate::{Dev, DevExt, Sequence};
 
 use super::{
     generic::GenericLargeStorageConfig,
@@ -75,14 +75,13 @@ where
     },
 }
 
-struct WriteGroup<K, V, S, D>
+struct WriteGroup<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder,
-    D: Device,
 {
-    writer: RegionHandle<D>,
+    writer: RegionHandle,
 
     buffer: IoBuffer,
     indices: Vec<(u64, EntryAddress)>,
@@ -91,12 +90,11 @@ where
     entries: Vec<CacheEntry<K, V, S>>,
 }
 
-impl<K, V, S, D> Debug for WriteGroup<K, V, S, D>
+impl<K, V, S> Debug for WriteGroup<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WriteGroup")
@@ -107,20 +105,14 @@ where
     }
 }
 
-struct RegionHandle<D>
-where
-    D: Device,
-{
-    handle: GetCleanRegionHandle<D>,
+struct RegionHandle {
+    handle: GetCleanRegionHandle,
     offset: u64,
     size: usize,
     is_full: bool,
 }
 
-impl<D> Debug for RegionHandle<D>
-where
-    D: Device,
-{
+impl Debug for RegionHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RegionHandle")
             .field("offset", &self.offset)
@@ -130,10 +122,7 @@ where
     }
 }
 
-impl<D> Clone for RegionHandle<D>
-where
-    D: Device,
-{
+impl Clone for RegionHandle {
     fn clone(&self) -> Self {
         Self {
             handle: self.handle.clone(),
@@ -181,19 +170,16 @@ where
 {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::too_many_arguments)]
-    pub async fn open<D>(
-        config: &GenericLargeStorageConfig<K, V, S, D>,
+    pub async fn open(
+        config: &GenericLargeStorageConfig<K, V, S>,
         indexer: Indexer,
-        region_manager: RegionManager<D>,
-        device: Monitored<D>,
+        region_manager: RegionManager,
+        device: MonitoredDevice,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: Handle,
-    ) -> Result<Self>
-    where
-        D: Device,
-    {
+    ) -> Result<Self> {
         let (tx, rx) = mpsc::unbounded_channel();
         let batch = Batch::default();
         let flight = Arc::new(Semaphore::new(1));
@@ -236,36 +222,33 @@ where
     }
 }
 
-struct Batch<K, V, S, D>
+struct Batch<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    groups: Vec<WriteGroup<K, V, S, D>>,
+    groups: Vec<WriteGroup<K, V, S>>,
     tombstones: Vec<(Tombstone, Option<InvalidStats>, oneshot::Sender<Result<bool>>)>,
     init_time: Option<Instant>,
 }
 
-impl<K, V, S, D> Debug for Batch<K, V, S, D>
+impl<K, V, S> Debug for Batch<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Batch").field("groups", &self.groups).finish()
     }
 }
 
-impl<K, V, S, D> Default for Batch<K, V, S, D>
+impl<K, V, S> Default for Batch<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn default() -> Self {
         Self {
@@ -276,32 +259,30 @@ where
     }
 }
 
-impl<K, V, S, D> Batch<K, V, S, D>
+impl<K, V, S> Batch<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn buffer_size(&self) -> usize {
         self.groups.iter().map(|group| group.buffer.len()).sum()
     }
 }
 
-struct Runner<K, V, S, D>
+struct Runner<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    batch: Batch<K, V, S, D>,
+    batch: Batch<K, V, S>,
 
     rx: mpsc::UnboundedReceiver<Submission<K, V, S>>,
 
-    region_manager: RegionManager<D>,
+    region_manager: RegionManager,
     indexer: Indexer,
-    device: Monitored<D>,
+    device: MonitoredDevice,
     tombstone_log: Option<TombstoneLog>,
 
     compression: Compression,
@@ -316,12 +297,11 @@ where
     flight: Arc<Semaphore>,
 }
 
-impl<K, V, S, D> Runner<K, V, S, D>
+impl<K, V, S> Runner<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     pub async fn run(mut self) -> Result<()> {
         loop {

@@ -14,26 +14,36 @@
 
 use crate::{
     compress::Compression,
-    device::{direct_fs::DirectFsDeviceOptions, monitor::DeviceStats},
-    engine::{Engine, EngineConfig},
+    device::{
+        direct_fs::DirectFsDeviceOptions,
+        monitor::{DeviceStats, Monitored, MonitoredOptions},
+        DeviceOptions,
+    },
+    engine::{Engine, EngineConfig, SizeSelector},
     error::Result,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
+        either::EitherConfig,
         runtime::{RuntimeConfig, RuntimeStoreConfig},
         EnqueueHandle, Storage,
     },
     tombstone::TombstoneLogConfig,
+    Dev, DirectFileDeviceOptions,
 };
 use ahash::RandomState;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use foyer_memory::{Cache, CacheEntry};
 use futures::Future;
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 use tokio::runtime::Handle;
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -161,13 +171,58 @@ where
 pub enum DeviceConfig {
     /// No device.
     None,
-    /// The configurations for the driect fs device.
-    DirectFs(DirectFsDeviceOptions),
+    /// With device options.
+    DeviceOptions(DeviceOptions),
+}
+
+impl From<DirectFileDeviceOptions> for DeviceConfig {
+    fn from(value: DirectFileDeviceOptions) -> Self {
+        Self::DeviceOptions(value.into())
+    }
 }
 
 impl From<DirectFsDeviceOptions> for DeviceConfig {
     fn from(value: DirectFsDeviceOptions) -> Self {
-        Self::DirectFs(value)
+        Self::DeviceOptions(value.into())
+    }
+}
+
+/// [`CombinedConfig`] controls the ratio of the large object disk cache and the small object disk cache.
+#[derive(Debug, Clone)]
+pub enum CombinedConfig {
+    /// All space are used as the large object disk cache.
+    Large,
+    /// All space are used as the small object disk cache.
+    Small,
+    /// Combined the large object disk cache and the small object disk cache.
+    Combined {
+        /// The ratio of the large object disk cache.
+        large_object_cache_ratio: f64,
+    },
+}
+
+impl Default for CombinedConfig {
+    fn default() -> Self {
+        // TODO(MrCroxx): Use combined cache after small object disk cache is ready.
+        Self::Large
+    }
+}
+
+impl CombinedConfig {
+    /// The ratio of the large object disk cache.
+    pub fn large_object_cache_ratio(&self) -> f64 {
+        match self {
+            CombinedConfig::Large => 1.0,
+            CombinedConfig::Small => 0.0,
+            CombinedConfig::Combined {
+                large_object_cache_ratio,
+            } => *large_object_cache_ratio,
+        }
+    }
+
+    /// The ratio of the small object disk cache.
+    pub fn small_object_cache_ratio(&self) -> f64 {
+        1.0 - self.large_object_cache_ratio()
     }
 }
 
@@ -195,6 +250,8 @@ where
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     compression: Compression,
     tombstone_log_config: Option<TombstoneLogConfig>,
+    combined_config: CombinedConfig,
+    large_object_threshold: usize,
 
     runtime_config: Option<RuntimeConfig>,
 }
@@ -224,6 +281,8 @@ where
             reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
             compression: Compression::None,
             tombstone_log_config: None,
+            combined_config: CombinedConfig::default(),
+            large_object_threshold: 8192,
             runtime_config: None,
         }
     }
@@ -376,6 +435,12 @@ where
         self
     }
 
+    /// Set the ratio of the large object disk cache and the small object disk cache.
+    pub fn with_combined_config(mut self, combined_config: CombinedConfig) -> Self {
+        self.combined_config = combined_config;
+        self
+    }
+
     /// Enable the dedicated runtime for the disk cache store.
     pub fn with_runtime_config(mut self, runtime_config: RuntimeConfig) -> Self {
         self.runtime_config = Some(runtime_config);
@@ -387,58 +452,146 @@ where
         let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
 
         let admission_picker = self.admission_picker.clone();
+        let metrics = Arc::new(Metrics::new(&self.name));
 
-        let engine = match (self.device_config, self.runtime_config) {
-            (DeviceConfig::None, _) => {
+        let engine = match self.device_config {
+            DeviceConfig::None => {
                 tracing::warn!(
                     "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
                 );
                 Engine::open(EngineConfig::Noop).await?
             }
-            (DeviceConfig::DirectFs(device_config), None) => {
-                Engine::open(EngineConfig::LargeDirectFs(GenericLargeStorageConfig {
-                    memory: self.memory,
-                    name: self.name,
-                    device_config,
-                    compression: self.compression,
-                    flush: self.flush,
-                    indexer_shards: self.indexer_shards,
-                    recover_mode: self.recover_mode,
-                    recover_concurrency: self.recover_concurrency,
-                    flushers: self.flushers,
-                    reclaimers: self.reclaimers,
-                    clean_region_threshold,
-                    eviction_pickers: self.eviction_pickers,
-                    admission_picker: self.admission_picker,
-                    reinsertion_picker: self.reinsertion_picker,
-                    tombstone_log_config: self.tombstone_log_config,
-                    buffer_threshold: self.buffer_threshold,
-                }))
-                .await?
-            }
-            (DeviceConfig::DirectFs(device_config), Some(runtime_config)) => {
-                Engine::open(EngineConfig::LargeRuntimeDirectFs(RuntimeStoreConfig {
-                    store_config: GenericLargeStorageConfig {
-                        memory: self.memory,
-                        name: self.name,
-                        device_config,
-                        compression: self.compression,
-                        flush: self.flush,
-                        indexer_shards: self.indexer_shards,
-                        recover_mode: self.recover_mode,
-                        recover_concurrency: self.recover_concurrency,
-                        flushers: self.flushers,
-                        reclaimers: self.reclaimers,
-                        clean_region_threshold,
-                        eviction_pickers: self.eviction_pickers,
-                        admission_picker: self.admission_picker,
-                        reinsertion_picker: self.reinsertion_picker,
-                        tombstone_log_config: self.tombstone_log_config,
-                        buffer_threshold: self.buffer_threshold,
-                    },
-                    runtime_config,
-                }))
-                .await?
+            DeviceConfig::DeviceOptions(options) => {
+                let device = Monitored::open(MonitoredOptions { options, metrics }).await?;
+                match (self.combined_config, self.runtime_config) {
+                    (CombinedConfig::Large, None) => {
+                        Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
+                            memory: self.memory,
+                            name: self.name,
+                            device,
+                            compression: self.compression,
+                            flush: self.flush,
+                            indexer_shards: self.indexer_shards,
+                            recover_mode: self.recover_mode,
+                            recover_concurrency: self.recover_concurrency,
+                            flushers: self.flushers,
+                            reclaimers: self.reclaimers,
+                            clean_region_threshold,
+                            eviction_pickers: self.eviction_pickers,
+                            admission_picker: self.admission_picker,
+                            reinsertion_picker: self.reinsertion_picker,
+                            tombstone_log_config: self.tombstone_log_config,
+                            buffer_threshold: self.buffer_threshold,
+                        }))
+                        .await?
+                    }
+                    (CombinedConfig::Large, Some(runtime_config)) => {
+                        Engine::open(EngineConfig::LargeRuntime(RuntimeStoreConfig {
+                            store_config: GenericLargeStorageConfig {
+                                memory: self.memory,
+                                name: self.name,
+                                device,
+                                compression: self.compression,
+                                flush: self.flush,
+                                indexer_shards: self.indexer_shards,
+                                recover_mode: self.recover_mode,
+                                recover_concurrency: self.recover_concurrency,
+                                flushers: self.flushers,
+                                reclaimers: self.reclaimers,
+                                clean_region_threshold,
+                                eviction_pickers: self.eviction_pickers,
+                                admission_picker: self.admission_picker,
+                                reinsertion_picker: self.reinsertion_picker,
+                                tombstone_log_config: self.tombstone_log_config,
+                                buffer_threshold: self.buffer_threshold,
+                            },
+                            runtime_config,
+                        }))
+                        .await?
+                    }
+                    (CombinedConfig::Small, None) => {
+                        Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
+                            placeholder: PhantomData,
+                        }))
+                        .await?
+                    }
+                    (CombinedConfig::Small, Some(runtime_config)) => {
+                        Engine::open(EngineConfig::SmallRuntime(RuntimeStoreConfig {
+                            store_config: GenericSmallStorageConfig {
+                                placeholder: PhantomData,
+                            },
+                            runtime_config,
+                        }))
+                        .await?
+                    }
+                    (
+                        CombinedConfig::Combined {
+                            large_object_cache_ratio: _,
+                        },
+                        None,
+                    ) => {
+                        Engine::open(EngineConfig::Combined(EitherConfig {
+                            selector: SizeSelector::new(self.large_object_threshold),
+                            left: GenericSmallStorageConfig {
+                                placeholder: PhantomData,
+                            },
+                            right: GenericLargeStorageConfig {
+                                memory: self.memory,
+                                name: self.name,
+                                device,
+                                compression: self.compression,
+                                flush: self.flush,
+                                indexer_shards: self.indexer_shards,
+                                recover_mode: self.recover_mode,
+                                recover_concurrency: self.recover_concurrency,
+                                flushers: self.flushers,
+                                reclaimers: self.reclaimers,
+                                clean_region_threshold,
+                                eviction_pickers: self.eviction_pickers,
+                                admission_picker: self.admission_picker,
+                                reinsertion_picker: self.reinsertion_picker,
+                                tombstone_log_config: self.tombstone_log_config,
+                                buffer_threshold: self.buffer_threshold,
+                            },
+                        }))
+                        .await?
+                    }
+                    (
+                        CombinedConfig::Combined {
+                            large_object_cache_ratio: _,
+                        },
+                        Some(runtime_config),
+                    ) => {
+                        Engine::open(EngineConfig::CombinedRuntime(RuntimeStoreConfig {
+                            store_config: EitherConfig {
+                                selector: SizeSelector::new(self.large_object_threshold),
+                                left: GenericSmallStorageConfig {
+                                    placeholder: PhantomData,
+                                },
+                                right: GenericLargeStorageConfig {
+                                    memory: self.memory,
+                                    name: self.name,
+                                    device,
+                                    compression: self.compression,
+                                    flush: self.flush,
+                                    indexer_shards: self.indexer_shards,
+                                    recover_mode: self.recover_mode,
+                                    recover_concurrency: self.recover_concurrency,
+                                    flushers: self.flushers,
+                                    reclaimers: self.reclaimers,
+                                    clean_region_threshold,
+                                    eviction_pickers: self.eviction_pickers,
+                                    admission_picker: self.admission_picker,
+                                    reinsertion_picker: self.reinsertion_picker,
+                                    tombstone_log_config: self.tombstone_log_config,
+                                    buffer_threshold: self.buffer_threshold,
+                                },
+                            },
+                            runtime_config,
+                        }))
+                        .await?
+                    }
+                }
             }
         };
 

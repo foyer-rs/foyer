@@ -15,7 +15,7 @@
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use tokio::runtime::Handle;
 
-use super::{Device, DeviceExt, DeviceOptions, RegionId};
+use super::{Dev, DevExt, DevOptions, RegionId};
 use crate::{
     device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
@@ -48,7 +48,7 @@ pub struct DirectFileDevice {
     runtime: Handle,
 }
 
-impl DeviceOptions for DirectFileDeviceOptions {
+impl DevOptions for DirectFileDeviceOptions {
     fn verify(&self) -> Result<()> {
         if self.region_size == 0 || self.region_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
@@ -148,7 +148,7 @@ impl DirectFileDevice {
     }
 }
 
-impl Device for DirectFileDevice {
+impl Dev for DirectFileDevice {
     type Options = DirectFileDeviceOptions;
 
     fn capacity(&self) -> usize {

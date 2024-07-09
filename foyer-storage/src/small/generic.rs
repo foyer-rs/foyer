@@ -21,85 +21,75 @@ use futures::Future;
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
-use crate::{device::Device, error::Result, storage::Storage, DeviceStats, EnqueueHandle};
+use crate::{device::Dev, error::Result, storage::Storage, DeviceStats, EnqueueHandle};
 
-pub struct GenericSmallStorageConfig<K, V, S, D>
+pub struct GenericSmallStorageConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    _marker: PhantomData<(K, V, S, D)>,
+    pub placeholder: PhantomData<(K, V, S)>,
 }
 
-impl<K, V, S, D> Debug for GenericSmallStorageConfig<K, V, S, D>
+impl<K, V, S> Debug for GenericSmallStorageConfig<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericSmallStorageConfig").finish()
     }
 }
 
-pub struct GenericSmallStorage<K, V, S, D>
+pub struct GenericSmallStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
-    _marker: PhantomData<(K, V, S, D)>,
+    _marker: PhantomData<(K, V, S)>,
 }
 
-impl<K, V, S, D> Debug for GenericSmallStorage<K, V, S, D>
+impl<K, V, S> Debug for GenericSmallStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericSmallStorage").finish()
     }
 }
 
-impl<K, V, S, D> Clone for GenericSmallStorage<K, V, S, D>
+impl<K, V, S> Clone for GenericSmallStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     fn clone(&self) -> Self {
         Self { _marker: PhantomData }
     }
 }
 
-impl<K, V, S, D> Storage for GenericSmallStorage<K, V, S, D>
+impl<K, V, S> Storage for GenericSmallStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     type Key = K;
     type Value = V;
     type BuildHasher = S;
-    type Config = GenericSmallStorageConfig<K, V, S, D>;
+    type Config = GenericSmallStorageConfig<K, V, S>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         todo!()
     }
 
     async fn close(&self) -> Result<()> {
-        todo!()
-    }
-
-    fn pick(&self, key: &Self::Key) -> bool {
         todo!()
     }
 

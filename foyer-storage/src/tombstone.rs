@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 use crate::device::{
     direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
     monitor::{Monitored, MonitoredOptions},
-    Device, DeviceExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
+    Dev, DevExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
 };
 
 use crate::error::{Error, Result};
@@ -121,7 +121,7 @@ impl TombstoneLog {
         metrics: Arc<Metrics>,
     ) -> Result<Self>
     where
-        D: Device,
+        D: Dev,
     {
         let align = cache_device.align();
 
@@ -243,7 +243,7 @@ impl<D> AsMut<[u8]> for PageBuffer<D> {
 
 impl<D> PageBuffer<D>
 where
-    D: Device,
+    D: Dev,
 {
     pub async fn open(device: D, region: RegionId, idx: u32, sync: bool) -> Result<Self> {
         let mut this = Self {

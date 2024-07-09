@@ -22,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::{IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
     large::{
         flusher::{Flusher, Submission},
@@ -43,8 +43,8 @@ pub struct Reclaimer {
 impl Reclaimer {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::too_many_arguments)]
-    pub async fn open<K, V, S, D>(
-        region_manager: RegionManager<D>,
+    pub async fn open<K, V, S>(
+        region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
@@ -57,7 +57,6 @@ impl Reclaimer {
         K: StorageKey,
         V: StorageValue,
         S: HashBuilder + Debug,
-        D: Device,
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
@@ -86,16 +85,15 @@ impl Reclaimer {
     }
 }
 
-struct ReclaimRunner<K, V, S, D>
+struct ReclaimRunner<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
 
-    region_manager: RegionManager<D>,
+    region_manager: RegionManager,
     reclaim_semaphore: Arc<Semaphore>,
 
     indexer: Indexer,
@@ -111,12 +109,11 @@ where
     runtime: Handle,
 }
 
-impl<K, V, S, D> ReclaimRunner<K, V, S, D>
+impl<K, V, S> ReclaimRunner<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
-    D: Device,
 {
     const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -255,10 +252,7 @@ where
 pub struct RegionCleaner;
 
 impl RegionCleaner {
-    pub async fn clean<D>(region: &Region<D>, flush: bool) -> Result<()>
-    where
-        D: Device,
-    {
+    pub async fn clean(region: &Region, flush: bool) -> Result<()> {
         let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR);
         region.write(buf, 0).await?;
         if flush {

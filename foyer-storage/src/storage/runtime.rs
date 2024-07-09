@@ -148,10 +148,6 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn pick(&self, key: &Self::Key) -> bool {
-        self.store.pick(key)
-    }
-
     fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
         self.store.enqueue(entry, force)
     }
@@ -203,13 +199,18 @@ mod tests {
     use std::path::Path;
 
     use ahash::RandomState;
+    use foyer_common::metrics::Metrics;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use futures::future::try_join_all;
     use itertools::Itertools;
 
     use crate::{
         compress::Compression,
-        device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
+        device::{
+            direct_fs::DirectFsDeviceOptions,
+            monitor::{Monitored, MonitoredOptions},
+            Dev, MonitoredDevice,
+        },
         large::{
             generic::{GenericLargeStorage, GenericLargeStorageConfig},
             recover::RecoverMode,
@@ -227,18 +228,30 @@ mod tests {
             .with_eviction_config(FifoConfig::default())
             .build()
     }
-    fn config_for_test(
-        memory: &Cache<u64, Vec<u8>>,
-        dir: impl AsRef<Path>,
-    ) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        GenericLargeStorageConfig {
-            memory: memory.clone(),
-            name: "test".to_string(),
-            device_config: DirectFsDeviceOptions {
+
+    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+        Monitored::open(MonitoredOptions {
+            options: DirectFsDeviceOptions {
                 dir: dir.as_ref().into(),
                 capacity: 64 * KB,
                 file_size: 16 * KB,
-            },
+            }
+            .into(),
+            metrics: Arc::new(Metrics::new("test")),
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn config_for_test(
+        memory: &Cache<u64, Vec<u8>>,
+        dir: impl AsRef<Path>,
+    ) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState> {
+        let device = device_for_test(dir).await;
+        GenericLargeStorageConfig {
+            memory: memory.clone(),
+            name: "test".to_string(),
+            device,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
@@ -269,8 +282,10 @@ mod tests {
 
         let es = (0..100).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        let config = config_for_test(&memory, dir);
-        let store = background.block_on(async move { GenericLargeStorage::open(config).await.unwrap() });
+        let store = background.block_on(async move {
+            let config = config_for_test(&memory, dir).await;
+            GenericLargeStorage::open(config).await.unwrap()
+        });
 
         let fs = es.iter().cloned().map(|e| store.enqueue(e, false)).collect_vec();
         background.block_on(async { try_join_all(fs).await.unwrap() });

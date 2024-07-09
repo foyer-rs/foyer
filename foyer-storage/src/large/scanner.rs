@@ -19,7 +19,7 @@ use foyer_common::{
 };
 
 use crate::{
-    device::{Device, IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::{IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
     region::Region,
     serde::{EntryDeserializer, EntryHeader},
@@ -36,22 +36,16 @@ pub struct EntryInfo {
 }
 
 #[derive(Debug)]
-struct CachedDeviceReader<D>
-where
-    D: Device,
-{
-    region: Region<D>,
+struct CachedDeviceReader {
+    region: Region,
     offset: u64,
     buffer: IoBuffer,
 }
 
-impl<D> CachedDeviceReader<D>
-where
-    D: Device,
-{
+impl CachedDeviceReader {
     const IO_SIZE_HINT: usize = 16 * 1024;
 
-    fn new(region: Region<D>) -> Self {
+    fn new(region: Region) -> Self {
         Self {
             region,
             offset: 0,
@@ -85,20 +79,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct RegionScanner<D>
-where
-    D: Device,
-{
-    region: Region<D>,
+pub struct RegionScanner {
+    region: Region,
     offset: u64,
-    cache: CachedDeviceReader<D>,
+    cache: CachedDeviceReader,
 }
 
-impl<D> RegionScanner<D>
-where
-    D: Device,
-{
-    pub fn new(region: Region<D>) -> Self {
+impl RegionScanner {
+    pub fn new(region: Region) -> Self {
         let cache = CachedDeviceReader::new(region.clone());
         Self {
             region,

@@ -30,11 +30,11 @@ use crate::{
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
     small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
     storage::{
-        either::{Either, Selection, Selector},
+        either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
         runtime::{Runtime, RuntimeStoreConfig},
     },
-    DeviceStats, DirectFsDevice, EnqueueHandle, Storage,
+    DeviceStats, EnqueueHandle, Storage,
 };
 
 pub struct SizeSelector<K>
@@ -56,6 +56,18 @@ where
     }
 }
 
+impl<K> SizeSelector<K>
+where
+    K: StorageKey,
+{
+    pub fn new(threshold: usize) -> Self {
+        Self {
+            threshold,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<K> Selector for SizeSelector<K>
 where
     K: StorageKey,
@@ -71,41 +83,38 @@ where
     }
 }
 
-enum LoadFuture<F1, F2, F3, F4, F5, F6> {
+enum LoadFuture<F1, F2, F3, F4, F5, F6, F7> {
     Noop(F1),
-    LargeDirectFs(F2),
-    LargeRuntimeDirectFs(F3),
-    SmallDirectFs(F4),
-    SmallRuntimeDirectFs(F5),
-    CombinedRuntimeDirectFs(F6),
+    Large(F2),
+    LargeRuntime(F3),
+    Small(F4),
+    SmallRuntime(F5),
+    Combined(F6),
+    CombinedRuntime(F7),
 }
 
-impl<F1, F2, F3, F4, F5, F6> LoadFuture<F1, F2, F3, F4, F5, F6> {
+impl<F1, F2, F3, F4, F5, F6, F7> LoadFuture<F1, F2, F3, F4, F5, F6, F7> {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     pub fn as_pin_mut(
         self: Pin<&mut Self>,
-    ) -> LoadFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>, Pin<&mut F6>> {
+    ) -> LoadFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>, Pin<&mut F6>, Pin<&mut F7>>
+    {
         unsafe {
             match *Pin::get_unchecked_mut(self) {
                 LoadFuture::Noop(ref mut inner) => LoadFuture::Noop(Pin::new_unchecked(inner)),
-                LoadFuture::LargeDirectFs(ref mut inner) => LoadFuture::LargeDirectFs(Pin::new_unchecked(inner)),
-                LoadFuture::LargeRuntimeDirectFs(ref mut inner) => {
-                    LoadFuture::LargeRuntimeDirectFs(Pin::new_unchecked(inner))
-                }
-                LoadFuture::SmallDirectFs(ref mut inner) => LoadFuture::SmallDirectFs(Pin::new_unchecked(inner)),
-                LoadFuture::SmallRuntimeDirectFs(ref mut inner) => {
-                    LoadFuture::SmallRuntimeDirectFs(Pin::new_unchecked(inner))
-                }
-                LoadFuture::CombinedRuntimeDirectFs(ref mut inner) => {
-                    LoadFuture::CombinedRuntimeDirectFs(Pin::new_unchecked(inner))
-                }
+                LoadFuture::Large(ref mut inner) => LoadFuture::Large(Pin::new_unchecked(inner)),
+                LoadFuture::LargeRuntime(ref mut inner) => LoadFuture::LargeRuntime(Pin::new_unchecked(inner)),
+                LoadFuture::Small(ref mut inner) => LoadFuture::Small(Pin::new_unchecked(inner)),
+                LoadFuture::SmallRuntime(ref mut inner) => LoadFuture::SmallRuntime(Pin::new_unchecked(inner)),
+                LoadFuture::Combined(ref mut inner) => LoadFuture::Combined(Pin::new_unchecked(inner)),
+                LoadFuture::CombinedRuntime(ref mut inner) => LoadFuture::CombinedRuntime(Pin::new_unchecked(inner)),
             }
         }
     }
 }
 
-impl<F1, F2, F3, F4, F5, F6> Future for LoadFuture<F1, F2, F3, F4, F5, F6>
+impl<F1, F2, F3, F4, F5, F6, F7> Future for LoadFuture<F1, F2, F3, F4, F5, F6, F7>
 where
     F1: Future,
     F2: Future<Output = F1::Output>,
@@ -113,17 +122,19 @@ where
     F4: Future<Output = F1::Output>,
     F5: Future<Output = F1::Output>,
     F6: Future<Output = F1::Output>,
+    F7: Future<Output = F1::Output>,
 {
     type Output = F1::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.as_pin_mut() {
             LoadFuture::Noop(future) => future.poll(cx),
-            LoadFuture::LargeDirectFs(future) => future.poll(cx),
-            LoadFuture::LargeRuntimeDirectFs(future) => future.poll(cx),
-            LoadFuture::SmallDirectFs(future) => future.poll(cx),
-            LoadFuture::SmallRuntimeDirectFs(future) => future.poll(cx),
-            LoadFuture::CombinedRuntimeDirectFs(future) => future.poll(cx),
+            LoadFuture::Large(future) => future.poll(cx),
+            LoadFuture::LargeRuntime(future) => future.poll(cx),
+            LoadFuture::Small(future) => future.poll(cx),
+            LoadFuture::SmallRuntime(future) => future.poll(cx),
+            LoadFuture::Combined(future) => future.poll(cx),
+            LoadFuture::CombinedRuntime(future) => future.poll(cx),
         }
     }
 }
@@ -137,23 +148,14 @@ where
     S: HashBuilder + Debug,
 {
     Noop,
-    LargeDirectFs(GenericLargeStorageConfig<K, V, S, DirectFsDevice>),
-    LargeRuntimeDirectFs(RuntimeStoreConfig<GenericLargeStorage<K, V, S, DirectFsDevice>>),
-    #[allow(unused)]
-    SmallDirectFs(GenericSmallStorageConfig<K, V, S, DirectFsDevice>),
-    #[allow(unused)]
-    SmallRuntimeDirectFs(RuntimeStoreConfig<GenericSmallStorage<K, V, S, DirectFsDevice>>),
-    #[allow(unused)]
-    CombinedRuntimeDirectFs(
+    Large(GenericLargeStorageConfig<K, V, S>),
+    LargeRuntime(RuntimeStoreConfig<GenericLargeStorage<K, V, S>>),
+    Small(GenericSmallStorageConfig<K, V, S>),
+    SmallRuntime(RuntimeStoreConfig<GenericSmallStorage<K, V, S>>),
+    Combined(EitherConfig<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>),
+    CombinedRuntime(
         RuntimeStoreConfig<
-            Either<
-                K,
-                V,
-                S,
-                GenericLargeStorage<K, V, S, DirectFsDevice>,
-                GenericSmallStorage<K, V, S, DirectFsDevice>,
-                SizeSelector<K>,
-            >,
+            Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>,
         >,
     ),
 }
@@ -167,11 +169,12 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Noop => write!(f, "Noop"),
-            Self::LargeDirectFs(config) => f.debug_tuple("LargeDirectFs").field(config).finish(),
-            Self::LargeRuntimeDirectFs(config) => f.debug_tuple("LargeRuntimeDirectFs").field(config).finish(),
-            Self::SmallDirectFs(config) => f.debug_tuple("SmallDirectFs").field(config).finish(),
-            Self::SmallRuntimeDirectFs(config) => f.debug_tuple("SmallRuntimeDirectFs").field(config).finish(),
-            Self::CombinedRuntimeDirectFs(config) => f.debug_tuple("CombinedRuntimeDirectFs").field(config).finish(),
+            Self::Large(config) => f.debug_tuple("Large").field(config).finish(),
+            Self::LargeRuntime(config) => f.debug_tuple("LargeRuntime").field(config).finish(),
+            Self::Small(config) => f.debug_tuple("Small").field(config).finish(),
+            Self::SmallRuntime(config) => f.debug_tuple("SmallRuntime").field(config).finish(),
+            Self::Combined(config) => f.debug_tuple("Combined").field(config).finish(),
+            Self::CombinedRuntime(config) => f.debug_tuple("CombinedRuntime").field(config).finish(),
         }
     }
 }
@@ -186,26 +189,19 @@ where
 {
     /// No-op disk cache.
     Noop(Noop<K, V, S>),
-    /// Large object disk cache with direct fs device.
-    LargeDirectFs(GenericLargeStorage<K, V, S, DirectFsDevice>),
-    /// Large object disk cache with direct fs device and a dedicated runtime.
-    LargeRuntimeDirectFs(Runtime<GenericLargeStorage<K, V, S, DirectFsDevice>>),
-    /// Small object disk cache with direct fs device.
-    SmallDirectFs(GenericSmallStorage<K, V, S, DirectFsDevice>),
-    /// Small object disk cache with direct fs device and a dedicated runtime.
-    SmallRuntimeDirectFs(Runtime<GenericSmallStorage<K, V, S, DirectFsDevice>>),
-    /// Combined large and small object disk cache with direct fs device and a dedicated runtime.
-    CombinedRuntimeDirectFs(
-        Runtime<
-            Either<
-                K,
-                V,
-                S,
-                GenericLargeStorage<K, V, S, DirectFsDevice>,
-                GenericSmallStorage<K, V, S, DirectFsDevice>,
-                SizeSelector<K>,
-            >,
-        >,
+    /// Large object disk cache.
+    Large(GenericLargeStorage<K, V, S>),
+    /// Large object disk cache with a dedicated runtime.
+    LargeRuntime(Runtime<GenericLargeStorage<K, V, S>>),
+    /// Small object disk cache.
+    Small(GenericSmallStorage<K, V, S>),
+    /// Small object disk cache with a dedicated runtime.
+    SmallRuntime(Runtime<GenericSmallStorage<K, V, S>>),
+    /// Combined large and small object disk cache.
+    Combined(Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>),
+    /// Combined large and small object disk cache with a dedicated runtime.
+    CombinedRuntime(
+        Runtime<Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>>,
     ),
 }
 
@@ -218,11 +214,12 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Noop(storage) => f.debug_tuple("Noop").field(storage).finish(),
-            Self::LargeDirectFs(storage) => f.debug_tuple("LargeDirectFs").field(storage).finish(),
-            Self::LargeRuntimeDirectFs(storage) => f.debug_tuple("LargeRuntimeDirectFs").field(storage).finish(),
-            Self::SmallDirectFs(storage) => f.debug_tuple("SmallDirectFs").field(storage).finish(),
-            Self::SmallRuntimeDirectFs(storage) => f.debug_tuple("SmallRuntimeDirectFs").field(storage).finish(),
-            Self::CombinedRuntimeDirectFs(storage) => f.debug_tuple("CombinedRuntimeDirectFs").field(storage).finish(),
+            Self::Large(storage) => f.debug_tuple("Large").field(storage).finish(),
+            Self::LargeRuntime(storage) => f.debug_tuple("LargeRuntime").field(storage).finish(),
+            Self::Small(storage) => f.debug_tuple("Small").field(storage).finish(),
+            Self::SmallRuntime(storage) => f.debug_tuple("SmallRuntime").field(storage).finish(),
+            Self::Combined(storage) => f.debug_tuple("Combined").field(storage).finish(),
+            Self::CombinedRuntime(storage) => f.debug_tuple("CombinedRuntime").field(storage).finish(),
         }
     }
 }
@@ -236,11 +233,12 @@ where
     fn clone(&self) -> Self {
         match self {
             Self::Noop(storage) => Self::Noop(storage.clone()),
-            Self::LargeDirectFs(storage) => Self::LargeDirectFs(storage.clone()),
-            Self::LargeRuntimeDirectFs(storage) => Self::LargeRuntimeDirectFs(storage.clone()),
-            Self::SmallDirectFs(storage) => Self::SmallDirectFs(storage.clone()),
-            Self::SmallRuntimeDirectFs(storage) => Self::SmallRuntimeDirectFs(storage.clone()),
-            Self::CombinedRuntimeDirectFs(storage) => Self::CombinedRuntimeDirectFs(storage.clone()),
+            Self::Large(storage) => Self::Large(storage.clone()),
+            Self::LargeRuntime(storage) => Self::LargeRuntime(storage.clone()),
+            Self::Small(storage) => Self::Small(storage.clone()),
+            Self::SmallRuntime(storage) => Self::SmallRuntime(storage.clone()),
+            Self::Combined(storage) => Self::Combined(storage.clone()),
+            Self::CombinedRuntime(storage) => Self::CombinedRuntime(storage.clone()),
         }
     }
 }
@@ -259,35 +257,24 @@ where
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
             EngineConfig::Noop => Ok(Self::Noop(Noop::open(()).await?)),
-            EngineConfig::LargeDirectFs(config) => Ok(Self::LargeDirectFs(GenericLargeStorage::open(config).await?)),
-            EngineConfig::LargeRuntimeDirectFs(config) => Ok(Self::LargeRuntimeDirectFs(Runtime::open(config).await?)),
-            EngineConfig::SmallDirectFs(config) => Ok(Self::SmallDirectFs(GenericSmallStorage::open(config).await?)),
-            EngineConfig::SmallRuntimeDirectFs(config) => Ok(Self::SmallRuntimeDirectFs(Runtime::open(config).await?)),
-            EngineConfig::CombinedRuntimeDirectFs(config) => {
-                Ok(Self::CombinedRuntimeDirectFs(Runtime::open(config).await?))
-            }
+            EngineConfig::Large(config) => Ok(Self::Large(GenericLargeStorage::open(config).await?)),
+            EngineConfig::LargeRuntime(config) => Ok(Self::LargeRuntime(Runtime::open(config).await?)),
+            EngineConfig::Small(config) => Ok(Self::Small(GenericSmallStorage::open(config).await?)),
+            EngineConfig::SmallRuntime(config) => Ok(Self::SmallRuntime(Runtime::open(config).await?)),
+            EngineConfig::Combined(config) => Ok(Self::Combined(Either::open(config).await?)),
+            EngineConfig::CombinedRuntime(config) => Ok(Self::CombinedRuntime(Runtime::open(config).await?)),
         }
     }
 
     async fn close(&self) -> Result<()> {
         match self {
             Engine::Noop(storage) => storage.close().await,
-            Engine::LargeDirectFs(storage) => storage.close().await,
-            Engine::LargeRuntimeDirectFs(storage) => storage.close().await,
-            Engine::SmallDirectFs(storage) => storage.close().await,
-            Engine::SmallRuntimeDirectFs(storage) => storage.close().await,
-            Engine::CombinedRuntimeDirectFs(storage) => storage.close().await,
-        }
-    }
-
-    fn pick(&self, key: &Self::Key) -> bool {
-        match self {
-            Engine::Noop(storage) => storage.pick(key),
-            Engine::LargeDirectFs(storage) => storage.pick(key),
-            Engine::LargeRuntimeDirectFs(storage) => storage.pick(key),
-            Engine::SmallDirectFs(storage) => storage.pick(key),
-            Engine::SmallRuntimeDirectFs(storage) => storage.pick(key),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.pick(key),
+            Engine::Large(storage) => storage.close().await,
+            Engine::LargeRuntime(storage) => storage.close().await,
+            Engine::Small(storage) => storage.close().await,
+            Engine::SmallRuntime(storage) => storage.close().await,
+            Engine::Combined(storage) => storage.close().await,
+            Engine::CombinedRuntime(storage) => storage.close().await,
         }
     }
 
@@ -298,11 +285,12 @@ where
     ) -> EnqueueHandle {
         match self {
             Engine::Noop(storage) => storage.enqueue(entry, force),
-            Engine::LargeDirectFs(storage) => storage.enqueue(entry, force),
-            Engine::LargeRuntimeDirectFs(storage) => storage.enqueue(entry, force),
-            Engine::SmallDirectFs(storage) => storage.enqueue(entry, force),
-            Engine::SmallRuntimeDirectFs(storage) => storage.enqueue(entry, force),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.enqueue(entry, force),
+            Engine::Large(storage) => storage.enqueue(entry, force),
+            Engine::LargeRuntime(storage) => storage.enqueue(entry, force),
+            Engine::Small(storage) => storage.enqueue(entry, force),
+            Engine::SmallRuntime(storage) => storage.enqueue(entry, force),
+            Engine::Combined(storage) => storage.enqueue(entry, force),
+            Engine::CombinedRuntime(storage) => storage.enqueue(entry, force),
         }
     }
 
@@ -313,11 +301,12 @@ where
     {
         match self {
             Engine::Noop(storage) => LoadFuture::Noop(storage.load(key)),
-            Engine::LargeDirectFs(storage) => LoadFuture::LargeDirectFs(storage.load(key)),
-            Engine::LargeRuntimeDirectFs(storage) => LoadFuture::LargeRuntimeDirectFs(storage.load(key)),
-            Engine::SmallDirectFs(storage) => LoadFuture::SmallDirectFs(storage.load(key)),
-            Engine::SmallRuntimeDirectFs(storage) => LoadFuture::SmallRuntimeDirectFs(storage.load(key)),
-            Engine::CombinedRuntimeDirectFs(storage) => LoadFuture::CombinedRuntimeDirectFs(storage.load(key)),
+            Engine::Large(storage) => LoadFuture::Large(storage.load(key)),
+            Engine::LargeRuntime(storage) => LoadFuture::LargeRuntime(storage.load(key)),
+            Engine::Small(storage) => LoadFuture::Small(storage.load(key)),
+            Engine::SmallRuntime(storage) => LoadFuture::SmallRuntime(storage.load(key)),
+            Engine::Combined(storage) => LoadFuture::Combined(storage.load(key)),
+            Engine::CombinedRuntime(storage) => LoadFuture::CombinedRuntime(storage.load(key)),
         }
     }
 
@@ -328,11 +317,12 @@ where
     {
         match self {
             Engine::Noop(storage) => storage.delete(key),
-            Engine::LargeDirectFs(storage) => storage.delete(key),
-            Engine::LargeRuntimeDirectFs(storage) => storage.delete(key),
-            Engine::SmallDirectFs(storage) => storage.delete(key),
-            Engine::SmallRuntimeDirectFs(storage) => storage.delete(key),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.delete(key),
+            Engine::Large(storage) => storage.delete(key),
+            Engine::LargeRuntime(storage) => storage.delete(key),
+            Engine::Small(storage) => storage.delete(key),
+            Engine::SmallRuntime(storage) => storage.delete(key),
+            Engine::Combined(storage) => storage.delete(key),
+            Engine::CombinedRuntime(storage) => storage.delete(key),
         }
     }
 
@@ -343,55 +333,60 @@ where
     {
         match self {
             Engine::Noop(storage) => storage.may_contains(key),
-            Engine::LargeDirectFs(storage) => storage.may_contains(key),
-            Engine::LargeRuntimeDirectFs(storage) => storage.may_contains(key),
-            Engine::SmallDirectFs(storage) => storage.may_contains(key),
-            Engine::SmallRuntimeDirectFs(storage) => storage.may_contains(key),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.may_contains(key),
+            Engine::Large(storage) => storage.may_contains(key),
+            Engine::LargeRuntime(storage) => storage.may_contains(key),
+            Engine::Small(storage) => storage.may_contains(key),
+            Engine::SmallRuntime(storage) => storage.may_contains(key),
+            Engine::Combined(storage) => storage.may_contains(key),
+            Engine::CombinedRuntime(storage) => storage.may_contains(key),
         }
     }
 
     async fn destroy(&self) -> Result<()> {
         match self {
             Engine::Noop(storage) => storage.destroy().await,
-            Engine::LargeDirectFs(storage) => storage.destroy().await,
-            Engine::LargeRuntimeDirectFs(storage) => storage.destroy().await,
-            Engine::SmallDirectFs(storage) => storage.destroy().await,
-            Engine::SmallRuntimeDirectFs(storage) => storage.destroy().await,
-            Engine::CombinedRuntimeDirectFs(storage) => storage.destroy().await,
+            Engine::Large(storage) => storage.destroy().await,
+            Engine::LargeRuntime(storage) => storage.destroy().await,
+            Engine::Small(storage) => storage.destroy().await,
+            Engine::SmallRuntime(storage) => storage.destroy().await,
+            Engine::Combined(storage) => storage.destroy().await,
+            Engine::CombinedRuntime(storage) => storage.destroy().await,
         }
     }
 
     fn stats(&self) -> Arc<DeviceStats> {
         match self {
             Engine::Noop(storage) => storage.stats(),
-            Engine::LargeDirectFs(storage) => storage.stats(),
-            Engine::LargeRuntimeDirectFs(storage) => storage.stats(),
-            Engine::SmallDirectFs(storage) => storage.stats(),
-            Engine::SmallRuntimeDirectFs(storage) => storage.stats(),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.stats(),
+            Engine::Large(storage) => storage.stats(),
+            Engine::LargeRuntime(storage) => storage.stats(),
+            Engine::Small(storage) => storage.stats(),
+            Engine::SmallRuntime(storage) => storage.stats(),
+            Engine::Combined(storage) => storage.stats(),
+            Engine::CombinedRuntime(storage) => storage.stats(),
         }
     }
 
     async fn wait(&self) -> Result<()> {
         match self {
             Engine::Noop(storage) => storage.wait().await,
-            Engine::LargeDirectFs(storage) => storage.wait().await,
-            Engine::LargeRuntimeDirectFs(storage) => storage.wait().await,
-            Engine::SmallDirectFs(storage) => storage.wait().await,
-            Engine::SmallRuntimeDirectFs(storage) => storage.wait().await,
-            Engine::CombinedRuntimeDirectFs(storage) => storage.wait().await,
+            Engine::Large(storage) => storage.wait().await,
+            Engine::LargeRuntime(storage) => storage.wait().await,
+            Engine::Small(storage) => storage.wait().await,
+            Engine::SmallRuntime(storage) => storage.wait().await,
+            Engine::Combined(storage) => storage.wait().await,
+            Engine::CombinedRuntime(storage) => storage.wait().await,
         }
     }
 
     fn runtime(&self) -> &tokio::runtime::Handle {
         match self {
             Engine::Noop(storage) => storage.runtime(),
-            Engine::LargeDirectFs(storage) => storage.runtime(),
-            Engine::LargeRuntimeDirectFs(storage) => storage.runtime(),
-            Engine::SmallDirectFs(storage) => storage.runtime(),
-            Engine::SmallRuntimeDirectFs(storage) => storage.runtime(),
-            Engine::CombinedRuntimeDirectFs(storage) => storage.runtime(),
+            Engine::Large(storage) => storage.runtime(),
+            Engine::LargeRuntime(storage) => storage.runtime(),
+            Engine::Small(storage) => storage.runtime(),
+            Engine::SmallRuntime(storage) => storage.runtime(),
+            Engine::Combined(storage) => storage.runtime(),
+            Engine::CombinedRuntime(storage) => storage.runtime(),
         }
     }
 }

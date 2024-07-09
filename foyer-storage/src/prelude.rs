@@ -18,7 +18,7 @@ pub use crate::{
         direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
         monitor::DeviceStats,
-        Device, DeviceExt, DeviceOptions,
+        Dev, DevExt, DevOptions,
     },
     error::{Error, Result},
     large::recover::RecoverMode,
@@ -31,6 +31,6 @@ pub use crate::{
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
         EnqueueHandle, Storage,
     },
-    store::{DeviceConfig, Store, StoreBuilder},
+    store::{CombinedConfig, DeviceConfig, Store, StoreBuilder},
     tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
 };
