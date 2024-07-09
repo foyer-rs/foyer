@@ -31,7 +31,7 @@ use crate::error::{Error, Result};
 use crate::large::scanner::{EntryInfo, RegionScanner};
 use crate::{AtomicSequence, Sequence};
 
-use super::generic::GenericStoreConfig;
+use super::generic::GenericLargeStorageConfig;
 use super::indexer::EntryAddress;
 use super::indexer::Indexer;
 use crate::device::{Device, DeviceExt, RegionId};
@@ -57,7 +57,7 @@ pub struct RecoverRunner;
 
 impl RecoverRunner {
     pub async fn run<K, V, S, D>(
-        config: &GenericStoreConfig<K, V, S, D>,
+        config: &GenericLargeStorageConfig<K, V, S, D>,
         device: Monitored<D>,
         sequence: &AtomicSequence,
         indexer: &Indexer,

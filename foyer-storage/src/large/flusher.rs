@@ -41,7 +41,7 @@ use tokio::{
 use crate::{Device, DeviceExt, Sequence};
 
 use super::{
-    generic::GenericStoreConfig,
+    generic::GenericLargeStorageConfig,
     indexer::{EntryAddress, Indexer},
     reclaimer::Reinsertion,
 };
@@ -182,7 +182,7 @@ where
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::too_many_arguments)]
     pub async fn open<D>(
-        config: &GenericStoreConfig<K, V, S, D>,
+        config: &GenericLargeStorageConfig<K, V, S, D>,
         indexer: Indexer,
         region_manager: RegionManager<D>,
         device: Monitored<D>,

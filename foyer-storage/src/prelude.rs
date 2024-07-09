@@ -31,6 +31,6 @@ pub use crate::{
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
         EnqueueHandle, Storage,
     },
-    store::{DeviceConfig, Store, StoreBuilder, StoreConfig},
+    store::{DeviceConfig, Store, StoreBuilder},
     tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
 };

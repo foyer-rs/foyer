@@ -12,89 +12,40 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    future::Future,
-    hash::Hash,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-
-use ahash::RandomState;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::{Cache, CacheEntry};
-use tokio::runtime::Handle;
-
-use super::{
-    device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
+use crate::{
+    compress::Compression,
+    device::{direct_fs::DirectFsDeviceOptions, monitor::DeviceStats},
+    engine::{Engine, EngineConfig},
+    error::Result,
+    large::{generic::GenericLargeStorageConfig, recover::RecoverMode},
+    picker::{
+        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
+        AdmissionPicker, EvictionPicker, ReinsertionPicker,
+    },
+    statistics::Statistics,
     storage::{
-        noop::NoopStore,
-        runtime::{Runtime, RuntimeConfig, RuntimeStoreConfig},
+        runtime::{RuntimeConfig, RuntimeStoreConfig},
         EnqueueHandle, Storage,
     },
     tombstone::TombstoneLogConfig,
 };
-
-use crate::{
-    compress::Compression,
-    large::{
-        generic::{GenericStore, GenericStoreConfig},
-        recover::RecoverMode,
-    },
-    picker::{
-        utils::{AdmitAllPicker, RejectAllPicker},
-        AdmissionPicker, EvictionPicker, ReinsertionPicker,
-    },
-    FifoPicker, InvalidRatioPicker,
-};
-
-use crate::error::Result;
-
-/// The configurations for the disk cache.
-pub enum StoreConfig<K, V, S = RandomState>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    /// The configurations for the no-op disk cache.
-    Noop,
-    /// The configurations for the disk cache with direct fs device.
-    DirectFs(GenericStoreConfig<K, V, S, DirectFsDevice>),
-    /// The configurations for the disk cache with direct fs device and a dedecated runtime.
-    RuntimeDirectFs(RuntimeStoreConfig<GenericStore<K, V, S, DirectFsDevice>>),
-}
-
-impl<K, V, S> Debug for StoreConfig<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Noop => f.debug_tuple("None").finish(),
-            Self::DirectFs(config) => f.debug_tuple("DirectFs").field(config).finish(),
-            Self::RuntimeDirectFs(config) => f.debug_tuple("RuntimeDirectFs").field(config).finish(),
-        }
-    }
-}
+use ahash::RandomState;
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_memory::{Cache, CacheEntry};
+use futures::Future;
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use tokio::runtime::Handle;
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
-pub enum Store<K, V, S = RandomState>
+pub struct Store<K, V, S = RandomState>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// No-op disk cache.
-    Noop(NoopStore<K, V, S>),
-    /// Disk cache with direct fs device.
-    DirectFs(GenericStore<K, V, S, DirectFsDevice>),
-    /// Disk cache with direct fs device and a dedecated runtime.
-    RuntimeDirectFs(Runtime<GenericStore<K, V, S, DirectFsDevice>>),
+    engine: Engine<K, V, S>,
+    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    statistics: Arc<Statistics>,
 }
 
 impl<K, V, S> Debug for Store<K, V, S>
@@ -104,11 +55,11 @@ where
     S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Noop(store) => f.debug_tuple("None").field(store).finish(),
-            Self::DirectFs(store) => f.debug_tuple("DirectFs").field(store).finish(),
-            Self::RuntimeDirectFs(store) => f.debug_tuple("RuntimeDirectFs").field(store).finish(),
-        }
+        f.debug_struct("Store")
+            .field("engine", &self.engine)
+            .field("admission_picker", &self.admission_picker)
+            .field("statistics", &self.statistics)
+            .finish()
     }
 }
 
@@ -119,10 +70,10 @@ where
     S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
-        match self {
-            Self::Noop(store) => Self::Noop(store.clone()),
-            Self::DirectFs(store) => Self::DirectFs(store.clone()),
-            Self::RuntimeDirectFs(store) => Self::RuntimeDirectFs(store.clone()),
+        Self {
+            engine: self.engine.clone(),
+            admission_picker: self.admission_picker.clone(),
+            statistics: self.statistics.clone(),
         }
     }
 }
@@ -133,42 +84,21 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Open the disk cache with the given configurations.
-    pub async fn open(config: StoreConfig<K, V, S>) -> Result<Self> {
-        match config {
-            StoreConfig::Noop => Ok(Self::Noop(NoopStore::open(()).await?)),
-            StoreConfig::DirectFs(config) => Ok(Self::DirectFs(GenericStore::open(config).await?)),
-            StoreConfig::RuntimeDirectFs(config) => Ok(Self::RuntimeDirectFs(Runtime::open(config).await?)),
-        }
-    }
-
     /// Close the disk cache gracefully.
     ///
     /// `close` will wait for all ongoing flush and reclaim tasks to finish.
     pub async fn close(&self) -> Result<()> {
-        match self {
-            Store::Noop(store) => store.close().await,
-            Store::DirectFs(store) => store.close().await,
-            Store::RuntimeDirectFs(store) => store.close().await,
-        }
+        self.engine.close().await
     }
 
     /// Return if the given key can be picked by the admission picker.
     pub fn pick(&self, key: &K) -> bool {
-        match self {
-            Store::Noop(store) => store.pick(key),
-            Store::DirectFs(store) => store.pick(key),
-            Store::RuntimeDirectFs(store) => store.pick(key),
-        }
+        self.admission_picker.pick(&self.statistics, key)
     }
 
     /// Push a in-memory cache entry to the disk cache write queue.
-    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> super::storage::EnqueueHandle {
-        match self {
-            Store::Noop(store) => store.enqueue(entry, force),
-            Store::DirectFs(store) => store.enqueue(entry, force),
-            Store::RuntimeDirectFs(store) => store.enqueue(entry, force),
-        }
+    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
+        self.engine.enqueue(entry, force)
     }
 
     /// Load a cache entry from the disk cache.
@@ -180,11 +110,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        match self {
-            Store::Noop(store) => LoadFuture::Noop(store.load(key)),
-            Store::DirectFs(store) => LoadFuture::DirectFs(store.load(key)),
-            Store::RuntimeDirectFs(store) => LoadFuture::RuntimeDirectFs(store.load(key)),
-        }
+        self.engine.load(key)
     }
 
     /// Delete the cache entry with the given key from the disk cache.
@@ -193,11 +119,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self {
-            Store::Noop(store) => store.delete(key),
-            Store::DirectFs(store) => store.delete(key),
-            Store::RuntimeDirectFs(store) => store.delete(key),
-        }
+        self.engine.delete(key)
     }
 
     /// Check if the disk cache contains a cached entry with the given key.
@@ -208,86 +130,29 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self {
-            Store::Noop(store) => store.may_contains(key),
-            Store::DirectFs(store) => store.may_contains(key),
-            Store::RuntimeDirectFs(store) => store.may_contains(key),
-        }
+        self.engine.may_contains(key)
     }
 
     /// Delete all cached entries of the disk cache.
     pub async fn destroy(&self) -> Result<()> {
-        match self {
-            Store::Noop(store) => store.destroy().await,
-            Store::DirectFs(store) => store.destroy().await,
-            Store::RuntimeDirectFs(store) => store.destroy().await,
-        }
+        self.engine.destroy().await
     }
 
     /// Get the statistics information of the disk cache.
-    pub fn stats(&self) -> Arc<crate::device::monitor::DeviceStats> {
-        match self {
-            Store::Noop(store) => store.stats(),
-            Store::DirectFs(store) => store.stats(),
-            Store::RuntimeDirectFs(store) => store.stats(),
-        }
+    pub fn stats(&self) -> Arc<DeviceStats> {
+        self.engine.stats()
     }
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
     pub async fn wait(&self) -> Result<()> {
-        match self {
-            Store::Noop(store) => store.wait().await,
-            Store::DirectFs(store) => store.wait().await,
-            Store::RuntimeDirectFs(store) => store.wait().await,
-        }
+        self.engine.wait().await
     }
 
     /// Get disk cache runtime handle.
     ///
     /// The runtime is determined during the opening phase.
     pub fn runtime(&self) -> &Handle {
-        match self {
-            Store::Noop(store) => store.runtime(),
-            Store::DirectFs(store) => store.runtime(),
-            Store::RuntimeDirectFs(store) => store.runtime(),
-        }
-    }
-}
-
-enum LoadFuture<F1, F2, F3> {
-    Noop(F1),
-    DirectFs(F2),
-    RuntimeDirectFs(F3),
-}
-
-impl<F1, F2, F3> LoadFuture<F1, F2, F3> {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
-    pub fn as_pin_mut(self: Pin<&mut Self>) -> LoadFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>> {
-        unsafe {
-            match *Pin::get_unchecked_mut(self) {
-                LoadFuture::Noop(ref mut inner) => LoadFuture::Noop(Pin::new_unchecked(inner)),
-                LoadFuture::DirectFs(ref mut inner) => LoadFuture::DirectFs(Pin::new_unchecked(inner)),
-                LoadFuture::RuntimeDirectFs(ref mut inner) => LoadFuture::RuntimeDirectFs(Pin::new_unchecked(inner)),
-            }
-        }
-    }
-}
-
-impl<F1, F2, F3> Future for LoadFuture<F1, F2, F3>
-where
-    F1: Future,
-    F2: Future<Output = F1::Output>,
-    F3: Future<Output = F1::Output>,
-{
-    type Output = F1::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.as_pin_mut() {
-            LoadFuture::Noop(future) => future.poll(cx),
-            LoadFuture::DirectFs(future) => future.poll(cx),
-            LoadFuture::RuntimeDirectFs(future) => future.poll(cx),
-        }
+        self.engine.runtime()
     }
 }
 
@@ -521,17 +386,17 @@ where
     pub async fn build(self) -> Result<Store<K, V, S>> {
         let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
 
-        if matches!(self.device_config, DeviceConfig::None) {
-            tracing::warn!(
-                "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
-            );
-            return Store::open(StoreConfig::Noop).await;
-        }
+        let admission_picker = self.admission_picker.clone();
 
-        match (self.device_config, self.runtime_config) {
-            (DeviceConfig::None, _) => unreachable!(),
+        let engine = match (self.device_config, self.runtime_config) {
+            (DeviceConfig::None, _) => {
+                tracing::warn!(
+                    "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
+                );
+                Engine::open(EngineConfig::Noop).await?
+            }
             (DeviceConfig::DirectFs(device_config), None) => {
-                Store::open(StoreConfig::DirectFs(GenericStoreConfig {
+                Engine::open(EngineConfig::LargeDirectFs(GenericLargeStorageConfig {
                     memory: self.memory,
                     name: self.name,
                     device_config,
@@ -549,11 +414,11 @@ where
                     tombstone_log_config: self.tombstone_log_config,
                     buffer_threshold: self.buffer_threshold,
                 }))
-                .await
+                .await?
             }
             (DeviceConfig::DirectFs(device_config), Some(runtime_config)) => {
-                Store::open(StoreConfig::RuntimeDirectFs(RuntimeStoreConfig {
-                    store_config: GenericStoreConfig {
+                Engine::open(EngineConfig::LargeRuntimeDirectFs(RuntimeStoreConfig {
+                    store_config: GenericLargeStorageConfig {
                         memory: self.memory,
                         name: self.name,
                         device_config,
@@ -573,8 +438,14 @@ where
                     },
                     runtime_config,
                 }))
-                .await
+                .await?
             }
-        }
+        };
+
+        Ok(Store {
+            engine,
+            admission_picker,
+            statistics: Arc::<Statistics>::default(),
+        })
     }
 }

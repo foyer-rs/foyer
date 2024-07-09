@@ -63,7 +63,7 @@ use super::{
 
 use minitrace::prelude::*;
 
-pub struct GenericStoreConfig<K, V, S, D>
+pub struct GenericLargeStorageConfig<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -89,7 +89,7 @@ where
     pub tombstone_log_config: Option<TombstoneLogConfig>,
 }
 
-impl<K, V, S, D> Debug for GenericStoreConfig<K, V, S, D>
+impl<K, V, S, D> Debug for GenericLargeStorageConfig<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -118,7 +118,7 @@ where
     }
 }
 
-pub struct GenericStore<K, V, S, D>
+pub struct GenericLargeStorage<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -128,7 +128,7 @@ where
     inner: Arc<GenericStoreInner<K, V, S, D>>,
 }
 
-impl<K, V, S, D> Debug for GenericStore<K, V, S, D>
+impl<K, V, S, D> Debug for GenericLargeStorage<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -172,7 +172,7 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S, D> Clone for GenericStore<K, V, S, D>
+impl<K, V, S, D> Clone for GenericLargeStorage<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -186,26 +186,14 @@ where
     }
 }
 
-impl<K, V, S, D> GenericStore<K, V, S, Monitored<D>>
+impl<K, V, S, D> GenericLargeStorage<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     D: Device,
 {
-    pub fn device_stats(&self) -> &Arc<DeviceStats> {
-        self.inner.device.stat()
-    }
-}
-
-impl<K, V, S, D> GenericStore<K, V, S, D>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-    D: Device,
-{
-    async fn open(mut config: GenericStoreConfig<K, V, S, D>) -> Result<Self> {
+    async fn open(mut config: GenericLargeStorageConfig<K, V, S, D>) -> Result<Self> {
         let runtime = Handle::current();
 
         let metrics = Arc::new(Metrics::new(&config.name));
@@ -500,7 +488,7 @@ where
     }
 }
 
-impl<K, V, S, D> Storage for GenericStore<K, V, S, D>
+impl<K, V, S, D> Storage for GenericLargeStorage<K, V, S, D>
 where
     K: StorageKey,
     V: StorageValue,
@@ -510,7 +498,7 @@ where
     type Key = K;
     type Value = V;
     type BuildHasher = S;
-    type Config = GenericStoreConfig<K, V, S, D>;
+    type Config = GenericLargeStorageConfig<K, V, S, D>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -598,7 +586,7 @@ mod tests {
     async fn store_for_test(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
-    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
         store_for_test_with_admission_picker(memory, dir, Arc::<AdmitAllPicker<u64>>::default()).await
     }
 
@@ -606,8 +594,8 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         admission_picker: Arc<dyn AdmissionPicker<Key = u64>>,
-    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        let config = GenericStoreConfig {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
@@ -629,15 +617,15 @@ mod tests {
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
         };
-        GenericStore::open(config).await.unwrap()
+        GenericLargeStorage::open(config).await.unwrap()
     }
 
     async fn store_for_test_with_reinsertion_picker(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
-    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        let config = GenericStoreConfig {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
@@ -659,15 +647,15 @@ mod tests {
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
         };
-        GenericStore::open(config).await.unwrap()
+        GenericLargeStorage::open(config).await.unwrap()
     }
 
     async fn store_for_test_with_tombstone_log(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
-    ) -> GenericStore<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        let config = GenericStoreConfig {
+    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
             device_config: DirectFsDeviceOptions {
@@ -689,7 +677,7 @@ mod tests {
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_threshold: usize::MAX,
         };
-        GenericStore::open(config).await.unwrap()
+        GenericLargeStorage::open(config).await.unwrap()
     }
 
     #[test_log::test(tokio::test)]
