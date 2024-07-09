@@ -211,7 +211,7 @@ mod tests {
         compress::Compression,
         device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         large::{
-            generic::{GenericStore, GenericStoreConfig},
+            generic::{GenericLargeStorage, GenericLargeStorageConfig},
             recover::RecoverMode,
         },
         picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
@@ -230,8 +230,8 @@ mod tests {
     fn config_for_test(
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
-    ) -> GenericStoreConfig<u64, Vec<u8>, RandomState, DirectFsDevice> {
-        GenericStoreConfig {
+    ) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState, DirectFsDevice> {
+        GenericLargeStorageConfig {
             memory: memory.clone(),
             name: "test".to_string(),
             device_config: DirectFsDeviceOptions {
@@ -270,7 +270,7 @@ mod tests {
         let es = (0..100).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
         let config = config_for_test(&memory, dir);
-        let store = background.block_on(async move { GenericStore::open(config).await.unwrap() });
+        let store = background.block_on(async move { GenericLargeStorage::open(config).await.unwrap() });
 
         let fs = es.iter().cloned().map(|e| store.enqueue(e, false)).collect_vec();
         background.block_on(async { try_join_all(fs).await.unwrap() });

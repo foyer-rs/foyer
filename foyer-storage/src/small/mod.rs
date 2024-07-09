@@ -12,31 +12,4 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
-
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![warn(missing_docs)]
-
-mod compress;
-mod device;
-mod engine;
-mod error;
-mod large;
-mod picker;
-mod region;
-mod serde;
-mod small;
-mod statistics;
-mod storage;
-mod store;
-mod tombstone;
-
-mod prelude;
-pub use prelude::*;
-
-pub mod test_utils;
-
-use std::sync::atomic::AtomicU64;
-
-type Sequence = u64;
-type AtomicSequence = AtomicU64;
+pub mod generic;

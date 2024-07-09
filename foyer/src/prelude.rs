@@ -30,7 +30,7 @@ pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Device, DeviceExt, DeviceOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
     DirectFsDeviceOptionsBuilder, EnqueueHandle, EvictionPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker,
-    RecoverMode, ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, StoreConfig,
+    RecoverMode, ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder,
     TombstoneLogConfigBuilder,
 };
 
