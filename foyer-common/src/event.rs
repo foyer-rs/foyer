@@ -15,14 +15,15 @@
 use crate::code::{Key, Value};
 
 /// Trait for the customized event listener.
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(unused_variables)]
+
 pub trait EventListener: Send + Sync + 'static {
     /// Associated key type.
     type Key;
     /// Associated value type.
     type Value;
 
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(unused_variables)]
     /// Called when a cache entry is released from the in-memory cache.
     fn on_memory_release(&self, key: Self::Key, value: Self::Value)
     where

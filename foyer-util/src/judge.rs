@@ -43,8 +43,6 @@ impl Judges {
         }
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused)]
     pub fn get(&mut self, index: usize) -> bool {
         self.judge.get(index)
     }
