@@ -453,6 +453,7 @@ where
 
         let admission_picker = self.admission_picker.clone();
         let metrics = Arc::new(Metrics::new(&self.name));
+        let statistics = Arc::<Statistics>::default();
 
         let engine = match self.device_config {
             DeviceConfig::None => {
@@ -482,6 +483,7 @@ where
                             reinsertion_picker: self.reinsertion_picker,
                             tombstone_log_config: self.tombstone_log_config,
                             buffer_threshold: self.buffer_threshold,
+                            statistics: statistics.clone(),
                         }))
                         .await?
                     }
@@ -504,6 +506,7 @@ where
                                 reinsertion_picker: self.reinsertion_picker,
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
+                                statistics: statistics.clone(),
                             },
                             runtime_config,
                         }))
@@ -552,6 +555,7 @@ where
                                 reinsertion_picker: self.reinsertion_picker,
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
+                                statistics: statistics.clone(),
                             },
                         }))
                         .await?
@@ -585,6 +589,7 @@ where
                                     reinsertion_picker: self.reinsertion_picker,
                                     tombstone_log_config: self.tombstone_log_config,
                                     buffer_threshold: self.buffer_threshold,
+                                    statistics: statistics.clone(),
                                 },
                             },
                             runtime_config,
@@ -598,7 +603,7 @@ where
         Ok(Store {
             engine,
             admission_picker,
-            statistics: Arc::<Statistics>::default(),
+            statistics,
         })
     }
 }
