@@ -15,7 +15,7 @@
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use futures::future::try_join_all;
+use futures::{future::try_join_all, FutureExt};
 use tokio::{
     runtime::Handle,
     sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
@@ -32,7 +32,7 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    EnqueueHandle, Sequence,
+    Sequence, WaitHandle,
 };
 
 #[derive(Debug)]
@@ -198,7 +198,7 @@ where
                 };
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
                 let (tx, rx) = oneshot::channel();
-                let future = EnqueueHandle::new(rx);
+                let future = WaitHandle::new(rx.map(|recv| recv.unwrap()));
                 flusher.submit(Submission::Reinsertion {
                     reinsertion: Reinsertion {
                         hash: info.hash,

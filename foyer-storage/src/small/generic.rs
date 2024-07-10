@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.use std::marker::PhantomData;
 
-// FIXME: REMOVE ME!!!
-#![allow(unused)]
-
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
@@ -23,11 +20,11 @@ use tokio::sync::oneshot;
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use crate::{
-    device::{Dev, IoBuffer},
+    device::IoBuffer,
     error::Result,
     serde::KvInfo,
-    storage::Storage,
-    DeviceStats, EnqueueHandle,
+    storage::{Storage, WaitHandle},
+    DeviceStats,
 };
 
 pub struct GenericSmallStorageConfig<K, V, S>
@@ -92,7 +89,7 @@ where
     type BuildHasher = S;
     type Config = GenericSmallStorageConfig<K, V, S>;
 
-    async fn open(config: Self::Config) -> Result<Self> {
+    async fn open(_config: Self::Config) -> Result<Self> {
         todo!()
     }
 
@@ -102,10 +99,10 @@ where
 
     fn enqueue(
         &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBuffer,
-        info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
+        _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        _buffer: IoBuffer,
+        _info: KvInfo,
+        _tx: oneshot::Sender<Result<bool>>,
     ) {
         todo!()
     }
@@ -113,7 +110,7 @@ where
     // FIXME: REMOVE THE CLIPPY IGNORE.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::manual_async_fn)]
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
+    fn load<Q>(&self, _key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
     where
         Self::Key: std::borrow::Borrow<Q>,
         Q: std::hash::Hash + Eq + ?Sized + Send + Sync + 'static,
@@ -121,15 +118,15 @@ where
         async { todo!() }
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, _key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        todo!()
+        WaitHandle::new(async move { todo!() })
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
+    fn may_contains<Q>(&self, _key: &Q) -> bool
     where
         Self::Key: std::borrow::Borrow<Q>,
         Q: std::hash::Hash + Eq + ?Sized,

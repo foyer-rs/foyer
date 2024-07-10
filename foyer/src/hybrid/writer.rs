@@ -15,7 +15,6 @@
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheContext;
-use foyer_storage::EnqueueHandle;
 use std::{
     fmt::Debug,
     time::{Duration, Instant},
@@ -112,11 +111,7 @@ where
         self
     }
 
-    fn insert_inner(
-        mut self,
-        value: V,
-        context: Option<CacheContext>,
-    ) -> Option<(HybridCacheEntry<K, V, S>, EnqueueHandle)> {
+    fn insert_inner(mut self, value: V, context: Option<CacheContext>) -> Option<HybridCacheEntry<K, V, S>> {
         let now = Instant::now();
 
         if !self.pick() {
@@ -127,7 +122,7 @@ where
             Some(context) => self.hybrid.memory().deposit_with_context(self.key, value, context),
             None => self.hybrid.memory().deposit(self.key, value),
         };
-        let handle = self.hybrid.storage().enqueue(entry.clone(), true);
+        let _handle = self.hybrid.storage().enqueue(entry.clone(), true);
 
         self.hybrid.metrics().hybrid_insert.increment(1);
         self.hybrid
@@ -135,16 +130,16 @@ where
             .hybrid_insert_duration
             .record(now.elapsed() + self.pick_duration);
 
-        Some((entry, handle))
+        Some(entry)
     }
 
     /// Insert the entry to the disk cache only.
     pub fn insert(self, value: V) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_inner(value, None).map(|(e, _)| e)
+        self.insert_inner(value, None)
     }
 
     /// Insert the entry with context to the disk cache only.
     pub fn insert_with_context(self, value: V, context: CacheContext) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_inner(value, Some(context)).map(|(e, _)| e)
+        self.insert_inner(value, Some(context))
     }
 }

@@ -25,7 +25,9 @@ use crate::device::IoBuffer;
 use crate::error::Result;
 
 use crate::serde::KvInfo;
-use crate::storage::{EnqueueHandle, Storage};
+use crate::storage::Storage;
+
+use super::WaitHandle;
 
 /// The builder of the disk cache with a dedicated runtime.
 pub struct RuntimeConfigBuilder {
@@ -170,7 +172,7 @@ where
         self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

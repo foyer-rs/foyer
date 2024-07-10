@@ -42,6 +42,7 @@ impl<T, S> From<T> for Diversion<T, S> {
 }
 
 /// [`DiversionFuture`] is a future wrapper that partially store and partially return the future result.
+#[must_use]
 #[pin_project]
 pub struct DiversionFuture<FU, T, S> {
     #[pin]

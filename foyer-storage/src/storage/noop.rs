@@ -18,15 +18,18 @@ use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::Phanto
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
+use futures::FutureExt;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
 use crate::device::IoBuffer;
 use crate::serde::KvInfo;
-use crate::storage::{EnqueueHandle, Storage};
+use crate::storage::Storage;
 
 use crate::error::Result;
+
+use super::WaitHandle;
 
 pub struct Noop<K, V, S>
 where
@@ -106,14 +109,14 @@ where
         async move { Ok(None) }
     }
 
-    fn delete<Q>(&self, _: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, _: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(false));
-        EnqueueHandle::new(rx)
+        WaitHandle::new(rx.map(|recv| recv.unwrap()))
     }
 
     fn may_contains<Q>(&self, _: &Q) -> bool

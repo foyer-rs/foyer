@@ -30,7 +30,10 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheEntry};
-use futures::future::{join_all, try_join_all};
+use futures::{
+    future::{join_all, try_join_all},
+    FutureExt,
+};
 
 use crate::{
     compress::Compression,
@@ -41,7 +44,7 @@ use crate::{
     region::RegionManager,
     serde::{EntryDeserializer, KvInfo},
     statistics::Statistics,
-    storage::{EnqueueHandle, Storage},
+    storage::{Storage, WaitHandle},
     tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     AtomicSequence,
 };
@@ -361,7 +364,7 @@ where
         .in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"))
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -369,12 +372,12 @@ where
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueHandle::new(rx);
+        let handle = WaitHandle::new(rx.map(|recv| recv.unwrap()));
 
         if !self.inner.active.load(Ordering::Relaxed) {
             tx.send(Err(anyhow::anyhow!("cannot delete entry after closed").into()))
                 .unwrap();
-            return future;
+            return handle;
         }
 
         let hash = self.inner.memory.hash_builder().hash_one(key);
@@ -397,7 +400,7 @@ where
         self.inner.metrics.storage_delete.increment(1);
         self.inner.metrics.storage_miss_duration.record(now.elapsed());
 
-        future
+        handle
     }
 
     fn may_contains<Q>(&self, key: &Q) -> bool
@@ -417,13 +420,13 @@ where
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueHandle::new(rx);
+        let handle = WaitHandle::new(rx.map(|recv| recv.unwrap()));
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
             tombstone: Tombstone { hash: 0, sequence },
             stats: None,
             tx,
         });
-        future.await?;
+        handle.await?;
 
         // Clear indices.
         //
@@ -487,7 +490,7 @@ where
         self.load(key)
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -630,7 +633,7 @@ mod tests {
     fn enqueue(
         store: &GenericLargeStorage<u64, Vec<u8>, RandomState>,
         entry: CacheEntry<u64, Vec<u8>, RandomState>,
-    ) -> EnqueueHandle {
+    ) -> WaitHandle<impl Future<Output = Result<bool>>> {
         let (tx, rx) = oneshot::channel();
         let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
         let info = EntrySerializer::serialize(
@@ -641,7 +644,7 @@ mod tests {
         )
         .unwrap();
         store.enqueue(entry, buffer, info, tx);
-        EnqueueHandle::new(rx)
+        WaitHandle::new(rx.map(|recv| recv.unwrap()))
     }
 
     #[test_log::test(tokio::test)]

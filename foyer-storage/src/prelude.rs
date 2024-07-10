@@ -29,7 +29,7 @@ pub use crate::{
     statistics::Statistics,
     storage::{
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
-        EnqueueHandle, Storage,
+        Storage, WaitHandle,
     },
     store::{CombinedConfig, DeviceConfig, Store, StoreBuilder},
     tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
