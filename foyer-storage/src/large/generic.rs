@@ -17,6 +17,7 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
+    ops::Range,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -73,6 +74,7 @@ where
 
     pub name: String,
     pub device: MonitoredDevice,
+    pub regions: Range<RegionId>,
     pub compression: Compression,
     pub flush: bool,
     pub indexer_shards: usize,
@@ -224,7 +226,7 @@ where
 
         RecoverRunner::run(
             &config,
-            device.clone(),
+            config.regions.clone(),
             &sequence,
             &indexer,
             &region_manager,
@@ -582,10 +584,12 @@ mod tests {
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
         let device = device_for_test(dir).await;
+        let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
             device,
+            regions,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
@@ -609,10 +613,12 @@ mod tests {
         path: impl AsRef<Path>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
         let device = device_for_test(dir).await;
+        let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             memory: memory.clone(),
             device,
+            regions,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,
