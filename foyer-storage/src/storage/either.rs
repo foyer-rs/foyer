@@ -20,7 +20,7 @@ use futures::{
 };
 use tokio::{runtime::Handle, sync::oneshot};
 
-use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, EnqueueHandle};
+use crate::{device::IoBuffer, error::Result, serde::KvInfo, storage::Storage, DeviceStats, EnqueueHandle};
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
 
@@ -152,7 +152,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: Vec<u8>,
+        buffer: IoBuffer,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {

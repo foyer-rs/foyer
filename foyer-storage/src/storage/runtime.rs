@@ -21,6 +21,7 @@ use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
+use crate::device::IoBuffer;
 use crate::error::Result;
 
 use crate::serde::KvInfo;
@@ -153,7 +154,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: Vec<u8>,
+        buffer: IoBuffer,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
@@ -215,9 +216,10 @@ mod tests {
     use crate::{
         compress::Compression,
         device::{
+            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
-            Dev, MonitoredDevice,
+            Dev, MonitoredDevice, IO_BUFFER_ALLOCATOR,
         },
         large::{
             generic::{GenericLargeStorage, GenericLargeStorageConfig},
@@ -302,8 +304,10 @@ mod tests {
             .cloned()
             .map(|e| {
                 let (tx, rx) = oneshot::channel();
-                let mut buffer = Vec::new();
-                let info = EntrySerializer::serialize_kv(e.key(), e.value(), &Compression::None, &mut buffer).unwrap();
+                let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+                let info =
+                    EntrySerializer::serialize(e.key(), e.value(), &Compression::None, WritableVecA(&mut buffer))
+                        .unwrap();
                 store.enqueue(e, buffer, info, tx);
                 rx.map(|res| res.unwrap())
             })

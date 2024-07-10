@@ -15,9 +15,10 @@
 use crate::{
     compress::Compression,
     device::{
+        allocator::WritableVecA,
         direct_fs::DirectFsDeviceOptions,
         monitor::{DeviceStats, Monitored, MonitoredOptions},
-        DeviceOptions,
+        DeviceOptions, IoBuffer, IO_BUFFER_ALLOCATOR,
     },
     engine::{Engine, EngineConfig, SizeSelector},
     error::Result,
@@ -123,8 +124,8 @@ where
 
         self.runtime().spawn(async move {
             if force || this.pick(entry.key()) {
-                let mut buffer = Vec::new();
-                match EntrySerializer::serialize_kv(entry.key(), entry.value(), &compression, &mut buffer) {
+                let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, WritableVecA(&mut buffer)) {
                     Ok(info) => {
                         this.engine.enqueue(entry, buffer, info, tx);
                     }

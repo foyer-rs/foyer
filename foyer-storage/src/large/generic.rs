@@ -34,7 +34,7 @@ use futures::future::{join_all, try_join_all};
 
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
+    device::{monitor::DeviceStats, Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::reclaimer::RegionCleaner,
     picker::{EvictionPicker, ReinsertionPicker},
@@ -290,7 +290,7 @@ where
     }
 
     #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: Vec<u8>, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBuffer, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
                 .unwrap();
@@ -300,6 +300,8 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             entry,
+            buffer,
+            info,
             tx,
             sequence,
         });
@@ -470,7 +472,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: Vec<u8>,
+        buffer: IoBuffer,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
@@ -528,8 +530,10 @@ mod tests {
 
     use crate::{
         device::{
+            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
+            IO_BUFFER_ALLOCATOR,
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
@@ -628,8 +632,14 @@ mod tests {
         entry: CacheEntry<u64, Vec<u8>, RandomState>,
     ) -> EnqueueHandle {
         let (tx, rx) = oneshot::channel();
-        let mut buffer = Vec::new();
-        let info = EntrySerializer::serialize_kv(entry.key(), entry.value(), &Compression::None, &mut buffer).unwrap();
+        let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+        let info = EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            WritableVecA(&mut buffer),
+        )
+        .unwrap();
         store.enqueue(entry, buffer, info, tx);
         EnqueueHandle::new(rx)
     }

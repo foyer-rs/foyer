@@ -28,6 +28,7 @@ use std::{
 use tokio::sync::oneshot;
 
 use crate::{
+    device::IoBuffer,
     error::Result,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
     serde::KvInfo,
@@ -284,7 +285,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: Vec<u8>,
+        buffer: IoBuffer,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
