@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ use crate::{AtomicSequence, Sequence};
 use super::generic::GenericLargeStorageConfig;
 use super::indexer::EntryAddress;
 use super::indexer::Indexer;
-use crate::device::{DevExt, MonitoredDevice, RegionId};
+use crate::device::RegionId;
 use crate::region::{Region, RegionManager};
 use crate::tombstone::Tombstone;
 
@@ -57,7 +58,7 @@ pub struct RecoverRunner;
 impl RecoverRunner {
     pub async fn run<K, V, S>(
         config: &GenericLargeStorageConfig<K, V, S>,
-        device: MonitoredDevice,
+        regions: Range<RegionId>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager,
@@ -72,7 +73,7 @@ impl RecoverRunner {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
         let mode = config.recover_mode;
-        let handles = (0..device.regions() as RegionId).map(|id| {
+        let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
             runtime.spawn(async move {

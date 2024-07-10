@@ -221,7 +221,7 @@ mod tests {
             allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
-            Dev, MonitoredDevice, IO_BUFFER_ALLOCATOR,
+            Dev, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR,
         },
         large::{
             generic::{GenericLargeStorage, GenericLargeStorageConfig},
@@ -230,7 +230,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         storage::Storage,
-        Statistics,
+        DevExt, Statistics,
     };
 
     use super::*;
@@ -262,10 +262,12 @@ mod tests {
         dir: impl AsRef<Path>,
     ) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState> {
         let device = device_for_test(dir).await;
+        let regions = 0..device.regions() as RegionId;
         GenericLargeStorageConfig {
             memory: memory.clone(),
             name: "test".to_string(),
             device,
+            regions,
             compression: Compression::None,
             flush: true,
             indexer_shards: 4,

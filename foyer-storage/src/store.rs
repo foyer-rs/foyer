@@ -18,7 +18,7 @@ use crate::{
         allocator::WritableVecA,
         direct_fs::DirectFsDeviceOptions,
         monitor::{DeviceStats, Monitored, MonitoredOptions},
-        DeviceOptions, IoBuffer, IO_BUFFER_ALLOCATOR,
+        DeviceOptions, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
     },
     engine::{Engine, EngineConfig, SizeSelector},
     error::Result,
@@ -36,7 +36,7 @@ use crate::{
         Storage,
     },
     tombstone::TombstoneLogConfig,
-    Dev, DirectFileDeviceOptions, WaitHandle,
+    Dev, DevExt, DirectFileDeviceOptions, WaitHandle,
 };
 use ahash::RandomState;
 use foyer_common::{
@@ -246,24 +246,6 @@ impl Default for CombinedConfig {
     }
 }
 
-impl CombinedConfig {
-    /// The ratio of the large object disk cache.
-    pub fn large_object_cache_ratio(&self) -> f64 {
-        match self {
-            CombinedConfig::Large => 1.0,
-            CombinedConfig::Small => 0.0,
-            CombinedConfig::Combined {
-                large_object_cache_ratio,
-            } => *large_object_cache_ratio,
-        }
-    }
-
-    /// The ratio of the small object disk cache.
-    pub fn small_object_cache_ratio(&self) -> f64 {
-        1.0 - self.large_object_cache_ratio()
-    }
-}
-
 /// The builder of the disk cache.
 pub struct StoreBuilder<K, V, S = RandomState>
 where
@@ -320,7 +302,7 @@ where
             compression: Compression::None,
             tombstone_log_config: None,
             combined_config: CombinedConfig::default(),
-            large_object_threshold: 8192,
+            large_object_threshold: 4096,
             runtime_config: None,
         }
     }
@@ -508,10 +490,12 @@ where
                 .await?;
                 match (self.combined_config, self.runtime_config) {
                     (CombinedConfig::Large, None) => {
+                        let regions = 0..device.regions() as RegionId;
                         Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
                             memory: self.memory,
                             name: self.name,
                             device,
+                            regions,
                             compression: self.compression,
                             flush: self.flush,
                             indexer_shards: self.indexer_shards,
@@ -529,11 +513,13 @@ where
                         .await?
                     }
                     (CombinedConfig::Large, Some(runtime_config)) => {
+                        let regions = 0..device.regions() as RegionId;
                         Engine::open(EngineConfig::LargeRuntime(RuntimeStoreConfig {
                             store_config: GenericLargeStorageConfig {
                                 memory: self.memory,
                                 name: self.name,
                                 device,
+                                regions,
                                 compression: self.compression,
                                 flush: self.flush,
                                 indexer_shards: self.indexer_shards,
@@ -569,10 +555,14 @@ where
                     }
                     (
                         CombinedConfig::Combined {
-                            large_object_cache_ratio: _,
+                            large_object_cache_ratio,
                         },
                         None,
                     ) => {
+                        let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
+                        let large_regions =
+                            (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
+
                         Engine::open(EngineConfig::Combined(EitherConfig {
                             selector: SizeSelector::new(self.large_object_threshold),
                             left: GenericSmallStorageConfig {
@@ -582,6 +572,7 @@ where
                                 memory: self.memory,
                                 name: self.name,
                                 device,
+                                regions: large_regions,
                                 compression: self.compression,
                                 flush: self.flush,
                                 indexer_shards: self.indexer_shards,
@@ -601,10 +592,14 @@ where
                     }
                     (
                         CombinedConfig::Combined {
-                            large_object_cache_ratio: _,
+                            large_object_cache_ratio,
                         },
                         Some(runtime_config),
                     ) => {
+                        let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
+                        let large_regions =
+                            (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
+
                         Engine::open(EngineConfig::CombinedRuntime(RuntimeStoreConfig {
                             store_config: EitherConfig {
                                 selector: SizeSelector::new(self.large_object_threshold),
@@ -615,6 +610,7 @@ where
                                     memory: self.memory,
                                     name: self.name,
                                     device,
+                                    regions: large_regions,
                                     compression: self.compression,
                                     flush: self.flush,
                                     indexer_shards: self.indexer_shards,
