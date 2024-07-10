@@ -34,12 +34,12 @@ use futures::future::{join_all, try_join_all};
 
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
+    device::{monitor::DeviceStats, Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::reclaimer::RegionCleaner,
-    picker::{AdmissionPicker, EvictionPicker, ReinsertionPicker},
+    picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
-    serde::EntryDeserializer,
+    serde::{EntryDeserializer, KvInfo},
     statistics::Statistics,
     storage::{EnqueueHandle, Storage},
     tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
@@ -80,7 +80,6 @@ where
     pub buffer_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    pub admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
@@ -107,7 +106,6 @@ where
             .field("buffer_threshold", &self.buffer_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
-            .field("admission_pickers", &self.admission_picker)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
             .field("statistics", &self.statistics)
@@ -150,8 +148,6 @@ where
 
     flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
-
-    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
 
     statistics: Arc<Statistics>,
 
@@ -272,7 +268,6 @@ where
                 region_manager,
                 flushers,
                 reclaimers,
-                admission_picker: config.admission_picker,
                 statistics: stats,
                 flush: config.flush,
                 sequence,
@@ -294,42 +289,22 @@ where
         self.wait().await
     }
 
-    fn pick(&self, key: &K) -> bool {
-        self.inner.admission_picker.pick(&self.inner.statistics, key)
-    }
-
     #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
-        let now = Instant::now();
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBuffer, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
+                .unwrap();
+            return;
+        }
 
-        let (tx, rx) = oneshot::channel();
-        let future = EnqueueHandle::new(rx);
-
-        let this = self.clone();
-
-        self.inner.runtime.spawn(async move {
-            if !this.inner.active.load(Ordering::Relaxed) {
-                tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
-                    .unwrap();
-                return;
-            }
-
-            if force || this.pick(entry.key()) {
-                let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-                this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::CacheEntry {
-                    entry,
-                    tx,
-                    sequence,
-                });
-            } else {
-                let _ = tx.send(Ok(false));
-            }
+        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
+            entry,
+            buffer,
+            info,
+            tx,
+            sequence,
         });
-
-        self.inner.metrics.storage_enqueue.increment(1);
-        self.inner.metrics.storage_enqueue_duration.record(now.elapsed());
-
-        future
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
@@ -494,8 +469,14 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
-        self.enqueue(entry, force)
+    fn enqueue(
+        &self,
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        buffer: IoBuffer,
+        info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
+        self.enqueue(entry, buffer, info, tx)
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -549,10 +530,13 @@ mod tests {
 
     use crate::{
         device::{
+            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
+            IO_BUFFER_ALLOCATOR,
         },
-        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
+        picker::utils::{FifoPicker, RejectAllPicker},
+        serde::EntrySerializer,
         test_utils::BiasedPicker,
         tombstone::TombstoneLogConfigBuilder,
     };
@@ -586,35 +570,7 @@ mod tests {
         memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
-        store_for_test_with_admission_picker(memory, dir, Arc::<AdmitAllPicker<u64>>::default()).await
-    }
-
-    async fn store_for_test_with_admission_picker(
-        memory: &Cache<u64, Vec<u8>>,
-        dir: impl AsRef<Path>,
-        admission_picker: Arc<dyn AdmissionPicker<Key = u64>>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
-        let device = device_for_test(dir).await;
-        let config = GenericLargeStorageConfig {
-            name: "test".to_string(),
-            memory: memory.clone(),
-            device,
-            compression: Compression::None,
-            flush: true,
-            indexer_shards: 4,
-            recover_mode: RecoverMode::Strict,
-            recover_concurrency: 2,
-            flushers: 1,
-            reclaimers: 1,
-            clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker,
-            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
-            tombstone_log_config: None,
-            buffer_threshold: usize::MAX,
-            statistics: Arc::<Statistics>::default(),
-        };
-        GenericLargeStorage::open(config).await.unwrap()
+        store_for_test_with_reinsertion_picker(memory, dir, Arc::<RejectAllPicker<u64>>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
@@ -636,7 +592,6 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker,
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
@@ -664,13 +619,29 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_threshold: usize::MAX,
             statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
+    }
+
+    fn enqueue(
+        store: &GenericLargeStorage<u64, Vec<u8>, RandomState>,
+        entry: CacheEntry<u64, Vec<u8>, RandomState>,
+    ) -> EnqueueHandle {
+        let (tx, rx) = oneshot::channel();
+        let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+        let info = EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            WritableVecA(&mut buffer),
+        )
+        .unwrap();
+        store.enqueue(entry, buffer, info, tx);
+        EnqueueHandle::new(rx)
     }
 
     #[test_log::test(tokio::test)]
@@ -684,8 +655,8 @@ mod tests {
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(store.enqueue(e1.clone(), false).await.unwrap());
-        assert!(store.enqueue(e2, false).await.unwrap());
+        assert!(enqueue(&store, e1.clone(),).await.unwrap());
+        assert!(enqueue(&store, e2,).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -696,8 +667,8 @@ mod tests {
         let e3 = memory.insert(3, vec![3; 7 * KB]);
         let e4 = memory.insert(4, vec![4; 6 * KB]);
 
-        assert!(store.enqueue(e3, false).await.unwrap());
-        assert!(store.enqueue(e4, false).await.unwrap());
+        assert!(enqueue(&store, e3,).await.unwrap());
+        assert!(enqueue(&store, e4,).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -710,7 +681,7 @@ mod tests {
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
-        assert!(store.enqueue(e5, false).await.unwrap());
+        assert!(enqueue(&store, e5,).await.unwrap());
 
         let r1 = store.load(&1).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -726,8 +697,8 @@ mod tests {
         // [ [], [e3, e4], [e5], [e6, e4*] ]
         let e6 = memory.insert(6, vec![6; 7 * KB]);
         let e4v2 = memory.insert(4, vec![!4; 7 * KB]);
-        assert!(store.enqueue(e6, false).await.unwrap());
-        assert!(store.enqueue(e4v2, false).await.unwrap());
+        assert!(enqueue(&store, e6,).await.unwrap());
+        assert!(enqueue(&store, e4v2,).await.unwrap());
 
         assert!(store.load(&1).await.unwrap().is_none());
         assert!(store.load(&2).await.unwrap().is_none());
@@ -741,7 +712,7 @@ mod tests {
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
-        assert!(store.enqueue(e1, false).await.is_err());
+        assert!(enqueue(&store, e1,).await.is_err());
         drop(store);
 
         let store = store_for_test(&memory, dir.path()).await;
@@ -767,7 +738,7 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone(), false)))
+        assert!(try_join_all(es.iter().take(6).map(|e| enqueue(&store, e.clone(),)))
             .await
             .unwrap()
             .into_iter()
@@ -792,7 +763,7 @@ mod tests {
             }
         }
 
-        assert!(store.enqueue(es[3].clone(), false).await.unwrap());
+        assert!(enqueue(&store, es[3].clone(),).await.unwrap());
         assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -812,7 +783,7 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| store.enqueue(e.clone(), false)))
+        assert!(try_join_all(es.iter().take(6).map(|e| enqueue(&store, e.clone(),)))
             .await
             .unwrap()
             .into_iter()
@@ -835,7 +806,7 @@ mod tests {
             assert_eq!(store.load(&i).await.unwrap(), None);
         }
 
-        assert!(store.enqueue(es[3].clone(), false).await.unwrap());
+        assert!(enqueue(&store, es[3].clone(),).await.unwrap());
         assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -846,23 +817,24 @@ mod tests {
         assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
-    #[test_log::test(tokio::test)]
-    async fn test_store_admission() {
-        let dir = tempfile::tempdir().unwrap();
+    // FIXME(MrCroxx): Move the admission test to store level.
+    // #[test_log::test(tokio::test)]
+    // async fn test_store_admission() {
+    //     let dir = tempfile::tempdir().unwrap();
 
-        let memory = cache_for_test();
-        let store = store_for_test_with_admission_picker(&memory, dir.path(), Arc::new(BiasedPicker::new([1]))).await;
+    //     let memory = cache_for_test();
+    //     let store = store_for_test_with_admission_picker(&memory, dir.path(), Arc::new(BiasedPicker::new([1]))).await;
 
-        let e1 = memory.insert(1, vec![1; 7 * KB]);
-        let e2 = memory.insert(2, vec![2; 7 * KB]);
+    //     let e1 = memory.insert(1, vec![1; 7 * KB]);
+    //     let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(store.enqueue(e1.clone(), false).await.unwrap());
-        assert!(!store.enqueue(e2, false).await.unwrap());
+    //     assert!(enqueue(&store, e1.clone(),).await.unwrap());
+    //     assert!(!enqueue(&store, e2,).await.unwrap());
 
-        let r1 = store.load(&1).await.unwrap().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
-        assert!(store.load(&2).await.unwrap().is_none());
-    }
+    //     let r1 = store.load(&1).await.unwrap().unwrap();
+    //     assert_eq!(r1, (1, vec![1; 7 * KB]));
+    //     assert!(store.load(&2).await.unwrap().is_none());
+    // }
 
     #[test_log::test(tokio::test)]
     async fn test_store_reinsertion() {
@@ -880,7 +852,7 @@ mod tests {
 
         // [ [e0, e1], [e2, e3], [e4, e5], [] ]
         for e in es.iter().take(6).cloned() {
-            assert!(store.enqueue(e, false).await.unwrap());
+            assert!(enqueue(&store, e,).await.unwrap());
         }
         for i in 0..6 {
             let r = store.load(&i).await.unwrap().unwrap();
@@ -888,7 +860,7 @@ mod tests {
         }
 
         // [ [], [e2, e3], [e4, e5], [e6, e1] ]
-        assert!(store.enqueue(es[6].clone(), false).await.unwrap());
+        assert!(enqueue(&store, es[6].clone(),).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -910,7 +882,7 @@ mod tests {
         );
 
         // [ [e7, e3], [], [e4, e5], [e6, e1] ]
-        assert!(store.enqueue(es[7].clone(), false).await.unwrap());
+        assert!(enqueue(&store, es[7].clone(),).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -934,8 +906,8 @@ mod tests {
 
         // [ [e7, e3], [e8, e9], [], [e6, e1] ]
         store.delete(&5).await.unwrap();
-        assert!(store.enqueue(es[8].clone(), false).await.unwrap());
-        assert!(store.enqueue(es[9].clone(), false).await.unwrap());
+        assert!(enqueue(&store, es[8].clone(),).await.unwrap());
+        assert!(enqueue(&store, es[9].clone(),).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }

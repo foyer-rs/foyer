@@ -13,10 +13,10 @@
 //  limitations under the License.
 
 use crate::{
-    device::{allocator::WritableVecA, IoBuffer, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR},
+    device::{IoBuffer, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
     region::{GetCleanRegionHandle, RegionManager},
-    serde::EntrySerializer,
+    serde::{Checksummer, EntryHeader, KvInfo},
     tombstone::{Tombstone, TombstoneLog},
     Compression, Statistics,
 };
@@ -24,7 +24,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    strict_assert_eq,
+    strict_assert, strict_assert_eq,
 };
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
@@ -61,6 +61,8 @@ where
 {
     CacheEntry {
         entry: CacheEntry<K, V, S>,
+        buffer: IoBuffer,
+        info: KvInfo,
         sequence: Sequence,
         tx: oneshot::Sender<Result<bool>>,
     },
@@ -322,7 +324,13 @@ where
 
     fn submission(&mut self, submission: Submission<K, V, S>) {
         match submission {
-            Submission::CacheEntry { entry, sequence, tx } => self.entry(entry, sequence, tx),
+            Submission::CacheEntry {
+                entry,
+                buffer,
+                info,
+                sequence,
+                tx,
+            } => self.entry(entry, buffer, info, sequence, tx),
             Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx),
             Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx),
         }
@@ -334,7 +342,14 @@ where
         self.batch.tombstones.push((tombstone, stats, tx));
     }
 
-    fn entry(&mut self, entry: CacheEntry<K, V, S>, sequence: Sequence, tx: oneshot::Sender<Result<bool>>) {
+    fn entry(
+        &mut self,
+        entry: CacheEntry<K, V, S>,
+        mut buffer: IoBuffer,
+        info: KvInfo,
+        sequence: Sequence,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
         tracing::trace!("[flusher]: submit entry with sequence: {sequence}");
 
         // Skip if the entry is already outdated.
@@ -356,21 +371,26 @@ where
         bits::debug_assert_aligned(self.device.align(), group.buffer.len());
         let mut boffset = group.buffer.len();
 
-        if let Err(e) = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            entry.hash(),
-            &sequence,
-            &self.compression,
-            WritableVecA(&mut group.buffer),
-        ) {
-            let _ = tx.send(Err(e));
-            return;
-        }
+        let header = EntryHeader {
+            key_len: info.key_len as _,
+            value_len: info.value_len as _,
+            hash: entry.hash(),
+            sequence,
+            checksum: Checksummer::checksum(&buffer),
+            compression: self.compression,
+        };
+
+        group
+            .buffer
+            .reserve(bits::align_up(self.device.align(), header.entry_len()));
+        // TODO(MrCroxx): impl `BufMut` for `WritableVecA` to avoid manually reservation?
+        unsafe { group.buffer.set_len(boffset + EntryHeader::serialized_len()) };
+        header.write(&mut group.buffer[boffset..]);
+        group.buffer.append(&mut buffer);
 
         let len = group.buffer.len() - boffset;
         let aligned = bits::align_up(self.device.align(), len);
-        group.buffer.reserve(aligned - len);
+        strict_assert!(group.buffer.capacity() >= boffset + aligned);
         unsafe { group.buffer.set_len(boffset + aligned) };
 
         bits::debug_assert_aligned(self.device.align(), group.buffer.len());

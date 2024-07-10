@@ -31,7 +31,11 @@ use foyer_memory::CacheEntry;
 use pin_project::pin_project;
 use tokio::{runtime::Handle, sync::oneshot};
 
-use crate::{device::monitor::DeviceStats, error::Result};
+use crate::{
+    device::{monitor::DeviceStats, IoBuffer},
+    error::Result,
+    serde::KvInfo,
+};
 
 /// The handle created by [`Storage::enqueue`].
 #[pin_project]
@@ -79,7 +83,13 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Push a in-memory cache entry to the disk cache write queue.
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle;
+    fn enqueue(
+        &self,
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        buffer: IoBuffer,
+        info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    );
 
     /// Load a cache entry from the disk cache.
     ///

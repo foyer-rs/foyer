@@ -22,6 +22,8 @@ use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
+use crate::device::IoBuffer;
+use crate::serde::KvInfo;
 use crate::storage::{EnqueueHandle, Storage};
 
 use crate::error::Result;
@@ -83,10 +85,14 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
-        let (tx, rx) = oneshot::channel();
-        let _ = tx.send(Ok(force)); // always return `force` here to keep consistency
-        EnqueueHandle::new(rx)
+    fn enqueue(
+        &self,
+        _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        _buffer: IoBuffer,
+        _info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
+        let _ = tx.send(Ok(false));
     }
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -139,6 +145,8 @@ where
 mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 
+    use crate::device::IO_BUFFER_ALLOCATOR;
+
     use super::*;
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
@@ -151,7 +159,17 @@ mod tests {
     async fn test_none_store() {
         let memory = cache_for_test();
         let store = Noop::open(()).await.unwrap();
-        assert!(!store.enqueue(memory.insert(0, vec![b'x'; 16384]), false).await.unwrap());
+        let (tx, rx) = oneshot::channel();
+        store.enqueue(
+            memory.insert(0, vec![b'x'; 16384]),
+            IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
+            KvInfo {
+                key_len: 0,
+                value_len: 0,
+            },
+            tx,
+        );
+        assert!(!rx.await.unwrap().unwrap());
         assert!(store.load(&0).await.unwrap().is_none());
         store.delete(&0).await.unwrap();
         store.destroy().await.unwrap();

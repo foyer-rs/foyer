@@ -18,10 +18,13 @@ use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
 use futures::{Future, FutureExt};
 use tokio::runtime::Handle;
+use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
+use crate::device::IoBuffer;
 use crate::error::Result;
 
+use crate::serde::KvInfo;
 use crate::storage::{EnqueueHandle, Storage};
 
 /// The builder of the disk cache with a dedicated runtime.
@@ -148,8 +151,14 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, force: bool) -> EnqueueHandle {
-        self.store.enqueue(entry, force)
+    fn enqueue(
+        &self,
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        buffer: IoBuffer,
+        info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
+        self.store.enqueue(entry, buffer, info, tx)
     }
 
     fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
@@ -207,15 +216,17 @@ mod tests {
     use crate::{
         compress::Compression,
         device::{
+            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
-            Dev, MonitoredDevice,
+            Dev, MonitoredDevice, IO_BUFFER_ALLOCATOR,
         },
         large::{
             generic::{GenericLargeStorage, GenericLargeStorageConfig},
             recover::RecoverMode,
         },
-        picker::utils::{AdmitAllPicker, FifoPicker, RejectAllPicker},
+        picker::utils::{FifoPicker, RejectAllPicker},
+        serde::EntrySerializer,
         storage::Storage,
         Statistics,
     };
@@ -262,7 +273,6 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker<u64>>::default(),
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: None,
             buffer_threshold: usize::MAX,
@@ -289,7 +299,19 @@ mod tests {
             GenericLargeStorage::open(config).await.unwrap()
         });
 
-        let fs = es.iter().cloned().map(|e| store.enqueue(e, false)).collect_vec();
+        let fs = es
+            .iter()
+            .cloned()
+            .map(|e| {
+                let (tx, rx) = oneshot::channel();
+                let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+                let info =
+                    EntrySerializer::serialize(e.key(), e.value(), &Compression::None, WritableVecA(&mut buffer))
+                        .unwrap();
+                store.enqueue(e, buffer, info, tx);
+                rx.map(|res| res.unwrap())
+            })
+            .collect_vec();
         background.block_on(async { try_join_all(fs).await.unwrap() });
 
         let mut fs = vec![];

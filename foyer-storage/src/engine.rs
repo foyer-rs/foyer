@@ -14,6 +14,7 @@
 
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_memory::CacheEntry;
 use futures::Future;
 use std::{
     borrow::Borrow,
@@ -24,17 +25,20 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use tokio::sync::oneshot;
 
 use crate::{
+    device::IoBuffer,
     error::Result,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
+    serde::KvInfo,
     small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
     storage::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
         runtime::{Runtime, RuntimeStoreConfig},
     },
-    DeviceStats, EnqueueHandle, Storage,
+    DeviceStats, Storage,
 };
 
 pub struct SizeSelector<K>
@@ -280,17 +284,19 @@ where
 
     fn enqueue(
         &self,
-        entry: foyer_memory::CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        force: bool,
-    ) -> EnqueueHandle {
+        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        buffer: IoBuffer,
+        info: KvInfo,
+        tx: oneshot::Sender<Result<bool>>,
+    ) {
         match self {
-            Engine::Noop(storage) => storage.enqueue(entry, force),
-            Engine::Large(storage) => storage.enqueue(entry, force),
-            Engine::LargeRuntime(storage) => storage.enqueue(entry, force),
-            Engine::Small(storage) => storage.enqueue(entry, force),
-            Engine::SmallRuntime(storage) => storage.enqueue(entry, force),
-            Engine::Combined(storage) => storage.enqueue(entry, force),
-            Engine::CombinedRuntime(storage) => storage.enqueue(entry, force),
+            Engine::Noop(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::Large(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::LargeRuntime(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::Small(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::SmallRuntime(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::Combined(storage) => storage.enqueue(entry, buffer, info, tx),
+            Engine::CombinedRuntime(storage) => storage.enqueue(entry, buffer, info, tx),
         }
     }
 

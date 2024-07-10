@@ -15,9 +15,10 @@
 use crate::{
     compress::Compression,
     device::{
+        allocator::WritableVecA,
         direct_fs::DirectFsDeviceOptions,
         monitor::{DeviceStats, Monitored, MonitoredOptions},
-        DeviceOptions,
+        DeviceOptions, IoBuffer, IO_BUFFER_ALLOCATOR,
     },
     engine::{Engine, EngineConfig, SizeSelector},
     error::Result,
@@ -26,6 +27,7 @@ use crate::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    serde::EntrySerializer,
     small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
@@ -43,8 +45,8 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheEntry};
 use futures::Future;
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
-use tokio::runtime::Handle;
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
+use tokio::{runtime::Handle, sync::oneshot};
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
 pub struct Store<K, V, S = RandomState>
@@ -55,7 +57,9 @@ where
 {
     engine: Engine<K, V, S>,
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    compression: Compression,
     statistics: Arc<Statistics>,
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S> Debug for Store<K, V, S>
@@ -68,6 +72,7 @@ where
         f.debug_struct("Store")
             .field("engine", &self.engine)
             .field("admission_picker", &self.admission_picker)
+            .field("compression", &self.compression)
             .field("statistics", &self.statistics)
             .finish()
     }
@@ -83,7 +88,9 @@ where
         Self {
             engine: self.engine.clone(),
             admission_picker: self.admission_picker.clone(),
+            compression: self.compression,
             statistics: self.statistics.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -108,7 +115,34 @@ where
 
     /// Push a in-memory cache entry to the disk cache write queue.
     pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
-        self.engine.enqueue(entry, force)
+        let now = Instant::now();
+
+        let (tx, rx) = oneshot::channel();
+        let future = EnqueueHandle::new(rx);
+        let compression = self.compression;
+        let this = self.clone();
+
+        self.runtime().spawn(async move {
+            if force || this.pick(entry.key()) {
+                let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, WritableVecA(&mut buffer)) {
+                    Ok(info) => {
+                        this.engine.enqueue(entry, buffer, info, tx);
+                    }
+                    Err(e) => {
+                        tracing::warn!("[store]: serialize kv error: {e}");
+                        let _ = tx.send(Ok(false));
+                    }
+                }
+            } else {
+                let _ = tx.send(Ok(false));
+            }
+        });
+
+        self.metrics.storage_enqueue.increment(1);
+        self.metrics.storage_enqueue_duration.record(now.elapsed());
+
+        future
     }
 
     /// Load a cache entry from the disk cache.
@@ -463,7 +497,11 @@ where
                 Engine::open(EngineConfig::Noop).await?
             }
             DeviceConfig::DeviceOptions(options) => {
-                let device = Monitored::open(MonitoredOptions { options, metrics }).await?;
+                let device = Monitored::open(MonitoredOptions {
+                    options,
+                    metrics: metrics.clone(),
+                })
+                .await?;
                 match (self.combined_config, self.runtime_config) {
                     (CombinedConfig::Large, None) => {
                         Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
@@ -479,7 +517,6 @@ where
                             reclaimers: self.reclaimers,
                             clean_region_threshold,
                             eviction_pickers: self.eviction_pickers,
-                            admission_picker: self.admission_picker,
                             reinsertion_picker: self.reinsertion_picker,
                             tombstone_log_config: self.tombstone_log_config,
                             buffer_threshold: self.buffer_threshold,
@@ -502,7 +539,6 @@ where
                                 reclaimers: self.reclaimers,
                                 clean_region_threshold,
                                 eviction_pickers: self.eviction_pickers,
-                                admission_picker: self.admission_picker,
                                 reinsertion_picker: self.reinsertion_picker,
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
@@ -551,7 +587,6 @@ where
                                 reclaimers: self.reclaimers,
                                 clean_region_threshold,
                                 eviction_pickers: self.eviction_pickers,
-                                admission_picker: self.admission_picker,
                                 reinsertion_picker: self.reinsertion_picker,
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
@@ -585,7 +620,6 @@ where
                                     reclaimers: self.reclaimers,
                                     clean_region_threshold,
                                     eviction_pickers: self.eviction_pickers,
-                                    admission_picker: self.admission_picker,
                                     reinsertion_picker: self.reinsertion_picker,
                                     tombstone_log_config: self.tombstone_log_config,
                                     buffer_threshold: self.buffer_threshold,
@@ -603,7 +637,9 @@ where
         Ok(Store {
             engine,
             admission_picker,
+            compression: self.compression,
             statistics,
+            metrics,
         })
     }
 }
