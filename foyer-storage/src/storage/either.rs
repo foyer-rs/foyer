@@ -58,7 +58,6 @@ where
     }
 }
 
-#[allow(unused)]
 pub enum Selection {
     Left,
     Right,
@@ -223,8 +222,8 @@ where
     }
 
     fn stats(&self) -> std::sync::Arc<DeviceStats> {
-        // FIXME(MrCroxx): This interface needs to be refactored for it is device level stats, QwQ.
-        unimplemented!("This interface needs to be refactored for it is device level stats, QwQ.")
+        // The two engines share the same device, so it is okay to use either device stats of those.
+        self.left.stats()
     }
 
     async fn wait(&self) -> Result<()> {
