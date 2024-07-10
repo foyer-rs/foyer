@@ -23,7 +23,7 @@ use std::{
     hash::Hash,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
@@ -37,25 +37,35 @@ use crate::{
     serde::KvInfo,
 };
 
-/// The handle created by [`Storage::enqueue`].
+/// [`WaitHandle`] is returned by some ops of the disk cache.
+///
+/// [`WaitHandle`] implies that the operation is already started asynchronously without the needs to poll the handle.
+/// (That's why it is named with `Handle` instead of `Future`).
+///
+/// If there is needs to wait the asynchronous op to finish, the caller can poll the handle like any other futures.
 #[pin_project]
-pub struct EnqueueHandle {
+pub struct WaitHandle<F> {
     #[pin]
-    rx: oneshot::Receiver<Result<bool>>,
+    future: F,
 }
 
-impl EnqueueHandle {
-    pub(crate) fn new(rx: oneshot::Receiver<Result<bool>>) -> Self {
-        Self { rx }
+impl<F> WaitHandle<F> {
+    /// Create a new [`WaitHandle`] with the given future.
+    ///
+    /// The future MUST be cancel-safe and can run asynchronously.
+    pub fn new(future: F) -> Self {
+        Self { future }
     }
 }
 
-impl Future for EnqueueHandle {
-    type Output = Result<bool>;
+impl<F> Future for WaitHandle<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let res = ready!(self.project().rx.poll(cx));
-        Poll::Ready(res.unwrap())
+        self.project().future.poll(cx)
     }
 }
 
@@ -102,7 +112,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
         Q: Hash + Eq + ?Sized + Send + Sync + 'static;
 
     /// Delete the cache entry with the given key from the disk cache.
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized;

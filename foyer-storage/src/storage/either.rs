@@ -15,14 +15,16 @@
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::{
-    future::{try_join, Either as EitherFuture},
-    Future,
+    future::{ready, select, try_join, Either as EitherFuture},
+    pin_mut, Future, FutureExt,
 };
 use tokio::{runtime::Handle, sync::oneshot};
 
-use crate::{device::IoBuffer, error::Result, serde::KvInfo, storage::Storage, DeviceStats, EnqueueHandle};
+use crate::{device::IoBuffer, error::Result, serde::KvInfo, storage::Storage, DeviceStats};
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+
+use super::WaitHandle;
 
 pub struct EitherConfig<K, V, S, SL, SR, SE>
 where
@@ -56,19 +58,17 @@ where
     }
 }
 
-#[allow(unused)]
 pub enum Selection {
     Left,
     Right,
 }
 
 pub trait Selector: Send + Sync + 'static + Debug {
-    type Key;
+    type Key: StorageKey;
+    type Value: StorageValue;
+    type BuildHasher: HashBuilder;
 
-    fn select<Q>(&self, key: &Q) -> Selection
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
+    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBuffer) -> Selection;
 }
 
 pub struct Either<K, V, S, SL, SR, SE>
@@ -128,7 +128,7 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     type Key = K;
     type Value = V;
@@ -156,9 +156,15 @@ where
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
-        match self.selector.select(entry.key()) {
-            Selection::Left => self.left.enqueue(entry, buffer, info, tx),
-            Selection::Right => self.right.enqueue(entry, buffer, info, tx),
+        match self.selector.select(&entry, &buffer) {
+            Selection::Left => {
+                self.right.delete(entry.key());
+                self.left.enqueue(entry, buffer, info, tx);
+            }
+            Selection::Right => {
+                self.right.delete(entry.key());
+                self.right.enqueue(entry, buffer, info, tx);
+            }
         }
     }
 
@@ -167,21 +173,39 @@ where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        match self.selector.select(key) {
-            Selection::Left => EitherFuture::Left(self.left.load(key)),
-            Selection::Right => EitherFuture::Right(self.right.load(key)),
+        let fleft = self.left.load(key);
+        let fright = self.right.load(key);
+
+        async move {
+            pin_mut!(fleft);
+            pin_mut!(fright);
+
+            // Returns a 4-way `Either` by nesting `Either` in `Either`.
+            select(fleft, fright)
+                .then(|either| match either {
+                    EitherFuture::Left((res, fr)) => match res {
+                        Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().left_future(),
+                        Err(e) => ready(Err(e)).left_future().left_future(),
+                        Ok(None) => fr.right_future().left_future(),
+                    },
+                    EitherFuture::Right((res, fl)) => match res {
+                        Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().right_future(),
+                        Err(e) => ready(Err(e)).left_future().right_future(),
+                        Ok(None) => fl.right_future().right_future(),
+                    },
+                })
+                .await
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self.selector.select(key) {
-            Selection::Left => self.left.delete(key),
-            Selection::Right => self.right.delete(key),
-        }
+        let hleft = self.left.delete(key);
+        let hright = self.right.delete(key);
+        WaitHandle::new(try_join(hleft, hright).map(|res| res.map(|(l, r)| l || r)))
     }
 
     fn may_contains<Q>(&self, key: &Q) -> bool
@@ -189,10 +213,7 @@ where
         Self::Key: std::borrow::Borrow<Q>,
         Q: std::hash::Hash + Eq + ?Sized,
     {
-        match self.selector.select(key) {
-            Selection::Left => self.left.may_contains(key),
-            Selection::Right => self.right.may_contains(key),
-        }
+        self.left.may_contains(key) || self.right.may_contains(key)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -201,8 +222,8 @@ where
     }
 
     fn stats(&self) -> std::sync::Arc<DeviceStats> {
-        // FIXME(MrCroxx): This interface needs to be refactored for it is device level stats, QwQ.
-        unimplemented!("This interface needs to be refactored for it is device level stats, QwQ.")
+        // The two engines share the same device, so it is okay to use either device stats of those.
+        self.left.stats()
     }
 
     async fn wait(&self) -> Result<()> {

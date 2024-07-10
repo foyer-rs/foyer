@@ -33,10 +33,10 @@ use crate::{
     storage::{
         either::EitherConfig,
         runtime::{RuntimeConfig, RuntimeStoreConfig},
-        EnqueueHandle, Storage,
+        Storage,
     },
     tombstone::TombstoneLogConfig,
-    Dev, DirectFileDeviceOptions,
+    Dev, DirectFileDeviceOptions, WaitHandle,
 };
 use ahash::RandomState;
 use foyer_common::{
@@ -44,7 +44,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheEntry};
-use futures::Future;
+use futures::{Future, FutureExt};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
 use tokio::{runtime::Handle, sync::oneshot};
 
@@ -114,11 +114,15 @@ where
     }
 
     /// Push a in-memory cache entry to the disk cache write queue.
-    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) -> EnqueueHandle {
+    pub fn enqueue(
+        &self,
+        entry: CacheEntry<K, V, S>,
+        force: bool,
+    ) -> WaitHandle<impl Future<Output = Result<bool>> + Send> {
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
-        let future = EnqueueHandle::new(rx);
+        let handle = WaitHandle::new(rx.map(|recv| recv.unwrap()));
         let compression = self.compression;
         let this = self.clone();
 
@@ -142,7 +146,7 @@ where
         self.metrics.storage_enqueue.increment(1);
         self.metrics.storage_enqueue_duration.record(now.elapsed());
 
-        future
+        handle
     }
 
     /// Load a cache entry from the disk cache.
@@ -158,7 +162,7 @@ where
     }
 
     /// Delete the cache entry with the given key from the disk cache.
-    pub fn delete<Q>(&self, key: &Q) -> EnqueueHandle
+    pub fn delete<'a, Q>(&'a self, key: &'a Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'a>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,

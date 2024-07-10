@@ -37,21 +37,26 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
         runtime::{Runtime, RuntimeStoreConfig},
+        WaitHandle,
     },
     DeviceStats, Storage,
 };
 
-pub struct SizeSelector<K>
+pub struct SizeSelector<K, V, S>
 where
     K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
 {
     threshold: usize,
-    _marker: PhantomData<K>,
+    _marker: PhantomData<(K, V, S)>,
 }
 
-impl<K> Debug for SizeSelector<K>
+impl<K, V, S> Debug for SizeSelector<K, V, S>
 where
     K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SizeSelector")
@@ -60,9 +65,11 @@ where
     }
 }
 
-impl<K> SizeSelector<K>
+impl<K, V, S> SizeSelector<K, V, S>
 where
     K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
 {
     pub fn new(threshold: usize) -> Self {
         Self {
@@ -72,22 +79,26 @@ where
     }
 }
 
-impl<K> Selector for SizeSelector<K>
+impl<K, V, S> Selector for SizeSelector<K, V, S>
 where
     K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
 {
     type Key = K;
+    type Value = V;
+    type BuildHasher = S;
 
-    fn select<Q>(&self, #[allow(unused)] key: &Q) -> Selection
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        todo!()
+    fn select(&self, _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBuffer) -> Selection {
+        if buffer.len() < self.threshold {
+            Selection::Left
+        } else {
+            Selection::Right
+        }
     }
 }
 
-enum LoadFuture<F1, F2, F3, F4, F5, F6, F7> {
+enum StoreFuture<F1, F2, F3, F4, F5, F6, F7> {
     Noop(F1),
     Large(F2),
     LargeRuntime(F3),
@@ -97,28 +108,28 @@ enum LoadFuture<F1, F2, F3, F4, F5, F6, F7> {
     CombinedRuntime(F7),
 }
 
-impl<F1, F2, F3, F4, F5, F6, F7> LoadFuture<F1, F2, F3, F4, F5, F6, F7> {
+impl<F1, F2, F3, F4, F5, F6, F7> StoreFuture<F1, F2, F3, F4, F5, F6, F7> {
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     pub fn as_pin_mut(
         self: Pin<&mut Self>,
-    ) -> LoadFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>, Pin<&mut F6>, Pin<&mut F7>>
+    ) -> StoreFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>, Pin<&mut F5>, Pin<&mut F6>, Pin<&mut F7>>
     {
         unsafe {
             match *Pin::get_unchecked_mut(self) {
-                LoadFuture::Noop(ref mut inner) => LoadFuture::Noop(Pin::new_unchecked(inner)),
-                LoadFuture::Large(ref mut inner) => LoadFuture::Large(Pin::new_unchecked(inner)),
-                LoadFuture::LargeRuntime(ref mut inner) => LoadFuture::LargeRuntime(Pin::new_unchecked(inner)),
-                LoadFuture::Small(ref mut inner) => LoadFuture::Small(Pin::new_unchecked(inner)),
-                LoadFuture::SmallRuntime(ref mut inner) => LoadFuture::SmallRuntime(Pin::new_unchecked(inner)),
-                LoadFuture::Combined(ref mut inner) => LoadFuture::Combined(Pin::new_unchecked(inner)),
-                LoadFuture::CombinedRuntime(ref mut inner) => LoadFuture::CombinedRuntime(Pin::new_unchecked(inner)),
+                StoreFuture::Noop(ref mut inner) => StoreFuture::Noop(Pin::new_unchecked(inner)),
+                StoreFuture::Large(ref mut inner) => StoreFuture::Large(Pin::new_unchecked(inner)),
+                StoreFuture::LargeRuntime(ref mut inner) => StoreFuture::LargeRuntime(Pin::new_unchecked(inner)),
+                StoreFuture::Small(ref mut inner) => StoreFuture::Small(Pin::new_unchecked(inner)),
+                StoreFuture::SmallRuntime(ref mut inner) => StoreFuture::SmallRuntime(Pin::new_unchecked(inner)),
+                StoreFuture::Combined(ref mut inner) => StoreFuture::Combined(Pin::new_unchecked(inner)),
+                StoreFuture::CombinedRuntime(ref mut inner) => StoreFuture::CombinedRuntime(Pin::new_unchecked(inner)),
             }
         }
     }
 }
 
-impl<F1, F2, F3, F4, F5, F6, F7> Future for LoadFuture<F1, F2, F3, F4, F5, F6, F7>
+impl<F1, F2, F3, F4, F5, F6, F7> Future for StoreFuture<F1, F2, F3, F4, F5, F6, F7>
 where
     F1: Future,
     F2: Future<Output = F1::Output>,
@@ -132,13 +143,13 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.as_pin_mut() {
-            LoadFuture::Noop(future) => future.poll(cx),
-            LoadFuture::Large(future) => future.poll(cx),
-            LoadFuture::LargeRuntime(future) => future.poll(cx),
-            LoadFuture::Small(future) => future.poll(cx),
-            LoadFuture::SmallRuntime(future) => future.poll(cx),
-            LoadFuture::Combined(future) => future.poll(cx),
-            LoadFuture::CombinedRuntime(future) => future.poll(cx),
+            StoreFuture::Noop(future) => future.poll(cx),
+            StoreFuture::Large(future) => future.poll(cx),
+            StoreFuture::LargeRuntime(future) => future.poll(cx),
+            StoreFuture::Small(future) => future.poll(cx),
+            StoreFuture::SmallRuntime(future) => future.poll(cx),
+            StoreFuture::Combined(future) => future.poll(cx),
+            StoreFuture::CombinedRuntime(future) => future.poll(cx),
         }
     }
 }
@@ -156,10 +167,10 @@ where
     LargeRuntime(RuntimeStoreConfig<GenericLargeStorage<K, V, S>>),
     Small(GenericSmallStorageConfig<K, V, S>),
     SmallRuntime(RuntimeStoreConfig<GenericSmallStorage<K, V, S>>),
-    Combined(EitherConfig<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>),
+    Combined(EitherConfig<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>),
     CombinedRuntime(
         RuntimeStoreConfig<
-            Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>,
+            Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>,
         >,
     ),
 }
@@ -202,10 +213,10 @@ where
     /// Small object disk cache with a dedicated runtime.
     SmallRuntime(Runtime<GenericSmallStorage<K, V, S>>),
     /// Combined large and small object disk cache.
-    Combined(Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>),
+    Combined(Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>),
     /// Combined large and small object disk cache with a dedicated runtime.
     CombinedRuntime(
-        Runtime<Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K>>>,
+        Runtime<Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>>,
     ),
 }
 
@@ -306,29 +317,29 @@ where
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         match self {
-            Engine::Noop(storage) => LoadFuture::Noop(storage.load(key)),
-            Engine::Large(storage) => LoadFuture::Large(storage.load(key)),
-            Engine::LargeRuntime(storage) => LoadFuture::LargeRuntime(storage.load(key)),
-            Engine::Small(storage) => LoadFuture::Small(storage.load(key)),
-            Engine::SmallRuntime(storage) => LoadFuture::SmallRuntime(storage.load(key)),
-            Engine::Combined(storage) => LoadFuture::Combined(storage.load(key)),
-            Engine::CombinedRuntime(storage) => LoadFuture::CombinedRuntime(storage.load(key)),
+            Engine::Noop(storage) => StoreFuture::Noop(storage.load(key)),
+            Engine::Large(storage) => StoreFuture::Large(storage.load(key)),
+            Engine::LargeRuntime(storage) => StoreFuture::LargeRuntime(storage.load(key)),
+            Engine::Small(storage) => StoreFuture::Small(storage.load(key)),
+            Engine::SmallRuntime(storage) => StoreFuture::SmallRuntime(storage.load(key)),
+            Engine::Combined(storage) => StoreFuture::Combined(storage.load(key)),
+            Engine::CombinedRuntime(storage) => StoreFuture::CombinedRuntime(storage.load(key)),
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> crate::EnqueueHandle
+    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self {
-            Engine::Noop(storage) => storage.delete(key),
-            Engine::Large(storage) => storage.delete(key),
-            Engine::LargeRuntime(storage) => storage.delete(key),
-            Engine::Small(storage) => storage.delete(key),
-            Engine::SmallRuntime(storage) => storage.delete(key),
-            Engine::Combined(storage) => storage.delete(key),
-            Engine::CombinedRuntime(storage) => storage.delete(key),
+            Engine::Noop(storage) => WaitHandle::new(StoreFuture::Noop(storage.delete(key))),
+            Engine::Large(storage) => WaitHandle::new(StoreFuture::Large(storage.delete(key))),
+            Engine::LargeRuntime(storage) => WaitHandle::new(StoreFuture::LargeRuntime(storage.delete(key))),
+            Engine::Small(storage) => WaitHandle::new(StoreFuture::Small(storage.delete(key))),
+            Engine::SmallRuntime(storage) => WaitHandle::new(StoreFuture::SmallRuntime(storage.delete(key))),
+            Engine::Combined(storage) => WaitHandle::new(StoreFuture::Combined(storage.delete(key))),
+            Engine::CombinedRuntime(storage) => WaitHandle::new(StoreFuture::CombinedRuntime(storage.delete(key))),
         }
     }
 
