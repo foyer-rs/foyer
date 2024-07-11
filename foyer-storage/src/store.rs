@@ -31,7 +31,7 @@ use crate::{
     small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
-        either::EitherConfig,
+        either::{EitherConfig, Order},
         runtime::{RuntimeConfig, RuntimeStoreConfig},
         Storage,
     },
@@ -226,6 +226,10 @@ impl From<DirectFsDeviceOptions> for DeviceConfig {
 }
 
 /// [`CombinedConfig`] controls the ratio of the large object disk cache and the small object disk cache.
+///
+/// If [`CombinedConfig::Combined`] is used, it will use the `Either` engine
+/// with the small object disk cache as the left engine,
+/// and the large object disk cache as the right engine.
 #[derive(Debug, Clone)]
 pub enum CombinedConfig {
     /// All space are used as the large object disk cache.
@@ -236,6 +240,10 @@ pub enum CombinedConfig {
     Combined {
         /// The ratio of the large object disk cache.
         large_object_cache_ratio: f64,
+        /// The serialized entry size threshold to use the large object disk cache.
+        large_object_threshold: usize,
+        /// Load order.
+        load_order: Order,
     },
 }
 
@@ -243,6 +251,27 @@ impl Default for CombinedConfig {
     fn default() -> Self {
         // TODO(MrCroxx): Use combined cache after small object disk cache is ready.
         Self::Large
+    }
+}
+
+impl CombinedConfig {
+    /// Default large object disk cache only config.
+    pub fn large() -> Self {
+        Self::Large
+    }
+
+    /// Default small object disk cache only config.
+    pub fn small() -> Self {
+        Self::Small
+    }
+
+    /// Default combined large object disk cache and small object disk cache only config.
+    pub fn combined() -> Self {
+        Self::Combined {
+            large_object_cache_ratio: 0.5,
+            large_object_threshold: 4096,
+            load_order: Order::RightFirst,
+        }
     }
 }
 
@@ -271,7 +300,6 @@ where
     compression: Compression,
     tombstone_log_config: Option<TombstoneLogConfig>,
     combined_config: CombinedConfig,
-    large_object_threshold: usize,
 
     runtime_config: Option<RuntimeConfig>,
 }
@@ -302,7 +330,6 @@ where
             compression: Compression::None,
             tombstone_log_config: None,
             combined_config: CombinedConfig::default(),
-            large_object_threshold: 4096,
             runtime_config: None,
         }
     }
@@ -556,6 +583,8 @@ where
                     (
                         CombinedConfig::Combined {
                             large_object_cache_ratio,
+                            large_object_threshold,
+                            load_order,
                         },
                         None,
                     ) => {
@@ -564,7 +593,7 @@ where
                             (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
 
                         Engine::open(EngineConfig::Combined(EitherConfig {
-                            selector: SizeSelector::new(self.large_object_threshold),
+                            selector: SizeSelector::new(large_object_threshold),
                             left: GenericSmallStorageConfig {
                                 placeholder: PhantomData,
                             },
@@ -587,12 +616,15 @@ where
                                 buffer_threshold: self.buffer_threshold,
                                 statistics: statistics.clone(),
                             },
+                            load_order,
                         }))
                         .await?
                     }
                     (
                         CombinedConfig::Combined {
                             large_object_cache_ratio,
+                            large_object_threshold,
+                            load_order,
                         },
                         Some(runtime_config),
                     ) => {
@@ -602,7 +634,7 @@ where
 
                         Engine::open(EngineConfig::CombinedRuntime(RuntimeStoreConfig {
                             store_config: EitherConfig {
-                                selector: SizeSelector::new(self.large_object_threshold),
+                                selector: SizeSelector::new(large_object_threshold),
                                 left: GenericSmallStorageConfig {
                                     placeholder: PhantomData,
                                 },
@@ -625,6 +657,7 @@ where
                                     buffer_threshold: self.buffer_threshold,
                                     statistics: statistics.clone(),
                                 },
+                                load_order,
                             },
                             runtime_config,
                         }))
