@@ -22,9 +22,70 @@ use tokio::{runtime::Handle, sync::oneshot};
 
 use crate::{device::IoBuffer, error::Result, serde::KvInfo, storage::Storage, DeviceStats};
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    hash::Hash,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use super::WaitHandle;
+
+enum OrderFuture<F1, F2, F3> {
+    LeftFirst(F1),
+    RightFirst(F2),
+    Parallel(F3),
+}
+
+impl<F1, F2, F3> OrderFuture<F1, F2, F3> {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::type_complexity)]
+    pub fn as_pin_mut(self: Pin<&mut Self>) -> OrderFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>> {
+        unsafe {
+            match *Pin::get_unchecked_mut(self) {
+                OrderFuture::LeftFirst(ref mut inner) => OrderFuture::LeftFirst(Pin::new_unchecked(inner)),
+                OrderFuture::RightFirst(ref mut inner) => OrderFuture::RightFirst(Pin::new_unchecked(inner)),
+                OrderFuture::Parallel(ref mut inner) => OrderFuture::Parallel(Pin::new_unchecked(inner)),
+            }
+        }
+    }
+}
+
+impl<F1, F2, F3> Future for OrderFuture<F1, F2, F3>
+where
+    F1: Future,
+    F2: Future<Output = F1::Output>,
+    F3: Future<Output = F1::Output>,
+{
+    type Output = F1::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_pin_mut() {
+            OrderFuture::LeftFirst(future) => future.poll(cx),
+            OrderFuture::RightFirst(future) => future.poll(cx),
+            OrderFuture::Parallel(future) => future.poll(cx),
+        }
+    }
+}
+
+/// Order of ops.
+#[derive(Debug, Clone, Copy)]
+pub enum Order {
+    /// Use the left engine first.
+    ///
+    /// If the op does returns the expected result, use then right engine then.
+    LeftFirst,
+    /// Use the right engine first.
+    ///
+    /// If the op does returns the expected result, use then left engine then.
+    RightFirst,
+    /// Use the left engine and the right engine in parallel.
+    ///
+    /// If any engine returns the expected result, the future returns immediately.
+    Parallel,
+}
 
 pub struct EitherConfig<K, V, S, SL, SR, SE>
 where
@@ -33,11 +94,12 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     pub selector: SE,
     pub left: SL::Config,
     pub right: SR::Config,
+    pub load_order: Order,
 }
 
 impl<K, V, S, SL, SR, SE> Debug for EitherConfig<K, V, S, SL, SR, SE>
@@ -47,7 +109,7 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EitherStoreConfig")
@@ -78,12 +140,14 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     selector: Arc<SE>,
 
     left: SL,
     right: SR,
+
+    load_order: Order,
 }
 
 impl<K, V, S, SL, SR, SE> Debug for Either<K, V, S, SL, SR, SE>
@@ -93,7 +157,7 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EitherStore")
@@ -110,13 +174,14 @@ where
     S: HashBuilder + Debug,
     SL: Storage<Key = K, Value = V, BuildHasher = S>,
     SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K>,
+    SE: Selector<Key = K, Value = V, BuildHasher = S>,
 {
     fn clone(&self) -> Self {
         Self {
             selector: self.selector.clone(),
             left: self.left.clone(),
             right: self.right.clone(),
+            load_order: self.load_order,
         }
     }
 }
@@ -140,7 +205,12 @@ where
         let left = SL::open(config.left).await?;
         let right = SR::open(config.right).await?;
 
-        Ok(Self { selector, left, right })
+        Ok(Self {
+            selector,
+            left,
+            right,
+            load_order: config.load_order,
+        })
     }
 
     async fn close(&self) -> Result<()> {
@@ -175,26 +245,40 @@ where
     {
         let fleft = self.left.load(key);
         let fright = self.right.load(key);
-
-        async move {
-            pin_mut!(fleft);
-            pin_mut!(fright);
-
-            // Returns a 4-way `Either` by nesting `Either` in `Either`.
-            select(fleft, fright)
-                .then(|either| match either {
-                    EitherFuture::Left((res, fr)) => match res {
-                        Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().left_future(),
-                        Err(e) => ready(Err(e)).left_future().left_future(),
-                        Ok(None) => fr.right_future().left_future(),
-                    },
-                    EitherFuture::Right((res, fl)) => match res {
-                        Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().right_future(),
-                        Err(e) => ready(Err(e)).left_future().right_future(),
-                        Ok(None) => fl.right_future().right_future(),
-                    },
+        match self.load_order {
+            // FIXME(MrCroxx): false-positive on hash collision.
+            Order::LeftFirst => OrderFuture::LeftFirst(fleft.then(|res| match res {
+                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
+                Err(e) => ready(Err(e)).left_future(),
+                Ok(None) => fright.right_future(),
+            })),
+            // FIXME(MrCroxx): false-positive on hash collision.
+            Order::RightFirst => OrderFuture::RightFirst(fright.then(|res| match res {
+                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
+                Err(e) => ready(Err(e)).left_future(),
+                Ok(None) => fleft.right_future(),
+            })),
+            Order::Parallel => {
+                OrderFuture::Parallel(async move {
+                    pin_mut!(fleft);
+                    pin_mut!(fright);
+                    // Returns a 4-way `Either` by nesting `Either` in `Either`.
+                    select(fleft, fright)
+                        .then(|either| match either {
+                            EitherFuture::Left((res, fr)) => match res {
+                                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().left_future(),
+                                Err(e) => ready(Err(e)).left_future().left_future(),
+                                Ok(None) => fr.right_future().left_future(),
+                            },
+                            EitherFuture::Right((res, fl)) => match res {
+                                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().right_future(),
+                                Err(e) => ready(Err(e)).left_future().right_future(),
+                                Ok(None) => fl.right_future().right_future(),
+                            },
+                        })
+                        .await
                 })
-                .await
+            }
         }
     }
 

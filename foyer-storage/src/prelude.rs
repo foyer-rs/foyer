@@ -28,6 +28,7 @@ pub use crate::{
     },
     statistics::Statistics,
     storage::{
+        either::Order,
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
         Storage, WaitHandle,
     },

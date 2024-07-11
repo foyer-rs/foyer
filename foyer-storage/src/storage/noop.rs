@@ -18,6 +18,7 @@ use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::Phanto
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
+use futures::future::ready;
 use futures::FutureExt;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
@@ -98,15 +99,12 @@ where
         let _ = tx.send(Ok(false));
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    // False-positive with `'static` lifetime requirement.
-    #[allow(clippy::manual_async_fn)]
     fn load<Q>(&self, _: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
     where
         Self::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        async move { Ok(None) }
+        ready(Ok(None))
     }
 
     fn delete<Q>(&self, _: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
