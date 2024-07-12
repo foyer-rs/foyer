@@ -134,6 +134,7 @@ impl CompactBloomFilter {
 /// [`CompactBloomFilterShard`] takes the partial ownership of the compact bloom filter.
 ///
 /// Operations from different shards don't affect each other.
+#[derive(Debug)]
 pub struct CompactBloomFilterShard {
     inner: Arc<UnsafeCell<CompactBloomFilter>>,
     idx: usize,
