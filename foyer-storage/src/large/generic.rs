@@ -40,14 +40,16 @@ use crate::{
     compress::Compression,
     device::{monitor::DeviceStats, Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
     error::{Error, Result},
-    large::reclaimer::RegionCleaner,
+    large::{
+        reclaimer::RegionCleaner,
+        serde::{AtomicSequence, EntryHeader},
+        tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
+    },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
     serde::{EntryDeserializer, KvInfo},
     statistics::Statistics,
     storage::{Storage, WaitHandle},
-    tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
-    AtomicSequence,
 };
 
 use tokio::{
@@ -344,7 +346,15 @@ where
                 .cache_read_bytes
                 .fetch_add(bits::align_up(device.align(), buffer.len()), Ordering::Relaxed);
 
-            let (_, k, v) = match EntryDeserializer::deserialize::<K, V>(&buffer) {
+            let header = EntryHeader::read(&buffer[..EntryHeader::serialized_len()])?;
+
+            let (k, v) = match EntryDeserializer::deserialize::<K, V>(
+                &buffer[EntryHeader::serialized_len()..],
+                header.key_len as _,
+                header.value_len as _,
+                header.compression,
+                Some(header.checksum),
+            ) {
                 Ok(res) => res,
                 Err(e) => match e {
                     Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
@@ -527,6 +537,9 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    use super::*;
+
     use std::path::Path;
 
     use ahash::RandomState;
@@ -543,10 +556,8 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        tombstone::TombstoneLogConfigBuilder,
+        TombstoneLogConfigBuilder,
     };
-
-    use super::*;
 
     const KB: usize = 1024;
 

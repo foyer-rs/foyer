@@ -28,11 +28,12 @@ use crate::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
         scanner::RegionScanner,
+        serde::Sequence,
     },
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    Sequence, WaitHandle,
+    WaitHandle,
 };
 
 #[derive(Debug)]

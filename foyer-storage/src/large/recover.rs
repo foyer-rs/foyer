@@ -28,15 +28,17 @@ use tokio::sync::Semaphore;
 
 use crate::error::{Error, Result};
 
-use crate::large::scanner::{EntryInfo, RegionScanner};
-use crate::{AtomicSequence, Sequence};
+use crate::large::{
+    scanner::{EntryInfo, RegionScanner},
+    serde::{AtomicSequence, Sequence},
+};
 
 use super::generic::GenericLargeStorageConfig;
 use super::indexer::EntryAddress;
 use super::indexer::Indexer;
 use crate::device::RegionId;
+use crate::large::tombstone::Tombstone;
 use crate::region::{Region, RegionManager};
-use crate::tombstone::Tombstone;
 
 /// The recover mode of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
