@@ -21,7 +21,10 @@ pub use crate::{
         Dev, DevExt, DevOptions,
     },
     error::{Error, Result},
-    large::recover::RecoverMode,
+    large::{
+        recover::RecoverMode,
+        tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
+    },
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
@@ -33,5 +36,4 @@ pub use crate::{
         Storage, WaitHandle,
     },
     store::{CombinedConfig, DeviceConfig, Store, StoreBuilder},
-    tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
 };

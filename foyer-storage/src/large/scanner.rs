@@ -15,15 +15,15 @@
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    strict_assert, strict_assert_eq,
+    strict_assert,
 };
 
 use crate::{
     device::{IoBuffer, IO_BUFFER_ALLOCATOR},
     error::Result,
+    large::serde::{EntryHeader, Sequence},
     region::Region,
-    serde::{EntryDeserializer, EntryHeader},
-    Sequence,
+    serde::EntryDeserializer,
 };
 
 use super::indexer::EntryAddress;
@@ -106,7 +106,13 @@ impl RegionScanner {
         // load entry header buf
         let buf = self.cache.read(self.offset, EntryHeader::serialized_len()).await?;
 
-        Ok(EntryDeserializer::deserialize_header(buf))
+        if buf.len() < EntryHeader::serialized_len() {
+            return Ok(None);
+        }
+
+        let res = EntryHeader::read(buf).ok();
+
+        Ok(res)
     }
 
     async fn step(&mut self, header: &EntryHeader) {
@@ -203,8 +209,14 @@ impl RegionScanner {
         let info = self.info(&header);
 
         let buf = self.cache.read(info.addr.offset as _, info.addr.len as _).await?;
-        let (h, key, value) = EntryDeserializer::deserialize(buf)?;
-        strict_assert_eq!(header, h);
+
+        let (key, value) = EntryDeserializer::deserialize(
+            &buf[EntryHeader::serialized_len()..],
+            header.key_len as _,
+            header.value_len as _,
+            header.compression,
+            Some(header.checksum),
+        )?;
 
         self.step(&header).await;
 

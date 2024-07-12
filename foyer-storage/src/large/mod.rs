@@ -18,3 +18,5 @@ pub mod indexer;
 pub mod reclaimer;
 pub mod recover;
 pub mod scanner;
+pub mod serde;
+pub mod tombstone;
