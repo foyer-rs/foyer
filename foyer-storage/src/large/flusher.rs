@@ -15,9 +15,9 @@
 use crate::{
     device::{IoBuffer, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR},
     error::{Error, Result},
+    large::serde::EntryHeader,
     region::{GetCleanRegionHandle, RegionManager},
-    serde::{Checksummer, EntryHeader, KvInfo},
-    tombstone::{Tombstone, TombstoneLog},
+    serde::{Checksummer, KvInfo},
     Compression, Statistics,
 };
 use foyer_common::{
@@ -38,12 +38,14 @@ use tokio::{
     sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
 };
 
-use crate::{Dev, DevExt, Sequence};
+use crate::{Dev, DevExt};
 
 use super::{
     generic::GenericLargeStorageConfig,
     indexer::{EntryAddress, Indexer},
     reclaimer::Reinsertion,
+    serde::Sequence,
+    tombstone::{Tombstone, TombstoneLog},
 };
 
 #[derive(Debug)]

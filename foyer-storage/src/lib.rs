@@ -29,14 +29,8 @@ mod small;
 mod statistics;
 mod storage;
 mod store;
-mod tombstone;
 
 mod prelude;
 pub use prelude::*;
 
 pub mod test_utils;
-
-use std::sync::atomic::AtomicU64;
-
-type Sequence = u64;
-type AtomicSequence = AtomicU64;

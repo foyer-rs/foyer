@@ -20,7 +20,7 @@ use std::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 
-use crate::{device::RegionId, Sequence};
+use crate::{device::RegionId, large::serde::Sequence};
 
 #[derive(Debug, Clone)]
 pub struct EntryAddress {

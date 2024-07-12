@@ -16,14 +16,12 @@ use std::{fmt::Debug, hash::Hasher};
 use twox_hash::XxHash64;
 
 use allocator_api2::alloc::Allocator;
-use bytes::{Buf, BufMut};
 use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{
     compress::Compression,
     device::allocator::WritableVecA,
     error::{Error, Result},
-    Sequence,
 };
 
 #[derive(Debug)]
@@ -34,72 +32,6 @@ impl Checksummer {
         let mut hasher = XxHash64::with_seed(0);
         hasher.write(buf);
         hasher.finish()
-    }
-}
-
-const ENTRY_MAGIC: u32 = 0x97_03_27_00;
-const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct EntryHeader {
-    pub key_len: u32,
-    pub value_len: u32,
-    pub hash: u64,
-    pub sequence: Sequence,
-    pub checksum: u64,
-    pub compression: Compression,
-}
-
-impl EntryHeader {
-    pub const fn serialized_len() -> usize {
-        4 + 4 + 8 + 8 + 8 + 4 /* magic & compression */
-    }
-
-    pub fn entry_len(&self) -> usize {
-        Self::serialized_len() + self.key_len as usize + self.value_len as usize
-    }
-
-    pub fn write(&self, mut buf: impl BufMut) {
-        buf.put_u32(self.key_len);
-        buf.put_u32(self.value_len);
-        buf.put_u64(self.hash);
-        buf.put_u64(self.sequence);
-        buf.put_u64(self.checksum);
-
-        let v = ENTRY_MAGIC | self.compression.to_u8() as u32;
-        buf.put_u32(v);
-    }
-
-    pub fn read(mut buf: impl Buf) -> Result<Self> {
-        let key_len = buf.get_u32();
-        let value_len = buf.get_u32();
-        let hash = buf.get_u64();
-        let sequence = buf.get_u64();
-        let checksum = buf.get_u64();
-
-        let v = buf.get_u32();
-        let compression = Compression::try_from(v as u8)?;
-
-        let this = Self {
-            key_len,
-            value_len,
-            hash,
-            sequence,
-            compression,
-            checksum,
-        };
-
-        tracing::trace!("{this:#?}");
-
-        let magic = v & ENTRY_MAGIC_MASK;
-        if magic != ENTRY_MAGIC {
-            return Err(Error::MagicMismatch {
-                expected: ENTRY_MAGIC,
-                get: magic,
-            });
-        }
-
-        Ok(this)
     }
 }
 
@@ -161,41 +93,34 @@ impl EntrySerializer {
 pub struct EntryDeserializer;
 
 impl EntryDeserializer {
-    pub fn deserialize<K, V>(buffer: &[u8]) -> Result<(EntryHeader, K, V)>
+    pub fn deserialize<K, V>(
+        buffer: &[u8],
+        ken_len: usize,
+        value_len: usize,
+        compression: Compression,
+        checksum: Option<u64>,
+    ) -> Result<(K, V)>
     where
         K: StorageKey,
         V: StorageValue,
     {
-        // deserialize entry header
-        let header = EntryHeader::read(buffer).map_err(Error::from)?;
-
         // deserialize value
-        let mut offset = EntryHeader::serialized_len();
-        let buf = &buffer[offset..offset + header.value_len as usize];
-        offset += header.value_len as usize;
-        let value = Self::deserialize_value(buf, header.compression)?;
+        let buf = &buffer[..value_len];
+        let value = Self::deserialize_value(buf, compression)?;
 
         // deserialize key
-        let buf = &buffer[offset..offset + header.key_len as usize];
+        let buf = &buffer[value_len..value_len + ken_len];
         let key = Self::deserialize_key(buf)?;
-        offset += header.key_len as usize;
 
-        let checksum = Checksummer::checksum(&buffer[EntryHeader::serialized_len()..offset]);
-        if checksum != header.checksum {
-            return Err(Error::ChecksumMismatch {
-                expected: header.checksum,
-                get: checksum,
-            });
+        // calculate checksum if needed
+        if let Some(expected) = checksum {
+            let get = Checksummer::checksum(&buffer[..value_len + ken_len]);
+            if expected != get {
+                return Err(Error::ChecksumMismatch { expected, get });
+            }
         }
 
-        Ok((header, key, value))
-    }
-
-    pub fn deserialize_header(buf: &[u8]) -> Option<EntryHeader> {
-        if buf.len() < EntryHeader::serialized_len() {
-            return None;
-        }
-        EntryHeader::read(buf).ok()
+        Ok((key, value))
     }
 
     pub fn deserialize_key<K>(buf: &[u8]) -> Result<K>

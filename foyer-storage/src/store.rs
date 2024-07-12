@@ -22,7 +22,7 @@ use crate::{
     },
     engine::{Engine, EngineConfig, SizeSelector},
     error::Result,
-    large::{generic::GenericLargeStorageConfig, recover::RecoverMode},
+    large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
@@ -35,7 +35,6 @@ use crate::{
         runtime::{RuntimeConfig, RuntimeStoreConfig},
         Storage,
     },
-    tombstone::TombstoneLogConfig,
     Dev, DevExt, DirectFileDeviceOptions, WaitHandle,
 };
 use ahash::RandomState;
