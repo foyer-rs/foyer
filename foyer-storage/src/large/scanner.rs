@@ -19,7 +19,7 @@ use foyer_common::{
 };
 
 use crate::{
-    device::{IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::bytes::IoBytes,
     error::Result,
     large::serde::{EntryHeader, Sequence},
     region::Region,
@@ -39,7 +39,7 @@ pub struct EntryInfo {
 struct CachedDeviceReader {
     region: Region,
     offset: u64,
-    buffer: IoBuffer,
+    buffer: IoBytes,
 }
 
 impl CachedDeviceReader {
@@ -49,7 +49,7 @@ impl CachedDeviceReader {
         Self {
             region,
             offset: 0,
-            buffer: IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
+            buffer: IoBytes::new(),
         }
     }
 
@@ -69,7 +69,7 @@ impl CachedDeviceReader {
         strict_assert!(bits::is_aligned(self.region.align(), read_len));
         strict_assert!(read_len >= len);
 
-        let buffer = self.region.read(self.offset, read_len).await?;
+        let buffer = self.region.read(self.offset, read_len).await?.freeze();
         self.buffer = buffer;
 
         let start = (offset - self.offset) as usize;

@@ -17,8 +17,9 @@ use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
 use crate::{
-    device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
+    device::ALIGN,
     error::{Error, Result},
+    IoBytes, IoBytesMut,
 };
 use std::{
     fs::{create_dir_all, File, OpenOptions},
@@ -74,12 +75,8 @@ impl DevOptions for DirectFileDeviceOptions {
 impl DirectFileDevice {
     /// Positioned write API for the direct file device.
     #[minitrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
-    pub async fn pwrite(&self, mut buf: IoBuffer, offset: u64) -> Result<()> {
-        bits::assert_aligned(self.align() as u64, offset);
-
-        let aligned = bits::align_up(self.align(), buf.len());
-        buf.reserve(aligned - buf.len());
-        unsafe { buf.set_len(aligned) };
+    pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
+        let aligned = buf.as_aligned().len();
 
         assert!(
             offset as usize + aligned <= self.capacity(),
@@ -96,7 +93,7 @@ impl DirectFileDevice {
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let written = file.write_at(buf.as_ref(), offset)?;
+            let written = file.write_at(buf.as_aligned(), offset)?;
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -108,7 +105,7 @@ impl DirectFileDevice {
 
     /// Positioned read API for the direct file device.
     #[minitrace::trace(name = "foyer::storage::device::direct_file::pread")]
-    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
         bits::assert_aligned(self.align() as u64, offset);
 
         let aligned = bits::align_up(self.align(), len);
@@ -120,7 +117,7 @@ impl DirectFileDevice {
             capacity = self.capacity,
         );
 
-        let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
+        let mut buf = IoBytesMut::with_capacity(aligned);
         unsafe {
             buf.set_len(aligned);
         }
@@ -191,12 +188,8 @@ impl Dev for DirectFileDevice {
     }
 
     #[minitrace::trace(name = "foyer::storage::device::direct_file::write")]
-    async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
-        bits::assert_aligned(self.align() as u64, offset);
-
-        let aligned = bits::align_up(self.align(), buf.len());
-        buf.reserve(aligned - buf.len());
-        unsafe { buf.set_len(aligned) };
+    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+        let aligned = buf.as_aligned().len();
 
         assert!(
             offset as usize + aligned <= self.region_size(),
@@ -210,7 +203,7 @@ impl Dev for DirectFileDevice {
     }
 
     #[minitrace::trace(name = "foyer::storage::device::direct_file::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
         bits::assert_aligned(self.align() as u64, offset);
 
         let aligned = bits::align_up(self.align(), len);
@@ -346,12 +339,13 @@ mod tests {
 
         let device = DirectFileDevice::open(options.clone()).await.unwrap();
 
-        let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
+        let mut buf = IoBytesMut::with_capacity(64 * 1024);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
+        let buf = buf.freeze();
 
         device.write(buf.clone(), 0, 4096).await.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
         assert_eq!(buf, b);
 
         device.flush(None).await.unwrap();
@@ -360,7 +354,7 @@ mod tests {
 
         let device = DirectFileDevice::open(options).await.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
         assert_eq!(buf, b);
     }
 }

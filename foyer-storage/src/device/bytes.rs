@@ -60,12 +60,28 @@ impl DerefMut for IoBytesMut {
     }
 }
 
+impl PartialEq for IoBytesMut {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for IoBytesMut {}
+
+impl Clone for IoBytesMut {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 /// Ported from `bytes`.
 unsafe impl BufMut for IoBytesMut {
     #[inline]
     fn remaining_mut(&self) -> usize {
         // A vector can never have more than isize::MAX bytes
-        core::isize::MAX as usize - self.len()
+        isize::MAX as usize - self.len()
     }
 
     unsafe fn advance_mut(&mut self, cnt: usize) {
@@ -150,6 +166,21 @@ impl IoBytesMut {
         }
     }
 
+    // Splits the collection into two at the given index.
+    ///
+    /// Returns a newly allocated vector containing the elements in the range
+    /// `[at, len)`. After the call, the original vector will be left containing
+    /// the elements `[0, at)` with its previous capacity unchanged.
+    ///
+    /// # Panics
+    ///
+    /// The split point `at` must be 4K-aligned.
+    pub fn split_off(&mut self, at: usize) -> Self {
+        debug_assert_eq!(at % ALIGN, 0);
+        let inner = self.inner.split_off(at);
+        Self { inner }
+    }
+
     /// Convert [`IoBytesMut`] to [`IoBytes`].
     pub fn freeze(self) -> IoBytes {
         self.into()
@@ -190,6 +221,12 @@ impl From<IoBytesMut> for IoBytes {
     }
 }
 
+impl Default for IoBytes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Deref for IoBytes {
     type Target = [u8];
 
@@ -197,6 +234,14 @@ impl Deref for IoBytes {
         &self.inner[self.offset..self.offset + self.len]
     }
 }
+
+impl PartialEq for IoBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for IoBytes {}
 
 impl Clone for IoBytes {
     fn clone(&self) -> Self {
@@ -209,6 +254,11 @@ impl Clone for IoBytes {
 }
 
 impl IoBytes {
+    /// Constructs a new, empty, shared 4K-aligned u8 vector.
+    pub fn new() -> Self {
+        IoBytesMut::new().into()
+    }
+
     /// Returns a 4K-aligned slice of self for the provided range.
     ///
     /// # Panics

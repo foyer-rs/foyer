@@ -23,10 +23,13 @@ use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 
-use crate::device::{
-    direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
-    monitor::{Monitored, MonitoredOptions},
-    Dev, DevExt, IoBuffer, RegionId, IO_BUFFER_ALLOCATOR,
+use crate::{
+    device::{
+        direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
+        monitor::{Monitored, MonitoredOptions},
+        Dev, DevExt, RegionId,
+    },
+    IoBytesMut,
 };
 
 use crate::error::{Error, Result};
@@ -222,7 +225,7 @@ impl TombstoneLog {
 pub struct PageBuffer<D> {
     region: RegionId,
     idx: u32,
-    buffer: IoBuffer,
+    buffer: IoBytesMut,
 
     device: D,
 
@@ -249,7 +252,7 @@ where
         let mut this = Self {
             region,
             idx,
-            buffer: IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
+            buffer: IoBytesMut::new(),
             device,
             sync,
         };
@@ -284,7 +287,7 @@ where
     pub async fn flush(&self) -> Result<()> {
         self.device
             .write(
-                self.buffer.clone(),
+                self.buffer.clone().freeze(),
                 self.region,
                 Self::offset(self.device.align(), self.idx),
             )

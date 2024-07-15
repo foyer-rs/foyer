@@ -13,12 +13,12 @@
 //  limitations under the License.
 
 use crate::{
-    device::{IoBuffer, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR},
+    device::{IoBuffer, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::serde::EntryHeader,
     region::{GetCleanRegionHandle, RegionManager},
     serde::{Checksummer, KvInfo},
-    Compression, Statistics,
+    Compression, IoBytesMut, Statistics,
 };
 use foyer_common::{
     bits,
@@ -87,7 +87,7 @@ where
 {
     writer: RegionHandle,
 
-    buffer: IoBuffer,
+    buffer: IoBytesMut,
     indices: Vec<(u64, EntryAddress)>,
     txs: Vec<oneshot::Sender<Result<bool>>>,
     // hold the entries to avoid memory cache lookup miss?
@@ -437,7 +437,7 @@ where
         group.writer.size += aligned;
     }
 
-    fn reinsertion(&mut self, mut reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>) {
+    fn reinsertion(&mut self, reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>) {
         tracing::trace!("[flusher]: submit reinsertion");
 
         // Skip if the entry is no longer in the indexer.
@@ -479,7 +479,7 @@ where
         let boffset = group.buffer.len();
         let len = reinsertion.buffer.len();
         group.buffer.reserve(aligned);
-        group.buffer.append(&mut reinsertion.buffer);
+        group.buffer.extend_from_slice(&reinsertion.buffer);
         unsafe { group.buffer.set_len(boffset + aligned) };
         group.indices.push((
             reinsertion.hash,
@@ -514,7 +514,7 @@ where
             writer.offset = writer.size as u64;
             batch.groups.push(WriteGroup {
                 writer,
-                buffer: IoBuffer::with_capacity_in(self.device.region_size(), &IO_BUFFER_ALLOCATOR),
+                buffer: IoBytesMut::with_capacity(self.device.region_size()),
                 indices: vec![],
                 txs: vec![],
                 entries: vec![],
@@ -549,7 +549,7 @@ where
                     // Write buffet to device.
                     if !group.buffer.is_empty() {
                         let aligned = group.buffer.len();
-                        region.write(group.buffer, group.writer.offset).await?;
+                        region.write(group.buffer.freeze(), group.writer.offset).await?;
                         if flush {
                             region.flush().await?;
                         }
@@ -615,13 +615,10 @@ where
     }
 
     fn append_groups(&mut self) {
-        self.append_groups_with_buffer(IoBuffer::with_capacity_in(
-            self.device.region_size(),
-            &IO_BUFFER_ALLOCATOR,
-        ));
+        self.append_groups_with_buffer(IoBytesMut::with_capacity(self.device.region_size()));
     }
 
-    fn append_groups_with_buffer(&mut self, buffer: IoBuffer) {
+    fn append_groups_with_buffer(&mut self, buffer: IoBytesMut) {
         let handle = self.region_manager.get_clean_region();
         self.batch.groups.push(WriteGroup {
             writer: RegionHandle {
