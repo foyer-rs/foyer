@@ -27,6 +27,8 @@ pub mod bits;
 pub mod buf;
 /// The trait for the key and value encoding and decoding.
 pub mod code;
+/// Bloom filters.
+pub mod compact_bloom_filter;
 /// A concurrent count down util.
 pub mod countdown;
 /// Components for monitoring internal events.
