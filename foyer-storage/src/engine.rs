@@ -28,7 +28,6 @@ use std::{
 use tokio::sync::oneshot;
 
 use crate::{
-    device::IoBuffer,
     error::Result,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
     serde::KvInfo,
@@ -39,7 +38,7 @@ use crate::{
         runtime::{Runtime, RuntimeStoreConfig},
         WaitHandle,
     },
-    DeviceStats, Storage,
+    DeviceStats, IoBytes, Storage,
 };
 
 pub struct SizeSelector<K, V, S>
@@ -89,7 +88,7 @@ where
     type Value = V;
     type BuildHasher = S;
 
-    fn select(&self, _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBuffer) -> Selection {
+    fn select(&self, _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBytes) -> Selection {
         if buffer.len() < self.threshold {
             Selection::Left
         } else {
@@ -296,7 +295,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {

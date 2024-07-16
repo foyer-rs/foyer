@@ -38,7 +38,7 @@ use futures::{
 
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
+    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::{
         reclaimer::RegionCleaner,
@@ -50,6 +50,7 @@ use crate::{
     serde::{EntryDeserializer, KvInfo},
     statistics::Statistics,
     storage::{Storage, WaitHandle},
+    IoBytes,
 };
 
 use tokio::{
@@ -297,7 +298,7 @@ where
     }
 
     #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBuffer, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
                 .unwrap();
@@ -487,7 +488,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
@@ -551,12 +552,11 @@ mod tests {
             allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
-            IO_BUFFER_ALLOCATOR,
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        TombstoneLogConfigBuilder,
+        IoBytesMut, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -652,7 +652,7 @@ mod tests {
         entry: CacheEntry<u64, Vec<u8>, RandomState>,
     ) -> WaitHandle<impl Future<Output = Result<bool>>> {
         let (tx, rx) = oneshot::channel();
-        let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+        let mut buffer = IoBytesMut::new();
         let info = EntrySerializer::serialize(
             entry.key(),
             entry.value(),
@@ -660,6 +660,7 @@ mod tests {
             WritableVecA(&mut buffer),
         )
         .unwrap();
+        let buffer = buffer.freeze();
         store.enqueue(entry, buffer, info, tx);
         WaitHandle::new(rx.map(|recv| recv.unwrap()))
     }

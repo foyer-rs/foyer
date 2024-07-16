@@ -24,11 +24,11 @@ use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
-use crate::device::IoBuffer;
 use crate::serde::KvInfo;
 use crate::storage::Storage;
 
 use crate::error::Result;
+use crate::IoBytes;
 
 use super::WaitHandle;
 
@@ -92,7 +92,7 @@ where
     fn enqueue(
         &self,
         _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        _buffer: IoBuffer,
+        _buffer: IoBytes,
         _info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
@@ -146,8 +146,6 @@ where
 mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 
-    use crate::device::IO_BUFFER_ALLOCATOR;
-
     use super::*;
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
@@ -163,7 +161,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         store.enqueue(
             memory.insert(0, vec![b'x'; 16384]),
-            IoBuffer::new_in(&IO_BUFFER_ALLOCATOR),
+            IoBytes::new(),
             KvInfo {
                 key_len: 0,
                 value_len: 0,

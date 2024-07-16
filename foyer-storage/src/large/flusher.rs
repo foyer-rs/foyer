@@ -13,12 +13,12 @@
 //  limitations under the License.
 
 use crate::{
-    device::{IoBuffer, MonitoredDevice, RegionId},
+    device::{MonitoredDevice, RegionId},
     error::{Error, Result},
     large::serde::EntryHeader,
     region::{GetCleanRegionHandle, RegionManager},
     serde::{Checksummer, KvInfo},
-    Compression, IoBytesMut, Statistics,
+    Compression, IoBytes, IoBytesMut, Statistics,
 };
 use foyer_common::{
     bits,
@@ -63,7 +63,7 @@ where
 {
     CacheEntry {
         entry: CacheEntry<K, V, S>,
-        buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         sequence: Sequence,
         tx: oneshot::Sender<Result<bool>>,
@@ -347,7 +347,7 @@ where
     fn entry(
         &mut self,
         entry: CacheEntry<K, V, S>,
-        mut buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         sequence: Sequence,
         tx: oneshot::Sender<Result<bool>>,
@@ -388,7 +388,7 @@ where
         // TODO(MrCroxx): impl `BufMut` for `WritableVecA` to avoid manually reservation?
         unsafe { group.buffer.set_len(boffset + EntryHeader::serialized_len()) };
         header.write(&mut group.buffer[boffset..]);
-        group.buffer.append(&mut buffer);
+        group.buffer.extend_from_slice(&buffer);
 
         let len = group.buffer.len() - boffset;
         let aligned = bits::align_up(self.device.align(), len);

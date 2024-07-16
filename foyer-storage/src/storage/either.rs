@@ -20,7 +20,7 @@ use futures::{
 };
 use tokio::{runtime::Handle, sync::oneshot};
 
-use crate::{device::IoBuffer, error::Result, serde::KvInfo, storage::Storage, DeviceStats};
+use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
 use std::{
     borrow::Borrow,
@@ -130,7 +130,7 @@ pub trait Selector: Send + Sync + 'static + Debug {
     type Value: StorageValue;
     type BuildHasher: HashBuilder;
 
-    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBuffer) -> Selection;
+    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBytes) -> Selection;
 }
 
 pub struct Either<K, V, S, SL, SR, SE>
@@ -222,7 +222,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {

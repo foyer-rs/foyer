@@ -32,8 +32,6 @@ pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new()
 
 pub type RegionId = u32;
 
-pub type IoBuffer = allocator_api2::vec::Vec<u8, &'static AlignedAllocator<ALIGN>>;
-
 /// Options for the device.
 pub trait DevOptions: Send + Sync + 'static + Debug + Clone {
     /// Verify the correctness of the options.

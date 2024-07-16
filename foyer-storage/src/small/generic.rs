@@ -20,11 +20,10 @@ use tokio::sync::oneshot;
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 use crate::{
-    device::IoBuffer,
     error::Result,
     serde::KvInfo,
     storage::{Storage, WaitHandle},
-    DeviceStats,
+    DeviceStats, IoBytes,
 };
 
 pub struct GenericSmallStorageConfig<K, V, S>
@@ -100,7 +99,7 @@ where
     fn enqueue(
         &self,
         _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        _buffer: IoBuffer,
+        _buffer: IoBytes,
         _info: KvInfo,
         _tx: oneshot::Sender<Result<bool>>,
     ) {

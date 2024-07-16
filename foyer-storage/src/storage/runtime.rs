@@ -21,11 +21,11 @@ use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
-use crate::device::IoBuffer;
 use crate::error::Result;
 
 use crate::serde::KvInfo;
 use crate::storage::Storage;
+use crate::IoBytes;
 
 use super::WaitHandle;
 
@@ -156,7 +156,7 @@ where
     fn enqueue(
         &self,
         entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBuffer,
+        buffer: IoBytes,
         info: KvInfo,
         tx: oneshot::Sender<Result<bool>>,
     ) {
@@ -221,7 +221,7 @@ mod tests {
             allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
-            Dev, MonitoredDevice, RegionId, IO_BUFFER_ALLOCATOR,
+            Dev, MonitoredDevice, RegionId,
         },
         large::{
             generic::{GenericLargeStorage, GenericLargeStorageConfig},
@@ -230,7 +230,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         storage::Storage,
-        DevExt, Statistics,
+        DevExt, IoBytesMut, Statistics,
     };
 
     use super::*;
@@ -308,10 +308,11 @@ mod tests {
             .cloned()
             .map(|e| {
                 let (tx, rx) = oneshot::channel();
-                let mut buffer = IoBuffer::new_in(&IO_BUFFER_ALLOCATOR);
+                let mut buffer = IoBytesMut::new();
                 let info =
                     EntrySerializer::serialize(e.key(), e.value(), &Compression::None, WritableVecA(&mut buffer))
                         .unwrap();
+                let buffer = buffer.freeze();
                 store.enqueue(e, buffer, info, tx);
                 rx.map(|res| res.unwrap())
             })
