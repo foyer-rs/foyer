@@ -15,6 +15,7 @@
 pub use crate::{
     compress::Compression,
     device::{
+        bytes::{IoBytes, IoBytesMut},
         direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
         monitor::DeviceStats,

@@ -23,9 +23,9 @@ use std::{
 
 use foyer_common::{bits, metrics::Metrics};
 
-use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice};
+use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice, IoBytes, IoBytesMut};
 
-use super::{IoBuffer, RegionId};
+use super::RegionId;
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -98,7 +98,7 @@ where
     }
 
     #[minitrace::trace(name = "foyer::storage::device::monitor::write")]
-    async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
         let now = Instant::now();
 
         let bytes = bits::align_up(self.align(), buf.len());
@@ -115,7 +115,7 @@ where
     }
 
     #[minitrace::trace(name = "foyer::storage::device::monitor::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
         let now = Instant::now();
 
         let bytes = bits::align_up(self.align(), len);
@@ -164,11 +164,11 @@ where
         Self::open(options).await
     }
 
-    async fn write(&self, buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
+    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
         self.write(buf, region, offset).await
     }
 
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
         self.read(region, offset, len).await
     }
 
@@ -179,7 +179,7 @@ where
 
 impl Monitored<DirectFileDevice> {
     #[minitrace::trace(name = "foyer::storage::device::monitor::pwrite")]
-    pub async fn pwrite(&self, buf: IoBuffer, offset: u64) -> Result<()> {
+    pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
         let now = Instant::now();
 
         let bytes = bits::align_up(self.align(), buf.len());
@@ -196,7 +196,7 @@ impl Monitored<DirectFileDevice> {
     }
 
     #[minitrace::trace(name = "foyer::storage::device::monitor::pread")]
-    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
         let now = Instant::now();
 
         let bytes = bits::align_up(self.align(), len);

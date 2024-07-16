@@ -37,9 +37,10 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
-    device::{Dev, DevExt, IoBuffer, MonitoredDevice, RegionId},
+    device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::Result,
     picker::EvictionPicker,
+    IoBytes, IoBytesMut,
 };
 
 #[derive(Debug, Default)]
@@ -82,11 +83,11 @@ impl Region {
         &self.stats
     }
 
-    pub async fn write(&self, buf: IoBuffer, offset: u64) -> Result<()> {
+    pub async fn write(&self, buf: IoBytes, offset: u64) -> Result<()> {
         self.device.write(buf, self.id, offset).await
     }
 
-    pub async fn read(&self, offset: u64, len: usize) -> Result<IoBuffer> {
+    pub async fn read(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
         self.stats.access.fetch_add(1, Ordering::Relaxed);
         self.device.read(self.id, offset, len).await
     }

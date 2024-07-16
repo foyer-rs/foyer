@@ -15,13 +15,12 @@
 use std::{fmt::Debug, hash::Hasher};
 use twox_hash::XxHash64;
 
-use allocator_api2::alloc::Allocator;
 use foyer_common::code::{StorageKey, StorageValue};
 
 use crate::{
     compress::Compression,
-    device::allocator::WritableVecA,
     error::{Error, Result},
+    IoBytesMut,
 };
 
 #[derive(Debug)]
@@ -45,16 +44,15 @@ pub struct KvInfo {
 pub struct EntrySerializer;
 
 impl EntrySerializer {
-    pub fn serialize<'a, K, V, A>(
+    pub fn serialize<'a, K, V>(
         key: &'a K,
         value: &'a V,
         compression: &'a Compression,
-        mut buffer: WritableVecA<'a, u8, A>,
+        mut buffer: &'a mut IoBytesMut,
     ) -> Result<KvInfo>
     where
         K: StorageKey,
         V: StorageValue,
-        A: Allocator,
     {
         let mut cursor = buffer.len();
 

@@ -22,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    device::{IoBuffer, IO_BUFFER_ALLOCATOR},
+    device::IO_BUFFER_ALLOCATOR,
     error::Result,
     large::{
         flusher::{Flusher, Submission},
@@ -33,7 +33,7 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    WaitHandle,
+    IoBytes, WaitHandle,
 };
 
 #[derive(Debug)]
@@ -195,7 +195,7 @@ where
                         );
                         break 'reinsert;
                     }
-                    Ok(buf) => buf,
+                    Ok(buf) => buf.freeze(),
                 };
                 let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
                 let (tx, rx) = oneshot::channel();
@@ -254,7 +254,7 @@ pub struct RegionCleaner;
 
 impl RegionCleaner {
     pub async fn clean(region: &Region, flush: bool) -> Result<()> {
-        let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR);
+        let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR).into();
         region.write(buf, 0).await?;
         if flush {
             region.flush().await?;
@@ -267,5 +267,5 @@ impl RegionCleaner {
 pub struct Reinsertion {
     pub hash: u64,
     pub sequence: Sequence,
-    pub buffer: IoBuffer,
+    pub buffer: IoBytes,
 }

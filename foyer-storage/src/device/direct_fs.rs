@@ -25,8 +25,9 @@ use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
 use crate::{
-    device::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR},
+    device::ALIGN,
     error::{Error, Result},
+    IoBytes, IoBytesMut,
 };
 
 /// Options for the direct fs device.
@@ -150,12 +151,8 @@ impl Dev for DirectFsDevice {
     }
 
     #[minitrace::trace(name = "foyer::storage::device::direct_fs::write")]
-    async fn write(&self, mut buf: IoBuffer, region: RegionId, offset: u64) -> Result<()> {
-        bits::assert_aligned(self.align() as u64, offset);
-
-        let aligned = bits::align_up(self.align(), buf.len());
-        buf.reserve(aligned - buf.len());
-        unsafe { buf.set_len(aligned) };
+    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+        let aligned = buf.as_aligned().len();
 
         assert!(
             offset as usize + aligned <= self.region_size(),
@@ -172,7 +169,7 @@ impl Dev for DirectFsDevice {
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let written = file.write_at(buf.as_ref(), offset)?;
+            let written = file.write_at(buf.as_aligned(), offset)?;
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -183,7 +180,7 @@ impl Dev for DirectFsDevice {
     }
 
     #[minitrace::trace(name = "foyer::storage::device::direct_fs::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBuffer> {
+    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
         bits::assert_aligned(self.align() as u64, offset);
 
         let aligned = bits::align_up(self.align(), len);
@@ -195,7 +192,7 @@ impl Dev for DirectFsDevice {
             region_size = self.region_size(),
         );
 
-        let mut buf = IoBuffer::with_capacity_in(aligned, &IO_BUFFER_ALLOCATOR);
+        let mut buf = IoBytesMut::with_capacity(aligned);
         unsafe {
             buf.set_len(aligned);
         }
@@ -351,12 +348,13 @@ mod tests {
 
         let device = DirectFsDevice::open(options.clone()).await.unwrap();
 
-        let mut buf = IoBuffer::with_capacity_in(64 * 1024, &IO_BUFFER_ALLOCATOR);
+        let mut buf = IoBytesMut::with_capacity(64 * 1024);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
+        let buf = buf.freeze();
 
         device.write(buf.clone(), 0, 4096).await.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
         assert_eq!(buf, b);
 
         device.flush(None).await.unwrap();
@@ -365,7 +363,7 @@ mod tests {
 
         let device = DirectFsDevice::open(options).await.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap();
+        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
         assert_eq!(buf, b);
     }
 }
