@@ -12,63 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ops::{Deref, DerefMut};
-
 use allocator_api2::alloc::{AllocError, Allocator, Global};
-
-pub use allocator_api2::vec::Vec as VecA;
-
-#[derive(Debug)]
-pub struct WritableVecA<'a, T, A: Allocator = Global>(pub &'a mut VecA<T, A>);
-
-impl<'a, T, A: Allocator> Deref for WritableVecA<'a, T, A> {
-    type Target = VecA<T, A>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
-}
-
-impl<'a, T, A: Allocator> DerefMut for WritableVecA<'a, T, A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-    }
-}
-
-impl<'a, A: Allocator> std::io::Write for WritableVecA<'a, u8, A> {
-    #[inline]
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    #[inline]
-    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
-        let len = bufs.iter().map(|b| b.len()).sum();
-        self.0.reserve(len);
-        for buf in bufs {
-            self.0.extend_from_slice(buf);
-        }
-        Ok(len)
-    }
-
-    // TODO(MrCroxx): Uncomment this after `can_vector` is stable.
-    // #[inline]
-    // fn is_write_vectored(&self) -> bool {
-    //     true
-    // }
-
-    #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.0.extend_from_slice(buf);
-        Ok(())
-    }
-
-    #[inline]
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AlignedAllocator<const N: usize>;
@@ -98,6 +42,7 @@ unsafe impl<const N: usize> Allocator for AlignedAllocator<N> {
 
 #[cfg(test)]
 mod tests {
+    use allocator_api2::vec::Vec as VecA;
     use foyer_common::bits;
 
     use super::*;

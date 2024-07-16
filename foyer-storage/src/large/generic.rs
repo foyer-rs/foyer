@@ -549,7 +549,6 @@ mod tests {
 
     use crate::{
         device::{
-            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
         },
@@ -653,13 +652,7 @@ mod tests {
     ) -> WaitHandle<impl Future<Output = Result<bool>>> {
         let (tx, rx) = oneshot::channel();
         let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            &Compression::None,
-            WritableVecA(&mut buffer),
-        )
-        .unwrap();
+        let info = EntrySerializer::serialize(entry.key(), entry.value(), &Compression::None, &mut buffer).unwrap();
         let buffer = buffer.freeze();
         store.enqueue(entry, buffer, info, tx);
         WaitHandle::new(rx.map(|recv| recv.unwrap()))

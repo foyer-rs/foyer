@@ -15,7 +15,6 @@
 use crate::{
     compress::Compression,
     device::{
-        allocator::WritableVecA,
         direct_fs::DirectFsDeviceOptions,
         monitor::{DeviceStats, Monitored, MonitoredOptions},
         DeviceOptions, RegionId,
@@ -128,7 +127,7 @@ where
         self.runtime().spawn(async move {
             if force || this.pick(entry.key()) {
                 let mut buffer = IoBytesMut::new();
-                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, WritableVecA(&mut buffer)) {
+                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, &mut buffer) {
                     Ok(info) => {
                         let buffer = buffer.freeze();
                         this.engine.enqueue(entry, buffer, info, tx);

@@ -218,7 +218,6 @@ mod tests {
     use crate::{
         compress::Compression,
         device::{
-            allocator::WritableVecA,
             direct_fs::DirectFsDeviceOptions,
             monitor::{Monitored, MonitoredOptions},
             Dev, MonitoredDevice, RegionId,
@@ -309,9 +308,7 @@ mod tests {
             .map(|e| {
                 let (tx, rx) = oneshot::channel();
                 let mut buffer = IoBytesMut::new();
-                let info =
-                    EntrySerializer::serialize(e.key(), e.value(), &Compression::None, WritableVecA(&mut buffer))
-                        .unwrap();
+                let info = EntrySerializer::serialize(e.key(), e.value(), &Compression::None, &mut buffer).unwrap();
                 let buffer = buffer.freeze();
                 store.enqueue(e, buffer, info, tx);
                 rx.map(|res| res.unwrap())

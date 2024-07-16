@@ -76,6 +76,41 @@ impl Clone for IoBytesMut {
     }
 }
 
+impl std::io::Write for IoBytesMut {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    #[inline]
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let len = bufs.iter().map(|b| b.len()).sum();
+        self.reserve(len);
+        for buf in bufs {
+            self.extend_from_slice(buf);
+        }
+        Ok(len)
+    }
+
+    // TODO(MrCroxx): Uncomment this after `can_vector` is stable.
+    // #[inline]
+    // fn is_write_vectored(&self) -> bool {
+    //     true
+    // }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.extend_from_slice(buf);
+        Ok(())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Ported from `bytes`.
 unsafe impl BufMut for IoBytesMut {
     #[inline]
