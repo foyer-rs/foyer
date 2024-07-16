@@ -49,6 +49,8 @@ pub mod rated_ticket;
 pub mod runtime;
 /// Tracing related components.
 pub mod tracing;
+/// An async wait group implementation.
+pub mod wait_group;
 
 /// File system utils.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
