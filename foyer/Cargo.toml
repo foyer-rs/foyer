@@ -32,14 +32,14 @@ default = []
 nightly = ["foyer-storage/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
-  "foyer-common/strict_assertions",
-  "foyer-memory/strict_assertions",
-  "foyer-storage/strict_assertions",
+    "foyer-common/strict_assertions",
+    "foyer-memory/strict_assertions",
+    "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
 mtrace = [
-  "fastrace/enable",
-  "foyer-common/mtrace",
-  "foyer-memory/mtrace",
-  "foyer-storage/mtrace",
+    "fastrace/enable",
+    "foyer-common/mtrace",
+    "foyer-memory/mtrace",
+    "foyer-storage/mtrace",
 ]

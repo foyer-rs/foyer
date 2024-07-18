@@ -49,7 +49,7 @@ default = []
 deadlock = ["parking_lot/deadlock_detection"]
 nightly = ["allocator-api2/nightly"]
 strict_assertions = [
-  "foyer-common/strict_assertions",
-  "foyer-memory/strict_assertions",
+    "foyer-common/strict_assertions",
+    "foyer-memory/strict_assertions",
 ]
 mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]

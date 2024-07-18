@@ -38,8 +38,8 @@ zipf = "7.0.1"
 [features]
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
-  "foyer-common/strict_assertions",
-  "foyer-intrusive/strict_assertions",
+    "foyer-common/strict_assertions",
+    "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
 mtrace = ["fastrace/enable", "foyer-common/mtrace"]
