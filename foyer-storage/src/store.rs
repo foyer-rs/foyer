@@ -291,6 +291,7 @@ where
     recover_concurrency: usize,
     flushers: usize,
     reclaimers: usize,
+    // FIXME(MrCroxx): rename the field and builder fn.
     buffer_threshold: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
@@ -321,7 +322,7 @@ where
             recover_concurrency: 8,
             flushers: 1,
             reclaimers: 1,
-            buffer_threshold: usize::MAX,
+            buffer_threshold: 16 * 1024 * 1024, // 16 MiB
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),

@@ -107,6 +107,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_wait_group_empty() {
+        let wg = WaitGroup::default();
+        wg.wait().await;
+    }
+
+    #[tokio::test]
     async fn test_wait_group_basic() {
         let v = Arc::new(AtomicUsize::new(0));
         let wg = WaitGroup::default();
