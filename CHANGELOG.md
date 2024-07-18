@@ -32,7 +32,7 @@
 
 ### Changes
 
-- Introduce tail-based tracing framework with [minitrace](https://github.com/tikv/minitrace-rust). [Tail-based Tracing Example](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs).
+- Introduce tail-based tracing framework with [fastrace](https://github.com/fastracelabs/fastrace). [Tail-based Tracing Example](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs).
 - Fix `fetch()` disk cache refill on in-memory cache miss.
 - Publish *foyer* logo! 
 

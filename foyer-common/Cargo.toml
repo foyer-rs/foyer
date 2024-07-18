@@ -19,7 +19,7 @@ futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 metrics = { workspace = true }
-minitrace = { workspace = true }
+fastrace = { workspace = true }
 nix = { version = "0.29", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 pin-project = "1"
@@ -33,4 +33,4 @@ rand = "0.8.5"
 
 [features]
 strict_assertions = []
-mtrace = ["minitrace/enable"]
+mtrace = ["fastrace/enable"]

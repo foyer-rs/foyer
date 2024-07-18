@@ -3,7 +3,4 @@
 ot = "ot"
 
 [files]
-extend-exclude = [
-    "foyer-workspace-hack/Cargo.toml",
-    "*.svg",
-]
+extend-exclude = ["foyer-workspace-hack/Cargo.toml", "*.svg"]

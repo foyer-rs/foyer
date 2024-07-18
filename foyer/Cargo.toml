@@ -18,7 +18,7 @@ foyer-common = { version = "0.8.1", path = "../foyer-common" }
 foyer-memory = { version = "0.6.1", path = "../foyer-memory" }
 foyer-storage = { version = "0.9.1", path = "../foyer-storage" }
 futures = "0.3"
-minitrace = { workspace = true }
+fastrace = { workspace = true }
 pin-project = "1"
 tokio = { workspace = true }
 tracing = "0.1"
@@ -32,14 +32,14 @@ default = []
 nightly = ["foyer-storage/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
-    "foyer-common/strict_assertions",
-    "foyer-memory/strict_assertions",
-    "foyer-storage/strict_assertions",
+  "foyer-common/strict_assertions",
+  "foyer-memory/strict_assertions",
+  "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
 mtrace = [
-    "minitrace/enable",
-    "foyer-common/mtrace",
-    "foyer-memory/mtrace",
-    "foyer-storage/mtrace",
+  "fastrace/enable",
+  "foyer-common/mtrace",
+  "foyer-memory/mtrace",
+  "foyer-storage/mtrace",
 ]

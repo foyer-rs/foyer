@@ -37,7 +37,7 @@ use foyer_common::{
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
 use foyer_storage::{DeviceStats, Store};
 use futures::FutureExt;
-use minitrace::prelude::*;
+use fastrace::prelude::*;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
 

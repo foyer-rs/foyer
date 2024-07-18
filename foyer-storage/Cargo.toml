@@ -29,7 +29,7 @@ itertools = { workspace = true }
 lazy_static = "1"
 libc = "0.2"
 lz4 = "1.24"
-minitrace = { workspace = true }
+fastrace = { workspace = true }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 pin-project = "1"
 rand = "0.8"
@@ -49,7 +49,7 @@ default = []
 deadlock = ["parking_lot/deadlock_detection"]
 nightly = ["allocator-api2/nightly"]
 strict_assertions = [
-    "foyer-common/strict_assertions",
-    "foyer-memory/strict_assertions",
+  "foyer-common/strict_assertions",
+  "foyer-memory/strict_assertions",
 ]
-mtrace = ["minitrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]
+mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]

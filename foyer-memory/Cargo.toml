@@ -20,7 +20,7 @@ futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 libc = "0.2"
-minitrace = { workspace = true }
+fastrace = { workspace = true }
 parking_lot = "0.12"
 pin-project = "1"
 serde = { workspace = true }
@@ -38,11 +38,11 @@ zipf = "7.0.1"
 [features]
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
-    "foyer-common/strict_assertions",
-    "foyer-intrusive/strict_assertions",
+  "foyer-common/strict_assertions",
+  "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
-mtrace = ["minitrace/enable", "foyer-common/mtrace"]
+mtrace = ["fastrace/enable", "foyer-common/mtrace"]
 
 [[bench]]
 name = "bench_hit_ratio"

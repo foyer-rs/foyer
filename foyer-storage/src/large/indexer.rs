@@ -45,7 +45,7 @@ impl Indexer {
         }
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::indexer::insert_batch")]
+    #[fastrace::trace(name = "foyer::storage::large::indexer::insert_batch")]
     pub fn insert_batch(&self, batch: Vec<(u64, EntryAddress)>) -> Vec<(u64, EntryAddress)> {
         let shards: HashMap<usize, Vec<(u64, EntryAddress)>> =
             batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
@@ -62,19 +62,19 @@ impl Indexer {
         olds
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::indexer::get")]
+    #[fastrace::trace(name = "foyer::storage::large::indexer::get")]
     pub fn get(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         self.shards[shard].read().get(&hash).cloned()
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::indexer::remove")]
+    #[fastrace::trace(name = "foyer::storage::large::indexer::remove")]
     pub fn remove(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         self.shards[shard].write().remove(&hash)
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::indexer::remove_batch")]
+    #[fastrace::trace(name = "foyer::storage::large::indexer::remove_batch")]
     pub fn remove_batch(&self, hashes: &[u64]) -> Vec<EntryAddress> {
         let shards = hashes.iter().into_group_map_by(|&hash| self.shard(*hash));
 
@@ -90,7 +90,7 @@ impl Indexer {
         olds
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::indexer::clear")]
+    #[fastrace::trace(name = "foyer::storage::large::indexer::clear")]
     pub fn clear(&self) {
         self.shards.iter().for_each(|shard| shard.write().clear());
     }

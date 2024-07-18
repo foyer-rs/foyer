@@ -1,36 +1,36 @@
 [workspace]
 resolver = "2"
 members = [
-    "examples",
-    "foyer",
-    "foyer-bench",
-    "foyer-common",
-    "foyer-intrusive",
-    "foyer-memory",
-    "foyer-storage",
-    "foyer-util",
+  "examples",
+  "foyer",
+  "foyer-bench",
+  "foyer-common",
+  "foyer-intrusive",
+  "foyer-memory",
+  "foyer-storage",
+  "foyer-util",
 ]
 
 [workspace.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
 ] }
 serde = { version = "1", features = ["derive", "rc"] }
 test-log = { version = "0.2", default-features = false, features = [
-    "trace",
-    "color",
+  "trace",
+  "color",
 ] }
 itertools = "0.13"
 metrics = "0.23"
-minitrace = "0.6.7"
-minitrace-jaeger = "0.6.7"
-minitrace-opentelemetry = "0.6.7"
+fastrace = "0.6"
+fastrace-jaeger = "0.6"
+fastrace-opentelemetry = "0.6"
 
 [profile.release]
 debug = true
