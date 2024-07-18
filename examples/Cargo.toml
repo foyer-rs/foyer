@@ -15,10 +15,10 @@ publish = false
 ahash = "0.8"
 anyhow = "1"
 chrono = "0.4"
-foyer = { version = "*", path = "../foyer" }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
+foyer = { version = "*", path = "../foyer" }
 opentelemetry = { version = "0.23", optional = true }
 opentelemetry-otlp = { version = "0.16", optional = true }
 opentelemetry-semantic-conventions = { version = "0.15", optional = true }
