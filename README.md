@@ -29,6 +29,7 @@
 Feel free to open a PR and add your projects here:
 
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
+- [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 
 ## Usage
 
