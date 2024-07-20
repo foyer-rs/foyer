@@ -410,7 +410,7 @@ where
     ///
     /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
     ///
-    /// Default: No Limits.
+    /// Default: 16 MiB.
     pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
         self.buffer_threshold = threshold;
         self
