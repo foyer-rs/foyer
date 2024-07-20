@@ -28,6 +28,7 @@ use tokio::sync::Semaphore;
 
 use crate::error::{Error, Result};
 
+use crate::large::indexer::HashedEntryAddress;
 use crate::large::{
     scanner::{EntryInfo, RegionScanner},
     serde::{AtomicSequence, Sequence},
@@ -137,7 +138,9 @@ impl RecoverRunner {
                 match versions.pop() {
                     None => None,
                     Some((_, EntryAddressOrTombstone::Tombstone)) => None,
-                    Some((_, EntryAddressOrTombstone::EntryAddress(addr))) => Some((hash, addr)),
+                    Some((_, EntryAddressOrTombstone::EntryAddress(address))) => {
+                        Some(HashedEntryAddress { hash, address })
+                    }
                 }
             })
             .collect_vec();

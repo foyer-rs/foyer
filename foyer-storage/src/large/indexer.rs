@@ -22,6 +22,12 @@ use parking_lot::RwLock;
 
 use crate::{device::RegionId, large::serde::Sequence};
 
+#[derive(Debug)]
+pub struct HashedEntryAddress {
+    pub hash: u64,
+    pub address: EntryAddress,
+}
+
 #[derive(Debug, Clone)]
 pub struct EntryAddress {
     pub region: RegionId,
@@ -46,16 +52,19 @@ impl Indexer {
     }
 
     #[fastrace::trace(name = "foyer::storage::large::indexer::insert_batch")]
-    pub fn insert_batch(&self, batch: Vec<(u64, EntryAddress)>) -> Vec<(u64, EntryAddress)> {
-        let shards: HashMap<usize, Vec<(u64, EntryAddress)>> =
-            batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
+    pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
+        let shards: HashMap<usize, Vec<HashedEntryAddress>> =
+            batch.into_iter().into_group_map_by(|haddr| self.shard(haddr.hash));
 
         let mut olds = vec![];
         for (s, batch) in shards {
             let mut shard = self.shards[s].write();
-            for (hash, addr) in batch {
-                if let Some(old) = self.insert_inner(&mut shard, hash, addr) {
-                    olds.push((hash, old));
+            for haddr in batch {
+                if let Some(old) = self.insert_inner(&mut shard, haddr.hash, haddr.address) {
+                    olds.push(HashedEntryAddress {
+                        hash: haddr.hash,
+                        address: old,
+                    });
                 }
             }
         }

@@ -19,11 +19,71 @@ use std::{
 };
 
 use super::{allocator::AlignedAllocator, ALIGN, IO_BUFFER_ALLOCATOR};
-use allocator_api2::vec::Vec as VecA;
+use allocator_api2::{boxed::Box as BoxA, vec::Vec as VecA};
 use bytes::{buf::UninitSlice, Buf, BufMut};
 use foyer_common::bits;
 
+/// A capacity-fixed 4K-aligned u8 buffer.
+pub struct IoBuffer {
+    inner: BoxA<[u8], &'static AlignedAllocator<ALIGN>>,
+}
+
+impl Debug for IoBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&*self.inner, f)
+    }
+}
+
+impl IoBuffer {
+    /// Constructs a new 4K-aligned [`IoBuffer`] with at least the specified capacity.
+    ///
+    /// The buffer is filled with random data.
+    pub fn new(size: usize) -> Self {
+        let size = bits::align_up(ALIGN, size);
+        let mut v = VecA::with_capacity_in(size, &IO_BUFFER_ALLOCATOR);
+        let aligned = bits::align_down(ALIGN, v.capacity());
+        unsafe { v.set_len(aligned) };
+        let inner = v.into_boxed_slice();
+        Self { inner }
+    }
+}
+
+impl Deref for IoBuffer {
+    type Target = BoxA<[u8], &'static AlignedAllocator<ALIGN>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for IoBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl PartialEq for IoBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for IoBuffer {}
+
+impl Clone for IoBuffer {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 /// A 4K-aligend u8 vector.
+///
+/// # Growth
+///
+/// [`IoBytesMut`] will implicitly grow its buffer as necessary.
+/// However, explicitly reserving the required space up-front before a series of inserts will be more efficient.
 pub struct IoBytesMut {
     inner: VecA<u8, &'static AlignedAllocator<ALIGN>>,
 }
@@ -216,6 +276,15 @@ impl IoBytesMut {
         Self { inner }
     }
 
+    /// Align the length of the vector to 4K.
+    ///
+    /// The extended part of the vector can be filled with any data without any guarantees.
+    pub fn align_to(&mut self) {
+        let aligned = bits::align_up(ALIGN, self.inner.len());
+        self.inner.reserve_exact(aligned - self.inner.len());
+        unsafe { self.inner.set_len(aligned) };
+    }
+
     /// Convert [`IoBytesMut`] to [`IoBytes`].
     pub fn freeze(self) -> IoBytes {
         self.into()
@@ -224,7 +293,7 @@ impl IoBytesMut {
 
 /// A 4K-aligned, shared, immutable u8 vector.
 pub struct IoBytes {
-    inner: Arc<VecA<u8, &'static AlignedAllocator<ALIGN>>>,
+    inner: Arc<BoxA<[u8], &'static AlignedAllocator<ALIGN>>>,
     offset: usize,
     len: usize,
 }
@@ -244,7 +313,8 @@ impl From<VecA<u8, &'static AlignedAllocator<ALIGN>>> for IoBytes {
         value.reserve_exact(aligned - value.len());
         unsafe { value.set_len(aligned) };
 
-        let inner = Arc::new(value);
+        let inner = value.into_boxed_slice();
+        let inner = Arc::new(inner);
 
         Self { inner, offset, len }
     }
@@ -253,6 +323,16 @@ impl From<VecA<u8, &'static AlignedAllocator<ALIGN>>> for IoBytes {
 impl From<IoBytesMut> for IoBytes {
     fn from(value: IoBytesMut) -> Self {
         value.inner.into()
+    }
+}
+
+impl From<IoBuffer> for IoBytes {
+    fn from(value: IoBuffer) -> Self {
+        assert!(bits::is_aligned(ALIGN, value.len()));
+        let offset = 0;
+        let len = value.len();
+        let inner = Arc::new(value.inner);
+        Self { inner, offset, len }
     }
 }
 

@@ -46,9 +46,8 @@ pub struct Metrics {
     pub storage_delete_duration: Histogram,
 
     pub storage_queue_rotate: Counter,
-    pub storage_queue_leader: Counter,
-    pub storage_queue_follower: Counter,
     pub storage_queue_rotate_duration: Histogram,
+    pub storage_queue_drop: Counter,
 
     pub storage_disk_write: Counter,
     pub storage_disk_read: Counter,
@@ -124,12 +123,10 @@ impl Metrics {
 
         let storage_queue_rotate =
             counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_rotate");
-        let storage_queue_leader =
-            counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_leader");
-        let storage_queue_follower =
-            counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_follower");
         let storage_queue_rotate_duration =
             histogram!(format!("foyer_storage_inner_op_duration"), "name" => name.to_string(), "op" => "queue_rotate");
+        let storage_queue_drop =
+            counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_drop");
 
         let storage_disk_write =
             counter!(format!("foyer_storage_disk_io_total"), "name" => name.to_string(), "op" => "write");
@@ -199,9 +196,8 @@ impl Metrics {
             storage_miss_duration,
             storage_delete_duration,
             storage_queue_rotate,
-            storage_queue_leader,
-            storage_queue_follower,
             storage_queue_rotate_duration,
+            storage_queue_drop,
             storage_disk_write,
             storage_disk_read,
             storage_disk_flush,

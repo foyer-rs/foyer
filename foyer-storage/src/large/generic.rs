@@ -59,7 +59,8 @@ use tokio::{
 };
 
 use super::{
-    flusher::{Flusher, InvalidStats, Submission},
+    batch::InvalidStats,
+    flusher::{Flusher, Submission},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
@@ -611,7 +612,7 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
             tombstone_log_config: None,
-            buffer_threshold: usize::MAX,
+            buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
@@ -640,7 +641,7 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
-            buffer_threshold: usize::MAX,
+            buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
         };
         GenericLargeStorage::open(config).await.unwrap()
@@ -902,6 +903,7 @@ mod tests {
         }
         let mut res = vec![];
         for i in 0..8 {
+            tracing::trace!("==========> {i}");
             res.push(store.load(&i).await.unwrap());
         }
         assert_eq!(
