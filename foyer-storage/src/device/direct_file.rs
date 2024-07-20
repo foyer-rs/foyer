@@ -74,7 +74,7 @@ impl DevOptions for DirectFileDeviceOptions {
 
 impl DirectFileDevice {
     /// Positioned write API for the direct file device.
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
     pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
         let aligned = buf.as_aligned().len();
 
@@ -104,7 +104,7 @@ impl DirectFileDevice {
     }
 
     /// Positioned read API for the direct file device.
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::pread")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::pread")]
     pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -156,7 +156,7 @@ impl Dev for DirectFileDevice {
         self.region_size
     }
 
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::open")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::open")]
     async fn open(options: Self::Options) -> Result<Self> {
         let runtime = Handle::current();
 
@@ -187,7 +187,7 @@ impl Dev for DirectFileDevice {
         })
     }
 
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::write")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::write")]
     async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
         let aligned = buf.as_aligned().len();
 
@@ -202,7 +202,7 @@ impl Dev for DirectFileDevice {
         self.pwrite(buf, poffset).await
     }
 
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::read")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::read")]
     async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
         bits::assert_aligned(self.align() as u64, offset);
 
@@ -219,7 +219,7 @@ impl Dev for DirectFileDevice {
         self.pread(poffset, len).await
     }
 
-    #[minitrace::trace(name = "foyer::storage::device::direct_file::flush")]
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::flush")]
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
         asyncify_with_runtime(&self.runtime, move || file.sync_all().map_err(Error::from)).await

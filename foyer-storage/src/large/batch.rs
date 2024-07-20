@@ -269,7 +269,7 @@ where
             .map(|group| {
                 // TODO(MrCroxx): Refine to logic.
                 // Do not filter empty group here.
-                // An empty group can be used to trigger makring evictable region in flusher.
+                // An empty group can be used to trigger marking evictable region in flusher.
                 strict_assert_eq!(group.region.len, group.range.size().unwrap());
                 Group {
                     region: group.region,

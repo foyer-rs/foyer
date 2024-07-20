@@ -327,9 +327,9 @@ fn setup() {
 
 #[cfg(feature = "mtrace")]
 fn setup() {
-    use minitrace::collector::Config;
-    let reporter = minitrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
-    minitrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
+    use fastrace::collector::Config;
+    let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
+    fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
 #[cfg(not(any(feature = "tokio-console", feature = "trace", feature = "mtrace")))]
@@ -351,7 +351,7 @@ fn teardown() {}
 
 #[cfg(feature = "mtrace")]
 fn teardown() {
-    minitrace::flush();
+    fastrace::flush();
 }
 
 #[tokio::main]

@@ -18,10 +18,10 @@ use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
 
 #[cfg(feature = "jaeger")]
 fn init_jaeger_exporter() {
-    let reporter = minitrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "example").unwrap();
-    minitrace::set_reporter(
+    let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "example").unwrap();
+    fastrace::set_reporter(
         reporter,
-        minitrace::collector::Config::default().report_interval(Duration::from_millis(1)),
+        fastrace::collector::Config::default().report_interval(Duration::from_millis(1)),
     );
 }
 
@@ -38,7 +38,7 @@ fn init_opentelemetry_exporter() {
         ))
         .build_span_exporter()
         .unwrap();
-    let reporter = minitrace_opentelemetry::OpenTelemetryReporter::new(
+    let reporter = fastrace_opentelemetry::OpenTelemetryReporter::new(
         exporter,
         opentelemetry::trace::SpanKind::Server,
         std::borrow::Cow::Owned(opentelemetry_sdk::Resource::new([opentelemetry::KeyValue::new(
@@ -47,7 +47,7 @@ fn init_opentelemetry_exporter() {
         )])),
         opentelemetry::InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
     );
-    minitrace::set_reporter(reporter, minitrace::collector::Config::default());
+    fastrace::set_reporter(reporter, fastrace::collector::Config::default());
 }
 
 fn init_exporter() {

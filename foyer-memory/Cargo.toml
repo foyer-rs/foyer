@@ -14,13 +14,13 @@ readme = "../README.md"
 ahash = "0.8"
 bitflags = "2"
 cmsketch = "0.2"
+fastrace = { workspace = true }
 foyer-common = { version = "0.8.1", path = "../foyer-common" }
 foyer-intrusive = { version = "0.8.1", path = "../foyer-intrusive" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 libc = "0.2"
-minitrace = { workspace = true }
 parking_lot = "0.12"
 pin-project = "1"
 serde = { workspace = true }
@@ -42,7 +42,7 @@ strict_assertions = [
     "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
-mtrace = ["minitrace/enable", "foyer-common/mtrace"]
+mtrace = ["fastrace/enable", "foyer-common/mtrace"]
 
 [[bench]]
 name = "bench_hit_ratio"

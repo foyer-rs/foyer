@@ -15,10 +15,10 @@ publish = false
 ahash = "0.8"
 anyhow = "1"
 chrono = "0.4"
+fastrace = { workspace = true }
+fastrace-jaeger = { workspace = true, optional = true }
+fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { version = "*", path = "../foyer" }
-minitrace = { workspace = true }
-minitrace-jaeger = { workspace = true, optional = true }
-minitrace-opentelemetry = { workspace = true, optional = true }
 opentelemetry = { version = "0.23", optional = true }
 opentelemetry-otlp = { version = "0.16", optional = true }
 opentelemetry-semantic-conventions = { version = "0.15", optional = true }
@@ -30,9 +30,9 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
 
 [features]
-jaeger = ["minitrace-jaeger"]
+jaeger = ["fastrace-jaeger"]
 ot = [
-    "minitrace-opentelemetry",
+    "fastrace-opentelemetry",
     "opentelemetry",
     "opentelemetry-otlp",
     "opentelemetry-semantic-conventions",
