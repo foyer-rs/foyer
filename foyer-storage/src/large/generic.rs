@@ -65,7 +65,7 @@ use super::{
     recover::{RecoverMode, RecoverRunner},
 };
 
-use minitrace::prelude::*;
+use fastrace::prelude::*;
 
 pub struct GenericLargeStorageConfig<K, V, S>
 where
@@ -297,7 +297,7 @@ where
         self.wait().await
     }
 
-    #[minitrace::trace(name = "foyer::storage::large::generic::enqueue")]
+    #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
     fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))

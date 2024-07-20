@@ -15,14 +15,14 @@ anyhow = "1"
 bytesize = "1"
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.2", optional = true }
+fastrace = { workspace = true, optional = true }
+fastrace-jaeger = { workspace = true, optional = true }
 foyer = { version = "0.10.1", path = "../foyer" }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.15"
-minitrace = { workspace = true, optional = true }
-minitrace-jaeger = { workspace = true, optional = true }
 opentelemetry = { version = "0.23", optional = true }
 opentelemetry-otlp = { version = "0.16", optional = true }
 opentelemetry-semantic-conventions = { version = "0.15", optional = true }
@@ -56,4 +56,4 @@ trace = [
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
 jemalloc = ["tikv-jemallocator"]
-mtrace = ["foyer/mtrace", "minitrace-jaeger", "minitrace"]
+mtrace = ["foyer/mtrace", "fastrace-jaeger", "fastrace"]

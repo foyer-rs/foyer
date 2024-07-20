@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use minitrace::prelude::*;
+use fastrace::prelude::*;
 
 use std::{
     ops::Deref,
@@ -110,7 +110,7 @@ impl TracingConfig {
     }
 }
 
-/// [`InRootSpan`] provides similar features like [`minitrace::future::InSpan`] with more controls.
+/// [`InRootSpan`] provides similar features like [`fastrace::future::InSpan`] with more controls.
 #[pin_project]
 pub struct InRootSpan<F> {
     #[pin]

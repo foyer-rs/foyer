@@ -503,7 +503,7 @@ where
     S: HashBuilder,
 {
     /// Insert cache entry to the in-memory cache.
-    #[minitrace::trace(name = "foyer::memory::cache::insert")]
+    #[fastrace::trace(name = "foyer::memory::cache::insert")]
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
@@ -514,7 +514,7 @@ where
     }
 
     /// Insert cache entry with cache context to the in-memory cache.
-    #[minitrace::trace(name = "foyer::memory::cache::insert_with_context")]
+    #[fastrace::trace(name = "foyer::memory::cache::insert_with_context")]
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
@@ -529,7 +529,7 @@ where
     /// The entry will be removed as soon as the returned entry is dropped.
     ///
     /// The entry will become a normal entry after it is accessed.
-    #[minitrace::trace(name = "foyer::memory::cache::deposit")]
+    #[fastrace::trace(name = "foyer::memory::cache::deposit")]
     pub fn deposit(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit(key, value).into(),
@@ -544,7 +544,7 @@ where
     /// The entry will be removed as soon as the returned entry is dropped.
     ///
     /// The entry will become a normal entry after it is accessed.
-    #[minitrace::trace(name = "foyer::memory::cache::deposit_with_context")]
+    #[fastrace::trace(name = "foyer::memory::cache::deposit_with_context")]
     pub fn deposit_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
@@ -555,7 +555,7 @@ where
     }
 
     /// Remove a cached entry with the given key from the in-memory cache.
-    #[minitrace::trace(name = "foyer::memory::cache::remove")]
+    #[fastrace::trace(name = "foyer::memory::cache::remove")]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
@@ -570,7 +570,7 @@ where
     }
 
     /// Get cached entry with the given key from the in-memory cache.
-    #[minitrace::trace(name = "foyer::memory::cache::get")]
+    #[fastrace::trace(name = "foyer::memory::cache::get")]
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
         K: Borrow<Q>,
@@ -585,7 +585,7 @@ where
     }
 
     /// Check if the in-memory cache contains a cached entry with the given key.
-    #[minitrace::trace(name = "foyer::memory::cache::contains")]
+    #[fastrace::trace(name = "foyer::memory::cache::contains")]
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -602,7 +602,7 @@ where
     /// Access the cached entry with the given key but don't return.
     ///
     /// Note: This method can be used to update the cache eviction information and order based on the algorithm.
-    #[minitrace::trace(name = "foyer::memory::cache::touch")]
+    #[fastrace::trace(name = "foyer::memory::cache::touch")]
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -617,7 +617,7 @@ where
     }
 
     /// Clear the in-memory cache.
-    #[minitrace::trace(name = "foyer::memory::cache::clear")]
+    #[fastrace::trace(name = "foyer::memory::cache::clear")]
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),
@@ -778,7 +778,7 @@ where
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    #[minitrace::trace(name = "foyer::memory::cache::fetch")]
+    #[fastrace::trace(name = "foyer::memory::cache::fetch")]
     pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
@@ -798,7 +798,7 @@ where
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    #[minitrace::trace(name = "foyer::memory::cache::fetch_with_context")]
+    #[fastrace::trace(name = "foyer::memory::cache::fetch_with_context")]
     pub fn fetch_with_context<F, FU, ER>(&self, key: K, context: CacheContext, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,

@@ -49,7 +49,7 @@ use crate::{
     CacheContext,
 };
 
-use minitrace::{future::InSpan, prelude::*};
+use fastrace::{future::InSpan, prelude::*};
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.
@@ -119,7 +119,7 @@ where
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    #[minitrace::trace(name = "foyer::memory::generic::shard::emplace")]
+    #[fastrace::trace(name = "foyer::memory::generic::shard::emplace")]
     unsafe fn emplace(
         &mut self,
         hash: u64,
@@ -272,7 +272,7 @@ where
 
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::type_complexity)]
-    #[minitrace::trace(name = "foyer::memory::generic::shard::evict")]
+    #[fastrace::trace(name = "foyer::memory::generic::shard::evict")]
     unsafe fn evict(&mut self, weight: usize, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         while self.usage.load(Ordering::Relaxed) + weight > self.capacity {
@@ -538,12 +538,12 @@ where
         }
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::insert")]
+    #[fastrace::trace(name = "foyer::memory::generic::insert")]
     pub fn insert(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, S> {
         self.insert_with_context(key, value, CacheContext::default())
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::insert_with_context")]
+    #[fastrace::trace(name = "foyer::memory::generic::insert_with_context")]
     pub fn insert_with_context(
         self: &Arc<Self>,
         key: K,
@@ -553,12 +553,12 @@ where
         self.emplace(key, value, context, false)
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::deposit")]
+    #[fastrace::trace(name = "foyer::memory::generic::deposit")]
     pub fn deposit(self: &Arc<Self>, key: K, value: V) -> GenericCacheEntry<K, V, E, I, S> {
         self.deposit_with_context(key, value, CacheContext::default())
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::deposit_with_context")]
+    #[fastrace::trace(name = "foyer::memory::generic::deposit_with_context")]
     pub fn deposit_with_context(
         self: &Arc<Self>,
         key: K,
@@ -568,7 +568,7 @@ where
         self.emplace(key, value, context, true)
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::emplace")]
+    #[fastrace::trace(name = "foyer::memory::generic::emplace")]
     fn emplace(
         self: &Arc<Self>,
         key: K,
@@ -616,7 +616,7 @@ where
         entry
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::remove")]
+    #[fastrace::trace(name = "foyer::memory::generic::remove")]
     pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
@@ -633,7 +633,7 @@ where
         }
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::get")]
+    #[fastrace::trace(name = "foyer::memory::generic::get")]
     pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
         K: Borrow<Q>,
@@ -676,7 +676,7 @@ where
         }
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::clear")]
+    #[fastrace::trace(name = "foyer::memory::generic::clear")]
     pub fn clear(&self) {
         let mut to_release = vec![];
         for shard in self.shards.iter() {
@@ -729,7 +729,7 @@ where
         drop(shard);
     }
 
-    #[minitrace::trace(name = "foyer::memory::generic::shard")]
+    #[fastrace::trace(name = "foyer::memory::generic::shard")]
     fn shard(&self, shard: usize) -> MutexGuard<'_, RawMutex, GenericCacheShard<K, V, E, I, S>> {
         self.shards[shard].lock()
     }
