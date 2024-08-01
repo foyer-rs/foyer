@@ -84,6 +84,9 @@ where
     init: Option<Instant>,
     wait: WaitGroup,
 
+    /// Cache write buffer between rotation to reduce page fault.
+    buffer_pool: Option<IoBytes>,
+
     region_manager: RegionManager,
     device: MonitoredDevice,
     indexer: Indexer,
@@ -119,6 +122,7 @@ where
             tombstones: vec![],
             init: None,
             wait: WaitGroup::default(),
+            buffer_pool: Some(IoBytes::from(IoBuffer::new(capacity))),
             region_manager,
             device,
             indexer,
@@ -229,15 +233,23 @@ where
         Some(allocation)
     }
 
+    /// Rotate the batch.
+    ///
+    /// # Panics
+    ///
+    /// The caller must guarantee all io bytes from the last batch are dropped.
     pub fn rotate(&mut self) -> Option<(Batch<K, V, S>, WaitGroupFuture)> {
         if self.is_empty() {
             return None;
         }
 
-        let mut buffer = IoBuffer::new(self.buffer.len());
+        let buffer = self.buffer_pool.take().unwrap();
+        let mut buffer = buffer.try_into_io_buffer().unwrap();
+
         std::mem::swap(&mut self.buffer, &mut buffer);
         self.len = 0;
         let buffer = IoBytes::from(buffer);
+        self.buffer_pool = Some(buffer.clone());
 
         let wait = std::mem::take(&mut self.wait);
 
@@ -291,6 +303,7 @@ where
                 groups,
                 tombstones,
                 init,
+                bytes: buffer,
             },
             wait.wait(),
         ))
@@ -430,6 +443,7 @@ where
     pub groups: Vec<Group<K, V, S>>,
     pub tombstones: Vec<TombstoneInfo>,
     pub init: Option<Instant>,
+    pub bytes: IoBytes,
 }
 
 impl<K, V, S> Debug for Batch<K, V, S>
