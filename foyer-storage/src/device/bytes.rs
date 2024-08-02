@@ -413,6 +413,36 @@ impl IoBytes {
         debug_assert_eq!(end % ALIGN, 0);
         &self.inner[start..end]
     }
+
+    /// Returns the underlying buffer as [`IoBuffer`], if the [`IoBytes`] has exactly one reference.
+    ///
+    /// Otherwise, an [`Err`] is returned with the same [`IoBytes`] that was passed in.
+    ///
+    /// Note: The [`IoBytes`] can be a slice of the underlying [`IoBuffer`].
+    /// `try_into_io_buffer` always returns the original complete underlying [`IoBuffer`].
+    pub fn try_into_io_buffer(self) -> core::result::Result<IoBuffer, Self> {
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => Ok(IoBuffer { inner }),
+            Err(inner) => Err(Self {
+                inner,
+                offset: self.offset,
+                len: self.len,
+            }),
+        }
+    }
+
+    /// Returns the underlying buffer as [`IoBuffer`], if the [`IoBytes`] has exactly one reference.
+    ///
+    /// Otherwise, [`None`] is returned.
+    ///
+    /// It is strongly recommended to use `into_io_buffer` instead if you don't want to keep the original [`IoByes`]
+    /// in the [`Err`] path. See `Arc::try_unwrap` and `Arc::into_inner` docs.
+    ///
+    /// Note: The [`IoBytes`] can be a slice of the underlying [`IoBuffer`].
+    /// `try_into_io_buffer` always returns the original complete underlying [`IoBuffer`].
+    pub fn into_io_buffer(self) -> Option<IoBuffer> {
+        Arc::into_inner(self.inner).map(|inner| IoBuffer { inner })
+    }
 }
 
 #[cfg(test)]

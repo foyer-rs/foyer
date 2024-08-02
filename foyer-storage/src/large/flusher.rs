@@ -281,6 +281,7 @@ where
             let indexer = self.indexer.clone();
             let region_manager = self.region_manager.clone();
             let stats = self.stats.clone();
+            let flush = self.flush;
             async move {
                 // Wait for region is clean.
                 let region = group.region.handle.await;
@@ -295,7 +296,7 @@ where
                 let size: usize = group.bytes.len();
                 if size > 0 {
                     region.write(group.bytes, group.region.offset).await?;
-                    if self.flush {
+                    if flush {
                         region.flush().await?;
                     }
                     stats.cache_write_bytes.fetch_add(size, Ordering::Relaxed);
