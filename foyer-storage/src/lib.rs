@@ -21,6 +21,7 @@ mod compress;
 mod device;
 mod engine;
 mod error;
+mod io_buffer_pool;
 mod large;
 mod picker;
 mod region;
@@ -29,7 +30,6 @@ mod small;
 mod statistics;
 mod storage;
 mod store;
-mod utils;
 
 mod prelude;
 pub use prelude::*;

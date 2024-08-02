@@ -32,9 +32,9 @@ use tokio::sync::oneshot;
 use crate::{
     device::{bytes::IoBytes, MonitoredDevice, RegionId},
     error::Result,
+    io_buffer_pool::IoBufferPool,
     large::indexer::HashedEntryAddress,
     region::{GetCleanRegionHandle, RegionManager},
-    utils::io_buffer_pool::IoBufferPool,
     Dev, DevExt, IoBuffer,
 };
 
