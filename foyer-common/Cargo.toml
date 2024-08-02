@@ -34,3 +34,6 @@ rand = "0.8.5"
 [features]
 strict_assertions = []
 mtrace = ["fastrace/enable"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }

@@ -73,31 +73,6 @@ where
     }
 }
 
-#[cfg(feature = "sanity")]
-pub struct SanityIndexerDrain<I, IT>
-where
-    I: Indexer,
-    IT: Iterator<Item = NonNull<I::Handle>>,
-{
-    iterator: IT,
-    _marker: std::marker::PhantomData<I>,
-}
-
-#[cfg(feature = "sanity")]
-impl<I, IT> Iterator for SanityIndexerDrain<I, IT>
-where
-    I: Indexer,
-    IT: Iterator<Item = NonNull<I::Handle>>,
-{
-    type Item = IT::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iterator
-            .next()
-            .inspect(|ptr| unsafe { assert!(ptr.as_ref().base().is_in_indexer()) })
-    }
-}
-
 #[cfg(not(feature = "sanity"))]
 impl<I> Indexer for SanityIndexer<I>
 where
