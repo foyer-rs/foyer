@@ -303,7 +303,6 @@ where
                 groups,
                 tombstones,
                 init,
-                bytes: buffer,
             },
             wait.wait(),
         ))
@@ -443,7 +442,6 @@ where
     pub groups: Vec<Group<K, V, S>>,
     pub tombstones: Vec<TombstoneInfo>,
     pub init: Option<Instant>,
-    pub bytes: IoBytes,
 }
 
 impl<K, V, S> Debug for Batch<K, V, S>
