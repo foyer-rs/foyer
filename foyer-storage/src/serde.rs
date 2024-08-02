@@ -44,6 +44,7 @@ pub struct KvInfo {
 pub struct EntrySerializer;
 
 impl EntrySerializer {
+    #[allow(clippy::needless_borrows_for_generic_args)]
     pub fn serialize<'a, K, V>(
         key: &'a K,
         value: &'a V,

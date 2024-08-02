@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 pub mod batch;
 pub mod continuum;
 pub mod erwlock;
