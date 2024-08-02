@@ -147,21 +147,9 @@ where
             return None;
         }
 
-        self.may_init();
-        assert!(bits::is_aligned(self.device.align(), self.len));
-
-        // Rotate group if the current one is full.
-        let group = self.groups.last_mut().unwrap();
-        if group.region.offset as usize + group.region.len + aligned > self.device.region_size() {
-            group.region.is_full = true;
-            self.append_group();
-        }
+        let allocation = self.allocate(aligned);
 
         let group = self.groups.last_mut().unwrap();
-        // Reserve buffer space for entry.
-        let start = self.len;
-        let end = start + aligned;
-        self.len = end;
         group.indices.push(HashedEntryAddress {
             hash: entry.hash(),
             address: EntryAddress {
@@ -171,12 +159,10 @@ where
                 sequence,
             },
         });
-        group.txs.push(tx);
         group.entries.push(entry);
+        group.txs.push(tx);
         group.region.len += aligned;
         group.range.end += aligned;
-
-        let allocation = unsafe { Allocation::new(&mut self.buffer[start..end], self.wait.acquire()) };
 
         Some(allocation)
     }
@@ -187,7 +173,6 @@ where
         self.tombstones.push(TombstoneInfo { tombstone, stats, tx });
     }
 
-    // FIXME(MrCroxx): merge into `entry`. Rename to allocate (?).
     pub fn reinsertion(&mut self, reinsertion: &Reinsertion, tx: oneshot::Sender<Result<bool>>) -> Option<Allocation> {
         tracing::trace!("[batch]: submit reinsertion");
 
@@ -200,21 +185,10 @@ where
             return None;
         }
 
-        self.may_init();
-        assert!(bits::is_aligned(self.device.align(), self.len));
-
-        // Rotate group if the current one is full.
-        let group = self.groups.last_mut().unwrap();
-        if group.region.offset as usize + group.region.len + aligned > self.device.region_size() {
-            group.region.is_full = true;
-            self.append_group();
-        }
+        let allocation = self.allocate(aligned);
 
         let group = self.groups.last_mut().unwrap();
         // Reserve buffer space for entry.
-        let start = self.len;
-        let end = start + aligned;
-        self.len = end;
         group.indices.push(HashedEntryAddress {
             hash: reinsertion.hash,
             address: EntryAddress {
@@ -227,8 +201,6 @@ where
         group.txs.push(tx);
         group.region.len += aligned;
         group.range.end += aligned;
-
-        let allocation = unsafe { Allocation::new(&mut self.buffer[start..end], self.wait.acquire()) };
 
         Some(allocation)
     }
@@ -306,6 +278,26 @@ where
             },
             wait.wait(),
         ))
+    }
+
+    fn allocate(&mut self, len: usize) -> Allocation {
+        assert!(bits::is_aligned(self.device.align(), len));
+        self.may_init();
+        assert!(bits::is_aligned(self.device.align(), self.len));
+
+        // Rotate group if the current one is full.
+        let group = self.groups.last_mut().unwrap();
+        if group.region.offset as usize + group.region.len + len > self.device.region_size() {
+            group.region.is_full = true;
+            self.append_group();
+        }
+
+        // Reserve buffer space for entry.
+        let start = self.len;
+        let end = start + len;
+        self.len = end;
+
+        unsafe { Allocation::new(&mut self.buffer[start..end], self.wait.acquire()) }
     }
 
     fn is_empty(&self) -> bool {
