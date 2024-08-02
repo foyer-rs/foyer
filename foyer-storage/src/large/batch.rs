@@ -173,7 +173,6 @@ where
         self.tombstones.push(TombstoneInfo { tombstone, stats, tx });
     }
 
-    // FIXME(MrCroxx): merge into `entry`. Rename to allocate (?).
     pub fn reinsertion(&mut self, reinsertion: &Reinsertion, tx: oneshot::Sender<Result<bool>>) -> Option<Allocation> {
         tracing::trace!("[batch]: submit reinsertion");
 
