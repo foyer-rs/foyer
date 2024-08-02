@@ -21,6 +21,7 @@ mod compress;
 mod device;
 mod engine;
 mod error;
+mod io_buffer_pool;
 mod large;
 mod picker;
 mod region;
