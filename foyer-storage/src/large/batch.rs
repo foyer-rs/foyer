@@ -34,6 +34,7 @@ use crate::{
     error::Result,
     large::indexer::HashedEntryAddress,
     region::{GetCleanRegionHandle, RegionManager},
+    utils::io_buffer_pool::IoBufferPool,
     Dev, DevExt, IoBuffer,
 };
 
@@ -85,7 +86,7 @@ where
     wait: WaitGroup,
 
     /// Cache write buffer between rotation to reduce page fault.
-    buffer_pool: Option<IoBytes>,
+    buffer_pool: IoBufferPool,
 
     region_manager: RegionManager,
     device: MonitoredDevice,
@@ -122,7 +123,7 @@ where
             tombstones: vec![],
             init: None,
             wait: WaitGroup::default(),
-            buffer_pool: Some(IoBytes::from(IoBuffer::new(capacity))),
+            buffer_pool: IoBufferPool::new(capacity, 1),
             region_manager,
             device,
             indexer,
@@ -205,23 +206,19 @@ where
         Some(allocation)
     }
 
-    /// Rotate the batch.
-    ///
-    /// # Panics
-    ///
-    /// The caller must guarantee all io bytes from the last batch are dropped.
+    // Note: Make sure `rotate` is called after all buffer from the last batch are dropped.
+    //
+    // Otherwise, the page fault caused by the buffer pool will hurt the performance.
     pub fn rotate(&mut self) -> Option<(Batch<K, V, S>, WaitGroupFuture)> {
         if self.is_empty() {
             return None;
         }
 
-        let buffer = self.buffer_pool.take().unwrap();
-        let mut buffer = buffer.into_io_buffer().unwrap();
-
+        let mut buffer = self.buffer_pool.acquire();
         std::mem::swap(&mut self.buffer, &mut buffer);
         self.len = 0;
         let buffer = IoBytes::from(buffer);
-        self.buffer_pool = Some(buffer.clone());
+        self.buffer_pool.release(buffer.clone());
 
         let wait = std::mem::take(&mut self.wait);
 

@@ -10,28 +10,6 @@
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
-//  limitations under the License.
+//  limitations under the License.use std::marker::PhantomData;
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
-
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![warn(missing_docs)]
-
-mod compress;
-mod device;
-mod engine;
-mod error;
-mod large;
-mod picker;
-mod region;
-mod serde;
-mod small;
-mod statistics;
-mod storage;
-mod store;
-mod utils;
-
-mod prelude;
-pub use prelude::*;
-
-pub mod test_utils;
+pub mod io_buffer_pool;
