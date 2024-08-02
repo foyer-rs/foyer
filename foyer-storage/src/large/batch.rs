@@ -244,7 +244,7 @@ where
         }
 
         let buffer = self.buffer_pool.take().unwrap();
-        let mut buffer = buffer.try_into_io_buffer().unwrap();
+        let mut buffer = buffer.into_io_buffer().unwrap();
 
         std::mem::swap(&mut self.buffer, &mut buffer);
         self.len = 0;
