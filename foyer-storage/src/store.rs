@@ -152,16 +152,17 @@ where
     }
 
     /// Load a cache entry from the disk cache.
-    ///
-    /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
-    /// check if the returned key matches the given key.
-    pub fn load<'a, Q>(&'a self, key: &'a Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'a
+    pub async fn load<Q>(&self, key: &Q) -> Result<Option<(K, V)>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
         let hash = self.memory.hash(key);
-        self.engine.load(hash)
+        match self.engine.load(hash).await {
+            Ok(Some((k, v))) if k.borrow() == key => Ok(Some((k, v))),
+            Ok(_) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Delete the cache entry with the given key from the disk cache.
