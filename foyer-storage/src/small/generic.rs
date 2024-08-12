@@ -129,7 +129,7 @@ where
         todo!()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self) {
         todo!()
     }
 

@@ -184,7 +184,7 @@ where
         self.store.stats()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self) {
         self.store.wait().await
     }
 

@@ -119,7 +119,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
     #[must_use]
-    fn wait(&self) -> impl Future<Output = Result<()>> + Send;
+    fn wait(&self) -> impl Future<Output = ()> + Send;
 
     /// Get disk cache runtime handle.
     ///

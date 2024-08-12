@@ -82,6 +82,7 @@ where
     len: usize,
     groups: Vec<GroupMut<K, V, S>>,
     tombstones: Vec<TombstoneInfo>,
+    waiters: Vec<oneshot::Sender<()>>,
     init: Option<Instant>,
     wait: WaitGroup,
 
@@ -104,6 +105,7 @@ where
             .field("len", &self.len)
             .field("groups", &self.groups)
             .field("tombstones", &self.tombstones)
+            .field("waiters", &self.waiters)
             .field("init", &self.init)
             .finish()
     }
@@ -121,6 +123,7 @@ where
             len: 0,
             groups: vec![],
             tombstones: vec![],
+            waiters: vec![],
             init: None,
             wait: WaitGroup::default(),
             buffer_pool: IoBufferPool::new(capacity, 1),
@@ -206,6 +209,15 @@ where
         Some(allocation)
     }
 
+    /// Register a waiter to be notified after the batch is finished.
+    pub fn wait(&mut self) -> oneshot::Receiver<()> {
+        tracing::trace!("[batch]: register waiter");
+        self.may_init();
+        let (tx, rx) = oneshot::channel();
+        self.waiters.push(tx);
+        rx
+    }
+
     // Note: Make sure `rotate` is called after all buffer from the last batch are dropped.
     //
     // Otherwise, the page fault caused by the buffer pool will hurt the performance.
@@ -225,6 +237,8 @@ where
         let init = self.init.take();
 
         let tombstones = std::mem::take(&mut self.tombstones);
+
+        let waiters = std::mem::take(&mut self.waiters);
 
         let next = self.groups.last().map(|last| {
             assert!(!last.region.is_full);
@@ -271,6 +285,7 @@ where
             Batch {
                 groups,
                 tombstones,
+                waiters,
                 init,
             },
             wait.wait(),
@@ -298,7 +313,7 @@ where
     }
 
     fn is_empty(&self) -> bool {
-        self.tombstones.is_empty() && self.groups.iter().all(|group| group.range.is_empty())
+        self.tombstones.is_empty() && self.groups.iter().all(|group| group.range.is_empty()) && self.waiters.is_empty()
     }
 
     fn may_init(&mut self) {
@@ -430,6 +445,7 @@ where
 {
     pub groups: Vec<Group<K, V, S>>,
     pub tombstones: Vec<TombstoneInfo>,
+    pub waiters: Vec<oneshot::Sender<()>>,
     pub init: Option<Instant>,
 }
 
@@ -443,6 +459,7 @@ where
         f.debug_struct("Batch")
             .field("groups", &self.groups)
             .field("tombstones", &self.tombstones)
+            .field("waiters", &self.waiters)
             .field("init", &self.init)
             .finish()
     }

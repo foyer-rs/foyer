@@ -368,7 +368,7 @@ where
         }
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self) {
         match self {
             Engine::Noop(storage) => storage.wait().await,
             Engine::Large(storage) => storage.wait().await,

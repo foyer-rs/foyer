@@ -34,7 +34,7 @@ use std::{
 };
 use tokio::{
     runtime::Handle,
-    sync::{oneshot, Notify, Semaphore},
+    sync::{oneshot, Notify},
 };
 
 use super::{
@@ -82,8 +82,6 @@ where
 
     notify: Arc<Notify>,
 
-    flight: Arc<Semaphore>,
-
     compression: Compression,
     metrics: Arc<Metrics>,
 }
@@ -98,7 +96,6 @@ where
         Self {
             batch: self.batch.clone(),
             notify: self.notify.clone(),
-            flight: self.flight.clone(),
             compression: self.compression,
             metrics: self.metrics.clone(),
         }
@@ -133,8 +130,6 @@ where
             indexer.clone(),
         )));
 
-        let flight = Arc::new(Semaphore::new(1));
-
         let runner = Runner {
             batch: batch.clone(),
             notify: notify.clone(),
@@ -155,7 +150,6 @@ where
         Ok(Self {
             batch,
             notify,
-            flight,
             compression: config.compression,
             metrics,
         })
@@ -176,10 +170,10 @@ where
         self.notify.notify_one();
     }
 
-    pub async fn wait(&self) -> Result<()> {
-        // TODO(MrCroxx): Consider a better implementation?
-        let _permit = self.flight.acquire().await;
-        Ok(())
+    pub async fn wait(&self) {
+        let waiter = self.batch.lock().wait();
+        self.notify.notify_one();
+        let _ = waiter.await;
     }
 
     fn entry(
@@ -349,6 +343,11 @@ where
         if let Err(e) = try_join(try_join_all(futures), future).await {
             tracing::error!("[flusher]: error raised when committing batch, error: {e}");
         }
+
+        for waiter in batch.waiters {
+            let _ = waiter.send(());
+        }
+
         if let Some(init) = batch.init.as_ref() {
             self.metrics.storage_queue_rotate.increment(1);
             self.metrics.storage_queue_rotate_duration.record(init.elapsed());
