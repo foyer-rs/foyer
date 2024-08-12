@@ -15,10 +15,10 @@
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #![allow(clippy::identity_op)]
 
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use ahash::RandomState;
-use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, StoreBuilder,
 };
@@ -28,6 +28,12 @@ const MB: usize = 1024 * 1024;
 
 const INSERTS: usize = 100;
 const LOOPS: usize = 10;
+
+async fn wait(entry: CacheEntry<u64, Vec<u8>, RandomState>, refs: usize) {
+    while entry.refs() != refs {
+        tokio::time::sleep(Duration::from_micros(10)).await;
+    }
+}
 
 async fn test_store(
     memory: Cache<u64, Vec<u8>>,
@@ -41,8 +47,8 @@ async fn test_store(
     for _ in 0..INSERTS as u64 {
         index += 1;
         let e = memory.insert(index, vec![index as u8; KB]);
-        store.enqueue(e, false);
-        store.wait().await;
+        store.enqueue(e.clone(), false);
+        wait(e, 1).await;
     }
 
     store.close().await.unwrap();
@@ -77,8 +83,8 @@ async fn test_store(
         for _ in 0..INSERTS as u64 {
             index += 1;
             let e = memory.insert(index, vec![index as u8; KB]);
-            store.enqueue(e, false);
-            store.wait().await;
+            store.enqueue(e.clone(), false);
+            wait(e, 1).await;
         }
 
         store.close().await.unwrap();

@@ -185,11 +185,6 @@ where
         self.engine.stats()
     }
 
-    /// Wait for the ongoing flush and reclaim tasks to finish.
-    pub async fn wait(&self) {
-        self.engine.wait().await
-    }
-
     /// Get disk cache runtime handle.
     ///
     /// The runtime is determined during the opening phase.
