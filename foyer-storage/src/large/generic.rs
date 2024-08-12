@@ -13,10 +13,9 @@
 //  limitations under the License.use std::marker::PhantomData;
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::Hash,
+    marker::PhantomData,
     ops::Range,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,7 +29,7 @@ use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
 };
-use foyer_memory::{Cache, CacheEntry};
+use foyer_memory::CacheEntry;
 use futures::{
     future::{join_all, try_join_all},
     FutureExt,
@@ -74,8 +73,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub memory: Cache<K, V, S>,
-
     pub name: String,
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
@@ -92,6 +89,7 @@ where
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
+    pub marker: PhantomData<(V, S)>,
 }
 
 impl<K, V, S> Debug for GenericLargeStorageConfig<K, V, S>
@@ -103,7 +101,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
             .field("name", &self.name)
-            .field("memory", &self.memory)
             .field("device", &self.device)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
@@ -148,9 +145,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Holds the memory cache for reinsertion.
-    memory: Cache<K, V, S>,
-
     indexer: Indexer,
     device: MonitoredDevice,
     region_manager: RegionManager,
@@ -271,7 +265,6 @@ where
 
         Ok(Self {
             inner: Arc::new(GenericStoreInner {
-                memory: config.memory,
                 indexer,
                 device,
                 region_manager,
@@ -316,14 +309,8 @@ where
         });
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let now = Instant::now();
-
-        let hash = self.inner.memory.hash_builder().hash_one(key);
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
@@ -378,11 +365,7 @@ where
         .in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"))
     }
 
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
         let now = Instant::now();
 
         let (tx, rx) = oneshot::channel();
@@ -393,8 +376,6 @@ where
                 .unwrap();
             return handle;
         }
-
-        let hash = self.inner.memory.hash_builder().hash_one(key);
 
         let stats = self.inner.indexer.remove(hash).map(|addr| InvalidStats {
             region: addr.region,
@@ -417,12 +398,7 @@ where
         handle
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        let hash = self.inner.memory.hash_builder().hash_one(key);
+    fn may_contains(&self, hash: u64) -> bool {
         self.inner.indexer.get(hash).is_some()
     }
 
@@ -496,28 +472,16 @@ where
         self.enqueue(entry, buffer, info, tx)
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
-        self.load(key)
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+        self.load(hash)
     }
 
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.delete(key)
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+        self.delete(hash)
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.may_contains(key)
+    fn may_contains(&self, hash: u64) -> bool {
+        self.may_contains(hash)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -582,15 +546,11 @@ mod tests {
     }
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
-    async fn store_for_test(
-        memory: &Cache<u64, Vec<u8>>,
-        dir: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
-        store_for_test_with_reinsertion_picker(memory, dir, Arc::<RejectAllPicker<u64>>::default()).await
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker<u64>>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
-        memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
@@ -598,7 +558,6 @@ mod tests {
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
-            memory: memory.clone(),
             device,
             regions,
             compression: Compression::None,
@@ -614,12 +573,12 @@ mod tests {
             tombstone_log_config: None,
             buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
+            marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
 
     async fn store_for_test_with_tombstone_log(
-        memory: &Cache<u64, Vec<u8>>,
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
@@ -627,7 +586,6 @@ mod tests {
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
-            memory: memory.clone(),
             device,
             regions,
             compression: Compression::None,
@@ -643,6 +601,7 @@ mod tests {
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
+            marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
@@ -664,7 +623,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test(&memory, dir.path()).await;
+        let store = store_for_test(dir.path()).await;
 
         // [ [e1, e2], [], [], [] ]
         let e1 = memory.insert(1, vec![1; 7 * KB]);
@@ -673,9 +632,9 @@ mod tests {
         assert!(enqueue(&store, e1.clone(),).await.unwrap());
         assert!(enqueue(&store, e2,).await.unwrap());
 
-        let r1 = store.load(&1).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(&2).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
 
         // [ [e1, e2], [e3, e4], [], [] ]
@@ -685,28 +644,28 @@ mod tests {
         assert!(enqueue(&store, e3,).await.unwrap());
         assert!(enqueue(&store, e4,).await.unwrap());
 
-        let r1 = store.load(&1).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(&2).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
-        let r3 = store.load(&3).await.unwrap().unwrap();
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(&4).await.unwrap().unwrap();
+        let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4, (4, vec![4; 6 * KB]));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
         assert!(enqueue(&store, e5,).await.unwrap());
 
-        let r1 = store.load(&1).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(&2).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
-        let r3 = store.load(&3).await.unwrap().unwrap();
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(&4).await.unwrap().unwrap();
+        let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4, (4, vec![4; 6 * KB]));
-        let r5 = store.load(&5).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
@@ -715,32 +674,32 @@ mod tests {
         assert!(enqueue(&store, e6,).await.unwrap());
         assert!(enqueue(&store, e4v2,).await.unwrap());
 
-        assert!(store.load(&1).await.unwrap().is_none());
-        assert!(store.load(&2).await.unwrap().is_none());
-        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
+        assert!(store.load(memory.hash(&2)).await.unwrap().is_none());
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(&4).await.unwrap().unwrap();
+        let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
-        let r5 = store.load(&5).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
-        let r6 = store.load(&6).await.unwrap().unwrap();
+        let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
         assert!(enqueue(&store, e1,).await.is_err());
         drop(store);
 
-        let store = store_for_test(&memory, dir.path()).await;
+        let store = store_for_test(dir.path()).await;
 
-        assert!(store.load(&1).await.unwrap().is_none());
-        assert!(store.load(&2).await.unwrap().is_none());
-        let r3 = store.load(&3).await.unwrap().unwrap();
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
+        assert!(store.load(memory.hash(&2)).await.unwrap().is_none());
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(&4).await.unwrap().unwrap();
+        let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
-        let r5 = store.load(&5).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
-        let r6 = store.load(&6).await.unwrap().unwrap();
+        let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
@@ -749,7 +708,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
@@ -760,33 +719,39 @@ mod tests {
             .all(|inserted| inserted));
 
         for i in 0..6 {
-            assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
+            assert_eq!(
+                store.load(memory.hash(&i)).await.unwrap(),
+                Some((i, vec![i as u8; 7 * KB]))
+            );
         }
 
-        assert!(store.delete(&3).await.unwrap());
-        assert_eq!(store.load(&3).await.unwrap(), None);
+        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
         for i in 0..6 {
             if i != 3 {
-                assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
+                assert_eq!(
+                    store.load(memory.hash(&i)).await.unwrap(),
+                    Some((i, vec![i as u8; 7 * KB]))
+                );
             } else {
-                assert_eq!(store.load(&3).await.unwrap(), None);
+                assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
             }
         }
 
         assert!(enqueue(&store, es[3].clone(),).await.unwrap());
-        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     #[test_log::test(tokio::test)]
@@ -794,7 +759,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
@@ -805,31 +770,34 @@ mod tests {
             .all(|inserted| inserted));
 
         for i in 0..6 {
-            assert_eq!(store.load(&i).await.unwrap(), Some((i, vec![i as u8; 7 * KB])));
+            assert_eq!(
+                store.load(memory.hash(&i)).await.unwrap(),
+                Some((i, vec![i as u8; 7 * KB]))
+            );
         }
 
-        assert!(store.delete(&3).await.unwrap());
-        assert_eq!(store.load(&3).await.unwrap(), None);
+        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.destroy().await.unwrap();
 
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
         for i in 0..6 {
-            assert_eq!(store.load(&i).await.unwrap(), None);
+            assert_eq!(store.load(memory.hash(&i)).await.unwrap(), None);
         }
 
         assert!(enqueue(&store, es[3].clone(),).await.unwrap());
-        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(&memory, dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.load(&3).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     // FIXME(MrCroxx): Move the admission test to store level.
@@ -856,12 +824,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_reinsertion_picker(
-            &memory,
-            dir.path(),
-            Arc::new(BiasedPicker::new(vec![1, 3, 5, 7, 9])),
-        )
-        .await;
+        let store =
+            store_for_test_with_reinsertion_picker(dir.path(), Arc::new(BiasedPicker::new(vec![1, 3, 5, 7, 9]))).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
@@ -870,7 +834,7 @@ mod tests {
             assert!(enqueue(&store, e,).await.unwrap());
         }
         for i in 0..6 {
-            let r = store.load(&i).await.unwrap().unwrap();
+            let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
             assert_eq!(r, (i, vec![i as u8; 7 * KB]));
         }
 
@@ -881,7 +845,7 @@ mod tests {
         }
         let mut res = vec![];
         for i in 0..7 {
-            res.push(store.load(&i).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
@@ -904,7 +868,7 @@ mod tests {
         let mut res = vec![];
         for i in 0..8 {
             tracing::trace!("==========> {i}");
-            res.push(store.load(&i).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
@@ -921,7 +885,7 @@ mod tests {
         );
 
         // [ [e7, e3], [e8, e9], [], [e6, e1] ]
-        store.delete(&5).await.unwrap();
+        store.delete(memory.hash(&5)).await.unwrap();
         assert!(enqueue(&store, es[8].clone(),).await.unwrap());
         assert!(enqueue(&store, es[9].clone(),).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
@@ -929,7 +893,7 @@ mod tests {
         }
         let mut res = vec![];
         for i in 0..10 {
-            res.push(store.load(&i).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,

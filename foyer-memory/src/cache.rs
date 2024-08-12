@@ -647,8 +647,17 @@ where
         }
     }
 
+    /// Hash the given key with the hash builder of the cache.
+    pub fn hash<Q>(&self, key: &Q) -> u64
+    where
+        K: Borrow<Q>,
+        Q: Hash + ?Sized,
+    {
+        self.hash_builder().hash_one(key)
+    }
+
     /// Get the hash builder of the in-memory cache.
-    pub fn hash_builder(&self) -> &S {
+    fn hash_builder(&self) -> &S {
         match self {
             Cache::Fifo(cache) => cache.hash_builder(),
             Cache::Lru(cache) => cache.hash_builder(),
