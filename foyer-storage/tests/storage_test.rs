@@ -49,16 +49,7 @@ async fn test_store(
     let remains = recorder.remains();
 
     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-        let value = match store.load(&i).await.unwrap() {
-            Some((k, v)) => {
-                if k == i {
-                    Some(v)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        };
+        let value = store.load(&i).await.unwrap().map(|(_, v)| v);
         if remains.contains(&i) {
             assert_eq!(value, Some(vec![i as u8; 1 * KB]));
         } else {
@@ -74,16 +65,7 @@ async fn test_store(
         let remains = recorder.remains();
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-            let value = match store.load(&i).await.unwrap() {
-                Some((k, v)) => {
-                    if k == i {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            };
+            let value = store.load(&i).await.unwrap().map(|(_, v)| v);
             if remains.contains(&i) {
                 assert_eq!(value, Some(vec![i as u8; 1 * KB]), "value mismatch, loop: {l}, i: {i}");
             } else {
@@ -102,16 +84,7 @@ async fn test_store(
         let remains = recorder.remains();
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-            let value = match store.load(&i).await.unwrap() {
-                Some((k, v)) => {
-                    if k == i {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            };
+            let value = store.load(&i).await.unwrap().map(|(_, v)| v);
             if remains.contains(&i) {
                 assert_eq!(value, Some(vec![i as u8; 1 * KB]));
             } else {

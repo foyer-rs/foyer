@@ -235,23 +235,25 @@ where
         }
         drop(guard);
 
-        if let Some((k, v)) = self
+        let entry = match self
             .storage
             .load(key)
             .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
             .await?
         {
-            if k.borrow() != key {
-                record_miss();
-                return Ok(None);
+            Some((k, v)) => {
+                record_hit();
+                Some(self.memory.insert(k, v))
             }
-            record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold);
-            return Ok(Some(self.memory.insert(k, v)));
-        }
-        record_miss();
+            None => {
+                record_miss();
+                None
+            }
+        };
+
         try_cancel!(self, span, record_hybrid_get_threshold);
-        Ok(None)
+
+        Ok(entry)
     }
 
     /// Get cached entry with the given key from the hybrid cache.
@@ -273,10 +275,9 @@ where
             let store = self.storage.clone();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from) {
-                    Err(e) => Err(ObtainFetchError::Err(e)),
-                    Ok(None) => Err(ObtainFetchError::NotExist),
-                    Ok(Some((k, _))) if key != k => Err(ObtainFetchError::NotExist),
                     Ok(Some((_, v))) => Ok(v),
+                    Ok(None) => Err(ObtainFetchError::NotExist),
+                    Err(e) => Err(ObtainFetchError::Err(e)),
                 }
             }
         });
@@ -487,21 +488,16 @@ where
                 let metrics = self.metrics.clone();
 
                 async move {
-                    let load = match store.load(&key).await.map_err(anyhow::Error::from) {
-                        Ok(load) => load,
-                        Err(e) => return Err(e).into(),
-                    };
-
-                    match load {
-                        None => {}
-                        Some((k, _)) if key != k => {}
-                        Some((_, v)) => {
+                    match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(Some((_k, v))) => {
                             metrics.hybrid_hit.increment(1);
                             metrics.hybrid_hit_duration.record(now.elapsed());
 
                             return Ok(v).into();
                         }
-                    }
+                        Ok(None) => {}
+                        Err(e) => return Err(e).into(),
+                    };
 
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
