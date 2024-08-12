@@ -18,7 +18,6 @@ use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
 use futures::{Future, FutureExt};
 use tokio::runtime::Handle;
-use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
 use crate::error::Result;
@@ -26,8 +25,6 @@ use crate::error::Result;
 use crate::serde::KvInfo;
 use crate::storage::Storage;
 use crate::IoBytes;
-
-use super::WaitHandle;
 
 /// The builder of the disk cache with a dedicated runtime.
 pub struct RuntimeConfigBuilder {
@@ -153,14 +150,8 @@ where
         self.runtime.spawn(async move { store.close().await }).await.unwrap()
     }
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBytes,
-        info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
-    ) {
-        self.store.enqueue(entry, buffer, info, tx)
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
+        self.store.enqueue(entry, buffer, info)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
@@ -168,7 +159,7 @@ where
         self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
-    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+    fn delete(&self, hash: u64) {
         self.store.delete(hash)
     }
 
@@ -184,8 +175,8 @@ where
         self.store.stats()
     }
 
-    async fn wait(&self) {
-        self.store.wait().await
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.store.wait()
     }
 
     fn runtime(&self) -> &Handle {
@@ -287,19 +278,14 @@ mod tests {
             GenericLargeStorage::open(config).await.unwrap()
         });
 
-        let fs = es
-            .iter()
-            .cloned()
-            .map(|e| {
-                let (tx, rx) = oneshot::channel();
-                let mut buffer = IoBytesMut::new();
-                let info = EntrySerializer::serialize(e.key(), e.value(), &Compression::None, &mut buffer).unwrap();
-                let buffer = buffer.freeze();
-                store.enqueue(e, buffer, info, tx);
-                rx.map(|res| res.unwrap())
-            })
-            .collect_vec();
-        background.block_on(async { try_join_all(fs).await.unwrap() });
+        for e in es {
+            let mut buffer = IoBytesMut::new();
+            let info = EntrySerializer::serialize(e.key(), e.value(), &Compression::None, &mut buffer).unwrap();
+            let buffer = buffer.freeze();
+            store.enqueue(e, buffer, info);
+        }
+
+        background.block_on(async { store.wait().await });
 
         let mut fs = vec![];
         for i in 0..100 {
@@ -307,11 +293,10 @@ mod tests {
         }
         background.block_on(async { try_join_all(fs).await.unwrap() });
 
-        let mut fs = vec![];
         for i in 0..100 {
-            fs.push(store.delete(memory.hash(&i)));
+            store.delete(memory.hash(&i));
         }
-        background.block_on(async { try_join_all(fs).await.unwrap() });
+        background.block_on(async { store.wait().await });
 
         background.block_on(async { store.close().await.unwrap() });
 

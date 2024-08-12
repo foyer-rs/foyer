@@ -34,7 +34,7 @@ pub use crate::{
     storage::{
         either::Order,
         runtime::{RuntimeConfig, RuntimeConfigBuilder},
-        Storage, WaitHandle,
+        Storage,
     },
     store::{CombinedConfig, DeviceConfig, Store, StoreBuilder},
 };

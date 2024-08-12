@@ -30,10 +30,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::CacheEntry;
-use futures::{
-    future::{join_all, try_join_all},
-    FutureExt,
-};
+use futures::future::{join_all, try_join_all};
 
 use crate::{
     compress::Compression,
@@ -48,14 +45,11 @@ use crate::{
     region::RegionManager,
     serde::{EntryDeserializer, KvInfo},
     statistics::Statistics,
-    storage::{Storage, WaitHandle},
+    storage::Storage,
     IoBytes,
 };
 
-use tokio::{
-    runtime::Handle,
-    sync::{oneshot, Semaphore},
-};
+use tokio::{runtime::Handle, sync::Semaphore};
 
 use super::{
     batch::InvalidStats,
@@ -280,9 +274,13 @@ where
         })
     }
 
-    async fn wait(&self) {
-        join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await;
-        join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        let wait_flushers = join_all(self.inner.flushers.iter().map(|flusher| flusher.wait()));
+        let wait_reclaimers = join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait()));
+        async move {
+            wait_flushers.await;
+            wait_reclaimers.await;
+        }
     }
 
     async fn close(&self) -> Result<()> {
@@ -292,10 +290,9 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo, tx: oneshot::Sender<Result<bool>>) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
         if !self.inner.active.load(Ordering::Relaxed) {
-            tx.send(Err(anyhow::anyhow!("cannot enqueue new entry after closed").into()))
-                .unwrap();
+            tracing::warn!("cannot enqueue new entry after closed");
             return;
         }
 
@@ -304,7 +301,6 @@ where
             entry,
             buffer,
             info,
-            tx,
             sequence,
         });
     }
@@ -365,16 +361,12 @@ where
         .in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"))
     }
 
-    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+    fn delete(&self, hash: u64) {
         let now = Instant::now();
 
-        let (tx, rx) = oneshot::channel();
-        let handle = WaitHandle::new(rx.map(|recv| recv.unwrap()));
-
         if !self.inner.active.load(Ordering::Relaxed) {
-            tx.send(Err(anyhow::anyhow!("cannot delete entry after closed").into()))
-                .unwrap();
-            return handle;
+            tracing::warn!("cannot delete entry after closed");
+            return;
         }
 
         let stats = self.inner.indexer.remove(hash).map(|addr| InvalidStats {
@@ -388,14 +380,11 @@ where
             this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
                 tombstone: Tombstone { hash, sequence },
                 stats,
-                tx,
             });
         });
 
         self.inner.metrics.storage_delete.increment(1);
         self.inner.metrics.storage_miss_duration.record(now.elapsed());
-
-        handle
     }
 
     fn may_contains(&self, hash: u64) -> bool {
@@ -409,14 +398,12 @@ where
 
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        let handle = WaitHandle::new(rx.map(|recv| recv.unwrap()));
+
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
             tombstone: Tombstone { hash: 0, sequence },
             stats: None,
-            tx,
         });
-        handle.await?;
+        self.wait().await;
 
         // Clear indices.
         //
@@ -462,21 +449,15 @@ where
         self.close().await
     }
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBytes,
-        info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
-    ) {
-        self.enqueue(entry, buffer, info, tx)
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
+        self.enqueue(entry, buffer, info)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         self.load(hash)
     }
 
-    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+    fn delete(&self, hash: u64) {
         self.delete(hash)
     }
 
@@ -492,8 +473,8 @@ where
         self.inner.device.stat().clone()
     }
 
-    async fn wait(&self) {
-        self.wait().await
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.wait()
     }
 
     fn runtime(&self) -> &Handle {
@@ -606,16 +587,11 @@ mod tests {
         GenericLargeStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(
-        store: &GenericLargeStorage<u64, Vec<u8>, RandomState>,
-        entry: CacheEntry<u64, Vec<u8>, RandomState>,
-    ) -> WaitHandle<impl Future<Output = Result<bool>>> {
-        let (tx, rx) = oneshot::channel();
+    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
         let mut buffer = IoBytesMut::new();
         let info = EntrySerializer::serialize(entry.key(), entry.value(), &Compression::None, &mut buffer).unwrap();
         let buffer = buffer.freeze();
-        store.enqueue(entry, buffer, info, tx);
-        WaitHandle::new(rx.map(|recv| recv.unwrap()))
+        store.enqueue(entry, buffer, info);
     }
 
     #[test_log::test(tokio::test)]
@@ -629,8 +605,9 @@ mod tests {
         let e1 = memory.insert(1, vec![1; 7 * KB]);
         let e2 = memory.insert(2, vec![2; 7 * KB]);
 
-        assert!(enqueue(&store, e1.clone(),).await.unwrap());
-        assert!(enqueue(&store, e2,).await.unwrap());
+        enqueue(&store, e1.clone());
+        enqueue(&store, e2);
+        store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -641,8 +618,9 @@ mod tests {
         let e3 = memory.insert(3, vec![3; 7 * KB]);
         let e4 = memory.insert(4, vec![4; 6 * KB]);
 
-        assert!(enqueue(&store, e3,).await.unwrap());
-        assert!(enqueue(&store, e4,).await.unwrap());
+        enqueue(&store, e3);
+        enqueue(&store, e4);
+        store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -655,7 +633,8 @@ mod tests {
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
-        assert!(enqueue(&store, e5,).await.unwrap());
+        enqueue(&store, e5);
+        store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
@@ -671,8 +650,9 @@ mod tests {
         // [ [], [e3, e4], [e5], [e6, e4*] ]
         let e6 = memory.insert(6, vec![6; 7 * KB]);
         let e4v2 = memory.insert(4, vec![!4; 7 * KB]);
-        assert!(enqueue(&store, e6,).await.unwrap());
-        assert!(enqueue(&store, e4v2,).await.unwrap());
+        enqueue(&store, e6);
+        enqueue(&store, e4v2);
+        store.wait().await;
 
         assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
         assert!(store.load(memory.hash(&2)).await.unwrap().is_none());
@@ -686,7 +666,9 @@ mod tests {
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
-        assert!(enqueue(&store, e1,).await.is_err());
+        enqueue(&store, e1);
+        store.wait().await;
+
         drop(store);
 
         let store = store_for_test(dir.path()).await;
@@ -712,11 +694,10 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| enqueue(&store, e.clone(),)))
-            .await
-            .unwrap()
-            .into_iter()
-            .all(|inserted| inserted));
+        for e in es.iter().take(6) {
+            enqueue(&store, e.clone());
+        }
+        store.wait().await;
 
         for i in 0..6 {
             assert_eq!(
@@ -725,7 +706,8 @@ mod tests {
             );
         }
 
-        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        store.delete(memory.hash(&3));
+        store.wait().await;
         assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.close().await.unwrap();
@@ -743,7 +725,8 @@ mod tests {
             }
         }
 
-        assert!(enqueue(&store, es[3].clone(),).await.unwrap());
+        enqueue(&store, es[3].clone());
+        store.wait().await;
         assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -763,11 +746,10 @@ mod tests {
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
-        assert!(try_join_all(es.iter().take(6).map(|e| enqueue(&store, e.clone(),)))
-            .await
-            .unwrap()
-            .into_iter()
-            .all(|inserted| inserted));
+        for e in es.iter().take(6) {
+            enqueue(&store, e.clone());
+        }
+        store.wait().await;
 
         for i in 0..6 {
             assert_eq!(
@@ -776,7 +758,8 @@ mod tests {
             );
         }
 
-        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        store.delete(memory.hash(&3));
+        store.wait().await;
         assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.destroy().await.unwrap();
@@ -789,7 +772,8 @@ mod tests {
             assert_eq!(store.load(memory.hash(&i)).await.unwrap(), None);
         }
 
-        assert!(enqueue(&store, es[3].clone(),).await.unwrap());
+        enqueue(&store, es[3].clone());
+        store.wait().await;
         assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
@@ -831,15 +815,18 @@ mod tests {
 
         // [ [e0, e1], [e2, e3], [e4, e5], [] ]
         for e in es.iter().take(6).cloned() {
-            assert!(enqueue(&store, e,).await.unwrap());
+            enqueue(&store, e);
         }
+        store.wait().await;
+
         for i in 0..6 {
             let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
             assert_eq!(r, (i, vec![i as u8; 7 * KB]));
         }
 
         // [ [], [e2, e3], [e4, e5], [e6, e1] ]
-        assert!(enqueue(&store, es[6].clone(),).await.unwrap());
+        enqueue(&store, es[6].clone());
+        store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -861,7 +848,8 @@ mod tests {
         );
 
         // [ [e7, e3], [], [e4, e5], [e6, e1] ]
-        assert!(enqueue(&store, es[7].clone(),).await.unwrap());
+        enqueue(&store, es[7].clone());
+        store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
@@ -885,9 +873,10 @@ mod tests {
         );
 
         // [ [e7, e3], [e8, e9], [], [e6, e1] ]
-        store.delete(memory.hash(&5)).await.unwrap();
-        assert!(enqueue(&store, es[8].clone(),).await.unwrap());
-        assert!(enqueue(&store, es[9].clone(),).await.unwrap());
+        store.delete(memory.hash(&5));
+        enqueue(&store, es[8].clone());
+        enqueue(&store, es[9].clone());
+        store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }

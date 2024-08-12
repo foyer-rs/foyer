@@ -12,10 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use futures::{future::try_join_all, FutureExt};
+use futures::future::join_all;
+use itertools::Itertools;
 use tokio::{
     runtime::Handle,
     sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
@@ -33,7 +34,7 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     statistics::Statistics,
-    IoBytes, WaitHandle,
+    IoBytes,
 };
 
 #[derive(Debug)]
@@ -79,10 +80,12 @@ impl Reclaimer {
     }
 
     // Wait for the current reclaim job to finish.
-    pub async fn wait(&self) {
+    pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let (tx, rx) = oneshot::channel();
         let _ = self.wait_tx.send(tx);
-        let _ = rx.await;
+        async move {
+            let _ = rx.await;
+        }
     }
 }
 
@@ -165,7 +168,7 @@ where
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
         let mut scanner = RegionScanner::new(region.clone());
-        let mut futures = vec![];
+        let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:
         //
@@ -197,32 +200,25 @@ where
                     }
                     Ok(buf) => buf.freeze(),
                 };
-                let flusher = self.flushers[futures.len() % self.flushers.len()].clone();
-                let (tx, rx) = oneshot::channel();
-                let future = WaitHandle::new(rx.map(|recv| recv.unwrap()));
+                let flusher = self.flushers[picked_count % self.flushers.len()].clone();
                 flusher.submit(Submission::Reinsertion {
                     reinsertion: Reinsertion {
                         hash: info.hash,
                         sequence: info.sequence,
                         buffer,
                     },
-                    tx,
                 });
-                futures.push(future);
+                picked_count += 1;
             } else {
                 unpicked.push(info.hash);
             }
         }
 
-        let picked_count = futures.len();
         let unpicked_count = unpicked.len();
 
+        let waits = self.flushers.iter().map(|flusher| flusher.wait()).collect_vec();
         self.runtime.spawn(async move {
-            if let Err(e) = try_join_all(futures).await {
-                tracing::warn!(
-                    "[reclaimer]: error raised when reinserting entries, the entries may be dropped, err: {e}"
-                );
-            }
+            join_all(waits).await;
         });
         self.indexer.remove_batch(&unpicked);
 

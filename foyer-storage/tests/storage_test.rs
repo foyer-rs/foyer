@@ -41,7 +41,8 @@ async fn test_store(
     for _ in 0..INSERTS as u64 {
         index += 1;
         let e = memory.insert(index, vec![index as u8; KB]);
-        store.enqueue(e, false).await.unwrap();
+        store.enqueue(e, false);
+        store.wait().await;
     }
 
     store.close().await.unwrap();
@@ -76,7 +77,8 @@ async fn test_store(
         for _ in 0..INSERTS as u64 {
             index += 1;
             let e = memory.insert(index, vec![index as u8; KB]);
-            store.enqueue(e, false).await.unwrap();
+            store.enqueue(e, false);
+            store.wait().await;
         }
 
         store.close().await.unwrap();
