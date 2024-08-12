@@ -160,7 +160,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let hash = self.memory.hash_builder().hash_one(key);
+        let hash = self.memory.hash(key);
         self.engine.load(hash)
     }
 
@@ -170,7 +170,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let hash = self.memory.hash_builder().hash_one(key);
+        let hash = self.memory.hash(key);
         self.engine.delete(hash)
     }
 
@@ -182,7 +182,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let hash = self.memory.hash_builder().hash_one(key);
+        let hash = self.memory.hash(key);
         self.engine.may_contains(hash)
     }
 

@@ -303,13 +303,13 @@ mod tests {
 
         let mut fs = vec![];
         for i in 0..100 {
-            fs.push(store.load(memory.hash_builder().hash_one(i)));
+            fs.push(store.load(memory.hash(&i)));
         }
         background.block_on(async { try_join_all(fs).await.unwrap() });
 
         let mut fs = vec![];
         for i in 0..100 {
-            fs.push(store.delete(memory.hash_builder().hash_one(i)));
+            fs.push(store.delete(memory.hash(&i)));
         }
         background.block_on(async { try_join_all(fs).await.unwrap() });
 

@@ -157,8 +157,8 @@ mod tests {
             tx,
         );
         assert!(!rx.await.unwrap().unwrap());
-        assert!(store.load(memory.hash_builder().hash_one(0)).await.unwrap().is_none());
-        store.delete(memory.hash_builder().hash_one(0)).await.unwrap();
+        assert!(store.load(memory.hash(&0)).await.unwrap().is_none());
+        store.delete(memory.hash(&0)).await.unwrap();
         store.destroy().await.unwrap();
         store.close().await.unwrap();
     }

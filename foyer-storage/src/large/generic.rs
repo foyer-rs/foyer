@@ -632,9 +632,9 @@ mod tests {
         assert!(enqueue(&store, e1.clone(),).await.unwrap());
         assert!(enqueue(&store, e2,).await.unwrap());
 
-        let r1 = store.load(memory.hash_builder().hash_one(1)).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash_builder().hash_one(2)).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
 
         // [ [e1, e2], [e3, e4], [], [] ]
@@ -644,28 +644,28 @@ mod tests {
         assert!(enqueue(&store, e3,).await.unwrap());
         assert!(enqueue(&store, e4,).await.unwrap());
 
-        let r1 = store.load(memory.hash_builder().hash_one(1)).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash_builder().hash_one(2)).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
-        let r3 = store.load(memory.hash_builder().hash_one(3)).await.unwrap().unwrap();
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(memory.hash_builder().hash_one(4)).await.unwrap().unwrap();
+        let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4, (4, vec![4; 6 * KB]));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 13 * KB]);
         assert!(enqueue(&store, e5,).await.unwrap());
 
-        let r1 = store.load(memory.hash_builder().hash_one(1)).await.unwrap().unwrap();
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash_builder().hash_one(2)).await.unwrap().unwrap();
+        let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
         assert_eq!(r2, (2, vec![2; 7 * KB]));
-        let r3 = store.load(memory.hash_builder().hash_one(3)).await.unwrap().unwrap();
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(memory.hash_builder().hash_one(4)).await.unwrap().unwrap();
+        let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4, (4, vec![4; 6 * KB]));
-        let r5 = store.load(memory.hash_builder().hash_one(5)).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
@@ -674,15 +674,15 @@ mod tests {
         assert!(enqueue(&store, e6,).await.unwrap());
         assert!(enqueue(&store, e4v2,).await.unwrap());
 
-        assert!(store.load(memory.hash_builder().hash_one(1)).await.unwrap().is_none());
-        assert!(store.load(memory.hash_builder().hash_one(2)).await.unwrap().is_none());
-        let r3 = store.load(memory.hash_builder().hash_one(3)).await.unwrap().unwrap();
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
+        assert!(store.load(memory.hash(&2)).await.unwrap().is_none());
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(memory.hash_builder().hash_one(4)).await.unwrap().unwrap();
+        let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
-        let r5 = store.load(memory.hash_builder().hash_one(5)).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
-        let r6 = store.load(memory.hash_builder().hash_one(6)).await.unwrap().unwrap();
+        let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
@@ -691,15 +691,15 @@ mod tests {
 
         let store = store_for_test(dir.path()).await;
 
-        assert!(store.load(memory.hash_builder().hash_one(1)).await.unwrap().is_none());
-        assert!(store.load(memory.hash_builder().hash_one(2)).await.unwrap().is_none());
-        let r3 = store.load(memory.hash_builder().hash_one(3)).await.unwrap().unwrap();
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
+        assert!(store.load(memory.hash(&2)).await.unwrap().is_none());
+        let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(memory.hash_builder().hash_one(4)).await.unwrap().unwrap();
+        let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
-        let r5 = store.load(memory.hash_builder().hash_one(5)).await.unwrap().unwrap();
+        let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
         assert_eq!(r5, (5, vec![5; 13 * KB]));
-        let r6 = store.load(memory.hash_builder().hash_one(6)).await.unwrap().unwrap();
+        let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
@@ -720,13 +720,13 @@ mod tests {
 
         for i in 0..6 {
             assert_eq!(
-                store.load(memory.hash_builder().hash_one(i)).await.unwrap(),
+                store.load(memory.hash(&i)).await.unwrap(),
                 Some((i, vec![i as u8; 7 * KB]))
             );
         }
 
-        assert!(store.delete(memory.hash_builder().hash_one(3)).await.unwrap());
-        assert_eq!(store.load(memory.hash_builder().hash_one(3)).await.unwrap(), None);
+        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.close().await.unwrap();
         drop(store);
@@ -735,29 +735,23 @@ mod tests {
         for i in 0..6 {
             if i != 3 {
                 assert_eq!(
-                    store.load(memory.hash_builder().hash_one(i)).await.unwrap(),
+                    store.load(memory.hash(&i)).await.unwrap(),
                     Some((i, vec![i as u8; 7 * KB]))
                 );
             } else {
-                assert_eq!(store.load(memory.hash_builder().hash_one(3)).await.unwrap(), None);
+                assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
             }
         }
 
         assert!(enqueue(&store, es[3].clone(),).await.unwrap());
-        assert_eq!(
-            store.load(memory.hash_builder().hash_one(3)).await.unwrap(),
-            Some((3, vec![3; 7 * KB]))
-        );
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(
-            store.load(memory.hash_builder().hash_one(3)).await.unwrap(),
-            Some((3, vec![3; 7 * KB]))
-        );
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     #[test_log::test(tokio::test)]
@@ -777,13 +771,13 @@ mod tests {
 
         for i in 0..6 {
             assert_eq!(
-                store.load(memory.hash_builder().hash_one(i)).await.unwrap(),
+                store.load(memory.hash(&i)).await.unwrap(),
                 Some((i, vec![i as u8; 7 * KB]))
             );
         }
 
-        assert!(store.delete(memory.hash_builder().hash_one(3)).await.unwrap());
-        assert_eq!(store.load(memory.hash_builder().hash_one(3)).await.unwrap(), None);
+        assert!(store.delete(memory.hash(&3)).await.unwrap());
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
 
         store.destroy().await.unwrap();
 
@@ -792,24 +786,18 @@ mod tests {
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
         for i in 0..6 {
-            assert_eq!(store.load(memory.hash_builder().hash_one(i)).await.unwrap(), None);
+            assert_eq!(store.load(memory.hash(&i)).await.unwrap(), None);
         }
 
         assert!(enqueue(&store, es[3].clone(),).await.unwrap());
-        assert_eq!(
-            store.load(memory.hash_builder().hash_one(3)).await.unwrap(),
-            Some((3, vec![3; 7 * KB]))
-        );
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(
-            store.load(memory.hash_builder().hash_one(3)).await.unwrap(),
-            Some((3, vec![3; 7 * KB]))
-        );
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
     }
 
     // FIXME(MrCroxx): Move the admission test to store level.
@@ -846,7 +834,7 @@ mod tests {
             assert!(enqueue(&store, e,).await.unwrap());
         }
         for i in 0..6 {
-            let r = store.load(memory.hash_builder().hash_one(i)).await.unwrap().unwrap();
+            let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
             assert_eq!(r, (i, vec![i as u8; 7 * KB]));
         }
 
@@ -857,7 +845,7 @@ mod tests {
         }
         let mut res = vec![];
         for i in 0..7 {
-            res.push(store.load(memory.hash_builder().hash_one(i)).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
@@ -880,7 +868,7 @@ mod tests {
         let mut res = vec![];
         for i in 0..8 {
             tracing::trace!("==========> {i}");
-            res.push(store.load(memory.hash_builder().hash_one(i)).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
@@ -897,7 +885,7 @@ mod tests {
         );
 
         // [ [e7, e3], [e8, e9], [], [e6, e1] ]
-        store.delete(memory.hash_builder().hash_one(5)).await.unwrap();
+        store.delete(memory.hash(&5)).await.unwrap();
         assert!(enqueue(&store, es[8].clone(),).await.unwrap());
         assert!(enqueue(&store, es[9].clone(),).await.unwrap());
         for reclaimer in store.inner.reclaimers.iter() {
@@ -905,7 +893,7 @@ mod tests {
         }
         let mut res = vec![];
         for i in 0..10 {
-            res.push(store.load(memory.hash_builder().hash_one(i)).await.unwrap());
+            res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
