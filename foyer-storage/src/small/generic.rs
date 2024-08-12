@@ -115,6 +115,9 @@ where
         todo!()
     }
 
+    // TODO(MrCroxx): Remove the attr after impl.
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::manual_async_fn)]
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         async { todo!() }
     }
