@@ -607,7 +607,7 @@ mod tests {
         let e2g = hybrid.obtain(2).await.unwrap().unwrap();
         assert_eq!(e2g.value(), &vec![2; 7 * KB]);
 
-        hybrid.storage.wait().await.unwrap();
+        hybrid.storage.wait().await;
 
         assert!(hybrid.contains(&3));
         hybrid.remove(&3);

@@ -280,15 +280,15 @@ where
         })
     }
 
-    async fn wait(&self) -> Result<()> {
-        try_join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await?;
+    async fn wait(&self) {
+        join_all(self.inner.flushers.iter().map(|flusher| flusher.wait())).await;
         join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
-        Ok(())
     }
 
     async fn close(&self) -> Result<()> {
         self.inner.active.store(false, Ordering::Relaxed);
-        self.wait().await
+        self.wait().await;
+        Ok(())
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
@@ -492,7 +492,7 @@ where
         self.inner.device.stat().clone()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self) {
         self.wait().await
     }
 

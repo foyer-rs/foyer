@@ -121,9 +121,7 @@ where
         Arc::default()
     }
 
-    async fn wait(&self) -> Result<()> {
-        Ok(())
-    }
+    async fn wait(&self) {}
 
     fn runtime(&self) -> &Handle {
         &self.runtime

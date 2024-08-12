@@ -15,7 +15,7 @@
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::{
-    future::{ready, select, try_join, Either as EitherFuture},
+    future::{join, ready, select, try_join, Either as EitherFuture},
     pin_mut, Future, FutureExt,
 };
 use tokio::{runtime::Handle, sync::oneshot};
@@ -296,9 +296,8 @@ where
         self.left.stats()
     }
 
-    async fn wait(&self) -> Result<()> {
-        try_join(self.left.wait(), self.right.wait()).await?;
-        Ok(())
+    async fn wait(&self) {
+        join(self.left.wait(), self.right.wait()).await;
     }
 
     fn runtime(&self) -> &Handle {
