@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 use std::sync::Arc;
-use std::{borrow::Borrow, fmt::Debug, future::Future, hash::Hash, marker::PhantomData};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
@@ -99,29 +99,17 @@ where
         let _ = tx.send(Ok(false));
     }
 
-    fn load<Q>(&self, _: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
+    fn load(&self, _: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         ready(Ok(None))
     }
 
-    fn delete<Q>(&self, _: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn delete(&self, _: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(Ok(false));
         WaitHandle::new(rx.map(|recv| recv.unwrap()))
     }
 
-    fn may_contains<Q>(&self, _: &Q) -> bool
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn may_contains(&self, _: u64) -> bool {
         false
     }
 
@@ -169,8 +157,8 @@ mod tests {
             tx,
         );
         assert!(!rx.await.unwrap().unwrap());
-        assert!(store.load(&0).await.unwrap().is_none());
-        store.delete(&0).await.unwrap();
+        assert!(store.load(memory.hash_builder().hash_one(0)).await.unwrap().is_none());
+        store.delete(memory.hash_builder().hash_one(0)).await.unwrap();
         store.destroy().await.unwrap();
         store.close().await.unwrap();
     }

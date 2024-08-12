@@ -17,9 +17,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
 use std::{
-    borrow::Borrow,
     fmt::Debug,
-    hash::Hash,
     marker::PhantomData,
     pin::Pin,
     sync::Arc,
@@ -310,51 +308,39 @@ where
         }
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         match self {
-            Engine::Noop(storage) => StoreFuture::Noop(storage.load(key)),
-            Engine::Large(storage) => StoreFuture::Large(storage.load(key)),
-            Engine::LargeRuntime(storage) => StoreFuture::LargeRuntime(storage.load(key)),
-            Engine::Small(storage) => StoreFuture::Small(storage.load(key)),
-            Engine::SmallRuntime(storage) => StoreFuture::SmallRuntime(storage.load(key)),
-            Engine::Combined(storage) => StoreFuture::Combined(storage.load(key)),
-            Engine::CombinedRuntime(storage) => StoreFuture::CombinedRuntime(storage.load(key)),
+            Engine::Noop(storage) => StoreFuture::Noop(storage.load(hash)),
+            Engine::Large(storage) => StoreFuture::Large(storage.load(hash)),
+            Engine::LargeRuntime(storage) => StoreFuture::LargeRuntime(storage.load(hash)),
+            Engine::Small(storage) => StoreFuture::Small(storage.load(hash)),
+            Engine::SmallRuntime(storage) => StoreFuture::SmallRuntime(storage.load(hash)),
+            Engine::Combined(storage) => StoreFuture::Combined(storage.load(hash)),
+            Engine::CombinedRuntime(storage) => StoreFuture::CombinedRuntime(storage.load(hash)),
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
         match self {
-            Engine::Noop(storage) => WaitHandle::new(StoreFuture::Noop(storage.delete(key))),
-            Engine::Large(storage) => WaitHandle::new(StoreFuture::Large(storage.delete(key))),
-            Engine::LargeRuntime(storage) => WaitHandle::new(StoreFuture::LargeRuntime(storage.delete(key))),
-            Engine::Small(storage) => WaitHandle::new(StoreFuture::Small(storage.delete(key))),
-            Engine::SmallRuntime(storage) => WaitHandle::new(StoreFuture::SmallRuntime(storage.delete(key))),
-            Engine::Combined(storage) => WaitHandle::new(StoreFuture::Combined(storage.delete(key))),
-            Engine::CombinedRuntime(storage) => WaitHandle::new(StoreFuture::CombinedRuntime(storage.delete(key))),
+            Engine::Noop(storage) => WaitHandle::new(StoreFuture::Noop(storage.delete(hash))),
+            Engine::Large(storage) => WaitHandle::new(StoreFuture::Large(storage.delete(hash))),
+            Engine::LargeRuntime(storage) => WaitHandle::new(StoreFuture::LargeRuntime(storage.delete(hash))),
+            Engine::Small(storage) => WaitHandle::new(StoreFuture::Small(storage.delete(hash))),
+            Engine::SmallRuntime(storage) => WaitHandle::new(StoreFuture::SmallRuntime(storage.delete(hash))),
+            Engine::Combined(storage) => WaitHandle::new(StoreFuture::Combined(storage.delete(hash))),
+            Engine::CombinedRuntime(storage) => WaitHandle::new(StoreFuture::CombinedRuntime(storage.delete(hash))),
         }
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn may_contains(&self, hash: u64) -> bool {
         match self {
-            Engine::Noop(storage) => storage.may_contains(key),
-            Engine::Large(storage) => storage.may_contains(key),
-            Engine::LargeRuntime(storage) => storage.may_contains(key),
-            Engine::Small(storage) => storage.may_contains(key),
-            Engine::SmallRuntime(storage) => storage.may_contains(key),
-            Engine::Combined(storage) => storage.may_contains(key),
-            Engine::CombinedRuntime(storage) => storage.may_contains(key),
+            Engine::Noop(storage) => storage.may_contains(hash),
+            Engine::Large(storage) => storage.may_contains(hash),
+            Engine::LargeRuntime(storage) => storage.may_contains(hash),
+            Engine::Small(storage) => storage.may_contains(hash),
+            Engine::SmallRuntime(storage) => storage.may_contains(hash),
+            Engine::Combined(storage) => storage.may_contains(hash),
+            Engine::CombinedRuntime(storage) => storage.may_contains(hash),
         }
     }
 

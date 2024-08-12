@@ -53,6 +53,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    memory: Cache<K, V, S>,
     engine: Engine<K, V, S>,
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     compression: Compression,
@@ -68,6 +69,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
+            .field("memory", &self.memory)
             .field("engine", &self.engine)
             .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
@@ -84,6 +86,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            memory: self.memory.clone(),
             engine: self.engine.clone(),
             admission_picker: self.admission_picker.clone(),
             compression: self.compression,
@@ -157,7 +160,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        self.engine.load(key)
+        let hash = self.memory.hash_builder().hash_one(key);
+        self.engine.load(hash)
     }
 
     /// Delete the cache entry with the given key from the disk cache.
@@ -166,7 +170,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.engine.delete(key)
+        let hash = self.memory.hash_builder().hash_one(key);
+        self.engine.delete(hash)
     }
 
     /// Check if the disk cache contains a cached entry with the given key.
@@ -177,7 +182,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.engine.may_contains(key)
+        let hash = self.memory.hash_builder().hash_one(key);
+        self.engine.may_contains(hash)
     }
 
     /// Delete all cached entries of the disk cache.
@@ -498,6 +504,7 @@ where
     pub async fn build(self) -> Result<Store<K, V, S>> {
         let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
 
+        let memory = self.memory.clone();
         let admission_picker = self.admission_picker.clone();
         let metrics = Arc::new(Metrics::new(&self.name));
         let statistics = Arc::<Statistics>::default();
@@ -519,7 +526,6 @@ where
                     (CombinedConfig::Large, None) => {
                         let regions = 0..device.regions() as RegionId;
                         Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
-                            memory: self.memory,
                             name: self.name,
                             device,
                             regions,
@@ -536,6 +542,7 @@ where
                             tombstone_log_config: self.tombstone_log_config,
                             buffer_threshold: self.buffer_threshold,
                             statistics: statistics.clone(),
+                            marker: PhantomData,
                         }))
                         .await?
                     }
@@ -543,7 +550,6 @@ where
                         let regions = 0..device.regions() as RegionId;
                         Engine::open(EngineConfig::LargeRuntime(RuntimeStoreConfig {
                             store_config: GenericLargeStorageConfig {
-                                memory: self.memory,
                                 name: self.name,
                                 device,
                                 regions,
@@ -560,6 +566,7 @@ where
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
                                 statistics: statistics.clone(),
+                                marker: PhantomData,
                             },
                             runtime_config,
                         }))
@@ -598,7 +605,6 @@ where
                                 placeholder: PhantomData,
                             },
                             right: GenericLargeStorageConfig {
-                                memory: self.memory,
                                 name: self.name,
                                 device,
                                 regions: large_regions,
@@ -615,6 +621,7 @@ where
                                 tombstone_log_config: self.tombstone_log_config,
                                 buffer_threshold: self.buffer_threshold,
                                 statistics: statistics.clone(),
+                                marker: PhantomData,
                             },
                             load_order,
                         }))
@@ -639,7 +646,6 @@ where
                                     placeholder: PhantomData,
                                 },
                                 right: GenericLargeStorageConfig {
-                                    memory: self.memory,
                                     name: self.name,
                                     device,
                                     regions: large_regions,
@@ -656,6 +662,7 @@ where
                                     tombstone_log_config: self.tombstone_log_config,
                                     buffer_threshold: self.buffer_threshold,
                                     statistics: statistics.clone(),
+                                    marker: PhantomData,
                                 },
                                 load_order,
                             },
@@ -668,6 +675,7 @@ where
         };
 
         Ok(Store {
+            memory,
             engine,
             admission_picker,
             compression: self.compression,

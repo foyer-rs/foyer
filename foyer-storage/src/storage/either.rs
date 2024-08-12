@@ -23,9 +23,7 @@ use tokio::{runtime::Handle, sync::oneshot};
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
-    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -228,23 +226,19 @@ where
     ) {
         match self.selector.select(&entry, &buffer) {
             Selection::Left => {
-                self.right.delete(entry.key());
+                self.right.delete(entry.hash());
                 self.left.enqueue(entry, buffer, info, tx);
             }
             Selection::Right => {
-                self.right.delete(entry.key());
+                self.right.delete(entry.hash());
                 self.right.enqueue(entry, buffer, info, tx);
             }
         }
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
-        let fleft = self.left.load(key);
-        let fright = self.right.load(key);
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+        let fleft = self.left.load(hash);
+        let fright = self.right.load(hash);
         match self.load_order {
             // FIXME(MrCroxx): false-positive on hash collision.
             Order::LeftFirst => OrderFuture::LeftFirst(fleft.then(|res| match res {
@@ -282,22 +276,14 @@ where
         }
     }
 
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        let hleft = self.left.delete(key);
-        let hright = self.right.delete(key);
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+        let hleft = self.left.delete(hash);
+        let hright = self.right.delete(hash);
         WaitHandle::new(try_join(hleft, hright).map(|res| res.map(|(l, r)| l || r)))
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
-    {
-        self.left.may_contains(key) || self.right.may_contains(key)
+    fn may_contains(&self, hash: u64) -> bool {
+        self.left.may_contains(hash) || self.right.may_contains(hash)
     }
 
     async fn destroy(&self) -> Result<()> {

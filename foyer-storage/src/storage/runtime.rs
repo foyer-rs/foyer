@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use foyer_common::runtime::BackgroundShutdownRuntime;
 use foyer_memory::CacheEntry;
@@ -163,29 +163,17 @@ where
         self.store.enqueue(entry, buffer, info, tx)
     }
 
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
-        let future = self.store.load(key);
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+        let future = self.store.load(hash);
         self.runtime.spawn(future).map(|join_result| join_result.unwrap())
     }
 
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.store.delete(key)
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
+        self.store.delete(hash)
     }
 
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.store.may_contains(key)
+    fn may_contains(&self, hash: u64) -> bool {
+        self.store.may_contains(hash)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -207,7 +195,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{marker::PhantomData, path::Path};
 
     use ahash::RandomState;
     use foyer_common::metrics::Metrics;
@@ -256,14 +244,10 @@ mod tests {
         .unwrap()
     }
 
-    async fn config_for_test(
-        memory: &Cache<u64, Vec<u8>>,
-        dir: impl AsRef<Path>,
-    ) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState> {
+    async fn config_for_test(dir: impl AsRef<Path>) -> GenericLargeStorageConfig<u64, Vec<u8>, RandomState> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         GenericLargeStorageConfig {
-            memory: memory.clone(),
             name: "test".to_string(),
             device,
             regions,
@@ -280,6 +264,7 @@ mod tests {
             tombstone_log_config: None,
             buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
+            marker: PhantomData,
         }
     }
 
@@ -298,7 +283,7 @@ mod tests {
         let es = (0..100).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
 
         let store = background.block_on(async move {
-            let config = config_for_test(&memory, dir).await;
+            let config = config_for_test(dir).await;
             GenericLargeStorage::open(config).await.unwrap()
         });
 
@@ -318,13 +303,13 @@ mod tests {
 
         let mut fs = vec![];
         for i in 0..100 {
-            fs.push(store.load(&i));
+            fs.push(store.load(memory.hash_builder().hash_one(i)));
         }
         background.block_on(async { try_join_all(fs).await.unwrap() });
 
         let mut fs = vec![];
         for i in 0..100 {
-            fs.push(store.delete(&i));
+            fs.push(store.delete(memory.hash_builder().hash_one(i)));
         }
         background.block_on(async { try_join_all(fs).await.unwrap() });
 

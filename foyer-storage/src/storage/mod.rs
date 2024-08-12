@@ -17,10 +17,8 @@ pub mod noop;
 pub mod runtime;
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
     future::Future,
-    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -102,24 +100,15 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
     /// check if the returned key matches the given key.
     #[must_use]
-    fn load<Q>(&self, key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static;
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static;
 
     /// Delete the cache entry with the given key from the disk cache.
-    fn delete<Q>(&self, key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
+    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>;
 
     /// Check if the disk cache contains a cached entry with the given key.
     ///
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
-    fn may_contains<Q>(&self, key: &Q) -> bool
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
+    fn may_contains(&self, hash: u64) -> bool;
 
     /// Delete all cached entries of the disk cache.
     #[must_use]

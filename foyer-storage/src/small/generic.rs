@@ -17,7 +17,7 @@ use foyer_memory::CacheEntry;
 use futures::Future;
 use tokio::sync::oneshot;
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use crate::{
     error::Result,
@@ -109,27 +109,15 @@ where
     // FIXME: REMOVE THE CLIPPY IGNORE.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::manual_async_fn)]
-    fn load<Q>(&self, _key: &Q) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static
-    where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized + Send + Sync + 'static,
-    {
+    fn load(&self, _hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         async { todo!() }
     }
 
-    fn delete<Q>(&self, _key: &Q) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    fn delete(&self, _hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
         WaitHandle::new(async move { todo!() })
     }
 
-    fn may_contains<Q>(&self, _key: &Q) -> bool
-    where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
-    {
+    fn may_contains(&self, _hash: u64) -> bool {
         todo!()
     }
 
