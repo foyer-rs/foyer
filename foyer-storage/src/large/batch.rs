@@ -31,7 +31,6 @@ use tokio::sync::oneshot;
 
 use crate::{
     device::{bytes::IoBytes, MonitoredDevice, RegionId},
-    error::Result,
     io_buffer_pool::IoBufferPool,
     large::indexer::HashedEntryAddress,
     region::{GetCleanRegionHandle, RegionManager},
@@ -135,19 +134,12 @@ where
         batch
     }
 
-    pub fn entry(
-        &mut self,
-        size: usize,
-        entry: CacheEntry<K, V, S>,
-        tx: oneshot::Sender<Result<bool>>,
-        sequence: Sequence,
-    ) -> Option<Allocation> {
+    pub fn entry(&mut self, size: usize, entry: CacheEntry<K, V, S>, sequence: Sequence) -> Option<Allocation> {
         tracing::trace!("[batch]: append entry with sequence: {sequence}");
 
         let aligned = bits::align_up(self.device.align(), size);
 
         if entry.is_outdated() || self.len + aligned > self.buffer.len() {
-            let _ = tx.send(Ok(false));
             return None;
         }
 
@@ -164,20 +156,19 @@ where
             },
         });
         group.entries.push(entry);
-        group.txs.push(tx);
         group.region.len += aligned;
         group.range.end += aligned;
 
         Some(allocation)
     }
 
-    pub fn tombstone(&mut self, tombstone: Tombstone, stats: Option<InvalidStats>, tx: oneshot::Sender<Result<bool>>) {
+    pub fn tombstone(&mut self, tombstone: Tombstone, stats: Option<InvalidStats>) {
         tracing::trace!("[batch]: append tombstone");
         self.may_init();
-        self.tombstones.push(TombstoneInfo { tombstone, stats, tx });
+        self.tombstones.push(TombstoneInfo { tombstone, stats });
     }
 
-    pub fn reinsertion(&mut self, reinsertion: &Reinsertion, tx: oneshot::Sender<Result<bool>>) -> Option<Allocation> {
+    pub fn reinsertion(&mut self, reinsertion: &Reinsertion) -> Option<Allocation> {
         tracing::trace!("[batch]: submit reinsertion");
 
         let aligned = bits::align_up(self.device.align(), reinsertion.buffer.len());
@@ -185,7 +176,6 @@ where
         // Skip if the entry is no longer in the indexer.
         // Skip if the batch buffer size exceeds the threshold.
         if self.indexer.get(reinsertion.hash).is_none() || self.len + aligned > self.buffer.len() {
-            let _ = tx.send(Ok(false));
             return None;
         }
 
@@ -202,7 +192,6 @@ where
                 sequence: reinsertion.sequence,
             },
         });
-        group.txs.push(tx);
         group.region.len += aligned;
         group.range.end += aligned;
 
@@ -250,7 +239,6 @@ where
                     is_full: false,
                 },
                 indices: vec![],
-                txs: vec![],
                 entries: vec![],
                 range: 0..0,
             };
@@ -270,7 +258,6 @@ where
                     region: group.region,
                     bytes: buffer.slice(group.range),
                     indices: group.indices,
-                    txs: group.txs,
                     entries: group.entries,
                 }
             })
@@ -331,7 +318,6 @@ where
                 is_full: false,
             },
             indices: vec![],
-            txs: vec![],
             entries: vec![],
             range: self.len..self.len,
         })
@@ -375,8 +361,6 @@ where
     region: RegionHandle,
     /// Entry indices to be inserted.
     indices: Vec<HashedEntryAddress>,
-    /// Writer notify tx.
-    txs: Vec<oneshot::Sender<Result<bool>>>,
     /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
     entries: Vec<CacheEntry<K, V, S>>,
     /// Tracks the group bytes range of the batch buffer.
@@ -410,8 +394,6 @@ where
     pub bytes: IoBytes,
     /// Entry indices to be inserted.
     pub indices: Vec<HashedEntryAddress>,
-    /// Writer notify tx.
-    pub txs: Vec<oneshot::Sender<Result<bool>>>,
     /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
     pub entries: Vec<CacheEntry<K, V, S>>,
 }
@@ -434,7 +416,6 @@ where
 pub struct TombstoneInfo {
     pub tombstone: Tombstone,
     pub stats: Option<InvalidStats>,
-    pub tx: oneshot::Sender<Result<bool>>,
 }
 
 pub struct Batch<K, V, S>

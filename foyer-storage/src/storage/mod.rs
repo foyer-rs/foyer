@@ -16,52 +16,13 @@ pub mod either;
 pub mod noop;
 pub mod runtime;
 
-use std::{
-    fmt::Debug,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{fmt::Debug, future::Future, sync::Arc};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
-use pin_project::pin_project;
-use tokio::{runtime::Handle, sync::oneshot};
+use tokio::runtime::Handle;
 
 use crate::{device::monitor::DeviceStats, error::Result, serde::KvInfo, IoBytes};
-
-/// [`WaitHandle`] is returned by some ops of the disk cache.
-///
-/// [`WaitHandle`] implies that the operation is already started asynchronously without the needs to poll the handle.
-/// (That's why it is named with `Handle` instead of `Future`).
-///
-/// If there is needs to wait the asynchronous op to finish, the caller can poll the handle like any other futures.
-#[pin_project]
-pub struct WaitHandle<F> {
-    #[pin]
-    future: F,
-}
-
-impl<F> WaitHandle<F> {
-    /// Create a new [`WaitHandle`] with the given future.
-    ///
-    /// The future MUST be cancel-safe and can run asynchronously.
-    pub fn new(future: F) -> Self {
-        Self { future }
-    }
-}
-
-impl<F> Future for WaitHandle<F>
-where
-    F: Future,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().future.poll(cx)
-    }
-}
 
 /// The storage trait for the disk cache storage engine.
 // TODO(MrCroxx): Remove this after in-memory cache event listener is removed.
@@ -87,13 +48,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Push a in-memory cache entry to the disk cache write queue.
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBytes,
-        info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
-    );
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo);
 
     /// Load a cache entry from the disk cache.
     ///
@@ -103,7 +58,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static;
 
     /// Delete the cache entry with the given key from the disk cache.
-    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static>;
+    fn delete(&self, hash: u64);
 
     /// Check if the disk cache contains a cached entry with the given key.
     ///
@@ -119,7 +74,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
     #[must_use]
-    fn wait(&self) -> impl Future<Output = ()> + Send;
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static;
 
     /// Get disk cache runtime handle.
     ///

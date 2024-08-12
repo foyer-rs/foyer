@@ -18,7 +18,7 @@ use futures::{
     future::{join, ready, select, try_join, Either as EitherFuture},
     pin_mut, Future, FutureExt,
 };
-use tokio::{runtime::Handle, sync::oneshot};
+use tokio::runtime::Handle;
 
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
@@ -28,8 +28,6 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-
-use super::WaitHandle;
 
 enum OrderFuture<F1, F2, F3> {
     LeftFirst(F1),
@@ -217,21 +215,15 @@ where
         Ok(())
     }
 
-    fn enqueue(
-        &self,
-        entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        buffer: IoBytes,
-        info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
-    ) {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
         match self.selector.select(&entry, &buffer) {
             Selection::Left => {
                 self.right.delete(entry.hash());
-                self.left.enqueue(entry, buffer, info, tx);
+                self.left.enqueue(entry, buffer, info);
             }
             Selection::Right => {
                 self.right.delete(entry.hash());
-                self.right.enqueue(entry, buffer, info, tx);
+                self.right.enqueue(entry, buffer, info);
             }
         }
     }
@@ -276,10 +268,9 @@ where
         }
     }
 
-    fn delete(&self, hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
-        let hleft = self.left.delete(hash);
-        let hright = self.right.delete(hash);
-        WaitHandle::new(try_join(hleft, hright).map(|res| res.map(|(l, r)| l || r)))
+    fn delete(&self, hash: u64) {
+        self.left.delete(hash);
+        self.right.delete(hash);
     }
 
     fn may_contains(&self, hash: u64) -> bool {
@@ -296,8 +287,8 @@ where
         self.left.stats()
     }
 
-    async fn wait(&self) {
-        join(self.left.wait(), self.right.wait()).await;
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        join(self.left.wait(), self.right.wait()).map(|_| ())
     }
 
     fn runtime(&self) -> &Handle {

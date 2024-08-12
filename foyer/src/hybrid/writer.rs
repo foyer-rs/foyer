@@ -122,7 +122,7 @@ where
             Some(context) => self.hybrid.memory().deposit_with_context(self.key, value, context),
             None => self.hybrid.memory().deposit(self.key, value),
         };
-        let _handle = self.hybrid.storage().enqueue(entry.clone(), true);
+        self.hybrid.storage().enqueue(entry.clone(), true);
 
         self.hybrid.metrics().hybrid_insert.increment(1);
         self.hybrid

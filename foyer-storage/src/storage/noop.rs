@@ -19,9 +19,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
 use futures::future::ready;
-use futures::FutureExt;
 use tokio::runtime::Handle;
-use tokio::sync::oneshot;
 
 use crate::device::monitor::DeviceStats;
 use crate::serde::KvInfo;
@@ -29,8 +27,6 @@ use crate::storage::Storage;
 
 use crate::error::Result;
 use crate::IoBytes;
-
-use super::WaitHandle;
 
 pub struct Noop<K, V, S>
 where
@@ -89,25 +85,13 @@ where
         Ok(())
     }
 
-    fn enqueue(
-        &self,
-        _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        _buffer: IoBytes,
-        _info: KvInfo,
-        tx: oneshot::Sender<Result<bool>>,
-    ) {
-        let _ = tx.send(Ok(false));
-    }
+    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _buffer: IoBytes, _info: KvInfo) {}
 
     fn load(&self, _: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         ready(Ok(None))
     }
 
-    fn delete(&self, _: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
-        let (tx, rx) = oneshot::channel();
-        let _ = tx.send(Ok(false));
-        WaitHandle::new(rx.map(|recv| recv.unwrap()))
-    }
+    fn delete(&self, _: u64) {}
 
     fn may_contains(&self, _: u64) -> bool {
         false
@@ -121,7 +105,9 @@ where
         Arc::default()
     }
 
-    async fn wait(&self) {}
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        ready(())
+    }
 
     fn runtime(&self) -> &Handle {
         &self.runtime
@@ -144,7 +130,7 @@ mod tests {
     async fn test_none_store() {
         let memory = cache_for_test();
         let store = Noop::open(()).await.unwrap();
-        let (tx, rx) = oneshot::channel();
+
         store.enqueue(
             memory.insert(0, vec![b'x'; 16384]),
             IoBytes::new(),
@@ -152,11 +138,11 @@ mod tests {
                 key_len: 0,
                 value_len: 0,
             },
-            tx,
         );
-        assert!(!rx.await.unwrap().unwrap());
+        store.wait().await;
         assert!(store.load(memory.hash(&0)).await.unwrap().is_none());
-        store.delete(memory.hash(&0)).await.unwrap();
+        store.delete(memory.hash(&0));
+        store.wait().await;
         store.destroy().await.unwrap();
         store.close().await.unwrap();
     }

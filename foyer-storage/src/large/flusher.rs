@@ -30,12 +30,10 @@ use futures::future::{try_join, try_join_all};
 use parking_lot::Mutex;
 use std::{
     fmt::Debug,
+    future::Future,
     sync::{atomic::Ordering, Arc},
 };
-use tokio::{
-    runtime::Handle,
-    sync::{oneshot, Notify},
-};
+use tokio::{runtime::Handle, sync::Notify};
 
 use super::{
     batch::{Batch, BatchMut, InvalidStats, TombstoneInfo},
@@ -58,16 +56,13 @@ where
         buffer: IoBytes,
         info: KvInfo,
         sequence: Sequence,
-        tx: oneshot::Sender<Result<bool>>,
     },
     Tombstone {
         tombstone: Tombstone,
         stats: Option<InvalidStats>,
-        tx: oneshot::Sender<Result<bool>>,
     },
     Reinsertion {
         reinsertion: Reinsertion,
-        tx: oneshot::Sender<Result<bool>>,
     },
 }
 
@@ -162,28 +157,22 @@ where
                 buffer,
                 info,
                 sequence,
-                tx,
-            } => self.entry(entry, buffer, info, sequence, tx),
-            Submission::Tombstone { tombstone, stats, tx } => self.tombstone(tombstone, stats, tx),
-            Submission::Reinsertion { reinsertion, tx } => self.reinsertion(reinsertion, tx),
+            } => self.entry(entry, buffer, info, sequence),
+            Submission::Tombstone { tombstone, stats } => self.tombstone(tombstone, stats),
+            Submission::Reinsertion { reinsertion } => self.reinsertion(reinsertion),
         }
         self.notify.notify_one();
     }
 
-    pub async fn wait(&self) {
+    pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let waiter = self.batch.lock().wait();
         self.notify.notify_one();
-        let _ = waiter.await;
+        async move {
+            let _ = waiter.await;
+        }
     }
 
-    fn entry(
-        &self,
-        entry: CacheEntry<K, V, S>,
-        buffer: IoBytes,
-        info: KvInfo,
-        sequence: u64,
-        tx: oneshot::Sender<Result<bool>>,
-    ) {
+    fn entry(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo, sequence: u64) {
         let header = EntryHeader {
             key_len: info.key_len as _,
             value_len: info.value_len as _,
@@ -193,7 +182,7 @@ where
             compression: self.compression,
         };
 
-        let mut allocation = match self.batch.lock().entry(header.entry_len(), entry, tx, sequence) {
+        let mut allocation = match self.batch.lock().entry(header.entry_len(), entry, sequence) {
             Some(allocation) => allocation,
             None => {
                 self.metrics.storage_queue_drop.increment(1);
@@ -206,12 +195,12 @@ where
         allocation[EntryHeader::serialized_len()..header.entry_len()].copy_from_slice(&buffer);
     }
 
-    fn tombstone(&self, tombstone: Tombstone, stats: Option<InvalidStats>, tx: oneshot::Sender<Result<bool>>) {
-        self.batch.lock().tombstone(tombstone, stats, tx);
+    fn tombstone(&self, tombstone: Tombstone, stats: Option<InvalidStats>) {
+        self.batch.lock().tombstone(tombstone, stats);
     }
 
-    fn reinsertion(&self, reinsertion: Reinsertion, tx: oneshot::Sender<Result<bool>>) {
-        let mut allocation = match self.batch.lock().reinsertion(&reinsertion, tx) {
+    fn reinsertion(&self, reinsertion: Reinsertion) {
+        let mut allocation = match self.batch.lock().reinsertion(&reinsertion) {
             Some(allocation) => allocation,
             None => {
                 self.metrics.storage_queue_drop.increment(1);
@@ -300,9 +289,6 @@ where
                     haddr.address.region = region.id();
                 }
                 indexer.insert_batch(indices);
-                for tx in group.txs {
-                    let _ = tx.send(Ok(true));
-                }
 
                 if group.region.is_full {
                     region_manager.mark_evictable(region.id());
@@ -315,19 +301,13 @@ where
         });
         let future = {
             let tombstones = batch.tombstones;
-            let has_tombstone_log = self.tombstone_log.is_some();
             let region_manager = self.region_manager.clone();
             let tombstone_log = self.tombstone_log.clone();
             async move {
                 if let Some(log) = tombstone_log {
                     log.append(tombstones.iter().map(|info| &info.tombstone)).await?;
                 }
-                for TombstoneInfo {
-                    tombstone: _,
-                    stats,
-                    tx,
-                } in tombstones
-                {
+                for TombstoneInfo { tombstone: _, stats } in tombstones {
                     if let Some(stats) = stats {
                         region_manager
                             .region(stats.region)
@@ -335,7 +315,6 @@ where
                             .invalid
                             .fetch_add(stats.size, Ordering::Relaxed);
                     }
-                    let _ = tx.send(Ok(has_tombstone_log));
                 }
                 Ok::<_, Error>(())
             }

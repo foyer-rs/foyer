@@ -15,16 +15,10 @@
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
-use tokio::sync::oneshot;
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-use crate::{
-    error::Result,
-    serde::KvInfo,
-    storage::{Storage, WaitHandle},
-    DeviceStats, IoBytes,
-};
+use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where
@@ -96,13 +90,7 @@ where
         todo!()
     }
 
-    fn enqueue(
-        &self,
-        _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        _buffer: IoBytes,
-        _info: KvInfo,
-        _tx: oneshot::Sender<Result<bool>>,
-    ) {
+    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _buffer: IoBytes, _info: KvInfo) {
         todo!()
     }
 
@@ -113,9 +101,7 @@ where
         async { todo!() }
     }
 
-    fn delete(&self, _hash: u64) -> WaitHandle<impl Future<Output = Result<bool>> + Send + 'static> {
-        WaitHandle::new(async move { todo!() })
-    }
+    fn delete(&self, _hash: u64) {}
 
     fn may_contains(&self, _hash: u64) -> bool {
         todo!()
@@ -129,8 +115,11 @@ where
         todo!()
     }
 
-    async fn wait(&self) {
-        todo!()
+    // TODO(MrCroxx): Remove the attr after impl.
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::manual_async_fn)]
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        async { todo!() }
     }
 
     fn runtime(&self) -> &tokio::runtime::Handle {
