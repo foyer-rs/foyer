@@ -19,7 +19,7 @@ mod text;
 use bytesize::MIB;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfigBuilder, S3FifoConfig, TracingConfig,
+    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfig, S3FifoConfig, TracingConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -144,8 +144,8 @@ pub struct Args {
     metrics: bool,
 
     /// use separate runtime
-    #[arg(long, default_value_t = false)]
-    runtime: bool,
+    #[arg(long, default_value_t = 0)]
+    runtime_worker_threads: usize,
 
     /// available values: "none", "zstd"
     #[arg(long, default_value = "none")]
@@ -443,7 +443,10 @@ async fn main() {
                 .as_str()
                 .try_into()
                 .expect("unsupported compression algorithm"),
-        );
+        )
+        .with_runtime_config(RuntimeConfig {
+            worker_threads: args.runtime_worker_threads,
+        });
 
     if args.admission_rate_limit > 0 {
         builder =
@@ -456,10 +459,6 @@ async fn main() {
 
     if args.clean_region_threshold > 0 {
         builder = builder.with_clean_region_threshold(args.clean_region_threshold);
-    }
-
-    if args.runtime {
-        builder = builder.with_runtime_config(RuntimeConfigBuilder::new().with_thread_name("foyer").build());
     }
 
     let hybrid = builder.build().await.unwrap();

@@ -816,8 +816,8 @@ mod tests {
         // [ [e0, e1], [e2, e3], [e4, e5], [] ]
         for e in es.iter().take(6).cloned() {
             enqueue(&store, e);
+            store.wait().await;
         }
-        store.wait().await;
 
         for i in 0..6 {
             let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
