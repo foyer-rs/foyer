@@ -30,7 +30,7 @@ pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevExt, DevOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
     DirectFsDeviceOptionsBuilder, EvictionPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RecoverMode,
-    ReinsertionPicker, RejectAllPicker, RuntimeConfigBuilder, Storage, Store, StoreBuilder, TombstoneLogConfigBuilder,
+    ReinsertionPicker, RejectAllPicker, RuntimeConfig, Storage, Store, StoreBuilder, TombstoneLogConfigBuilder,
 };
 
 pub use crate::hybrid::{

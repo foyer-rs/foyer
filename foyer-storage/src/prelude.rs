@@ -31,10 +31,6 @@ pub use crate::{
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     statistics::Statistics,
-    storage::{
-        either::Order,
-        runtime::{RuntimeConfig, RuntimeConfigBuilder},
-        Storage,
-    },
-    store::{CombinedConfig, DeviceConfig, Store, StoreBuilder},
+    storage::{either::Order, Storage},
+    store::{CombinedConfig, DeviceConfig, RuntimeConfig, Store, StoreBuilder},
 };

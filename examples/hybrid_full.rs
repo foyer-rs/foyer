@@ -18,7 +18,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfigBuilder, TombstoneLogConfigBuilder,
+    RuntimeConfig, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -59,12 +59,7 @@ async fn main() -> Result<()> {
                 .with_flush(true)
                 .build(),
         )
-        .with_runtime_config(
-            RuntimeConfigBuilder::new()
-                .with_thread_name("foyer")
-                .with_worker_threads(4)
-                .build(),
-        )
+        .with_runtime_config(RuntimeConfig { worker_threads: 4 })
         .build()
         .await?;
 

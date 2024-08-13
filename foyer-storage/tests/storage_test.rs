@@ -19,9 +19,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use ahash::RandomState;
 use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
-use foyer_storage::{
-    test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, RuntimeConfigBuilder, StoreBuilder,
-};
+use foyer_storage::{test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, StoreBuilder};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * 1024;
@@ -150,17 +148,5 @@ async fn test_direct_fs_store_lz4() {
     let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4);
-    test_store(memory, builder, recorder).await;
-}
-
-#[test_log::test(tokio::test)]
-async fn test_runtime_fs_store() {
-    let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(Recorder::default());
-    let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
-    let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>>| {
-        basic(memory, tempdir.path(), &r).with_runtime_config(RuntimeConfigBuilder::new().build())
-    };
     test_store(memory, builder, recorder).await;
 }
