@@ -193,7 +193,9 @@ struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
     async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
-        assert_ne!(mode, RecoverMode::None);
+        if mode == RecoverMode::None {
+            return Ok(vec![]);
+        }
 
         let mut infos = vec![];
 
