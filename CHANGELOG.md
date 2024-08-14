@@ -4,6 +4,7 @@
 | - | - |
 | foyer | 0.10.2 |
 | foyer-storage | 0.9.2 |
+| foyer-bench | 0.2.2 |
 
 <details>
 
