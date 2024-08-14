@@ -192,7 +192,9 @@ impl RegionRecoverRunner {
     where
         D: Device,
     {
-        assert_ne!(mode, RecoverMode::None);
+        if mode == RecoverMode::None {
+            return Ok(vec![]);
+        }
 
         let mut infos = vec![];
 
