@@ -2,7 +2,7 @@
 
 | crate | version |
 | - | - |
-| foyer | 0.10.3 |
+| foyer | 0.10.4 |
 | foyer-storage | 0.9.3 |
 | foyer-bench | 0.2.3 |
 
