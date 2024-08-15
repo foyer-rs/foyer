@@ -1,3 +1,19 @@
+## 2024-08-15
+
+| crate | version |
+| - | - |
+| foyer | 0.10.3 |
+| foyer-storage | 0.9.3 |
+| foyer-bench | 0.2.3 |
+
+<details>
+
+### Changes
+
+- Support serde for recover mode configuration.
+
+</details>
+
 ## 2024-08-14
 
 | crate | version |
