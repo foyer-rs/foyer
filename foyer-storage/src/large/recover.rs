@@ -23,6 +23,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use futures::future::try_join_all;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
@@ -42,7 +43,7 @@ use crate::large::tombstone::Tombstone;
 use crate::region::{Region, RegionManager};
 
 /// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecoverMode {
     /// Do not recover disk cache.
     ///
