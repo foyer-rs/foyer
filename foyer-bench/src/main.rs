@@ -462,6 +462,7 @@ async fn main() {
     builder = builder
         .with_flush(args.flush)
         .with_indexer_shards(args.shards)
+        .with_recover_mode(args.recover_mode)
         .with_recover_concurrency(args.recover_concurrency)
         .with_flushers(args.flushers)
         .with_reclaimers(args.reclaimers)
