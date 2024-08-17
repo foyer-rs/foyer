@@ -19,6 +19,7 @@ use std::ops::Range;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use clap::ValueEnum;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use futures::future::try_join_all;
 
@@ -43,7 +44,7 @@ use crate::large::tombstone::Tombstone;
 use crate::region::{Region, RegionManager};
 
 /// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 pub enum RecoverMode {
     /// Do not recover disk cache.
     ///

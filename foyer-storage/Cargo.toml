@@ -21,6 +21,7 @@ async-channel = "2"
 bincode = "1"
 bitflags = "2.3.1"
 bytes = "1"
+clap = { workspace = true }
 either = "1"
 fastrace = { workspace = true }
 foyer-common = { version = "0.8.1", path = "../foyer-common" }
