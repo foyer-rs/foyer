@@ -162,8 +162,14 @@ impl Dev for DirectFileDevice {
 
         options.verify()?;
 
-        let dir = options.path.parent().expect("path must point to a file").to_path_buf();
-        asyncify_with_runtime(&runtime, move || create_dir_all(dir)).await?;
+        let dir = options
+            .path
+            .parent()
+            .expect("path must not be the root directory")
+            .to_path_buf();
+        if !dir.exists() {
+            create_dir_all(dir)?;
+        }
 
         let mut opts = OpenOptions::new();
 
@@ -176,7 +182,11 @@ impl Dev for DirectFileDevice {
         }
 
         let file = opts.open(&options.path)?;
-        file.set_len(options.capacity as _)?;
+
+        if file.metadata().unwrap().is_file() {
+            file.set_len(options.capacity as _)?;
+        }
+
         let file = Arc::new(file);
 
         Ok(Self {
