@@ -143,9 +143,13 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     metrics: bool,
 
-    /// use separate runtime
+    /// dedicated runtime worker threads
     #[arg(long, default_value_t = 0)]
     runtime_worker_threads: usize,
+
+    /// max threads for blocking io
+    #[arg(long, default_value_t = 0)]
+    max_blocking_threads: usize,
 
     /// available values: "none", "zstd"
     #[arg(long, default_value = "none")]
@@ -446,6 +450,7 @@ async fn main() {
         )
         .with_runtime_config(RuntimeConfig {
             worker_threads: args.runtime_worker_threads,
+            max_blocking_threads: args.max_blocking_threads,
         });
 
     if args.admission_rate_limit > 0 {

@@ -278,7 +278,16 @@ pub struct RuntimeConfig {
     ///
     /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
     /// Which is 1 worker per core.
+    ///
+    /// See [`tokio::runtime::Builder::worker_threads`].
     pub worker_threads: usize,
+
+    /// Max threads to run blocking io.
+    ///
+    /// If the value is set to `0`, use the tokio default value (which is 512).
+    ///
+    /// See [`tokio::runtime::Builder::max_blocking_threads`].
+    pub max_blocking_threads: usize,
 }
 
 /// The builder of the disk cache.
@@ -336,7 +345,10 @@ where
             compression: Compression::None,
             tombstone_log_config: None,
             combined_config: CombinedConfig::default(),
-            runtime_config: RuntimeConfig { worker_threads: 0 },
+            runtime_config: RuntimeConfig {
+                worker_threads: 0,
+                max_blocking_threads: 0,
+            },
         }
     }
 
@@ -514,6 +526,9 @@ where
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if self.runtime_config.worker_threads != 0 {
                 builder.worker_threads(self.runtime_config.worker_threads);
+            }
+            if self.runtime_config.max_blocking_threads != 0 {
+                builder.max_blocking_threads(self.runtime_config.max_blocking_threads);
             }
             builder.thread_name(&self.name);
             let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
