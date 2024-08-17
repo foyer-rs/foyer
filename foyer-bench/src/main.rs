@@ -18,8 +18,9 @@ mod text;
 
 use bytesize::MIB;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, RuntimeConfig, S3FifoConfig, TracingConfig,
+    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
+    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
+    S3FifoConfig, TracingConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -36,7 +37,7 @@ use std::{
 };
 
 use analyze::{analyze, monitor, Metrics};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 
 use futures::future::join_all;
 use itertools::Itertools;
@@ -58,10 +59,19 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
+#[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir"]))]
 pub struct Args {
-    /// Directory for disk cache data.
+    /// File for disk cache data. Use `DirectFile` as device.
+    ///
+    /// Either `file` or `dir` must be set.
     #[arg(short, long)]
-    dir: String,
+    file: Option<String>,
+
+    /// Directory for disk cache data. Use `DirectFs` as device.
+    ///
+    /// Either `file` or `dir` must be set.
+    #[arg(short, long)]
+    dir: Option<String>,
 
     /// In-memory cache capacity. (MiB)
     #[arg(long, default_value_t = 1024)]
@@ -99,9 +109,9 @@ pub struct Args {
     #[arg(long, default_value_t = 10000)]
     get_range: u64,
 
-    /// Disk cache file size. (MiB)
+    /// Disk cache region size. (MiB)
     #[arg(long, default_value_t = 64)]
-    file_size: usize,
+    region_size: usize,
 
     /// Flusher count.
     #[arg(long, default_value_t = 4)]
@@ -118,6 +128,9 @@ pub struct Args {
     /// Reader count.
     #[arg(long, default_value_t = 16)]
     readers: usize,
+
+    #[arg(long, value_enum, default_value_t = RecoverMode::None)]
+    recover_mode: RecoverMode,
 
     /// Recover concurrency.
     #[arg(long, default_value_t = 16)]
@@ -151,9 +164,9 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     max_blocking_threads: usize,
 
-    /// available values: "none", "zstd"
-    #[arg(long, default_value = "none")]
-    compression: String,
+    /// compression algorithm
+    #[arg(long, value_enum, default_value_t = Compression::None)]
+    compression: Compression,
 
     /// Time-series operation distribution.
     ///
@@ -402,8 +415,6 @@ async fn main() {
             .unwrap();
     }
 
-    create_dir_all(&args.dir).unwrap();
-
     let tracing_config = TracingConfig::default();
     tracing_config.set_record_hybrid_insert_threshold(Duration::from_micros(args.trace_insert_us as _));
     tracing_config.set_record_hybrid_get_threshold(Duration::from_micros(args.trace_get_us as _));
@@ -424,15 +435,31 @@ async fn main() {
         _ => panic!("unsupported eviction algorithm: {}", args.eviction),
     };
 
+    if let Some(dir) = args.dir.as_ref() {
+        create_dir_all(dir).unwrap();
+    }
+
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(&args.dir)
+        .storage();
+
+    builder = match (args.file.as_ref(), args.dir.as_ref()) {
+        (Some(file), None) => builder.with_device_config(
+            DirectFileDeviceOptionsBuilder::new(file)
                 .with_capacity(args.disk * MIB as usize)
-                .with_file_size(args.file_size * MIB as usize)
+                .with_region_size(args.region_size * MIB as usize)
                 .build(),
-        )
+        ),
+        (None, Some(dir)) => builder.with_device_config(
+            DirectFsDeviceOptionsBuilder::new(dir)
+                .with_capacity(args.disk * MIB as usize)
+                .with_file_size(args.region_size * MIB as usize)
+                .build(),
+        ),
+        _ => unreachable!(),
+    };
+
+    builder = builder
         .with_flush(args.flush)
         .with_indexer_shards(args.shards)
         .with_recover_concurrency(args.recover_concurrency)
@@ -442,12 +469,7 @@ async fn main() {
             Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
             Box::<FifoPicker>::default(),
         ])
-        .with_compression(
-            args.compression
-                .as_str()
-                .try_into()
-                .expect("unsupported compression algorithm"),
-        )
+        .with_compression(args.compression)
         .with_runtime_config(RuntimeConfig {
             worker_threads: args.runtime_worker_threads,
             max_blocking_threads: args.max_blocking_threads,

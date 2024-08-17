@@ -15,11 +15,13 @@
 // TODO(MrCroxx): unify compress interface?
 
 use anyhow::anyhow;
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 
 const NOT_SUPPORT: &str = "compression algorithm not support";
 
 /// The compression algorithm of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 pub enum Compression {
     /// No compression endabled.
     None,
@@ -38,15 +40,6 @@ impl Compression {
             Self::Lz4 => 2,
         }
     }
-
-    /// Get the str that repersent the compression algorithm.
-    pub fn to_str(&self) -> &str {
-        match self {
-            Self::None => "none",
-            Self::Zstd => "zstd",
-            Self::Lz4 => "lz4",
-        }
-    }
 }
 
 impl From<Compression> for u8 {
@@ -55,16 +48,6 @@ impl From<Compression> for u8 {
             Compression::None => 0,
             Compression::Zstd => 1,
             Compression::Lz4 => 2,
-        }
-    }
-}
-
-impl From<Compression> for &str {
-    fn from(value: Compression) -> Self {
-        match value {
-            Compression::None => "none",
-            Compression::Zstd => "zstd",
-            Compression::Lz4 => "lz4",
         }
     }
 }
@@ -79,26 +62,5 @@ impl TryFrom<u8> for Compression {
             2 => Ok(Self::Lz4),
             _ => Err(anyhow!(NOT_SUPPORT)),
         }
-    }
-}
-
-impl TryFrom<&str> for Compression {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "none" => Ok(Self::None),
-            "zstd" => Ok(Self::Zstd),
-            "lz4" => Ok(Self::Lz4),
-            _ => Err(anyhow!(NOT_SUPPORT)),
-        }
-    }
-}
-
-impl TryFrom<String> for Compression {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::try_from(value.as_str())
     }
 }

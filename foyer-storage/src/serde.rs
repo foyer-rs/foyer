@@ -45,6 +45,7 @@ pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[allow(clippy::needless_borrows_for_generic_args)]
+    #[fastrace::trace(name = "foyer::storage::serde::serialize")]
     pub fn serialize<'a, K, V>(
         key: &'a K,
         value: &'a V,
@@ -92,6 +93,7 @@ impl EntrySerializer {
 pub struct EntryDeserializer;
 
 impl EntryDeserializer {
+    #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
     pub fn deserialize<K, V>(
         buffer: &[u8],
         ken_len: usize,
@@ -122,6 +124,7 @@ impl EntryDeserializer {
         Ok((key, value))
     }
 
+    #[fastrace::trace(name = "foyer::storage::serde::deserialize_key")]
     pub fn deserialize_key<K>(buf: &[u8]) -> Result<K>
     where
         K: StorageKey,
@@ -129,6 +132,7 @@ impl EntryDeserializer {
         bincode::deserialize_from(buf).map_err(Error::from)
     }
 
+    #[fastrace::trace(name = "foyer::storage::serde::deserialize_value")]
     pub fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
     where
         V: StorageValue,

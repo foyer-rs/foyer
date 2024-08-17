@@ -148,7 +148,7 @@ jobs:
           CI: true
         run: |
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16 --disk 256 --region-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -188,7 +188,7 @@ jobs:
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16 --disk 256 --region-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -226,7 +226,7 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16 --disk 256 --region-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
@@ -274,7 +274,7 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --mem 16 --disk 256 --file-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --mem 16 --disk 256 --region-size 16 --get-range 1000 --w-rate 1 --r-rate 1 --admission-rate-limit 10 --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-

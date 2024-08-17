@@ -13,7 +13,7 @@ readme = "../README.md"
 [dependencies]
 anyhow = "1"
 bytesize = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 console-subscriber = { version = "0.2", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
