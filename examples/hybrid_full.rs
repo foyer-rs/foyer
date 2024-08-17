@@ -59,7 +59,10 @@ async fn main() -> Result<()> {
                 .with_flush(true)
                 .build(),
         )
-        .with_runtime_config(RuntimeConfig { worker_threads: 4 })
+        .with_runtime_config(RuntimeConfig {
+            worker_threads: 4,
+            max_blocking_threads: 8,
+        })
         .build()
         .await?;
 
