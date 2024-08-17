@@ -129,7 +129,7 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     readers: usize,
 
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, default_value_t = RecoverMode::None)]
     recover_mode: RecoverMode,
 
     /// Recover concurrency.
