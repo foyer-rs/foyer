@@ -156,6 +156,9 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     metrics: bool,
 
+    #[arg(long, default_value_t = 0)]
+    benchmark_runtime_worker_threads: usize,
+
     /// dedicated runtime worker threads
     #[arg(long, default_value_t = 0)]
     runtime_worker_threads: usize,
@@ -371,8 +374,20 @@ fn teardown() {
     fastrace::flush();
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let args = Args::parse();
+    println!("{:#?}", args);
+
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    if args.benchmark_runtime_worker_threads != 0 {
+        builder.worker_threads(args.benchmark_runtime_worker_threads);
+    }
+    builder.thread_name("foyer-bench");
+    let runtime = builder.enable_all().build().unwrap();
+    runtime.block_on(benchmark(args));
+}
+
+async fn benchmark(args: Args) {
     setup();
 
     #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
@@ -401,8 +416,6 @@ async fn main() {
         });
     }
 
-    let args = Args::parse();
-    println!("{:#?}", args);
     assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
     if args.metrics {
