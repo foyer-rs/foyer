@@ -28,9 +28,9 @@ test-log = { version = "0.2", default-features = false, features = [
 ] }
 itertools = "0.13"
 metrics = "0.23"
-fastrace = "0.6"
-fastrace-jaeger = "0.6"
-fastrace-opentelemetry = "0.6"
+fastrace = "0.7"
+fastrace-jaeger = "0.7"
+fastrace-opentelemetry = "0.7"
 clap = { version = "4", features = ["derive"] }
 
 [profile.release]

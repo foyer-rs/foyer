@@ -14,7 +14,7 @@ readme = "../README.md"
 anyhow = "1"
 bytesize = "1"
 clap = { workspace = true }
-console-subscriber = { version = "0.2", optional = true }
+console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
 foyer = { version = "0.10.4", path = "../foyer" }
@@ -23,10 +23,10 @@ hdrhistogram = "7"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.15"
-opentelemetry = { version = "0.23", optional = true }
-opentelemetry-otlp = { version = "0.16", optional = true }
-opentelemetry-semantic-conventions = { version = "0.15", optional = true }
-opentelemetry_sdk = { version = "0.23", features = [
+opentelemetry = { version = "0.24", optional = true }
+opentelemetry-otlp = { version = "0.17", optional = true }
+opentelemetry-semantic-conventions = { version = "0.16", optional = true }
+opentelemetry_sdk = { version = "0.24", features = [
     "rt-tokio",
     "trace",
 ], optional = true }
@@ -36,12 +36,12 @@ serde = { workspace = true }
 serde_bytes = "0.11.14"
 tokio = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = { version = "0.24", optional = true }
+tracing-opentelemetry = { version = "0.25", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.5", optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
