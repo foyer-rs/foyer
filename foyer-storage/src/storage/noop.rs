@@ -19,7 +19,6 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
 use futures::future::ready;
-use tokio::runtime::Handle;
 
 use crate::device::monitor::DeviceStats;
 use crate::serde::KvInfo;
@@ -34,7 +33,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    runtime: Handle,
     _marker: PhantomData<(K, V, S)>,
 }
 
@@ -56,10 +54,7 @@ where
     S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
-        Self {
-            runtime: self.runtime.clone(),
-            _marker: PhantomData,
-        }
+        Self { _marker: PhantomData }
     }
 }
 
@@ -75,10 +70,7 @@ where
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
-        Ok(Self {
-            runtime: Handle::current(),
-            _marker: PhantomData,
-        })
+        Ok(Self { _marker: PhantomData })
     }
 
     async fn close(&self) -> Result<()> {
@@ -107,10 +99,6 @@ where
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         ready(())
-    }
-
-    fn runtime(&self) -> &Handle {
-        &self.runtime
     }
 }
 

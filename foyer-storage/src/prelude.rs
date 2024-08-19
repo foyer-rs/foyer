@@ -32,5 +32,5 @@ pub use crate::{
     },
     statistics::Statistics,
     storage::{either::Order, Storage},
-    store::{CombinedConfig, DeviceConfig, RuntimeConfig, Store, StoreBuilder},
+    store::{CombinedConfig, DeviceConfig, RuntimeConfig, RuntimeHandles, Store, StoreBuilder, TokioRuntimeConfig},
 };

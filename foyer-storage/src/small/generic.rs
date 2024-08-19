@@ -121,8 +121,4 @@ where
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         async { todo!() }
     }
-
-    fn runtime(&self) -> &tokio::runtime::Handle {
-        todo!()
-    }
 }

@@ -18,7 +18,6 @@ use futures::{
     future::{join, ready, select, try_join, Either as EitherFuture},
     pin_mut, Future, FutureExt,
 };
-use tokio::runtime::Handle;
 
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
@@ -289,16 +288,5 @@ where
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         join(self.left.wait(), self.right.wait()).map(|_| ())
-    }
-
-    fn runtime(&self) -> &Handle {
-        if cfg!(debug_assertions) {
-            let hleft = self.left.runtime();
-            let hright = self.right.runtime();
-            assert_eq!(hleft.id(), hright.id());
-            hleft
-        } else {
-            self.left.runtime()
-        }
     }
 }

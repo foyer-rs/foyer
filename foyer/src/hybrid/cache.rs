@@ -511,7 +511,8 @@ where
                         .await
                 }
             },
-            self.storage().runtime(),
+            // TODO(MrCroxx): check regression
+            self.storage().runtimes().user_runtime_handle,
         );
 
         if inner.state() == FetchState::Hit {

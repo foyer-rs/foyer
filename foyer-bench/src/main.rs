@@ -20,7 +20,7 @@ use bytesize::MIB;
 use foyer::{
     Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
     HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
-    S3FifoConfig, TracingConfig,
+    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -37,7 +37,7 @@ use std::{
 };
 
 use analyze::{analyze, monitor, Metrics};
-use clap::{ArgGroup, Parser};
+use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 
 use futures::future::join_all;
 use itertools::Itertools;
@@ -156,16 +156,49 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     metrics: bool,
 
+    /// Benchmark user runtime worker threads.
     #[arg(long, default_value_t = 0)]
-    benchmark_runtime_worker_threads: usize,
+    user_runtime_worker_threads: usize,
 
-    /// dedicated runtime worker threads
+    /// Dedicated runtime type.
+    #[arg(long, value_parser = PossibleValuesParser::new(["disabled", "unified", "separated"]), default_value = "disabled")]
+    runtime: String,
+
+    /// Dedicated runtime worker threads.
+    ///
+    /// Only valid when using unified dedicated runtime.
     #[arg(long, default_value_t = 0)]
     runtime_worker_threads: usize,
 
-    /// max threads for blocking io
+    /// Max threads for blocking io.
+    ///
+    /// Only valid when using unified dedicated runtime.
     #[arg(long, default_value_t = 0)]
-    max_blocking_threads: usize,
+    runtime_max_blocking_threads: usize,
+
+    /// Dedicated runtime for writes worker threads.
+    ///
+    /// Only valid when using separated dedicated runtime.
+    #[arg(long, default_value_t = 0)]
+    write_runtime_worker_threads: usize,
+
+    /// Dedicated runtime for writes Max threads for blocking io.
+    ///
+    /// Only valid when using separated dedicated runtime.
+    #[arg(long, default_value_t = 0)]
+    write_runtime_max_blocking_threads: usize,
+
+    /// Dedicated runtime for reads worker threads.
+    ///
+    /// Only valid when using separated dedicated runtime.
+    #[arg(long, default_value_t = 0)]
+    read_runtime_worker_threads: usize,
+
+    /// Dedicated runtime for writes max threads for blocking io.
+    ///
+    /// Only valid when using separated dedicated runtime.
+    #[arg(long, default_value_t = 0)]
+    read_runtime_max_blocking_threads: usize,
 
     /// compression algorithm
     #[arg(long, value_enum, default_value_t = Compression::None)]
@@ -379,8 +412,8 @@ fn main() {
     println!("{:#?}", args);
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
-    if args.benchmark_runtime_worker_threads != 0 {
-        builder.worker_threads(args.benchmark_runtime_worker_threads);
+    if args.user_runtime_worker_threads != 0 {
+        builder.worker_threads(args.user_runtime_worker_threads);
     }
     builder.thread_name("foyer-bench");
     let runtime = builder.enable_all().build().unwrap();
@@ -484,9 +517,23 @@ async fn benchmark(args: Args) {
             Box::<FifoPicker>::default(),
         ])
         .with_compression(args.compression)
-        .with_runtime_config(RuntimeConfig {
-            worker_threads: args.runtime_worker_threads,
-            max_blocking_threads: args.max_blocking_threads,
+        .with_runtime_config(match args.runtime.as_str() {
+            "disabled" => RuntimeConfig::Disabled,
+            "unified" => RuntimeConfig::Unified(TokioRuntimeConfig {
+                worker_threads: args.runtime_worker_threads,
+                max_blocking_threads: args.runtime_max_blocking_threads,
+            }),
+            "separated" => RuntimeConfig::Separated {
+                read_runtime_config: TokioRuntimeConfig {
+                    worker_threads: args.read_runtime_worker_threads,
+                    max_blocking_threads: args.read_runtime_max_blocking_threads,
+                },
+                write_runtime_config: TokioRuntimeConfig {
+                    worker_threads: args.write_runtime_worker_threads,
+                    max_blocking_threads: args.write_runtime_max_blocking_threads,
+                },
+            },
+            _ => unreachable!(),
         });
 
     if args.admission_rate_limit > 0 {
