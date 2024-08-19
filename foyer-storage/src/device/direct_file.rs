@@ -178,7 +178,7 @@ impl Dev for DirectFileDevice {
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            opts.custom_flags(libc::O_DIRECT);
+            opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
         }
 
         let file = opts.open(&options.path)?;
