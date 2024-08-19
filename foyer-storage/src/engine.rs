@@ -304,13 +304,4 @@ where
             Engine::Combined(storage) => StoreFuture::Combined(storage.wait()),
         }
     }
-
-    fn runtime(&self) -> &tokio::runtime::Handle {
-        match self {
-            Engine::Noop(storage) => storage.runtime(),
-            Engine::Large(storage) => storage.runtime(),
-            Engine::Small(storage) => storage.runtime(),
-            Engine::Combined(storage) => storage.runtime(),
-        }
-    }
 }

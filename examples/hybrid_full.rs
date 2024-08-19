@@ -18,7 +18,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfig, TombstoneLogConfigBuilder,
+    RuntimeConfig, TokioRuntimeConfig, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -59,9 +59,15 @@ async fn main() -> Result<()> {
                 .with_flush(true)
                 .build(),
         )
-        .with_runtime_config(RuntimeConfig {
-            worker_threads: 4,
-            max_blocking_threads: 8,
+        .with_runtime_config(RuntimeConfig::Separated {
+            read_runtime_config: TokioRuntimeConfig {
+                worker_threads: 4,
+                max_blocking_threads: 8,
+            },
+            write_runtime_config: TokioRuntimeConfig {
+                worker_threads: 4,
+                max_blocking_threads: 8,
+            },
         })
         .build()
         .await?;

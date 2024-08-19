@@ -20,7 +20,7 @@ use crate::{
         DeviceOptions, RegionId,
     },
     engine::{Engine, EngineConfig, SizeSelector},
-    error::Result,
+    error::{Error, Result},
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
@@ -60,7 +60,12 @@ where
 
     compression: Compression,
 
-    runtime: Arc<BackgroundShutdownRuntime>,
+    read_runtime: Option<Arc<BackgroundShutdownRuntime>>,
+    write_runtime: Option<Arc<BackgroundShutdownRuntime>>,
+
+    read_runtime_handle: Handle,
+    write_runtime_handle: Handle,
+    user_runtime_handle: Handle,
 
     statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
@@ -78,7 +83,11 @@ where
             .field("engine", &self.engine)
             .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
-            .field("runtime", &self.runtime)
+            .field("read_runtime", &self.read_runtime)
+            .field("write_runtime", &self.write_runtime)
+            .field("read_runtime_handle", &self.read_runtime_handle)
+            .field("write_runtime_handle", &self.write_runtime_handle)
+            .field("user_runtime_handle", &self.user_runtime_handle)
             .finish()
     }
 }
@@ -95,7 +104,11 @@ where
             engine: self.engine.clone(),
             admission_picker: self.admission_picker.clone(),
             compression: self.compression,
-            runtime: self.runtime.clone(),
+            read_runtime: self.read_runtime.clone(),
+            write_runtime: self.write_runtime.clone(),
+            read_runtime_handle: self.read_runtime_handle.clone(),
+            write_runtime_handle: self.write_runtime_handle.clone(),
+            user_runtime_handle: self.user_runtime_handle.clone(),
             statistics: self.statistics.clone(),
             metrics: self.metrics.clone(),
         }
@@ -127,7 +140,7 @@ where
         let compression = self.compression;
         let this = self.clone();
 
-        self.runtime().spawn(async move {
+        self.write_runtime_handle.spawn(async move {
             if force || this.pick(entry.key()) {
                 let mut buffer = IoBytesMut::new();
                 match EntrySerializer::serialize(entry.key(), entry.value(), &compression, &mut buffer) {
@@ -154,7 +167,7 @@ where
     {
         let hash = self.memory.hash(key);
         let future = self.engine.load(hash);
-        match self.runtime.spawn(future).await.unwrap() {
+        match self.read_runtime_handle.spawn(future).await.unwrap() {
             Ok(Some((k, v))) if k.borrow() == key => Ok(Some((k, v))),
             Ok(_) => Ok(None),
             Err(e) => Err(e),
@@ -193,11 +206,13 @@ where
         self.engine.stats()
     }
 
-    /// Get disk cache runtime handle.
-    ///
-    /// The runtime is determined during the opening phase.
-    pub fn runtime(&self) -> &Handle {
-        self.engine.runtime()
+    /// Get the runtime handles.
+    pub fn runtimes(&self) -> RuntimeHandles<'_> {
+        RuntimeHandles {
+            read_runtime_handle: &self.read_runtime_handle,
+            write_runtime_handle: &self.write_runtime_handle,
+            user_runtime_handle: &self.user_runtime_handle,
+        }
     }
 }
 
@@ -272,8 +287,8 @@ impl CombinedConfig {
     }
 }
 
-/// Configuration for the dedicated runtime.
-pub struct RuntimeConfig {
+/// Tokio runtime configuration.
+pub struct TokioRuntimeConfig {
     /// Dedicated runtime worker threads.
     ///
     /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
@@ -288,6 +303,31 @@ pub struct RuntimeConfig {
     ///
     /// See [`tokio::runtime::Builder::max_blocking_threads`].
     pub max_blocking_threads: usize,
+}
+
+/// Configuration for the dedicated runtime.
+pub enum RuntimeConfig {
+    /// Disable dedicated runtime. The runtime which foyer is built on will be used.
+    Disabled,
+    /// Use unified dedicated runtime for both reads and writes.
+    Unified(TokioRuntimeConfig),
+    /// Use separated dedicated runtime for reads or writes.
+    Separated {
+        /// Dedicated runtime for reads.
+        read_runtime_config: TokioRuntimeConfig,
+        /// Dedicated runtime for both foreground and background writes
+        write_runtime_config: TokioRuntimeConfig,
+    },
+}
+
+/// Runtime handles.
+pub struct RuntimeHandles<'a> {
+    /// Runtime handle for reads.
+    pub read_runtime_handle: &'a Handle,
+    /// Runtime handle for writes.
+    pub write_runtime_handle: &'a Handle,
+    /// User runtime handle.
+    pub user_runtime_handle: &'a Handle,
 }
 
 /// The builder of the disk cache.
@@ -345,10 +385,7 @@ where
             compression: Compression::None,
             tombstone_log_config: None,
             combined_config: CombinedConfig::default(),
-            runtime_config: RuntimeConfig {
-                worker_threads: 0,
-                max_blocking_threads: 0,
-            },
+            runtime_config: RuntimeConfig::Disabled,
         }
     }
 
@@ -522,87 +559,83 @@ where
         let statistics = Arc::<Statistics>::default();
         let compression = self.compression;
 
-        let runtime = {
+        let build_runtime = |config: &TokioRuntimeConfig, suffix: &str| {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if self.runtime_config.worker_threads != 0 {
-                builder.worker_threads(self.runtime_config.worker_threads);
+            if config.worker_threads != 0 {
+                builder.worker_threads(config.worker_threads);
             }
-            if self.runtime_config.max_blocking_threads != 0 {
-                builder.max_blocking_threads(self.runtime_config.max_blocking_threads);
+            if config.max_blocking_threads != 0 {
+                builder.max_blocking_threads(config.max_blocking_threads);
             }
-            builder.thread_name(&self.name);
+            builder.thread_name(format!("{}-{}", &self.name, suffix));
             let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
             let runtime = BackgroundShutdownRuntime::from(runtime);
-            Arc::new(runtime)
+            Ok::<_, Error>(Arc::new(runtime))
         };
+
+        let (read_runtime, write_runtime, read_runtime_handle, write_runtime_handle) = match self.runtime_config {
+            RuntimeConfig::Disabled => {
+                tracing::warn!("[store]: Dedicated runtime is disabled");
+                (None, None, Handle::current(), Handle::current())
+            }
+            RuntimeConfig::Unified(runtime_config) => {
+                let runtime = build_runtime(&runtime_config, "unified")?;
+                (
+                    Some(runtime.clone()),
+                    Some(runtime.clone()),
+                    runtime.handle().clone(),
+                    runtime.handle().clone(),
+                )
+            }
+            RuntimeConfig::Separated {
+                read_runtime_config,
+                write_runtime_config,
+            } => {
+                let read_runtime = build_runtime(&read_runtime_config, "read")?;
+                let write_runtime = build_runtime(&write_runtime_config, "write")?;
+                let read_runtime_handle = read_runtime.handle().clone();
+                let write_runtime_handle = write_runtime.handle().clone();
+                (
+                    Some(read_runtime),
+                    Some(write_runtime),
+                    read_runtime_handle,
+                    write_runtime_handle,
+                )
+            }
+        };
+        let user_runtime_handle = Handle::current();
 
         let engine = {
             let statistics = statistics.clone();
             let metrics = metrics.clone();
-            runtime.spawn(async move {
-            match self.device_config {
-                DeviceConfig::None => {
-                    tracing::warn!(
-                        "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
-                    );
-                    Engine::open(EngineConfig::Noop).await
-                }
-                DeviceConfig::DeviceOptions(options) => {
-                    let device = match Monitored::open(MonitoredOptions {
-                        options,
-                        metrics: metrics.clone(),
-                    })
-                    .await {
-                        Ok(device) => device,
-                        Err(e) =>return Err(e),
-                    };
-                    match self.combined_config {
-                        CombinedConfig::Large => {
-                            let regions = 0..device.regions() as RegionId;
-                            Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
-                                name: self.name,
-                                device,
-                                regions,
-                                compression: self.compression,
-                                flush: self.flush,
-                                indexer_shards: self.indexer_shards,
-                                recover_mode: self.recover_mode,
-                                recover_concurrency: self.recover_concurrency,
-                                flushers: self.flushers,
-                                reclaimers: self.reclaimers,
-                                clean_region_threshold,
-                                eviction_pickers: self.eviction_pickers,
-                                reinsertion_picker: self.reinsertion_picker,
-                                tombstone_log_config: self.tombstone_log_config,
-                                buffer_threshold: self.buffer_threshold,
-                                statistics: statistics.clone(),
-                                marker: PhantomData,
-                            }))
-                            .await
-                        }
-                        CombinedConfig::Small => {
-                            Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
-                                placeholder: PhantomData,
-                            }))
-                            .await
-                        }
-                        CombinedConfig::Combined {
-                            large_object_cache_ratio,
-                            large_object_threshold,
-                            load_order,
-                        } => {
-                            let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
-                            let large_regions =
-                                (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
-                            Engine::open(EngineConfig::Combined(EitherConfig {
-                                selector: SizeSelector::new(large_object_threshold),
-                                left: GenericSmallStorageConfig {
-                                    placeholder: PhantomData,
-                                },
-                                right: GenericLargeStorageConfig {
+            let write_runtime_handle = write_runtime_handle.clone();
+            let read_runtime_handle = read_runtime_handle.clone();
+            let user_runtime_handle = user_runtime_handle.clone();
+            // Use the user runtiem to open engine.
+            tokio::spawn(async move {
+                match self.device_config {
+                    DeviceConfig::None => {
+                        tracing::warn!(
+                            "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
+                        );
+                        Engine::open(EngineConfig::Noop).await
+                    }
+                    DeviceConfig::DeviceOptions(options) => {
+                        let device = match Monitored::open(MonitoredOptions {
+                            options,
+                            metrics: metrics.clone(),
+                        })
+                        .await {
+                            Ok(device) => device,
+                            Err(e) =>return Err(e),
+                        };
+                        match self.combined_config {
+                            CombinedConfig::Large => {
+                                let regions = 0..device.regions() as RegionId;
+                                Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
                                     name: self.name,
                                     device,
-                                    regions: large_regions,
+                                    regions,
                                     compression: self.compression,
                                     flush: self.flush,
                                     indexer_shards: self.indexer_shards,
@@ -616,16 +649,62 @@ where
                                     tombstone_log_config: self.tombstone_log_config,
                                     buffer_threshold: self.buffer_threshold,
                                     statistics: statistics.clone(),
+                                    write_runtime_handle,
+                                    read_runtime_handle,
+                                    user_runtime_handle,
                                     marker: PhantomData,
-                                },
+                                }))
+                                .await
+                            }
+                            CombinedConfig::Small => {
+                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
+                                    placeholder: PhantomData,
+                                }))
+                                .await
+                            }
+                            CombinedConfig::Combined {
+                                large_object_cache_ratio,
+                                large_object_threshold,
                                 load_order,
-                            }))
-                            .await
+                            } => {
+                                let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
+                                let large_regions =
+                                    (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
+                                Engine::open(EngineConfig::Combined(EitherConfig {
+                                    selector: SizeSelector::new(large_object_threshold),
+                                    left: GenericSmallStorageConfig {
+                                        placeholder: PhantomData,
+                                    },
+                                    right: GenericLargeStorageConfig {
+                                        name: self.name,
+                                        device,
+                                        regions: large_regions,
+                                        compression: self.compression,
+                                        flush: self.flush,
+                                        indexer_shards: self.indexer_shards,
+                                        recover_mode: self.recover_mode,
+                                        recover_concurrency: self.recover_concurrency,
+                                        flushers: self.flushers,
+                                        reclaimers: self.reclaimers,
+                                        clean_region_threshold,
+                                        eviction_pickers: self.eviction_pickers,
+                                        reinsertion_picker: self.reinsertion_picker,
+                                        tombstone_log_config: self.tombstone_log_config,
+                                        buffer_threshold: self.buffer_threshold,
+                                        statistics: statistics.clone(),
+                                        write_runtime_handle,
+                                        read_runtime_handle,
+                                        user_runtime_handle,
+                                        marker: PhantomData,
+                                    },
+                                    load_order,
+                                }))
+                                .await
+                            }
                         }
                     }
                 }
-            }
-        }).await.unwrap()?
+            }).await.unwrap()?
         };
 
         Ok(Store {
@@ -633,7 +712,11 @@ where
             engine,
             admission_picker,
             compression,
-            runtime,
+            read_runtime,
+            write_runtime,
+            read_runtime_handle,
+            write_runtime_handle,
+            user_runtime_handle,
             statistics,
             metrics,
         })

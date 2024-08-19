@@ -412,7 +412,7 @@ where
         }
     }
 
-    /// Enable the dedicated runtime for the disk cache store.
+    /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
         let builder = self.builder.with_runtime_config(runtime_config);
         Self {
