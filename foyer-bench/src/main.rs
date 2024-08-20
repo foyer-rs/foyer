@@ -230,7 +230,7 @@ pub struct Args {
     #[arg(long, default_value_t = 0.8)]
     invalid_ratio: f64,
 
-    #[arg(long, default_value = "lfu")]
+    #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.

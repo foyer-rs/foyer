@@ -13,7 +13,7 @@ readme = "../README.md"
 [dependencies]
 ahash = "0.8"
 bitflags = "2"
-cmsketch = "0.2"
+cmsketch = "0.2.1"
 fastrace = { workspace = true }
 foyer-common = { version = "0.8.1", path = "../foyer-common" }
 foyer-intrusive = { version = "0.8.1", path = "../foyer-intrusive" }
