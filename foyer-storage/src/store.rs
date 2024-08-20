@@ -52,6 +52,15 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    inner: Arc<StoreInner<K, V, S>>,
+}
+
+struct StoreInner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
     memory: Cache<K, V, S>,
 
     engine: Engine<K, V, S>,
@@ -79,15 +88,15 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
-            .field("memory", &self.memory)
-            .field("engine", &self.engine)
-            .field("admission_picker", &self.admission_picker)
-            .field("compression", &self.compression)
-            .field("read_runtime", &self.read_runtime)
-            .field("write_runtime", &self.write_runtime)
-            .field("read_runtime_handle", &self.read_runtime_handle)
-            .field("write_runtime_handle", &self.write_runtime_handle)
-            .field("user_runtime_handle", &self.user_runtime_handle)
+            .field("memory", &self.inner.memory)
+            .field("engine", &self.inner.engine)
+            .field("admission_picker", &self.inner.admission_picker)
+            .field("compression", &self.inner.compression)
+            .field("read_runtime", &self.inner.read_runtime)
+            .field("write_runtime", &self.inner.write_runtime)
+            .field("read_runtime_handle", &self.inner.read_runtime_handle)
+            .field("write_runtime_handle", &self.inner.write_runtime_handle)
+            .field("user_runtime_handle", &self.inner.user_runtime_handle)
             .finish()
     }
 }
@@ -100,17 +109,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            memory: self.memory.clone(),
-            engine: self.engine.clone(),
-            admission_picker: self.admission_picker.clone(),
-            compression: self.compression,
-            read_runtime: self.read_runtime.clone(),
-            write_runtime: self.write_runtime.clone(),
-            read_runtime_handle: self.read_runtime_handle.clone(),
-            write_runtime_handle: self.write_runtime_handle.clone(),
-            user_runtime_handle: self.user_runtime_handle.clone(),
-            statistics: self.statistics.clone(),
-            metrics: self.metrics.clone(),
+            inner: self.inner.clone(),
         }
     }
 }
@@ -125,28 +124,28 @@ where
     ///
     /// `close` will wait for all ongoing flush and reclaim tasks to finish.
     pub async fn close(&self) -> Result<()> {
-        self.engine.close().await
+        self.inner.engine.close().await
     }
 
     /// Return if the given key can be picked by the admission picker.
     pub fn pick(&self, key: &K) -> bool {
-        self.admission_picker.pick(&self.statistics, key)
+        self.inner.admission_picker.pick(&self.inner.statistics, key)
     }
 
     /// Push a in-memory cache entry to the disk cache write queue.
     pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) {
         let now = Instant::now();
 
-        let compression = self.compression;
+        let compression = self.inner.compression;
         let this = self.clone();
 
-        self.write_runtime_handle.spawn(async move {
+        self.inner.write_runtime_handle.spawn(async move {
             if force || this.pick(entry.key()) {
                 let mut buffer = IoBytesMut::new();
                 match EntrySerializer::serialize(entry.key(), entry.value(), &compression, &mut buffer) {
                     Ok(info) => {
                         let buffer = buffer.freeze();
-                        this.engine.enqueue(entry, buffer, info);
+                        this.inner.engine.enqueue(entry, buffer, info);
                     }
                     Err(e) => {
                         tracing::warn!("[store]: serialize kv error: {e}");
@@ -155,8 +154,8 @@ where
             }
         });
 
-        self.metrics.storage_enqueue.increment(1);
-        self.metrics.storage_enqueue_duration.record(now.elapsed());
+        self.inner.metrics.storage_enqueue.increment(1);
+        self.inner.metrics.storage_enqueue_duration.record(now.elapsed());
     }
 
     /// Load a cache entry from the disk cache.
@@ -165,9 +164,9 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
-        let hash = self.memory.hash(key);
-        let future = self.engine.load(hash);
-        match self.read_runtime_handle.spawn(future).await.unwrap() {
+        let hash = self.inner.memory.hash(key);
+        let future = self.inner.engine.load(hash);
+        match self.inner.read_runtime_handle.spawn(future).await.unwrap() {
             Ok(Some((k, v))) if k.borrow() == key => Ok(Some((k, v))),
             Ok(_) => Ok(None),
             Err(e) => Err(e),
@@ -180,8 +179,8 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let hash = self.memory.hash(key);
-        self.engine.delete(hash)
+        let hash = self.inner.memory.hash(key);
+        self.inner.engine.delete(hash)
     }
 
     /// Check if the disk cache contains a cached entry with the given key.
@@ -192,26 +191,26 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let hash = self.memory.hash(key);
-        self.engine.may_contains(hash)
+        let hash = self.inner.memory.hash(key);
+        self.inner.engine.may_contains(hash)
     }
 
     /// Delete all cached entries of the disk cache.
     pub async fn destroy(&self) -> Result<()> {
-        self.engine.destroy().await
+        self.inner.engine.destroy().await
     }
 
     /// Get the statistics information of the disk cache.
     pub fn stats(&self) -> Arc<DeviceStats> {
-        self.engine.stats()
+        self.inner.engine.stats()
     }
 
     /// Get the runtime handles.
     pub fn runtimes(&self) -> RuntimeHandles<'_> {
         RuntimeHandles {
-            read_runtime_handle: &self.read_runtime_handle,
-            write_runtime_handle: &self.write_runtime_handle,
-            user_runtime_handle: &self.user_runtime_handle,
+            read_runtime_handle: &self.inner.read_runtime_handle,
+            write_runtime_handle: &self.inner.write_runtime_handle,
+            user_runtime_handle: &self.inner.user_runtime_handle,
         }
     }
 }
@@ -707,7 +706,7 @@ where
             }).await.unwrap()?
         };
 
-        Ok(Store {
+        let inner = StoreInner {
             memory,
             engine,
             admission_picker,
@@ -719,6 +718,10 @@ where
             user_runtime_handle,
             statistics,
             metrics,
-        })
+        };
+        let inner = Arc::new(inner);
+        let store = Store { inner };
+
+        Ok(store)
     }
 }
