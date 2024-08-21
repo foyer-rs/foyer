@@ -25,7 +25,7 @@ pub use common::{
     range::RangeBoundsExt,
     tracing::TracingConfig,
 };
-pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
+pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig, Weighter};
 pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevExt, DevOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
