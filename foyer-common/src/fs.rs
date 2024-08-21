@@ -30,8 +30,9 @@ mod tests {
         process::Command,
     };
 
-    use super::*;
     use itertools::Itertools;
+
+    use super::*;
 
     #[test]
     #[ignore]

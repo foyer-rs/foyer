@@ -41,9 +41,8 @@ use futures::FutureExt;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
 
-use crate::HybridCacheWriter;
-
 use super::writer::HybridCacheStorageWriter;
+use crate::HybridCacheWriter;
 
 macro_rules! root_span {
     ($self:ident, mut $name:ident, $label:expr) => {

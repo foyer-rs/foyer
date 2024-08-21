@@ -29,10 +29,9 @@ use crate::{
         monitor::{Monitored, MonitoredOptions},
         Dev, DevExt, RegionId,
     },
+    error::{Error, Result},
     IoBytesMut,
 };
-
-use crate::error::{Error, Result};
 
 /// The configurations for the tombstone log.
 #[derive(Debug, Clone)]
@@ -308,9 +307,8 @@ mod tests {
     use itertools::Itertools;
     use tempfile::tempdir;
 
-    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
-
     use super::*;
+    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {

@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
+
+use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 /// The admission picker for the disk cache.
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {

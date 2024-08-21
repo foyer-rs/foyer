@@ -12,13 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+
 use bytes::{Buf, BufMut};
 
 use crate::{
     compress::Compression,
     error::{Error, Result},
 };
-use std::sync::atomic::AtomicU64;
 
 const ENTRY_MAGIC: u32 = 0x97_03_27_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;

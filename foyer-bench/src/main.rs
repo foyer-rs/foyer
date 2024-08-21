@@ -16,14 +16,6 @@ mod analyze;
 mod rate;
 mod text;
 
-use bytesize::MIB;
-use foyer::{
-    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
-    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
-};
-use metrics_exporter_prometheus::PrometheusBuilder;
-
 use std::{
     collections::BTreeMap,
     fs::create_dir_all,
@@ -37,10 +29,16 @@ use std::{
 };
 
 use analyze::{analyze, monitor, Metrics};
+use bytesize::MIB;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
-
+use foyer::{
+    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
+    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
+    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
+};
 use futures::future::join_all;
 use itertools::Itertools;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{
     distributions::Distribution,
     rngs::{OsRng, StdRng},
@@ -313,9 +311,10 @@ impl Deref for Value {
 }
 
 mod arc_bytes {
+    use std::sync::Arc;
+
     use serde::{Deserialize, Deserializer, Serializer};
     use serde_bytes::ByteBuf;
-    use std::sync::Arc;
 
     pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use fastrace::prelude::*;
-use serde::{Deserialize, Serialize};
-
 use std::{
     ops::Deref,
     pin::Pin,
@@ -23,8 +20,10 @@ use std::{
     time::Duration,
 };
 
+use fastrace::prelude::*;
 use futures::{ready, Future};
 use pin_project::pin_project;
+use serde::{Deserialize, Serialize};
 
 /// Configurations for tracing.
 #[derive(Debug, Serialize, Deserialize)]

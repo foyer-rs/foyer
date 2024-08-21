@@ -12,37 +12,38 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::collections::HashMap;
-
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-
-use clap::ValueEnum;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_common::metrics::Metrics;
-use futures::future::try_join_all;
-
-use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
-use tokio::sync::Semaphore;
-
-use crate::error::{Error, Result};
-
-use crate::large::indexer::HashedEntryAddress;
-use crate::large::{
-    scanner::{EntryInfo, RegionScanner},
-    serde::{AtomicSequence, Sequence},
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    ops::Range,
+    sync::{atomic::Ordering, Arc},
 };
 
-use super::generic::GenericLargeStorageConfig;
-use super::indexer::EntryAddress;
-use super::indexer::Indexer;
-use crate::device::RegionId;
-use crate::large::tombstone::Tombstone;
-use crate::region::{Region, RegionManager};
+use clap::ValueEnum;
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
+use futures::future::try_join_all;
+use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use tokio::{runtime::Handle, sync::Semaphore};
+
+use super::{
+    generic::GenericLargeStorageConfig,
+    indexer::{EntryAddress, Indexer},
+};
+use crate::{
+    device::RegionId,
+    error::{Error, Result},
+    large::{
+        indexer::HashedEntryAddress,
+        scanner::{EntryInfo, RegionScanner},
+        serde::{AtomicSequence, Sequence},
+        tombstone::Tombstone,
+    },
+    region::{Region, RegionManager},
+};
 
 /// The recover mode of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
