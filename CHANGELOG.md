@@ -192,7 +192,7 @@
 - Fulfill rust docs for public APIs.
 - Introduce tombstone log for updatable persistent cache.
 - Reduce unnecessary dependencies.
-- More details: [foyer - Project Dashboard](https://github.com/users/MrCroxx/projects/4).
+- More details: [foyer - Development Roadmap](https://github.com/orgs/foyer-rs/projects/2).
 
 </details>
 
