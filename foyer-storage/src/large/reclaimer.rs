@@ -14,7 +14,10 @@
 
 use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use futures::future::join_all;
 use itertools::Itertools;
 use tokio::{
@@ -53,6 +56,7 @@ impl Reclaimer {
         flushers: Vec<Flusher<K, V, S>>,
         stats: Arc<Statistics>,
         flush: bool,
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Self
     where
@@ -70,6 +74,7 @@ impl Reclaimer {
             reinsertion_picker,
             stats,
             flush,
+            metrics,
             wait_rx,
             runtime: runtime.clone(),
         };
@@ -107,6 +112,8 @@ where
     stats: Arc<Statistics>,
 
     flush: bool,
+
+    metrics: Arc<Metrics>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
@@ -167,7 +174,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone());
+        let mut scanner = RegionScanner::new(region.clone(), self.metrics.clone());
         let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:

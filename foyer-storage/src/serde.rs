@@ -12,10 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hasher};
+use std::{fmt::Debug, hash::Hasher, time::Instant};
 use twox_hash::XxHash64;
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
 
 use crate::{
     compress::Compression,
@@ -51,11 +54,14 @@ impl EntrySerializer {
         value: &'a V,
         compression: &'a Compression,
         mut buffer: &'a mut IoBytesMut,
+        metrics: &Metrics,
     ) -> Result<KvInfo>
     where
         K: StorageKey,
         V: StorageValue,
     {
+        let now = Instant::now();
+
         let mut cursor = buffer.len();
 
         // serialize value
@@ -85,6 +91,8 @@ impl EntrySerializer {
         bincode::serialize_into(&mut buffer, &key).map_err(Error::from)?;
         let key_len = buffer.len() - cursor;
 
+        metrics.storage_entry_serialize_duration.record(now.elapsed());
+
         Ok(KvInfo { key_len, value_len })
     }
 }
@@ -100,11 +108,14 @@ impl EntryDeserializer {
         value_len: usize,
         compression: Compression,
         checksum: Option<u64>,
+        metrics: &Metrics,
     ) -> Result<(K, V)>
     where
         K: StorageKey,
         V: StorageValue,
     {
+        let now = Instant::now();
+
         // deserialize value
         let buf = &buffer[..value_len];
         let value = Self::deserialize_value(buf, compression)?;
@@ -120,6 +131,8 @@ impl EntryDeserializer {
                 return Err(Error::ChecksumMismatch { expected, get });
             }
         }
+
+        metrics.storage_entry_deserialize_duration.record(now.elapsed());
 
         Ok((key, value))
     }

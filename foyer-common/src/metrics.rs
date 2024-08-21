@@ -66,6 +66,9 @@ pub struct Metrics {
 
     pub storage_region_size_bytes: Gauge,
 
+    pub storage_entry_serialize_duration: Histogram,
+    pub storage_entry_deserialize_duration: Histogram,
+
     /* hybrid cache metrics */
     pub hybrid_insert: Counter,
     pub hybrid_hit: Counter,
@@ -156,6 +159,10 @@ impl Metrics {
 
         let storage_region_size_bytes = gauge!(format!("foyer_storage_region_size_bytes"), "name" => name.to_string());
 
+        let storage_entry_serialize_duration =
+            histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "serialize");
+        let storage_entry_deserialize_duration = histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "deserialize");
+
         /* hybrid cache metrics */
 
         let hybrid_insert = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "insert");
@@ -210,6 +217,8 @@ impl Metrics {
             storage_region_clean,
             storage_region_evictable,
             storage_region_size_bytes,
+            storage_entry_serialize_duration,
+            storage_entry_deserialize_duration,
 
             hybrid_insert,
             hybrid_hit,

@@ -12,9 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::Arc;
+
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    metrics::Metrics,
     strict_assert,
 };
 
@@ -83,15 +86,17 @@ pub struct RegionScanner {
     region: Region,
     offset: u64,
     cache: CachedDeviceReader,
+    metrics: Arc<Metrics>,
 }
 
 impl RegionScanner {
-    pub fn new(region: Region) -> Self {
+    pub fn new(region: Region, metrics: Arc<Metrics>) -> Self {
         let cache = CachedDeviceReader::new(region.clone());
         Self {
             region,
             offset: 0,
             cache,
+            metrics,
         }
     }
 
@@ -216,6 +221,7 @@ impl RegionScanner {
             header.value_len as _,
             header.compression,
             Some(header.checksum),
+            &self.metrics,
         )?;
 
         self.step(&header).await;
