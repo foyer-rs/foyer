@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
+use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
@@ -28,7 +29,7 @@ use std::{
 };
 
 /// Options for the direct file device.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectFileDeviceOptions {
     /// Path of the direct file device.
     pub path: PathBuf,
