@@ -1,0 +1,8 @@
+# TODO(MrCroxx): Move features into `rustfmt.toml` after stable.
+
+imports_granularity = "Crate" # unsatble
+group_imports = "StdExternalCrate" # unstable
+tab_spaces = 4
+wrap_comments = true # unstable
+max_width = 120 
+comment_width = 120 # unstable
