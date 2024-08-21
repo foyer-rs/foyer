@@ -17,6 +17,7 @@
 - Support fine-grained storage engine runtime configuration.
 - Enhance performance via reducing page fault.
 - Refine storage engine framework for future features.
+- Expose `Weighter` trait.
 - Support `serde` for more configurations.
 - Update `foyer-bench` with more fine-grained configurations.
 - Fix panices with `None` recover mode.
