@@ -1,3 +1,29 @@
+## 2024-08-21
+
+| crate | version |
+| - | - |
+| foyer | 0.11.0 |
+| foyer-common | 0.9.0 |
+| foyer-intrusive | 0.9.0 |
+| foyer-memory | 0.7.0 |
+| foyer-storage | 0.10.0 |
+| foyer-bench | 0.3.0 |
+
+<details>
+
+### Changes
+
+- Support disk cache on raw block device.
+- Support fine-grained storage engine runtime configuration.
+- Enhance performance via reducing page fault.
+- Refine storage engine framework for future features.
+- Expose `Weighter` trait.
+- Support `serde` for more configurations.
+- Update `foyer-bench` with more fine-grained configurations.
+- Fix panices with `None` recover mode.
+
+</details>
+
 ## 2024-08-15
 
 | crate | version |
