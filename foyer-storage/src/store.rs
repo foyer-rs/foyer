@@ -656,8 +656,16 @@ where
                                 .await
                             }
                             CombinedConfig::Small => {
-                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
-                                    placeholder: PhantomData,
+                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig { 
+                                    set_size: todo!(), 
+                                    set_cache_capacity: todo!(), 
+                                    device, regions: todo!(), 
+                                    flush: todo!(), 
+                                    flushers: todo!(), 
+                                    read_runtime_handle, 
+                                    write_runtime_handle, 
+                                    user_runtime_handle, 
+                                    marker: PhantomData 
                                 }))
                                 .await
                             }
@@ -671,8 +679,16 @@ where
                                     (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
                                 Engine::open(EngineConfig::Combined(EitherConfig {
                                     selector: SizeSelector::new(large_object_threshold),
-                                    left: GenericSmallStorageConfig {
-                                        placeholder: PhantomData,
+                                    left: GenericSmallStorageConfig { 
+                                        set_size: todo!(), 
+                                        set_cache_capacity: todo!(), 
+                                        device, regions: todo!(), 
+                                        flush: todo!(), 
+                                        flushers: todo!(), 
+                                        read_runtime_handle, 
+                                        write_runtime_handle, 
+                                        user_runtime_handle, 
+                                        marker: PhantomData 
                                     },
                                     right: GenericLargeStorageConfig {
                                         name: self.name,

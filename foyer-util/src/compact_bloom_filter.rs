@@ -17,7 +17,7 @@ use std::{cell::UnsafeCell, sync::Arc};
 use bitvec::prelude::*;
 use itertools::Itertools;
 
-use crate::strict_assert;
+use foyer_common::strict_assert;
 
 /// Reduce two 64-bit hashes into one.
 ///

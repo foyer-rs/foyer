@@ -14,11 +14,25 @@
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
-use futures::Future;
+use futures::{
+    future::{join_all, try_join_all},
+    Future,
+};
+use itertools::Itertools;
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use tokio::runtime::Handle;
 
-use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
+use std::{fmt::Debug, marker::PhantomData, ops::Range, sync::Arc};
+
+use crate::{
+    device::{MonitoredDevice, RegionId},
+    error::Result,
+    serde::KvInfo,
+    storage::Storage,
+    DeviceStats, IoBytes,
+};
+
+use super::{flusher::Flusher, set::SetId, set_manager::SetManager};
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where
@@ -26,7 +40,24 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub placeholder: PhantomData<(K, V, S)>,
+    /// Set size in bytes.
+    pub set_size: usize,
+    /// Set cache capacity by set count.
+    pub set_cache_capacity: usize,
+    /// Device for small object disk cache.
+    pub device: MonitoredDevice,
+    /// Regions of the device to use.
+    pub regions: Range<RegionId>,
+    /// Whether to flush after writes.
+    pub flush: bool,
+    /// Flusher count.
+    pub flushers: usize,
+
+    pub read_runtime_handle: Handle,
+    pub write_runtime_handle: Handle,
+    pub user_runtime_handle: Handle,
+
+    pub marker: PhantomData<(K, V, S)>,
 }
 
 impl<K, V, S> Debug for GenericSmallStorageConfig<K, V, S>
@@ -40,13 +71,29 @@ where
     }
 }
 
+struct GenericSmallStorageInner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    flushers: Vec<Flusher<K, V, S>>,
+
+    device: MonitoredDevice,
+    set_manager: SetManager,
+
+    read_runtime_handle: Handle,
+    _write_runtime_handle: Handle,
+    _user_runtime_handle: Handle,
+}
+
 pub struct GenericSmallStorage<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    _marker: PhantomData<(K, V, S)>,
+    inner: Arc<GenericSmallStorageInner<K, V, S>>,
 }
 
 impl<K, V, S> Debug for GenericSmallStorage<K, V, S>
@@ -67,7 +114,93 @@ where
     S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
-        Self { _marker: PhantomData }
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<K, V, S> GenericSmallStorage<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    async fn open(config: GenericSmallStorageConfig<K, V, S>) -> Result<Self> {
+        let set_manager = SetManager::new(
+            config.set_size,
+            config.set_cache_capacity,
+            config.device.clone(),
+            config.regions,
+            config.flush,
+        );
+
+        let flushers = (0..config.flushers)
+            .map(|_| Flusher::new(set_manager.clone(), &config.write_runtime_handle))
+            .collect_vec();
+
+        let inner = GenericSmallStorageInner {
+            flushers,
+            device: config.device,
+            set_manager,
+            read_runtime_handle: config.read_runtime_handle,
+            _write_runtime_handle: config.write_runtime_handle,
+            _user_runtime_handle: config.user_runtime_handle,
+        };
+        let inner = Arc::new(inner);
+
+        Ok(Self { inner })
+    }
+
+    async fn close(&self) -> Result<()> {
+        try_join_all(self.inner.flushers.iter().map(|flusher| flusher.close())).await?;
+        Ok(())
+    }
+
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
+        // Entries with the same hash must be grouped in the batch.
+        let id = entry.hash() as usize % self.inner.flushers.len();
+        self.inner.flushers[id].entry(entry, buffer, info);
+    }
+
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
+        let set_manager = self.inner.set_manager.clone();
+        let sid = hash % set_manager.sets() as SetId;
+        async move {
+            match set_manager.read(sid, hash).await? {
+                Some(set) => {
+                    let kv = set.get(hash)?;
+                    Ok(kv)
+                }
+                None => Ok(None),
+            }
+        }
+    }
+
+    fn delete(&self, hash: u64) {
+        // Entries with the same hash MUST be grouped in the same batch.
+        let id = hash as usize % self.inner.flushers.len();
+        self.inner.flushers[id].deletion(hash);
+    }
+
+    fn may_contains(&self, hash: u64) -> bool {
+        let set_manager = self.inner.set_manager.clone();
+        let sid = hash % set_manager.sets() as SetId;
+        // FIXME: Anyway without blocking? Use atomic?
+        self.inner
+            .read_runtime_handle
+            .block_on(async move { set_manager.contains(sid, hash).await })
+    }
+
+    fn stats(&self) -> Arc<DeviceStats> {
+        self.inner.device.stat().clone()
+    }
+
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        let wait_flushers = join_all(self.inner.flushers.iter().map(|flusher| flusher.wait()));
+        async move {
+            wait_flushers.await;
+        }
     }
 }
 
@@ -82,29 +215,32 @@ where
     type BuildHasher = S;
     type Config = GenericSmallStorageConfig<K, V, S>;
 
-    async fn open(_config: Self::Config) -> Result<Self> {
-        todo!()
+    async fn open(config: Self::Config) -> Result<Self> {
+        Self::open(config).await
     }
 
     async fn close(&self) -> Result<()> {
-        todo!()
+        self.close().await?;
+        Ok(())
     }
 
-    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _buffer: IoBytes, _info: KvInfo) {
-        todo!()
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
+        self.enqueue(entry, buffer, info);
     }
 
     // FIXME: REMOVE THE CLIPPY IGNORE.
     // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(clippy::manual_async_fn)]
-    fn load(&self, _hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
-        async { todo!() }
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+        self.load(hash)
     }
 
-    fn delete(&self, _hash: u64) {}
+    fn delete(&self, hash: u64) {
+        self.delete(hash)
+    }
 
-    fn may_contains(&self, _hash: u64) -> bool {
-        todo!()
+    fn may_contains(&self, hash: u64) -> bool {
+        self.may_contains(hash)
     }
 
     async fn destroy(&self) -> Result<()> {
@@ -112,13 +248,10 @@ where
     }
 
     fn stats(&self) -> Arc<DeviceStats> {
-        todo!()
+        self.stats()
     }
 
-    // TODO(MrCroxx): Remove the attr after impl.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::manual_async_fn)]
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        async { todo!() }
+        self.wait()
     }
 }

@@ -178,7 +178,7 @@ where
             value_len: info.value_len as _,
             hash: entry.hash(),
             sequence,
-            checksum: Checksummer::checksum(&buffer),
+            checksum: Checksummer::checksum64(&buffer),
             compression: self.compression,
         };
 

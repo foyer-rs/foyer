@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 pub mod batch;
+pub mod compact_bloom_filter;
 pub mod continuum;
 pub mod erwlock;
 pub mod iostat;
