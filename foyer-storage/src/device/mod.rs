@@ -18,14 +18,15 @@ pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
-use crate::{
-    error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
-    IoBytesMut,
-};
 use std::{fmt::Debug, future::Future};
 
 use allocator::AlignedAllocator;
 use monitor::Monitored;
+
+use crate::{
+    error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
+    IoBytesMut,
+};
 
 pub const ALIGN: usize = 4096;
 pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new();

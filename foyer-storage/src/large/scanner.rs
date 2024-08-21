@@ -21,6 +21,7 @@ use foyer_common::{
     strict_assert,
 };
 
+use super::indexer::EntryAddress;
 use crate::{
     device::bytes::IoBytes,
     error::Result,
@@ -28,8 +29,6 @@ use crate::{
     region::Region,
     serde::EntryDeserializer,
 };
-
-use super::indexer::EntryAddress;
 
 #[derive(Debug)]
 pub struct EntryInfo {

@@ -12,7 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use pin_project::pin_project;
 use std::{
     future::Future,
     marker::PhantomData,
@@ -20,6 +19,8 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
+
+use pin_project::pin_project;
 
 /// Result that the inner future of a [`DiversionFuture`] should return.
 ///

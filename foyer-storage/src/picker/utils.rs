@@ -25,9 +25,8 @@ use std::{
 use foyer_common::{code::StorageKey, rated_ticket::RatedTicket, strict_assert};
 use itertools::Itertools;
 
-use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
-
 use super::{AdmissionPicker, EvictionPicker, ReinsertionPicker};
+use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 /// A picker that always returns `true`.
 pub struct AdmitAllPicker<K>(PhantomData<K>)

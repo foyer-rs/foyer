@@ -12,10 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use ahash::RandomState;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheEntry;
-use futures::Future;
 use std::{
     fmt::Debug,
     marker::PhantomData,
@@ -23,6 +19,11 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+
+use ahash::RandomState;
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_memory::CacheEntry;
+use futures::Future;
 
 use crate::{
     error::Result,

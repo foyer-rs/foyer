@@ -13,12 +13,12 @@
 //  limitations under the License.
 
 use std::{fmt::Debug, hash::Hasher, time::Instant};
-use twox_hash::XxHash64;
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
+use twox_hash::XxHash64;
 
 use crate::{
     compress::Compression,

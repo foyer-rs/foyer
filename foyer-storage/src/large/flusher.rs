@@ -12,14 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{
-    device::MonitoredDevice,
-    error::{Error, Result},
-    large::serde::EntryHeader,
-    region::RegionManager,
-    serde::{Checksummer, KvInfo},
-    Compression, IoBytes, Statistics,
+use std::{
+    fmt::Debug,
+    future::Future,
+    sync::{atomic::Ordering, Arc},
 };
+
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
@@ -28,11 +26,6 @@ use foyer_common::{
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
 use parking_lot::Mutex;
-use std::{
-    fmt::Debug,
-    future::Future,
-    sync::{atomic::Ordering, Arc},
-};
 use tokio::{runtime::Handle, sync::Notify};
 
 use super::{
@@ -42,6 +35,14 @@ use super::{
     reclaimer::Reinsertion,
     serde::Sequence,
     tombstone::{Tombstone, TombstoneLog},
+};
+use crate::{
+    device::MonitoredDevice,
+    error::{Error, Result},
+    large::serde::EntryHeader,
+    region::RegionManager,
+    serde::{Checksummer, KvInfo},
+    Compression, IoBytes, Statistics,
 };
 
 #[derive(Debug)]

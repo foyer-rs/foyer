@@ -14,10 +14,9 @@
 
 use std::ptr::NonNull;
 
+use super::Indexer;
 #[cfg(feature = "sanity")]
 use crate::handle::Handle;
-
-use super::Indexer;
 
 pub struct SanityIndexer<I>
 where

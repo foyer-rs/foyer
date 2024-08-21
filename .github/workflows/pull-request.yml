@@ -70,7 +70,43 @@ jobs:
       - name: Unused Dependencies Check
         env:
           RUSTFLAGS: "--cfg tokio_unstable -Awarnings"
-        run: "cargo udeps --all-targets  \n"
+        run: |
+          cargo udeps --all-targets
+  rust-ffmt-check:
+    name: rust ffmt check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Cache Cargo home
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-rust-ffmt-check
+      - name: Fastidious Format Check
+        run: |
+          cargo fmt --all --check -- --config-path rustfmt.nightly.toml
+      - name: Hint
+        if: ${{ failure() }}
+        run: |-
+          echo "The ffmt (Fastidious Format Check) test is not a necessary."
+          echo "It uses unstable features to achieve a better format."
+          echo "If you want to pass the test, please install the nightly toolchain with \`rustup install nightly\`."
+          echo "Then run \`make ffmt\`."
   rust-test:
     name: rust test with codecov
     strategy:

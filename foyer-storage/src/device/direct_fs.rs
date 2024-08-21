@@ -166,7 +166,6 @@ impl Dev for DirectFsDevice {
         asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
@@ -202,7 +201,6 @@ impl Dev for DirectFsDevice {
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 

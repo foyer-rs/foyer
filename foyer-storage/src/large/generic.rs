@@ -24,6 +24,7 @@ use std::{
     time::Instant,
 };
 
+use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
@@ -31,7 +32,15 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
+use tokio::{runtime::Handle, sync::Semaphore};
 
+use super::{
+    batch::InvalidStats,
+    flusher::{Flusher, Submission},
+    indexer::Indexer,
+    reclaimer::Reclaimer,
+    recover::{RecoverMode, RecoverRunner},
+};
 use crate::{
     compress::Compression,
     device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
@@ -48,18 +57,6 @@ use crate::{
     storage::Storage,
     IoBytes,
 };
-
-use tokio::{runtime::Handle, sync::Semaphore};
-
-use super::{
-    batch::InvalidStats,
-    flusher::{Flusher, Submission},
-    indexer::Indexer,
-    reclaimer::Reclaimer,
-    recover::{RecoverMode, RecoverRunner},
-};
-
-use fastrace::prelude::*;
 
 pub struct GenericLargeStorageConfig<K, V, S>
 where
@@ -487,14 +484,13 @@ where
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-
     use std::path::Path;
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
 
+    use super::*;
     use crate::{
         device::{
             direct_fs::DirectFsDeviceOptions,
@@ -805,7 +801,8 @@ mod tests {
     //     let dir = tempfile::tempdir().unwrap();
 
     //     let memory = cache_for_test();
-    //     let store = store_for_test_with_admission_picker(&memory, dir.path(), Arc::new(BiasedPicker::new([1]))).await;
+    //     let store = store_for_test_with_admission_picker(&memory, dir.path(),
+    // Arc::new(BiasedPicker::new([1]))).await;
 
     //     let e1 = memory.insert(1, vec![1; 7 * KB]);
     //     let e2 = memory.insert(2, vec![2; 7 * KB]);

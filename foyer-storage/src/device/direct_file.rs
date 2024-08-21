@@ -12,6 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{
+    fs::{create_dir_all, File, OpenOptions},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
@@ -21,11 +27,6 @@ use crate::{
     device::ALIGN,
     error::{Error, Result},
     IoBytes, IoBytesMut,
-};
-use std::{
-    fs::{create_dir_all, File, OpenOptions},
-    path::{Path, PathBuf},
-    sync::Arc,
 };
 
 /// Options for the direct file device.
@@ -90,7 +91,6 @@ impl DirectFileDevice {
         asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
@@ -127,7 +127,6 @@ impl DirectFileDevice {
         let mut buffer = asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 

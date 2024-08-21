@@ -12,6 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{
+    fmt::Debug,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::{
@@ -20,13 +27,6 @@ use futures::{
 };
 
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
-
-use std::{
-    fmt::Debug,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
 
 enum OrderFuture<F1, F2, F3> {
     LeftFirst(F1),

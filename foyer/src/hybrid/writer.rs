@@ -12,13 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use ahash::RandomState;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheContext;
 use std::{
     fmt::Debug,
     time::{Duration, Instant},
 };
+
+use ahash::RandomState;
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_memory::CacheContext;
 
 use crate::{HybridCache, HybridCacheEntry};
 
@@ -90,7 +91,8 @@ where
 
     /// Check if the entry can be admitted by the admission picker of the disk cache.
     ///
-    /// `pick` is idempotent (unless `force` is called). Which means the disk cache only check its admission at most once.
+    /// `pick` is idempotent (unless `force` is called). Which means the disk cache only check its admission at most
+    /// once.
     pub fn pick(&mut self) -> bool {
         if let Some(picked) = self.picked {
             return picked;

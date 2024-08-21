@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 use bitflags::bitflags;
-
 use foyer_common::{
     assert::OptionExt,
     code::{Key, Value},

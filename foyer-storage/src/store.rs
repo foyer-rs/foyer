@@ -12,6 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
+
+use ahash::RandomState;
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+    runtime::BackgroundShutdownRuntime,
+};
+use foyer_memory::{Cache, CacheEntry};
+use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+
 use crate::{
     compress::Compression,
     device::{
@@ -35,16 +47,6 @@ use crate::{
     },
     Dev, DevExt, DirectFileDeviceOptions, IoBytesMut,
 };
-use ahash::RandomState;
-use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
-    runtime::BackgroundShutdownRuntime,
-};
-use foyer_memory::{Cache, CacheEntry};
-use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
-use tokio::runtime::Handle;
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
 pub struct Store<K, V, S = RandomState>

@@ -12,11 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
-
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 

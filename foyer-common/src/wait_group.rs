@@ -12,7 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use futures::{task::AtomicWaker, Future};
 use std::{
     pin::Pin,
     sync::{
@@ -21,6 +20,8 @@ use std::{
     },
     task::{Context, Poll},
 };
+
+use futures::{task::AtomicWaker, Future};
 
 #[derive(Debug, Default)]
 struct WaitGroupInner {
@@ -64,8 +65,7 @@ impl Drop for WaitGroupGuard {
             // Wake up the future if this is the last count.
             //
             // - If the waker is not set yet, this is a no-op. The counter might be increased again later.
-            // - If the waker is already set, the counter will be no longer increased,
-            //   so this is the actual last count.
+            // - If the waker is already set, the counter will be no longer increased, so this is the actual last count.
             self.inner.waker.wake();
         }
     }

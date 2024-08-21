@@ -28,6 +28,7 @@ use std::{
 };
 
 use ahash::RandomState;
+use fastrace::{future::InSpan, prelude::*};
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
@@ -48,8 +49,6 @@ use crate::{
     indexer::Indexer,
     CacheContext,
 };
-
-use fastrace::{future::InSpan, prelude::*};
 
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.

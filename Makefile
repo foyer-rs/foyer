@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt
 
 deps:
 	./scripts/install-deps.sh
@@ -74,3 +74,6 @@ monitor:
 
 clear:
 	rm -rf .tmp
+
+ffmt:
+	cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml
