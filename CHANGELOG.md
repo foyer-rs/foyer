@@ -64,11 +64,11 @@
 
 ### Changes
 
-- Introduce tail-based tracing framework with [minitrace](https://github.com/tikv/minitrace-rust). [Tail-based Tracing Example](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs).
+- Introduce tail-based tracing framework with [minitrace](https://github.com/tikv/minitrace-rust). [Tail-based Tracing Example](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs).
 - Fix `fetch()` disk cache refill on in-memory cache miss.
 - Publish *foyer* logo! 
 
-<img src="https://raw.githubusercontent.com/MrCroxx/foyer/main/etc/logo/slogan.min.svg"/>
+<img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/slogan.min.svg"/>
 
 </details>
 
@@ -84,8 +84,8 @@
 
 ### Changes
 
-- Fix phantom entries after foyer storage recovery. [#560](https://github.com/MrCroxx/foyer/pull/560)
-- Fix hybrid cache hit metrics with `fetch()` interface. [#563](https://github.com/MrCroxx/foyer/pull/563)
+- Fix phantom entries after foyer storage recovery. [#560](https://github.com/foyer-rs/foyer/pull/560)
+- Fix hybrid cache hit metrics with `fetch()` interface. [#563](https://github.com/foyer-rs/foyer/pull/563)
 
 </details>
 
@@ -157,8 +157,8 @@
 
 ### Changes
 
-- Fix "attempt to subtract with overflow" panic after cloning cache entry. [#543](https://github.com/MrCroxx/foyer/issues/543).
-- Fix "assertion failed: base.is_in_indexer()" panic after replacing deposit entry. [#547](https://github.com/MrCroxx/foyer/issues/547).
+- Fix "attempt to subtract with overflow" panic after cloning cache entry. [#543](https://github.com/foyer-rs/foyer/issues/543).
+- Fix "assertion failed: base.is_in_indexer()" panic after replacing deposit entry. [#547](https://github.com/foyer-rs/foyer/issues/547).
 - Fix setting name for in-memory cache.
 - Add region related metrics.
 - Introduce `strict_assertions` and `sanity` feature for debugging.
@@ -192,7 +192,7 @@
 - Fulfill rust docs for public APIs.
 - Introduce tombstone log for updatable persistent cache.
 - Reduce unnecessary dependencies.
-- More details: [foyer - Project Dashboard](https://github.com/users/MrCroxx/projects/4).
+- More details: [foyer - Development Roadmap](https://github.com/orgs/foyer-rs/projects/2).
 
 </details>
 
@@ -542,7 +542,7 @@
 ### Changes
 
 - Bump rust-toolchain to "nightly-2023-12-26".
-- Introduce time-series distribution args to bench tool. [#253](https://github.com/MrCroxx/foyer/pull/253)
+- Introduce time-series distribution args to bench tool. [#253](https://github.com/foyer-rs/foyer/pull/253)
 
 ### Fixes
 

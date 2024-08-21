@@ -1,26 +1,29 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/MrCroxx/foyer/main/etc/logo/slogan.min.svg" />
+    <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/slogan.min.svg" />
 </p>
 
 # foyer
 
 ![Crates.io Version](https://img.shields.io/crates/v/foyer)
 ![Crates.io MSRV](https://img.shields.io/crates/msrv/foyer)
-![GitHub License](https://img.shields.io/github/license/mrcroxx/foyer)
+![GitHub License](https://img.shields.io/github/license/foyer-rs/foyer)
 
-[![CI (main)](https://github.com/MrCroxx/foyer/actions/workflows/main.yml/badge.svg)](https://github.com/MrCroxx/foyer/actions/workflows/main.yml)
-[![License Checker](https://github.com/MrCroxx/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/MrCroxx/foyer/actions/workflows/license_check.yml)
-[![codecov](https://codecov.io/github/MrCroxx/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/MrCroxx/foyer)
+[![CI (main)](https://github.com/foyer-rs/foyer/actions/workflows/main.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/main.yml)
+[![License Checker](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml)
+[![codecov](https://codecov.io/github/foyer-rs/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/foyer-rs/foyer)
 
-*foyer* aims to be a user-friendly hybrid cache lib in Rust. 
+*foyer* aims to be an efficient and user-friendly hybrid cache lib in Rust. 
 
-*foyer* is inspired by [Facebook/CacheLib](https://github.com/facebook/cachelib), [ben-manes/caffeine](https://github.com/ben-manes/caffeine), and other projects, which is an excellent hybrid cache lib in C++. *foyer* is not only a 'rewrite in Rust project', but provide some features that *CacheLib* doesn't have for now.
+foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cachelib), a highly-regarded hybrid cache library written in C++, and [ben-manes/caffeine](https://github.com/ben-manes/caffeine), a popular Java caching library, among other projects.
+
+However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
 ## Features
 
 - **Hybrid Cache**: Seamlessly integrates both in-memory and disk-based caching for optimal performance and flexibility.
 - **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
 - **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
+- **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
 - **User-Friendly Interface**: Offers a simple and intuitive API, making cache integration effortless and accessible for developers of all levels.
 - **Out-of-the-Box Observability**: Integrate popular observation systems such as Prometheus, Grafana, Opentelemetry, and Jaeger in just *ONE* line.
 
@@ -180,10 +183,10 @@ async fn mock() -> Result<String> {
 
 ### Other Examples
 
-- [Event Listener](https://github.com/MrCroxx/foyer/tree/main/examples/event_listener.rs)
-- [Tail-based Tracing](https://github.com/MrCroxx/foyer/tree/main/examples/tail_based_tracing.rs)
+- [Event Listener](https://github.com/foyer-rs/foyer/tree/main/examples/event_listener.rs)
+- [Tail-based Tracing](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs)
 
-More examples and details can be found [here](https://github.com/MrCroxx/foyer/tree/main/examples).
+More examples and details can be found [here](https://github.com/foyer-rs/foyer/tree/main/examples).
 
 ## Supported Rust Versions
 
@@ -193,7 +196,7 @@ More examples and details can be found [here](https://github.com/MrCroxx/foyer/t
 
 Currently, *foyer* is still under heavy development.
 
-The development state and the roadmap can be found [here](https://github.com/users/MrCroxx/projects/4).
+The development state and the roadmap can be found in [foyer - Development Roadmap](https://github.com/orgs/foyer-rs/projects/2).
 
 ## Contributing
 
@@ -202,3 +205,7 @@ Contributions for *foyer* are warmly welcomed! 🥰
 Don't forget to pass `make fast` (which means fast check & test) locally before submitting a PR. 🚀
 
 If you want to run a broader range of checks locally, run `make full`. 🙌
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=foyer-rs/foyer&type=Date)](https://star-history.com/#foyer-rs/foyer&Date)
