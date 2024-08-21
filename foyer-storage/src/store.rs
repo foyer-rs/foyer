@@ -42,6 +42,7 @@ use foyer_common::{
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, CacheEntry};
+use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
 use tokio::runtime::Handle;
 
@@ -287,6 +288,7 @@ impl CombinedConfig {
 }
 
 /// Tokio runtime configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokioRuntimeConfig {
     /// Dedicated runtime worker threads.
     ///
@@ -305,6 +307,7 @@ pub struct TokioRuntimeConfig {
 }
 
 /// Configuration for the dedicated runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeConfig {
     /// Disable dedicated runtime. The runtime which foyer is built on will be used.
     Disabled,

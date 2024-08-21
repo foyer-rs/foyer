@@ -21,6 +21,7 @@ use std::{
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
@@ -31,7 +32,7 @@ use crate::{
 };
 
 /// Options for the direct fs device.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectFsDeviceOptions {
     /// Directory of the direct fs device.
     pub dir: PathBuf,
