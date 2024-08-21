@@ -14,15 +14,30 @@
 
 //! Test utils for the `foyer-storage` crate.
 
-use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::HashSet,
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+    sync::{Arc, OnceLock},
+};
 
-use foyer_common::code::StorageKey;
+use foyer_common::{code::StorageKey, metrics::Metrics};
 use parking_lot::Mutex;
 
 use crate::{
     picker::{AdmissionPicker, ReinsertionPicker},
     statistics::Statistics,
 };
+
+/// A phantom metrics for test.
+static METRICS_FOR_TEST: OnceLock<Metrics> = OnceLock::new();
+
+/// Get a phantom metrics for test.
+pub fn metrics_for_test() -> &'static Metrics {
+    METRICS_FOR_TEST.get_or_init(|| Metrics::new("test"))
+}
 
 /// A picker that only admits key from the given list.
 pub struct BiasedPicker<K, Q> {

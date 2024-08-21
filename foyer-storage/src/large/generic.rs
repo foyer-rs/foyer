@@ -228,6 +228,7 @@ where
             &indexer,
             &region_manager,
             &tombstones,
+            metrics.clone(),
             config.user_runtime_handle.clone(),
         )
         .await?;
@@ -256,6 +257,7 @@ where
                 flushers.clone(),
                 stats.clone(),
                 config.flush,
+                metrics.clone(),
                 config.write_runtime_handle.clone(),
             )
             .await
@@ -346,6 +348,7 @@ where
                 header.value_len as _,
                 header.compression,
                 Some(header.checksum),
+                &metrics,
             ) {
                 Ok(res) => res,
                 Err(e) => match e {
@@ -499,7 +502,7 @@ mod tests {
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
-        test_utils::BiasedPicker,
+        test_utils::{metrics_for_test, BiasedPicker},
         IoBytesMut, TombstoneLogConfigBuilder,
     };
 
@@ -594,7 +597,14 @@ mod tests {
 
     fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
         let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(entry.key(), entry.value(), &Compression::None, &mut buffer).unwrap();
+        let info = EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            &mut buffer,
+            metrics_for_test(),
+        )
+        .unwrap();
         let buffer = buffer.freeze();
         store.enqueue(entry, buffer, info);
     }

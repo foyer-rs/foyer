@@ -143,7 +143,13 @@ where
         self.inner.write_runtime_handle.spawn(async move {
             if force || this.pick(entry.key()) {
                 let mut buffer = IoBytesMut::new();
-                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, &mut buffer) {
+                match EntrySerializer::serialize(
+                    entry.key(),
+                    entry.value(),
+                    &compression,
+                    &mut buffer,
+                    &this.inner.metrics,
+                ) {
                     Ok(info) => {
                         let buffer = buffer.freeze();
                         this.inner.engine.enqueue(entry, buffer, info);

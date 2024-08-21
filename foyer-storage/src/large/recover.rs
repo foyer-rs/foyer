@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use clap::ValueEnum;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::metrics::Metrics;
 use futures::future::try_join_all;
 
 use itertools::Itertools;
@@ -61,6 +62,8 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
+    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run<K, V, S>(
         config: &GenericLargeStorageConfig<K, V, S>,
         regions: Range<RegionId>,
@@ -68,6 +71,7 @@ impl RecoverRunner {
         indexer: &Indexer,
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Result<()>
     where
@@ -81,9 +85,10 @@ impl RecoverRunner {
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
+            let metrics = metrics.clone();
             runtime.spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, region).await;
+                let res = RegionRecoverRunner::run(mode, region, metrics).await;
                 drop(permit);
                 res
             })
@@ -194,7 +199,7 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
+    async fn run(mode: RecoverMode, region: Region, metrics: Arc<Metrics>) -> Result<Vec<EntryInfo>> {
         if mode == RecoverMode::None {
             return Ok(vec![]);
         }
@@ -202,7 +207,7 @@ impl RegionRecoverRunner {
         let mut infos = vec![];
 
         let id = region.id();
-        let mut iter = RegionScanner::new(region);
+        let mut iter = RegionScanner::new(region, metrics);
         loop {
             let r = iter.next().await;
             match r {
