@@ -39,13 +39,13 @@ Feel free to open a PR and add your projects here:
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.10"
+foyer = "0.11"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.10", features = ["nightly"] }
+foyer = { version = "0.11", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -102,7 +102,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfigBuilder, TombstoneLogConfigBuilder,
+    RuntimeConfig, TokioRuntimeConfig, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -143,12 +143,16 @@ async fn main() -> Result<()> {
                 .with_flush(true)
                 .build(),
         )
-        .with_runtime_config(
-            RuntimeConfigBuilder::new()
-                .with_thread_name("foyer")
-                .with_worker_threads(4)
-                .build(),
-        )
+        .with_runtime_config(RuntimeConfig::Separated {
+            read_runtime_config: TokioRuntimeConfig {
+                worker_threads: 4,
+                max_blocking_threads: 8,
+            },
+            write_runtime_config: TokioRuntimeConfig {
+                worker_threads: 4,
+                max_blocking_threads: 8,
+            },
+        })
         .build()
         .await?;
 
