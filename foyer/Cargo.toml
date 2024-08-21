@@ -5,8 +5,8 @@ edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "Hybrid cache for Rust"
 license = "Apache-2.0"
-repository = "https://github.com/mrcroxx/foyer"
-homepage = "https://github.com/mrcroxx/foyer"
+repository = "https://github.com/foyer-rs/foyer"
+homepage = "https://github.com/foyer-rs/foyer"
 readme = "../README.md"
 rust-version = "1.77"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
