@@ -12,9 +12,65 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    ops::Deref,
+    time::{Duration, Instant},
+};
 
 use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
+
+/// A Wrapper for [`Histogram`] to track durations.
+#[derive(Clone)]
+pub struct DurationHistogram(Histogram);
+
+impl Deref for DurationHistogram {
+    type Target = Histogram;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Histogram> for DurationHistogram {
+    fn from(value: Histogram) -> Self {
+        Self::new(value)
+    }
+}
+
+impl DurationHistogram {
+    /// Create a new [`DurationHistogram`].
+    pub fn new(histogram: Histogram) -> Self {
+        Self(histogram)
+    }
+
+    /// Get a timer that automatically record duration on drop.
+    pub fn timer(&self) -> DurationHistogramTimer<'_> {
+        DurationHistogramTimer {
+            histogram: self,
+            created: Instant::now(),
+        }
+    }
+}
+
+/// A timer that automatically record duration with [`Histogram`] on drop.
+pub struct DurationHistogramTimer<'a> {
+    histogram: &'a Histogram,
+    created: Instant,
+}
+
+impl<'a> Drop for DurationHistogramTimer<'a> {
+    fn drop(&mut self) {
+        self.histogram.record(self.created.elapsed());
+    }
+}
+
+impl<'a> DurationHistogramTimer<'a> {
+    /// Get elapsed duration since created.
+    pub fn elapsed(&self) -> Duration {
+        self.created.elapsed()
+    }
+}
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 #[allow(missing_docs)]
@@ -40,13 +96,13 @@ pub struct Metrics {
     pub storage_miss: Counter,
     pub storage_delete: Counter,
 
-    pub storage_enqueue_duration: Histogram,
-    pub storage_hit_duration: Histogram,
-    pub storage_miss_duration: Histogram,
-    pub storage_delete_duration: Histogram,
+    pub storage_enqueue_duration: DurationHistogram,
+    pub storage_hit_duration: DurationHistogram,
+    pub storage_miss_duration: DurationHistogram,
+    pub storage_delete_duration: DurationHistogram,
 
     pub storage_queue_rotate: Counter,
-    pub storage_queue_rotate_duration: Histogram,
+    pub storage_queue_rotate_duration: DurationHistogram,
     pub storage_queue_drop: Counter,
 
     pub storage_disk_write: Counter,
@@ -56,9 +112,9 @@ pub struct Metrics {
     pub storage_disk_write_bytes: Counter,
     pub storage_disk_read_bytes: Counter,
 
-    pub storage_disk_write_duration: Histogram,
-    pub storage_disk_read_duration: Histogram,
-    pub storage_disk_flush_duration: Histogram,
+    pub storage_disk_write_duration: DurationHistogram,
+    pub storage_disk_read_duration: DurationHistogram,
+    pub storage_disk_flush_duration: DurationHistogram,
 
     pub storage_region_total: Gauge,
     pub storage_region_clean: Gauge,
@@ -66,8 +122,8 @@ pub struct Metrics {
 
     pub storage_region_size_bytes: Gauge,
 
-    pub storage_entry_serialize_duration: Histogram,
-    pub storage_entry_deserialize_duration: Histogram,
+    pub storage_entry_serialize_duration: DurationHistogram,
+    pub storage_entry_deserialize_duration: DurationHistogram,
 
     /* hybrid cache metrics */
     pub hybrid_insert: Counter,
@@ -75,11 +131,11 @@ pub struct Metrics {
     pub hybrid_miss: Counter,
     pub hybrid_remove: Counter,
 
-    pub hybrid_insert_duration: Histogram,
-    pub hybrid_hit_duration: Histogram,
-    pub hybrid_miss_duration: Histogram,
-    pub hybrid_remove_duration: Histogram,
-    pub hybrid_fetch_duration: Histogram,
+    pub hybrid_insert_duration: DurationHistogram,
+    pub hybrid_hit_duration: DurationHistogram,
+    pub hybrid_miss_duration: DurationHistogram,
+    pub hybrid_remove_duration: DurationHistogram,
+    pub hybrid_fetch_duration: DurationHistogram,
 }
 
 impl Debug for Metrics {
@@ -116,18 +172,19 @@ impl Metrics {
         let storage_delete = counter!(format!("foyer_storage_op_total"), "name" => name.to_string(), "op" => "delete");
 
         let storage_enqueue_duration =
-            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "enqueue");
+            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "enqueue").into();
         let storage_hit_duration =
-            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "hit");
+            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "hit").into();
         let storage_miss_duration =
-            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "miss");
+            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "miss").into();
         let storage_delete_duration =
-            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "delete");
+            histogram!(format!("foyer_storage_op_duration"), "name" => name.to_string(), "op" => "delete").into();
 
         let storage_queue_rotate =
             counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_rotate");
         let storage_queue_rotate_duration =
-            histogram!(format!("foyer_storage_inner_op_duration"), "name" => name.to_string(), "op" => "queue_rotate");
+            histogram!(format!("foyer_storage_inner_op_duration"), "name" => name.to_string(), "op" => "queue_rotate")
+                .into();
         let storage_queue_drop =
             counter!(format!("foyer_storage_inner_op_total"), "name" => name.to_string(), "op" => "queue_drop");
 
@@ -144,11 +201,11 @@ impl Metrics {
             counter!(format!("foyer_storage_disk_io_bytes"), "name" => name.to_string(), "op" => "read");
 
         let storage_disk_write_duration =
-            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "write");
+            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "write").into();
         let storage_disk_read_duration =
-            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "read");
+            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "read").into();
         let storage_disk_flush_duration =
-            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "flush");
+            histogram!(format!("foyer_storage_disk_io_duration"), "name" => name.to_string(), "op" => "flush").into();
 
         let storage_region_total =
             gauge!(format!("foyer_storage_region"), "name" => name.to_string(), "type" => "total");
@@ -160,8 +217,9 @@ impl Metrics {
         let storage_region_size_bytes = gauge!(format!("foyer_storage_region_size_bytes"), "name" => name.to_string());
 
         let storage_entry_serialize_duration =
-            histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "serialize");
-        let storage_entry_deserialize_duration = histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "deserialize");
+            histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "serialize")
+                .into();
+        let storage_entry_deserialize_duration = histogram!(format!("foyer_storage_entry_serde_duration"), "name" => name.to_string(), "op" => "deserialize").into();
 
         /* hybrid cache metrics */
 
@@ -171,15 +229,15 @@ impl Metrics {
         let hybrid_remove = counter!(format!("foyer_hybrid_op_total"), "name" => name.to_string(), "op" => "remove");
 
         let hybrid_insert_duration =
-            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "insert");
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "insert").into();
         let hybrid_hit_duration =
-            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "hit");
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "hit").into();
         let hybrid_miss_duration =
-            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "miss");
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "miss").into();
         let hybrid_remove_duration =
-            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "remove");
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "remove").into();
         let hybrid_fetch_duration =
-            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "fetch");
+            histogram!(format!("foyer_hybrid_op_duration"), "name" => name.to_string(), "op" => "fetch").into();
 
         Self {
             memory_insert,

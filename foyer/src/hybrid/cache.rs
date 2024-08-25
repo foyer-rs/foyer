@@ -171,17 +171,15 @@ where
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
+        let _timer = self.metrics.hybrid_insert_duration.timer();
+
         root_span!(self, mut span, "foyer::hybrid::cache::insert");
-
         let _guard = span.set_local_parent();
-
-        let now = Instant::now();
 
         let entry = self.memory.insert(key, value);
         self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
@@ -190,17 +188,15 @@ where
 
     /// Insert cache entry with cache context to the hybrid cache.
     pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+        let _timer = self.metrics.hybrid_insert_duration.timer();
+
         root_span!(self, mut span, "foyer::hybrid::cache::insert_with_context");
-
         let _guard = span.set_local_parent();
-
-        let now = Instant::now();
 
         let entry = self.memory.insert_with_context(key, value, context);
         self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
@@ -213,9 +209,9 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
     {
-        root_span!(self, mut span, "foyer::hybrid::cache::get");
-
         let now = Instant::now();
+
+        root_span!(self, mut span, "foyer::hybrid::cache::get");
 
         let record_hit = || {
             self.metrics.hybrid_hit.increment(1);
@@ -314,17 +310,15 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + Send + Sync + 'static,
     {
+        let _timer = self.metrics.hybrid_remove_duration.timer();
+
         root_span!(self, mut span, "foyer::hybrid::cache::remove");
-
         let _guard = span.set_local_parent();
-
-        let now = Instant::now();
 
         self.memory.remove(key);
         self.storage.delete(key);
 
         self.metrics.hybrid_remove.increment(1);
-        self.metrics.hybrid_remove_duration.record(now.elapsed());
 
         try_cancel!(self, span, record_hybrid_remove_threshold);
     }
