@@ -190,7 +190,7 @@ where
                 return;
             }
         };
-        strict_assert!(allocation.len() > header.entry_len());
+        strict_assert!(allocation.len() >= header.entry_len());
 
         header.write(&mut allocation[0..EntryHeader::serialized_len()]);
         allocation[EntryHeader::serialized_len()..header.entry_len()].copy_from_slice(&buffer);
