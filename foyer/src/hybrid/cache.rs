@@ -257,7 +257,7 @@ where
 
     /// Get cached entry with the given key from the hybrid cache.
     ///
-    /// Different from `get`, `obtain` dedeplicates the disk cache queries.
+    /// Different from `get`, `obtain` deduplicates the disk cache queries.
     ///
     /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
     /// key is acceptable.
@@ -485,6 +485,7 @@ where
             context,
             || {
                 let metrics = self.metrics.clone();
+                let user_runtime_handle = self.storage().runtimes().user_runtime_handle.clone();
 
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
@@ -501,17 +502,20 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    future
-                        .map(|res| Diversion {
-                            target: res,
-                            store: Some(FetchMark),
-                        })
-                        .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
+                    user_runtime_handle
+                        .spawn(
+                            future
+                                .map(|res| Diversion {
+                                    target: res,
+                                    store: Some(FetchMark),
+                                })
+                                .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn")),
+                        )
                         .await
+                        .unwrap()
                 }
             },
-            // TODO(MrCroxx): check regression
-            self.storage().runtimes().user_runtime_handle,
+            self.storage().runtimes().read_runtime_handle,
         );
 
         if inner.state() == FetchState::Hit {
