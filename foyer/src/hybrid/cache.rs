@@ -257,7 +257,7 @@ where
 
     /// Get cached entry with the given key from the hybrid cache.
     ///
-    /// Different from `get`, `obtain` dedeplicates the disk cache queries.
+    /// Different from `get`, `obtain` deduplicates the disk cache queries.
     ///
     /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
     /// key is acceptable.
