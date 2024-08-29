@@ -515,7 +515,6 @@ where
                         .unwrap()
                 }
             },
-            // TODO(MrCroxx): check regression
             self.storage().runtimes().read_runtime_handle,
         );
 
