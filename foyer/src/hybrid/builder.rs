@@ -185,7 +185,7 @@ where
     }
 }
 
-/// Hybird cache builder modify the disk cache configurations.
+/// Hybrid cache builder modify the disk cache configurations.
 pub struct HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
