@@ -24,7 +24,7 @@ use foyer_common::{
 use super::indexer::EntryAddress;
 use crate::{
     device::bytes::IoBytes,
-    error::Result,
+    error::{Error, Result},
     large::serde::{EntryHeader, Sequence},
     region::Region,
     serde::EntryDeserializer,
@@ -38,13 +38,13 @@ pub struct EntryInfo {
 }
 
 #[derive(Debug)]
-struct CachedDeviceReader {
+struct CachedRegionReader {
     region: Region,
     offset: u64,
     buffer: IoBytes,
 }
 
-impl CachedDeviceReader {
+impl CachedRegionReader {
     const IO_SIZE_HINT: usize = 16 * 1024;
 
     fn new(region: Region) -> Self {
@@ -56,20 +56,30 @@ impl CachedDeviceReader {
     }
 
     async fn read(&mut self, offset: u64, len: usize) -> Result<&[u8]> {
+        if offset as usize + len >= self.region.size() {
+            return Err(Error::OutOfRange {
+                valid: 0..self.region.size(),
+                get: offset as usize..offset as usize + len,
+            });
+        }
+
         if offset >= self.offset && offset as usize + len <= self.offset as usize + self.buffer.len() {
             let start = (offset - self.offset) as usize;
             let end = start + len;
             return Ok(&self.buffer[start..end]);
         }
+
+        // Move forward.
         self.offset = bits::align_down(self.region.align() as u64, offset);
         let end = bits::align_up(
             self.region.align(),
             std::cmp::max(offset as usize + len, offset as usize + Self::IO_SIZE_HINT),
         );
         let end = std::cmp::min(self.region.size(), end);
+
         let read_len = end - self.offset as usize;
-        strict_assert!(bits::is_aligned(self.region.align(), read_len));
-        strict_assert!(read_len >= len);
+        assert!(bits::is_aligned(self.region.align(), read_len));
+        assert!(read_len >= len);
 
         let buffer = self.region.read(self.offset, read_len).await?.freeze();
         self.buffer = buffer;
@@ -84,13 +94,13 @@ impl CachedDeviceReader {
 pub struct RegionScanner {
     region: Region,
     offset: u64,
-    cache: CachedDeviceReader,
+    cache: CachedRegionReader,
     metrics: Arc<Metrics>,
 }
 
 impl RegionScanner {
     pub fn new(region: Region, metrics: Arc<Metrics>) -> Self {
-        let cache = CachedDeviceReader::new(region.clone());
+        let cache = CachedRegionReader::new(region.clone());
         Self {
             region,
             offset: 0,
@@ -226,5 +236,55 @@ impl RegionScanner {
         self.step(&header).await;
 
         Ok(Some((info, key, value)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::{
+        device::{
+            monitor::{Monitored, MonitoredOptions},
+            Dev, MonitoredDevice,
+        },
+        region::RegionStats,
+        DirectFsDeviceOptions,
+    };
+
+    use super::*;
+
+    const KB: usize = 1024;
+
+    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+        Monitored::open(MonitoredOptions {
+            options: DirectFsDeviceOptions {
+                dir: dir.as_ref().into(),
+                capacity: 64 * KB,
+                file_size: 16 * KB,
+            }
+            .into(),
+            metrics: Arc::new(Metrics::new("test")),
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_cached_region_reader_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let device = device_for_test(dir.path()).await;
+        let region = Region::new_for_test(0, device, Arc::<RegionStats>::default());
+
+        let mut cached = CachedRegionReader::new(region.clone());
+
+        cached.read(0, region.size() / 2).await.unwrap();
+        let res = cached.read(region.size() as u64 / 2, region.size()).await;
+        assert!(
+            matches!(res, Err(Error::OutOfRange { valid, get }) if valid == (0..region.size()) && get == (
+                region.size() / 2..region.size() / 2 + region.size()
+            ))
+        );
     }
 }

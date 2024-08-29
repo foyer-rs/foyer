@@ -105,6 +105,13 @@ impl Region {
     }
 }
 
+#[cfg(test)]
+impl Region {
+    pub fn new_for_test(id: RegionId, device: MonitoredDevice, stats: Arc<RegionStats>) -> Self {
+        Self { id, device, stats }
+    }
+}
+
 #[derive(Clone)]
 pub struct RegionManager {
     inner: Arc<RegionManagerInner>,
