@@ -243,6 +243,7 @@ impl RegionScanner {
 mod tests {
     use std::path::Path;
 
+    use super::*;
     use crate::{
         device::{
             monitor::{Monitored, MonitoredOptions},
@@ -251,8 +252,6 @@ mod tests {
         region::RegionStats,
         DirectFsDeviceOptions,
     };
-
-    use super::*;
 
     const KB: usize = 1024;
 
