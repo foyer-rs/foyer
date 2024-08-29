@@ -296,7 +296,7 @@ impl CombinedConfig {
 }
 
 /// Tokio runtime configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokioRuntimeConfig {
     /// Dedicated runtime worker threads.
     ///
