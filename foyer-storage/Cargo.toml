@@ -54,3 +54,6 @@ strict_assertions = [
     "foyer-memory/strict_assertions",
 ]
 mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }

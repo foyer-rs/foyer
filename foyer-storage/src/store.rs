@@ -571,9 +571,11 @@ where
 
         let build_runtime = |config: &TokioRuntimeConfig, suffix: &str| {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
+            #[cfg(not(madsim))]
             if config.worker_threads != 0 {
                 builder.worker_threads(config.worker_threads);
             }
+            #[cfg(not(madsim))]
             if config.max_blocking_threads != 0 {
                 builder.max_blocking_threads(config.max_blocking_threads);
             }
