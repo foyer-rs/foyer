@@ -337,7 +337,19 @@ where
                 .cache_read_bytes
                 .fetch_add(bits::align_up(device.align(), buffer.len()), Ordering::Relaxed);
 
-            let header = EntryHeader::read(&buffer[..EntryHeader::serialized_len()])?;
+            let header = match EntryHeader::read(&buffer[..EntryHeader::serialized_len()]) {
+                Ok(header) => header,
+                Err(e @ Error::MagicMismatch { .. })
+                | Err(e @ Error::ChecksumMismatch { .. })
+                | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
+                    tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increment(1);
+                    metrics.storage_miss_duration.record(now.elapsed());
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            };
 
             let (k, v) = match EntryDeserializer::deserialize::<K, V>(
                 &buffer[EntryHeader::serialized_len()..],
@@ -348,16 +360,14 @@ where
                 &metrics,
             ) {
                 Ok(res) => res,
-                Err(e) => match e {
-                    Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
-                        tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
-                        indexer.remove(hash);
-                        metrics.storage_miss.increment(1);
-                        metrics.storage_miss_duration.record(now.elapsed());
-                        return Ok(None);
-                    }
-                    e => return Err(e),
-                },
+                Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
+                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increment(1);
+                    metrics.storage_miss_duration.record(now.elapsed());
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
             };
 
             metrics.storage_hit.increment(1);
@@ -484,7 +494,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::path::Path;
+    use std::{fs::File, os::unix::fs::FileExt, path::Path};
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
@@ -911,5 +921,34 @@ mod tests {
                 Some((9, vec![9; 7 * KB])),
             ]
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_magic_checksum_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test(dir.path()).await;
+
+        // write entry 1
+        let e1 = memory.insert(1, vec![1; 7 * KB]);
+        enqueue(&store, e1);
+        store.wait().await;
+
+        // check entry 1
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+
+        // corrupt entry and header
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            if !entry.metadata().unwrap().is_file() {
+                continue;
+            }
+            let file = File::options().write(true).open(entry.path()).unwrap();
+            file.write_all_at(&[b'x'; 4 * 1024], 0).unwrap();
+        }
+
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
     }
 }
