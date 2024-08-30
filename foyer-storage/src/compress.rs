@@ -14,11 +14,10 @@
 
 // TODO(MrCroxx): unify compress interface?
 
-use anyhow::anyhow;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-const NOT_SUPPORT: &str = "compression algorithm not support";
+use crate::error::Error;
 
 /// The compression algorithm of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -53,14 +52,14 @@ impl From<Compression> for u8 {
 }
 
 impl TryFrom<u8> for Compression {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::None),
             1 => Ok(Self::Zstd),
             2 => Ok(Self::Lz4),
-            _ => Err(anyhow!(NOT_SUPPORT)),
+            _ => Err(Error::CompressionAlgorithmNotSupported(value)),
         }
     }
 }

@@ -30,7 +30,7 @@ pub enum Error {
     /// Multiple error list.
     Multiple(MultipleError),
     /// Entry magic mismatch.
-    #[error("magiac mismatch, expected: {expected}, get: {get}")]
+    #[error("magic mismatch, expected: {expected}, get: {get}")]
     MagicMismatch {
         /// Expected magic.
         expected: u32,
@@ -53,6 +53,9 @@ pub enum Error {
         /// Gotten range.
         get: Range<usize>,
     },
+    /// Compression algorithm not supported.
+    #[error("compression algorithm not supported: {0}")]
+    CompressionAlgorithmNotSupported(u8),
     /// Other error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
