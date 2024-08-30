@@ -58,7 +58,7 @@ fn init_exporter() {
     init_opentelemetry_exporter();
 
     #[cfg(not(any(feature = "jaeger", feature = "ot")))]
-    panic!("Either jeager or opentelemetry feature must be enabled!");
+    panic!("Either jaeger or opentelemetry feature must be enabled!");
 }
 
 /// NOTE: To run this example, please enable feature "mtrace" and either "jaeger" or "ot".

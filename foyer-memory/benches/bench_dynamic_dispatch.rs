@@ -106,7 +106,7 @@ fn main() {
     for loops in [100_000, 1_000_000, 10_000_000] {
         println!();
 
-        println!("     statis - {} loops : {:?}", loops, bench_static_dispatch(&t, loops));
+        println!("     static - {} loops : {:?}", loops, bench_static_dispatch(&t, loops));
         println!(
             "box dynamic - {} loops : {:?}",
             loops,

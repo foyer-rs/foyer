@@ -144,7 +144,7 @@ unsafe impl<T> Sync for LfuHandle<T> where T: Send + Sync + 'static {}
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
-/// A newcoming and hot entry is kept in `window`.
+/// A new and hot entry is kept in `window`.
 ///
 /// When `window` is full, entries from it will overflow to `probation`.
 ///
@@ -152,7 +152,7 @@ unsafe impl<T> Sync for LfuHandle<T> where T: Send + Sync + 'static {}
 ///
 /// When `protected` is full, entries from it will overflow to `probation`.
 ///
-/// When evicting, the entry with a lower frequency from `window` or `probtion` will be evicted first, then from
+/// When evicting, the entry with a lower frequency from `window` or `probation` will be evicted first, then from
 /// `protected`.
 pub struct Lfu<T>
 where

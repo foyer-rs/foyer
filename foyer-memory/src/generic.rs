@@ -320,7 +320,7 @@ where
             return None;
         }
 
-        strict_assert!(handle.base().is_inited());
+        strict_assert!(handle.base().is_initialized());
         strict_assert!(!handle.base().has_refs());
 
         // If the entry is deposit (emplace by deposit & never read), remove it from indexer to skip reinsertion.

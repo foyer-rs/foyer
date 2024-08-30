@@ -55,7 +55,7 @@ where
 }
 
 impl<K, Q> BiasedPicker<K, Q> {
-    /// Create a biased picker with the geiven admit list.
+    /// Create a biased picker with the given admit list.
     pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
     where
         Q: Hash + Eq,
@@ -100,9 +100,9 @@ pub enum Record<K> {
     Evict(K),
 }
 
-/// A recorder that records the cache entry admission and eviciton of a disk cache.
+/// A recorder that records the cache entry admission and eviction of a disk cache.
 ///
-/// [`Recorder`] should be used as both the admission picker and the reisnertion picker to record.
+/// [`Recorder`] should be used as both the admission picker and the reinsertion picker to record.
 pub struct Recorder<K> {
     records: Mutex<Vec<Record<K>>>,
 }

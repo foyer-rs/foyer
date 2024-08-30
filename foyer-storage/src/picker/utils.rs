@@ -211,7 +211,7 @@ where
     }
 }
 
-/// A picker that pick region to eviciton with a FIFO behaviour.
+/// A picker that pick region to eviction with a FIFO behavior.
 #[derive(Debug, Default)]
 pub struct FifoPicker {
     queue: VecDeque<RegionId>,

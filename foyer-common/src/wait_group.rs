@@ -48,7 +48,7 @@ impl WaitGroup {
     pub fn wait(self) -> WaitGroupFuture {
         WaitGroupFuture {
             inner: self.inner,
-            inited: false,
+            initialized: false,
         }
     }
 }
@@ -78,15 +78,15 @@ impl Drop for WaitGroupGuard {
 #[derive(Debug)]
 pub struct WaitGroupFuture {
     inner: Arc<WaitGroupInner>,
-    inited: bool,
+    initialized: bool,
 }
 
 impl Future for WaitGroupFuture {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if !self.inited {
-            self.inited = true;
+        if !self.initialized {
+            self.initialized = true;
             self.inner.waker.register(cx.waker());
         }
 

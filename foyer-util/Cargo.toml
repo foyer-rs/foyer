@@ -13,8 +13,10 @@ publish = false
 
 [dependencies]
 bitmaps = "3"
+bitvec = "1"
 bytes = "1"
 cfg-if = "1"
+foyer-common = { path = "../foyer-common" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }

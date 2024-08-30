@@ -21,7 +21,7 @@ pub enum CacheContext {
     Default,
     /// Mark the entry as low-priority.
     ///
-    /// The behaviour differs from different eviction algorithm.
+    /// The behavior differs from different eviction algorithm.
     LowPriority,
 }
 

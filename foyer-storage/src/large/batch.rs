@@ -333,7 +333,7 @@ pub struct InvalidStats {
 pub struct RegionHandle {
     /// Handle of the region to write.
     pub handle: GetCleanRegionHandle,
-    /// Offoset of the region to write.
+    /// Offset of the region to write.
     pub offset: u64,
     /// Length of the buffer to write.
     pub len: usize,

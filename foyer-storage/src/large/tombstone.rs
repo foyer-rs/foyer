@@ -38,7 +38,7 @@ use crate::{
 pub struct TombstoneLogConfig {
     /// Path of the tombstone log.
     pub path: PathBuf,
-    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
+    /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub flush: bool,
 }
 
@@ -60,7 +60,7 @@ impl TombstoneLogConfigBuilder {
 
     /// Set whether to enable flush.
     ///
-    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
+    /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub fn with_flush(mut self, flush: bool) -> Self {
         self.flush = flush;
         self
