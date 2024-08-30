@@ -18,7 +18,7 @@
 //!
 //! There are a few goals to achieve with the crate:
 //!
-//! 1. Pluggable eviction algorithm with the same abstraction.
+//! 1. Plug-and-Play eviction algorithm with the same abstraction.
 //! 2. Tracking the real memory usage by the cache. Including both holding by the cache and by the external users.
 //! 3. Reduce the concurrent read-through requests into one.
 //!

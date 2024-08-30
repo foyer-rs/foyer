@@ -79,7 +79,7 @@ impl Clone for IoBuffer {
     }
 }
 
-/// A 4K-aligend u8 vector.
+/// A 4K-aligned u8 vector.
 ///
 /// # Growth
 ///

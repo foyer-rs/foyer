@@ -245,7 +245,7 @@ where
         // 1. Reclaim runner releases 1 permit on finish. (+1)
         // 2. There is a new clean region. (-1)
         //
-        // Because the total permits to modify is 0 and to avlid concurrent corner case, just forget the permit.
+        // Because the total permits to modify is 0 and to avoid concurrent corner case, just forget the permit.
         //
         // The permit only increase when the a clean region is taken to write.
         permit.forget();

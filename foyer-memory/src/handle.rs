@@ -85,7 +85,7 @@ impl<T, C> Default for BaseHandle<T, C> {
 }
 
 impl<T, C> BaseHandle<T, C> {
-    /// Create a uninited handle.
+    /// Create a uninitialized handle.
     #[inline(always)]
     pub fn new() -> Self {
         Self {
@@ -109,7 +109,7 @@ impl<T, C> BaseHandle<T, C> {
         self.flags = BaseHandleFlags::empty();
     }
 
-    /// Take key and value from the handle and reset it to the uninited state.
+    /// Take key and value from the handle and reset it to the uninitialized state.
     #[inline(always)]
     pub fn take(&mut self) -> (T, C, usize) {
         strict_assert!(self.entry.is_some());
@@ -121,9 +121,9 @@ impl<T, C> BaseHandle<T, C> {
         }
     }
 
-    /// Return `true` if the handle is inited.
+    /// Return `true` if the handle is initialized.
     #[inline(always)]
-    pub fn is_inited(&self) -> bool {
+    pub fn is_initialized(&self) -> bool {
         self.entry.is_some()
     }
 
@@ -131,7 +131,7 @@ impl<T, C> BaseHandle<T, C> {
     ///
     /// # Panics
     ///
-    /// Panics if the handle is uninited.
+    /// Panics if the handle is uninitialized.
     #[inline(always)]
     pub fn hash(&self) -> u64 {
         self.hash
@@ -141,7 +141,7 @@ impl<T, C> BaseHandle<T, C> {
     ///
     /// # Panics
     ///
-    /// Panics if the handle is uninited.
+    /// Panics if the handle is uninitialized.
     #[inline(always)]
     pub fn data_unwrap_unchecked(&self) -> &T {
         strict_assert!(self.entry.is_some());
@@ -152,7 +152,7 @@ impl<T, C> BaseHandle<T, C> {
     ///  
     /// # Panics
     ///
-    /// Panics if the handle is uninited.
+    /// Panics if the handle is uninitialized.
     #[inline(always)]
     pub fn context(&self) -> &C {
         strict_assert!(self.entry.is_some());

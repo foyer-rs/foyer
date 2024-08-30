@@ -498,7 +498,7 @@ where
     /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
     /// will be applied.
     ///
-    /// If no eviction picker pickes a region, a region will be picked randomly.
+    /// If no eviction picker picks a region, a region will be picked randomly.
     ///
     /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
@@ -623,7 +623,7 @@ where
             let write_runtime_handle = write_runtime_handle.clone();
             let read_runtime_handle = read_runtime_handle.clone();
             let user_runtime_handle = user_runtime_handle.clone();
-            // Use the user runtiem to open engine.
+            // Use the user runtime to open engine.
             tokio::spawn(async move {
                 match self.device_config {
                     DeviceConfig::None => {

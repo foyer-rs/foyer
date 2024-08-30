@@ -22,7 +22,7 @@ use crate::error::Error;
 /// The compression algorithm of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 pub enum Compression {
-    /// No compression endabled.
+    /// No compression enabled.
     None,
     /// Use zstd compression.
     Zstd,
@@ -31,7 +31,7 @@ pub enum Compression {
 }
 
 impl Compression {
-    /// Get the u8 that repersent the compression algorithm.
+    /// Get the u8 that represent the compression algorithm.
     pub fn to_u8(&self) -> u8 {
         match self {
             Self::None => 0,

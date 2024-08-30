@@ -189,7 +189,7 @@ impl RegionManager {
         // Temporarily take pickers to make borrow checker happy.
         let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
 
-        // Noitfy pickers.
+        // Notify pickers.
         for picker in pickers.iter_mut() {
             picker.on_region_evictable(&eviction.evictable, region);
         }
@@ -225,7 +225,7 @@ impl RegionManager {
             }
         }
 
-        // If no region is selected, just ramdomly pick one.
+        // If no region is selected, just randomly pick one.
         let picked = picked.unwrap_or_else(|| {
             eviction
                 .evictable
@@ -239,7 +239,7 @@ impl RegionManager {
         eviction.evictable.remove(&picked).unwrap();
         self.inner.metrics.storage_region_evictable.decrement(1);
 
-        // Noitfy pickers.
+        // Notify pickers.
         for picker in pickers.iter_mut() {
             picker.on_region_evict(&eviction.evictable, picked);
         }

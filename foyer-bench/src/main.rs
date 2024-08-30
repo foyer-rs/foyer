@@ -138,9 +138,9 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     admission_rate_limit: usize,
 
-    /// Enable rated ticket reinsetion picker if `reinseriton_rate_limit > 0`. (MiB/s)
+    /// Enable rated ticket reinsertion picker if `reinsertion_rate_limit > 0`. (MiB/s)
     #[arg(long, default_value_t = 0)]
-    reinseriton_rate_limit: usize,
+    reinsertion_rate_limit: usize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -539,7 +539,7 @@ async fn benchmark(args: Args) {
         builder =
             builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
     }
-    if args.reinseriton_rate_limit > 0 {
+    if args.reinsertion_rate_limit > 0 {
         builder =
             builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
     }

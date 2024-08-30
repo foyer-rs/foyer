@@ -15,9 +15,8 @@
 use std::{cell::UnsafeCell, sync::Arc};
 
 use bitvec::prelude::*;
+use foyer_common::strict_assert;
 use itertools::Itertools;
-
-use crate::strict_assert;
 
 /// Reduce two 64-bit hashes into one.
 ///
@@ -46,7 +45,8 @@ fn twang_mix64(val: u64) -> u64 {
     val
 }
 
-/// [`CompactBloomFilter`] is composed of a series of contiguous bloom filters with each size is smaller than cacheline.
+/// [`CompactBloomFilter`] is composed of a series of contiguous bloom filters with each size is smaller than cache
+/// line.
 pub struct CompactBloomFilter {
     /// Bloom filter data.
     data: BitVec,
@@ -113,7 +113,7 @@ impl CompactBloomFilter {
         self.data.fill(false);
     }
 
-    /// Create a new comapct bloom filter and return the shards.
+    /// Create a new compact bloom filter and return the shards.
     ///
     /// See [`CompactBloomFilterShard`].
     pub fn shards(filters: usize, hashes: usize, bits: usize) -> Vec<CompactBloomFilterShard> {
