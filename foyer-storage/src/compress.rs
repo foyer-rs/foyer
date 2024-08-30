@@ -14,9 +14,10 @@
 
 // TODO(MrCroxx): unify compress interface?
 
-use crate::error::Error;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+
+use crate::error::Error;
 
 /// The compression algorithm of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
