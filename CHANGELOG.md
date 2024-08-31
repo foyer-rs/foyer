@@ -1,3 +1,26 @@
+## 2024-08-31
+
+| crate | version |
+| - | - |
+| foyer | 0.11.1 |
+| foyer-common | 0.9.1 |
+| foyer-intrusive | 0.9.1 |
+| foyer-memory | 0.7.1 |
+| foyer-storage | 0.10.1 |
+| foyer-bench | 0.3.1 |
+
+<details>
+
+### Changes
+
+- Add metrics for serde.
+- Refine `fetch` runtime usage.
+- Fix unhandled low-layer errors. #674 #677 #679
+- Implement `Default` for `TokioRuntimeConfig`.
+- Fix typos and format code with unstable features.
+
+</details>
+
 ## 2024-08-21
 
 | crate | version |
