@@ -15,6 +15,7 @@ bytes = "1"
 cfg-if = "1"
 crossbeam = "0.8"
 fastrace = { workspace = true }
+fs4 = "0.9.1"
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
