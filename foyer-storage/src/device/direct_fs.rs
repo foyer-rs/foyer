@@ -168,14 +168,17 @@ impl Dev for DirectFsDevice {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
             #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
+            let written = {
+                let original = file.stream_position()?;
+                file.seek(std::io::SeekFrom::Start(offset))?;
+                let written = file.write(buf.as_aligned())?;
+                file.seek(std::io::SeekFrom::Start(original))?;
+                written
+            };
 
-            let original = file.stream_position()?;
-            file.seek(std::io::SeekFrom::Start(offset))?;
-            let written = file.write(buf.as_aligned())?;
-            //file.seek(std::io::SeekFrom::Start(original))?;
+            #[cfg(target_family = "unix")]
+            let written = file.write_at(buf.as_aligned(), offset)?;
 
-            //let written = file.write_at(buf.as_aligned(), offset)?;
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -207,15 +210,17 @@ impl Dev for DirectFsDevice {
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
+            #[cfg(target_family = "unix")]
+            let read = file.read_at(buf.as_mut(), offset)?;
+
             #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
-
-            //let read = file.read_at(buf.as_mut(), offset)?;
-
-            let original = file.stream_position()?;
-            file.seek(std::io::SeekFrom::Start(offset))?;
-            let read = file.read(buf.as_mut())?;
-            //file.seek(std::io::SeekFrom::Start(original))?;
+            let read = {
+                let original = file.stream_position()?;
+                file.seek(std::io::SeekFrom::Start(offset))?;
+                let read = file.read(buf.as_mut())?;
+                file.seek(std::io::SeekFrom::Start(original))?;
+                read
+            };
 
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
