@@ -14,6 +14,7 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -162,14 +163,19 @@ impl Dev for DirectFsDevice {
             region_size = self.region_size(),
         );
 
-        let file = self.file(region).clone();
+        let mut file = self.file(region).clone();
         asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let written = file.write_at(buf.as_aligned(), offset)?;
+            let original = file.stream_position()?;
+            file.seek(std::io::SeekFrom::Start(offset))?;
+            let written = file.write(buf.as_aligned())?;
+            //file.seek(std::io::SeekFrom::Start(original))?;
+
+            //let written = file.write_at(buf.as_aligned(), offset)?;
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -197,14 +203,20 @@ impl Dev for DirectFsDevice {
             buf.set_len(aligned);
         }
 
-        let file = self.file(region).clone();
+        let mut file = self.file(region).clone();
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
             use std::os::unix::fs::FileExt;
             #[cfg(target_family = "windows")]
             use std::os::windows::fs::FileExt;
 
-            let read = file.read_at(buf.as_mut(), offset)?;
+            //let read = file.read_at(buf.as_mut(), offset)?;
+
+            let original = file.stream_position()?;
+            file.seek(std::io::SeekFrom::Start(offset))?;
+            let read = file.read(buf.as_mut())?;
+            //file.seek(std::io::SeekFrom::Start(original))?;
+
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
             }
@@ -288,7 +300,7 @@ impl DirectFsDeviceOptionsBuilder {
         let capacity = self.capacity.unwrap_or({
             // Create an empty directory before to get freespace.
             create_dir_all(&dir).unwrap();
-            freespace(&dir).unwrap() / 10 * 8
+            freespace(&dir).unwrap() as usize / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 
