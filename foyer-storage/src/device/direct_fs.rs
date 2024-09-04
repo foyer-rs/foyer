@@ -12,15 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#[cfg(unix)]
-use std::os::unix::fs::FileExt;
 use std::{
     fs::{create_dir_all, File, OpenOptions},
     path::{Path, PathBuf},
     sync::Arc,
 };
-#[cfg(windows)]
-use std::{io::Seek, os::windows::fs::FileExt};
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use futures::future::try_join_all;
@@ -172,14 +168,16 @@ impl Dev for DirectFsDevice {
         asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "windows")]
             let written = {
+                use std::{io::Seek, os::windows::fs::FileExt};
                 let original = file.stream_position()?;
-                let written = file.seek_write(buf.as_aligned(), offset)?;
-                file.seek(std::io::SeekFrom::Start(original))?;
-                written
+                file.seek_write(buf.as_aligned(), offset)?
             };
 
             #[cfg(target_family = "unix")]
-            let written = { file.write_at(buf.as_aligned(), offset)? };
+            let written = {
+                use std::os::unix::fs::FileExt;
+                file.write_at(buf.as_aligned(), offset)?
+            };
 
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
@@ -213,14 +211,16 @@ impl Dev for DirectFsDevice {
 
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
-            let read = { file.read_at(buf.as_mut(), offset)? };
+            let read = {
+                use std::os::unix::fs::FileExt;
+                file.read_at(buf.as_mut(), offset)?
+            };
 
             #[cfg(target_family = "windows")]
             let read = {
+                use std::{io::Seek, os::windows::fs::FileExt};
                 let original = file.stream_position()?;
-                let read = file.seek_read(buf.as_mut(), offset)?;
-                file.seek(std::io::SeekFrom::Start(original))?;
-                read
+                file.seek_read(buf.as_mut(), offset)?
             };
 
             if read != aligned {
