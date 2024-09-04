@@ -951,7 +951,7 @@ mod tests {
             }
             let mut file = File::options().write(true).open(entry.path()).unwrap();
             file.seek(SeekFrom::Start(0)).unwrap();
-            file.write(&[b'x'; 4 * 1024]).unwrap();
+            file.write_all(&[b'x'; 4 * 1024]).unwrap();
         }
 
         assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
