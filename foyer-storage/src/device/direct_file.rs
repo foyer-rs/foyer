@@ -12,9 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::{
-    fs::{create_dir_all, File, OpenOptions},  path::{Path, PathBuf}, sync::Arc
+    fs::{create_dir_all, File, OpenOptions},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
+#[cfg(windows)]
+use std::{io::Seek, os::windows::fs::FileExt};
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use serde::{Deserialize, Serialize};
@@ -26,12 +32,6 @@ use crate::{
     error::{Error, Result},
     IoBytes, IoBytesMut,
 };
-
-#[cfg(windows)]
-use std::{os::windows::fs::FileExt, io::Seek};
-
-#[cfg(unix)]
-use std::os::unix::fs::FileExt;
 
 /// Options for the direct file device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +95,6 @@ impl DirectFileDevice {
         let mut file = self.file.clone();
 
         asyncify_with_runtime(&self.runtime, move || {
-
             #[cfg(target_family = "windows")]
             let written = {
                 let original = file.stream_position()?;
@@ -105,9 +104,7 @@ impl DirectFileDevice {
             };
 
             #[cfg(target_family = "unix")]
-            let written = {
-                file.write_at(buf.as_aligned(), offset)?
-            };
+            let written = { file.write_at(buf.as_aligned(), offset)? };
 
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
@@ -150,9 +147,7 @@ impl DirectFileDevice {
             };
 
             #[cfg(target_family = "unix")]
-            let read = {
-                file.read_at(buf.as_mut(), offset)?
-            };
+            let read = { file.read_at(buf.as_mut(), offset)? };
 
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());

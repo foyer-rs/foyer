@@ -27,7 +27,6 @@
 // limitations under the License.
 
 use std::path::Path;
-
 #[cfg(unix)]
 use std::path::PathBuf;
 

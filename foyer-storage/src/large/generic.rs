@@ -494,7 +494,11 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{fs::File, io::{Seek, SeekFrom, Write}, path::Path};
+    use std::{
+        fs::File,
+        io::{Seek, SeekFrom, Write},
+        path::Path,
+    };
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};

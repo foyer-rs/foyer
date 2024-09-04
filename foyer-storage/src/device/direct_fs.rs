@@ -12,17 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::{
     fs::{create_dir_all, File, OpenOptions},
     path::{Path, PathBuf},
     sync::Arc,
 };
-
 #[cfg(windows)]
-use std::{os::windows::fs::FileExt, io::Seek};
-
-#[cfg(unix)]
-use std::os::unix::fs::FileExt;
+use std::{io::Seek, os::windows::fs::FileExt};
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use futures::future::try_join_all;
@@ -181,10 +179,7 @@ impl Dev for DirectFsDevice {
             };
 
             #[cfg(target_family = "unix")]
-            let written = {
-                file.write_at(buf.as_aligned(), offset)?
-            };
-            
+            let written = { file.write_at(buf.as_aligned(), offset)? };
 
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
@@ -218,9 +213,7 @@ impl Dev for DirectFsDevice {
 
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
-            let read = {
-                file.read_at(buf.as_mut(), offset)?
-            };
+            let read = { file.read_at(buf.as_mut(), offset)? };
 
             #[cfg(target_family = "windows")]
             let read = {
