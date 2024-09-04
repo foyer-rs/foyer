@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-/// Returns the available space. Available space in unix is space reserved for priviliged user +
+/// Returns the available space. Available space in unix is space reserved for privileged user +
 /// free space.
 pub fn freespace(path: impl AsRef<Path>) -> std::io::Result<u64> {
     fs4::free_space(path)
