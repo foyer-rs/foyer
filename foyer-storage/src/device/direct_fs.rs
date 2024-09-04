@@ -14,10 +14,15 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+#[cfg(windows)]
+use std::{os::windows::fs::FileExt, io::Seek};
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
 use futures::future::try_join_all;
@@ -163,21 +168,23 @@ impl Dev for DirectFsDevice {
             region_size = self.region_size(),
         );
 
+        #[allow(unused_mut)]
         let mut file = self.file(region).clone();
+
         asyncify_with_runtime(&self.inner.runtime, move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
             #[cfg(target_family = "windows")]
             let written = {
                 let original = file.stream_position()?;
-                file.seek(std::io::SeekFrom::Start(offset))?;
-                let written = file.write(buf.as_aligned())?;
+                let written = file.seek_write(buf.as_aligned(), offset)?;
                 file.seek(std::io::SeekFrom::Start(original))?;
                 written
             };
 
             #[cfg(target_family = "unix")]
-            let written = file.write_at(buf.as_aligned(), offset)?;
+            let written = {
+                file.write_at(buf.as_aligned(), offset)?
+            };
+            
 
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
@@ -206,18 +213,19 @@ impl Dev for DirectFsDevice {
             buf.set_len(aligned);
         }
 
+        #[allow(unused_mut)]
         let mut file = self.file(region).clone();
+
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-            #[cfg(target_family = "unix")]
-            let read = file.read_at(buf.as_mut(), offset)?;
+            let read = {
+                file.read_at(buf.as_mut(), offset)?
+            };
 
             #[cfg(target_family = "windows")]
             let read = {
                 let original = file.stream_position()?;
-                file.seek(std::io::SeekFrom::Start(offset))?;
-                let read = file.read(buf.as_mut())?;
+                let read = file.seek_read(buf.as_mut(), offset)?;
                 file.seek(std::io::SeekFrom::Start(original))?;
                 read
             };

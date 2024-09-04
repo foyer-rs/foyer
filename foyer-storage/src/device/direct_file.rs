@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 use std::{
-    fs::{create_dir_all, File, OpenOptions}, io::{Read, Seek, Write}, path::{Path, PathBuf}, sync::Arc
+    fs::{create_dir_all, File, OpenOptions},  path::{Path, PathBuf}, sync::Arc
 };
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
@@ -26,6 +26,12 @@ use crate::{
     error::{Error, Result},
     IoBytes, IoBytesMut,
 };
+
+#[cfg(windows)]
+use std::{os::windows::fs::FileExt, io::Seek};
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 
 /// Options for the direct file device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,22 +91,23 @@ impl DirectFileDevice {
             capacity = self.capacity,
         );
 
+        #[allow(unused_mut)]
         let mut file = self.file.clone();
+
         asyncify_with_runtime(&self.runtime, move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
 
             #[cfg(target_family = "windows")]
             let written = {
                 let original = file.stream_position()?;
-                file.seek(std::io::SeekFrom::Start(offset))?;
-                let write = file.write(buf.as_aligned())?;
+                let written = file.seek_write(buf.as_aligned(), offset)?;
                 file.seek(std::io::SeekFrom::Start(original))?;
-                write
+                written
             };
 
             #[cfg(target_family = "unix")]
-            let written = file.write_at(buf.as_aligned(), offset)?;
+            let written = {
+                file.write_at(buf.as_aligned(), offset)?
+            };
 
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
@@ -130,22 +137,23 @@ impl DirectFileDevice {
             buf.set_len(aligned);
         }
 
+        #[allow(unused_mut)]
         let mut file = self.file.clone();
+
         let mut buffer = asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "windows")]
             let read = {
                 let original = file.stream_position()?;
-                file.seek(std::io::SeekFrom::Start(offset))?;
-                let read = file.read(buf.as_mut())?;
+                let read = file.seek_read(buf.as_mut(), offset)?;
                 file.seek(std::io::SeekFrom::Start(original))?;
                 read
             };
 
             #[cfg(target_family = "unix")]
             let read = {
-                use std::os::unix::fs::FileExt;
                 file.read_at(buf.as_mut(), offset)?
             };
+
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
             }
