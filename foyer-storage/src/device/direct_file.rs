@@ -87,14 +87,12 @@ impl DirectFileDevice {
             capacity = self.capacity,
         );
 
-        #[allow(unused_mut)]
-        let mut file = self.file.clone();
+        let file = self.file.clone();
 
         asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "windows")]
             let written = {
-                use std::{io::Seek, os::windows::fs::FileExt};
-                let original = file.stream_position()?;
+                use std::os::windows::fs::FileExt;
                 file.seek_write(buf.as_aligned(), offset)?
             };
 
@@ -132,14 +130,12 @@ impl DirectFileDevice {
             buf.set_len(aligned);
         }
 
-        #[allow(unused_mut)]
-        let mut file = self.file.clone();
+        let file = self.file.clone();
 
         let mut buffer = asyncify_with_runtime(&self.runtime, move || {
             #[cfg(target_family = "windows")]
             let read = {
-                use std::{io::Seek, os::windows::fs::FileExt};
-                let original = file.stream_position()?;
+                use std::os::windows::fs::FileExt;
                 file.seek_read(buf.as_mut(), offset)?
             };
 
@@ -308,7 +304,7 @@ impl DirectFileDeviceOptionsBuilder {
             // Create an empty directory before to get freespace.
             let dir = path.parent().expect("path must point to a file").to_path_buf();
             create_dir_all(&dir).unwrap();
-            freespace(&dir).unwrap() as usize / 10 * 8
+            freespace(&dir).unwrap() / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 

@@ -16,8 +16,8 @@ use std::path::Path;
 
 /// Returns the available space. Available space in unix is space reserved for privileged user +
 /// free space.
-pub fn freespace(path: impl AsRef<Path>) -> std::io::Result<u64> {
-    fs4::free_space(path)
+pub fn freespace(path: impl AsRef<Path>) -> std::io::Result<usize> {
+    fs4::free_space(path).map(|v| v as usize)
 }
 
 #[cfg(test)]

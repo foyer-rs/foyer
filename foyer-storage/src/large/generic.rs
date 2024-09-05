@@ -494,11 +494,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{
-        fs::File,
-        io::{Seek, SeekFrom, Write},
-        path::Path,
-    };
+    use std::{fs::File, path::Path};
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
@@ -949,9 +945,18 @@ mod tests {
             if !entry.metadata().unwrap().is_file() {
                 continue;
             }
-            let mut file = File::options().write(true).open(entry.path()).unwrap();
-            file.seek(SeekFrom::Start(0)).unwrap();
-            file.write_all(&[b'x'; 4 * 1024]).unwrap();
+
+            let file = File::options().write(true).open(entry.path()).unwrap();
+            #[cfg(target_family = "unix")]
+            {
+                use std::os::unix::fs::FileExt;
+                file.write_all_at(&[b'x'; 4 * 1024], 0).unwrap();
+            }
+            #[cfg(target_family = "windows")]
+            {
+                use std::os::windows::fs::FileExt;
+                file.seek_write(&[b'x'; 4 * 1024], 0).unwrap();
+            }
         }
 
         assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
