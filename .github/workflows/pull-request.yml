@@ -138,6 +138,7 @@ jobs:
         run: |
           cargo install cargo-sort --locked
       - name: Run rust cargo-sort check
+        if: matrix.os != 'windows-latest'
         run: |
           cargo sort -w -c
       - name: Run rust format check
