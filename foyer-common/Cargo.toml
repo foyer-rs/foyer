@@ -20,7 +20,6 @@ futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
 metrics = { workspace = true }
-nix = { version = "0.29", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 pin-project = "1"
 serde = { workspace = true }
