@@ -48,6 +48,3 @@ pub mod runtime;
 pub mod tracing;
 /// An async wait group implementation.
 pub mod wait_group;
-
-/// File system utils.
-pub mod fs;

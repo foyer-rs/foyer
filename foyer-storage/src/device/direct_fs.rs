@@ -18,7 +18,8 @@ use std::{
     sync::Arc,
 };
 
-use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
+use foyer_common::{asyncify::asyncify_with_runtime, bits};
+use fs4::free_space;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -300,9 +301,9 @@ impl DirectFsDeviceOptionsBuilder {
         let align_v = |value: usize, align: usize| value - value % align;
 
         let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get freespace.
+            // Create an empty directory before to get free space.
             create_dir_all(&dir).unwrap();
-            freespace(&dir).unwrap() / 10 * 8
+            free_space(&dir).unwrap() as usize / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 
