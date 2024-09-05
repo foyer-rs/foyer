@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -64,6 +64,12 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-rust-udeps
+      - name: Install NASM for aws-lc-rs on Windows
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+      - name: Install ninja-build tool for aws-lc-fips-sys on Windows
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Install cargo-udeps
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -78,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -113,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         rust_toolchain: [stable, 1.77]
     runs-on: ${{ matrix.os }}
     steps:
@@ -138,7 +144,14 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           cargo install cargo-sort --locked
+      - name: Install NASM for aws-lc-rs on Windows
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+      - name: Install ninja-build tool for aws-lc-fips-sys on Windows
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Run rust cargo-sort check
+        if: matrix.os != 'windows-latest'
         run: |
           cargo sort -w -c
       - name: Run rust format check
@@ -178,7 +191,7 @@ jobs:
           cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
           cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
       - name: Run foyer-bench with coverage
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         env:
           RUST_BACKTRACE: 1
           CI: true
@@ -189,7 +202,7 @@ jobs:
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
-        if: matrix.os == 'ubuntu-latest' && matrix.rust_toolchain == 'stable'
+        if: runner.os == 'Linux' && matrix.rust_toolchain == 'stable'
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:

@@ -26,9 +26,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use itertools::Itertools;
+#[cfg(unix)]
 use nix::{fcntl::readlink, sys::stat::stat};
 
 // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
@@ -64,6 +67,7 @@ pub fn detect_fs_type(path: impl AsRef<Path>) -> FsType {
 
 /// Given a normal file path, returns the containing block device static file path (of the
 /// partition).
+#[cfg(unix)]
 pub fn file_stat_path(path: impl AsRef<Path>) -> PathBuf {
     let st_dev = stat(path.as_ref()).unwrap().st_dev;
 
@@ -77,6 +81,7 @@ pub fn file_stat_path(path: impl AsRef<Path>) -> PathBuf {
     dev_stat_path(devname.to_str().unwrap())
 }
 
+#[cfg(unix)]
 pub fn dev_stat_path(devname: &str) -> PathBuf {
     let classpath = Path::new("/sys/class/block").join(devname);
     let devclass = readlink(&classpath).unwrap();

@@ -50,5 +50,4 @@ pub mod tracing;
 pub mod wait_group;
 
 /// File system utils.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod fs;

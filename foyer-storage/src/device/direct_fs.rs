@@ -163,13 +163,20 @@ impl Dev for DirectFsDevice {
         );
 
         let file = self.file(region).clone();
-        asyncify_with_runtime(&self.inner.runtime, move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-            #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
 
-            let written = file.write_at(buf.as_aligned(), offset)?;
+        asyncify_with_runtime(&self.inner.runtime, move || {
+            #[cfg(target_family = "windows")]
+            let written = {
+                use std::os::windows::fs::FileExt;
+                file.seek_write(buf.as_aligned(), offset)?
+            };
+
+            #[cfg(target_family = "unix")]
+            let written = {
+                use std::os::unix::fs::FileExt;
+                file.write_at(buf.as_aligned(), offset)?
+            };
+
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -198,13 +205,20 @@ impl Dev for DirectFsDevice {
         }
 
         let file = self.file(region).clone();
+
         let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
             #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-            #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
+            let read = {
+                use std::os::unix::fs::FileExt;
+                file.read_at(buf.as_mut(), offset)?
+            };
 
-            let read = file.read_at(buf.as_mut(), offset)?;
+            #[cfg(target_family = "windows")]
+            let read = {
+                use std::os::windows::fs::FileExt;
+                file.seek_read(buf.as_mut(), offset)?
+            };
+
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
             }

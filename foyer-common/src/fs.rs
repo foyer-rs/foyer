@@ -14,13 +14,10 @@
 
 use std::path::Path;
 
-use nix::{errno::Errno, sys::statvfs::statvfs};
-
-/// Get the freespace of the device that contains the given path.
-pub fn freespace(path: impl AsRef<Path>) -> Result<usize, Errno> {
-    let stat = statvfs(path.as_ref())?;
-    let res = stat.blocks_available() as usize * stat.fragment_size() as usize;
-    Ok(res)
+/// Returns the available space. Available space in unix is space reserved for privileged user +
+/// free space.
+pub fn freespace(path: impl AsRef<Path>) -> std::io::Result<usize> {
+    fs4::free_space(path).map(|v| v as usize)
 }
 
 #[cfg(test)]
@@ -57,7 +54,7 @@ mod tests {
 
             println!("{}", df);
 
-            assert_eq!(v1, v2);
+            assert_eq!(v1 as usize, v2);
         }
     }
 }

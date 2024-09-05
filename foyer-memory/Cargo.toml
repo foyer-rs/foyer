@@ -20,7 +20,6 @@ foyer-intrusive = { version = "0.9.1", path = "../foyer-intrusive" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
-libc = "0.2"
 parking_lot = "0.12"
 pin-project = "1"
 serde = { workspace = true }
