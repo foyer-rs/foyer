@@ -18,7 +18,8 @@ use std::{
     sync::Arc,
 };
 
-use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
+use foyer_common::{asyncify::asyncify_with_runtime, bits};
+use fs4::free_space;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
@@ -301,10 +302,10 @@ impl DirectFileDeviceOptionsBuilder {
         let align_v = |value: usize, align: usize| value - value % align;
 
         let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get freespace.
+            // Create an empty directory before to get free space.
             let dir = path.parent().expect("path must point to a file").to_path_buf();
             create_dir_all(&dir).unwrap();
-            freespace(&dir).unwrap() / 10 * 8
+            free_space(&dir).unwrap() as usize / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 
