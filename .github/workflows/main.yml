@@ -185,7 +185,7 @@ jobs:
           cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
           cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
       - name: Run foyer-bench with coverage
-        if: runner.os == "Linux"
+        if: runner.os == 'Linux'
         env:
           RUST_BACKTRACE: 1
           CI: true
@@ -196,7 +196,7 @@ jobs:
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
-        if: runner.os == "Linux" && matrix.rust_toolchain == 'stable'
+        if: runner.os == 'Linux' && matrix.rust_toolchain == 'stable'
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
