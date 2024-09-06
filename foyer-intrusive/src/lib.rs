@@ -12,8 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#![allow(clippy::new_without_default)]
+#![expect(clippy::new_without_default)]
 #![warn(missing_docs)]
 #![warn(clippy::allow_attributes)]
 

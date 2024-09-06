@@ -12,8 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#![allow(clippy::identity_op)]
+#![expect(clippy::identity_op)]
 
 use std::{path::Path, sync::Arc, time::Duration};
 
