@@ -339,46 +339,6 @@ fn setup() {
     console_subscriber::init();
 }
 
-#[cfg(feature = "trace")]
-fn setup() {
-    use opentelemetry_sdk::{
-        trace::{BatchConfigBuilder, Config},
-        Resource,
-    };
-    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-    use tracing::Level;
-    use tracing_subscriber::{filter::Targets, prelude::*};
-
-    let tracing_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-        SERVICE_NAME,
-        "foyer-bench",
-    )]));
-    let batch_config = BatchConfigBuilder::default()
-        .with_max_queue_size(1048576)
-        .with_max_export_batch_size(4096)
-        .with_max_concurrent_exports(4)
-        .build();
-
-    let tracer = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .with_tracing_config(tracing_config)
-        .with_batch_config(batch_config)
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .unwrap();
-    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    tracing_subscriber::registry()
-        .with(
-            Targets::new()
-                .with_target("foyer_storage", Level::DEBUG)
-                .with_target("foyer_common", Level::DEBUG)
-                .with_target("foyer_intrusive", Level::DEBUG)
-                .with_target("foyer_storage_bench", Level::DEBUG),
-        )
-        .with(opentelemetry_layer)
-        .init();
-}
-
 #[cfg(feature = "mtrace")]
 fn setup() {
     use fastrace::collector::Config;
@@ -386,7 +346,7 @@ fn setup() {
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
-#[cfg(not(any(feature = "tokio-console", feature = "trace", feature = "mtrace")))]
+#[cfg(not(any(feature = "tokio-console", feature = "mtrace")))]
 fn setup() {
     use tracing_subscriber::{prelude::*, EnvFilter};
 

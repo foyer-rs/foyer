@@ -23,13 +23,6 @@ hdrhistogram = "7"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.15"
-opentelemetry = { version = "0.24", optional = true }
-opentelemetry-otlp = { version = "0.17", optional = true }
-opentelemetry-semantic-conventions = { version = "0.16", optional = true }
-opentelemetry_sdk = { version = "0.24", features = [
-    "rt-tokio",
-    "trace",
-], optional = true }
 parking_lot = "0.12"
 rand = "0.8.5"
 serde = { workspace = true }
@@ -46,13 +39,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 [features]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["console-subscriber"]
-trace = [
-    "opentelemetry",
-    "opentelemetry_sdk",
-    "opentelemetry-otlp",
-    "tracing-opentelemetry",
-    "opentelemetry-semantic-conventions",
-]
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
 jemalloc = ["tikv-jemallocator"]
