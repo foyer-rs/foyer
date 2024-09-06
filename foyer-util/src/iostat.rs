@@ -34,7 +34,6 @@ use itertools::Itertools;
 #[cfg(unix)]
 use nix::{fcntl::readlink, sys::stat::stat};
 
-#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
