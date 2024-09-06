@@ -14,6 +14,7 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 //! A hybrid cache library that supports plug-and-play cache algorithms, in-memory cache and disk cache.
 

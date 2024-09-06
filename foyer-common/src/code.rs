@@ -24,12 +24,10 @@ pub trait Value: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 /// Key trait for the disk cache.
 pub trait StorageKey: Key + Serialize + DeserializeOwned {}
 impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned {}
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
 /// Value trait for the disk cache.
 pub trait StorageValue: Value + 'static + Serialize + DeserializeOwned {}
 impl<T> StorageValue for T where T: Value + Serialize + DeserializeOwned {}

@@ -34,8 +34,6 @@ use itertools::Itertools;
 #[cfg(unix)]
 use nix::{fcntl::readlink, sys::stat::stat};
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
@@ -45,8 +43,7 @@ pub enum FsType {
     Others,
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+#[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
 pub fn detect_fs_type(path: impl AsRef<Path>) -> FsType {
     #[cfg(target_os = "linux")]
     {

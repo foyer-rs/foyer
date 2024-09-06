@@ -35,8 +35,6 @@ enum OrderFuture<F1, F2, F3> {
 }
 
 impl<F1, F2, F3> OrderFuture<F1, F2, F3> {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     pub fn as_pin_mut(self: Pin<&mut Self>) -> OrderFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>> {
         unsafe {
             match *Pin::get_unchecked_mut(self) {

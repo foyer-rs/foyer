@@ -37,8 +37,7 @@ pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
 /// The eviction picker for the disk cache.
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
     /// Init the eviction picker with information.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn init(&mut self, regions: usize, region_size: usize) {}
 
     /// Pick a region to evict.

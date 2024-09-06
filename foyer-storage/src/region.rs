@@ -288,14 +288,12 @@ impl RegionManager {
         self.inner.regions.len()
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn evictable_regions(&self) -> usize {
         self.inner.eviction.lock().evictable.len()
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn clean_regions(&self) -> usize {
         self.inner.clean_region_rx.len()
     }

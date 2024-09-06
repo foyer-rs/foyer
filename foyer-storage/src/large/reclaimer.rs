@@ -46,8 +46,7 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn open<K, V, S>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,

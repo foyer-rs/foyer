@@ -10,7 +10,7 @@ on:
   pull_request:
     branches: [main]
 env:
-  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-03-17
+  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-07-19
   CARGO_TERM_COLOR: always
   CACHE_KEY_SUFFIX: 20240821
 jobs:
@@ -119,7 +119,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust_toolchain: [stable, 1.77]
+        rust_toolchain: [stable, 1.81.0]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout

@@ -211,7 +211,7 @@ where
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + Send + Sync + 'static + Clone,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::get");
 

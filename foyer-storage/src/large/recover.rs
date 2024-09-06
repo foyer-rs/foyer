@@ -63,8 +63,7 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn run<K, V, S>(
         config: &GenericLargeStorageConfig<K, V, S>,
         regions: Range<RegionId>,
