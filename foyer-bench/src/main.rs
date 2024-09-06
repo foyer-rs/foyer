@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#![warn(clippy::allow_attributes)]
+
 mod analyze;
 mod rate;
 mod text;

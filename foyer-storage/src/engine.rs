@@ -101,8 +101,6 @@ enum StoreFuture<F1, F2, F3, F4> {
 }
 
 impl<F1, F2, F3, F4> StoreFuture<F1, F2, F3, F4> {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     pub fn as_pin_mut(self: Pin<&mut Self>) -> StoreFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>> {
         unsafe {
             match *Pin::get_unchecked_mut(self) {
@@ -134,8 +132,7 @@ where
     }
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub enum EngineConfig<K, V, S = RandomState>
 where
     K: StorageKey,
@@ -164,8 +161,7 @@ where
     }
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub enum Engine<K, V, S = RandomState>
 where
     K: StorageKey,

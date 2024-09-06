@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 //! Shared components and utils for foyer.
 

@@ -104,8 +104,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn open(
         config: &GenericLargeStorageConfig<K, V, S>,
         indexer: Indexer,

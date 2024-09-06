@@ -117,8 +117,7 @@ impl CompactBloomFilter {
     ///
     /// See [`CompactBloomFilterShard`].
     pub fn shards(filters: usize, hashes: usize, bits: usize) -> Vec<CompactBloomFilterShard> {
-        // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-        #[allow(clippy::arc_with_non_send_sync)]
+        #[expect(clippy::arc_with_non_send_sync)]
         let filter = Arc::new(UnsafeCell::new(Self::new(filters, hashes, bits)));
         (0..filters)
             .map(|idx| CompactBloomFilterShard {

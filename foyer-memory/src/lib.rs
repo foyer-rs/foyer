@@ -63,6 +63,7 @@
 //! destroyed.
 
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 mod cache;
 mod context;

@@ -22,9 +22,8 @@ pub trait EventListener: Send + Sync + 'static {
     /// Associated value type.
     type Value;
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused_variables)]
     /// Called when a cache entry is released from the in-memory cache.
+    #[expect(unused_variables)]
     fn on_memory_release(&self, key: Self::Key, value: Self::Value)
     where
         Self::Key: Key,

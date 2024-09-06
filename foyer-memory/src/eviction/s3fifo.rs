@@ -175,8 +175,7 @@ where
         self.evict_small_force()
     }
 
-    // TODO(MrCroxx): FIX ME!!! clippy false positive
-    #[allow(clippy::never_loop)]
+    #[expect(clippy::never_loop)]
     unsafe fn evict_small_force(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
             let handle = ptr.as_mut();
@@ -267,8 +266,6 @@ where
         handle.base_mut().set_in_eviction(true);
     }
 
-    // TODO: FIX ME! clippy false positive
-    // #[allow(clippy::never_loop)]
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
         if let Some(mut ptr) = self.evict() {
             let handle = ptr.as_mut();

@@ -47,7 +47,6 @@ pub struct KvInfo {
 pub struct EntrySerializer;
 
 impl EntrySerializer {
-    #[allow(clippy::needless_borrows_for_generic_args)]
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
     pub fn serialize<'a, K, V>(
         key: &'a K,
