@@ -94,17 +94,6 @@ impl EntrySerializer {
 
         Ok(KvInfo { key_len, value_len })
     }
-
-    pub fn size_hint<'a, K, V>(key: &'a K, value: &'a V, compression: &'a Compression) -> usize
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
-        match compression {
-            Compression::Zstd | Compression::Lz4 => 0,
-            Compression::None => key.serialized_size_hint() + value.serialized_size_hint(),
-        }
-    }
 }
 
 #[derive(Debug)]
