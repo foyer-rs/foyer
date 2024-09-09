@@ -144,7 +144,7 @@ where
 
         self.inner.write_runtime_handle.spawn(async move {
             if force || this.pick(entry.key()) {
-                let mut buffer = IoBytesMut::new();
+                let mut buffer = IoBytesMut::with_capacity(EntrySerializer::size_hint(entry.key(), entry.value()));
                 match EntrySerializer::serialize(
                     entry.key(),
                     entry.value(),
