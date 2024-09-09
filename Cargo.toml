@@ -4,6 +4,7 @@ members = [
     "examples",
     "foyer",
     "foyer-bench",
+    "foyer-cli",
     "foyer-common",
     "foyer-intrusive",
     "foyer-memory",
