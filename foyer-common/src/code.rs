@@ -25,23 +25,13 @@ impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
 /// Key trait for the disk cache.
-pub trait StorageKey: Key + Serialize + DeserializeOwned + Hint {}
-impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned + Hint {}
+pub trait StorageKey: Key + Serialize + DeserializeOwned {}
+impl<T> StorageKey for T where T: Key + Serialize + DeserializeOwned {}
 
 /// Value trait for the disk cache.
-pub trait StorageValue: Value + 'static + Serialize + DeserializeOwned + Hint {}
-impl<T> StorageValue for T where T: Value + Serialize + DeserializeOwned + Hint {}
+pub trait StorageValue: Value + 'static + Serialize + DeserializeOwned {}
+impl<T> StorageValue for T where T: Value + Serialize + DeserializeOwned {}
 
 /// Hash builder trait.
 pub trait HashBuilder: BuildHasher + Send + Sync + 'static {}
 impl<T> HashBuilder for T where T: BuildHasher + Send + Sync + 'static {}
-
-/// Hint functions collection.
-pub trait Hint {
-    /// Size hint for serialization.
-    fn serialized_size_hint(&self) -> usize {
-        0
-    }
-}
-
-impl<T: Send + Sync + 'static> Hint for T {}
