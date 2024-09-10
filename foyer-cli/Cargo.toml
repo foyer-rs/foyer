@@ -12,7 +12,7 @@ readme = "../README.md"
 
 [dependencies]
 anyhow = "1"
-bytesize = "1"
+bytesize = { workspace = true }
 clap = { workspace = true }
 thiserror = "1"
 
