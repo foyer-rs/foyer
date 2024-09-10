@@ -210,11 +210,11 @@ Don't forget to pass `make fast` (which means fast check & test) locally before 
 
 If you want to run a broader range of checks locally, run `make full`. 🙌
 
+Thank you for your contribution~
+
 <p>
     <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" width="10%" />
 </p>
-
-Thank you for your contribution~
 
 ## Star History
 
