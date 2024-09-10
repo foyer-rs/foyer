@@ -179,9 +179,8 @@ impl EntryDeserializer {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::metrics_for_test;
-
     use super::*;
+    use crate::test_utils::metrics_for_test;
 
     #[test]
     fn test_serde_size_hint() {
