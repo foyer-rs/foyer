@@ -263,15 +263,15 @@ impl TimeSeriesDistribution {
             "none" => TimeSeriesDistribution::None,
             "uniform" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
-                let interval = ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64
-                    / (args.w_rate.as_u64() as f64 * 1024.0 * 1024.0);
+                let interval =
+                    ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64 / (args.w_rate.as_u64() as f64);
                 let interval = Duration::from_secs_f64(interval);
                 TimeSeriesDistribution::Uniform { interval }
             }
             "zipf" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
-                let interval = ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64
-                    / (args.w_rate.as_u64() as f64 * 1024.0 * 1024.0);
+                let interval =
+                    ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64 / (args.w_rate.as_u64() as f64);
                 let interval = Duration::from_secs_f64(interval);
                 display_zipf_sample(args.distribution_zipf_n, args.distribution_zipf_s);
                 TimeSeriesDistribution::Zipf {
@@ -573,12 +573,12 @@ async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, st
     let w_rate = if args.w_rate.as_u64() == 0 {
         None
     } else {
-        Some(args.w_rate.as_u64() as f64 * 1024.0 * 1024.0)
+        Some(args.w_rate.as_u64() as _)
     };
     let r_rate = if args.r_rate.as_u64() == 0 {
         None
     } else {
-        Some(args.r_rate.as_u64() as f64 * 1024.0 * 1024.0)
+        Some(args.r_rate.as_u64() as _)
     };
 
     let counts = (0..args.writers).map(|_| AtomicU64::default()).collect_vec();
