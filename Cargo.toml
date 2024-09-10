@@ -33,7 +33,7 @@ fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.7"
 clap = { version = "4", features = ["derive"] }
-bytesize = { git = "https://github.com/foyer-rs/bytesize", rev = "54525bc" }
+bytesize = { package = "foyer-bytesize", version = "2" }
 
 [profile.release]
 debug = true
