@@ -7,7 +7,6 @@ deps:
 check:
 	typos
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	cargo fmt --all
@@ -15,7 +14,6 @@ check:
 
 check-all:
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	cargo fmt --all
@@ -53,7 +51,6 @@ fast: check test example
 
 msrv:
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
 	cargo +1.81.0 sort -w
 	cargo +1.81.0 fmt --all
