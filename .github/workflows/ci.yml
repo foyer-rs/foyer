@@ -3,10 +3,12 @@ name: "CI"
 on:
   push:
     branches:
-      - main
+      - "main"
+      - "forks/*"
   pull_request:
     branches:
-      - main
+      - "main"
+      - "v*.*.*-rc"
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
