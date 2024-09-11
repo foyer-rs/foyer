@@ -1,6 +1,0 @@
-name: CI (main)
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
