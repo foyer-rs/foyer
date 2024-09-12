@@ -17,8 +17,8 @@
 - Bump rust toolchain to `1.81.0`.
 - Expose in-memory cache builder and cache entry.
 - Reduce page fault and vec growth overhead.
-- Fix install deps script.
 - Use bytes size for `foyer-bench`.
+- Fix install deps script.
 
 </details>
 
