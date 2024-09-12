@@ -1,6 +1,6 @@
 [package]
 name = "foyer-bench"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "bench tool for foyer - the hybrid cache for Rust"
@@ -17,7 +17,7 @@ clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { version = "0.11.1", path = "../foyer" }
+foyer = { version = "0.11.2", path = "../foyer" }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }

@@ -1,3 +1,27 @@
+## 2024-09-12
+
+| crate | version |
+| - | - |
+| foyer | 0.11.2 |
+| foyer-common | 0.9.2 |
+| foyer-intrusive | 0.9.2 |
+| foyer-memory | 0.7.2 |
+| foyer-storage | 0.10.2 |
+| foyer-bench | 0.3.2 |
+
+<details>
+
+### Changes
+
+- Support windows (for `foyer` only).
+- Bump rust toolchain to `1.81.0`.
+- Expose in-memory cache builder and cache entry.
+- Reduce page fault and vec growth overhead.
+- Use bytes size for `foyer-bench`.
+- Fix install deps script.
+
+</details>
+
 ## 2024-08-31
 
 | crate | version |
