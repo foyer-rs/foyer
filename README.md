@@ -196,6 +196,17 @@ More examples and details can be found [here](https://github.com/foyer-rs/foyer/
 
 *foyer* is built against the recent stable release. The minimum supported version is 1.81.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
+## Supported Platforms
+
+*foyer* is designed to serve on Linux OS, but can still be built on other OS for development.
+
+However, other components may not support non-Linux OS.
+
+| Component | Linux | MacOS | Windows |
+| - | - | - | - |
+| foyer | ✓ | ✓ | ✓ |
+| foyer-bench | ✓ | ✗ | ✗ |
+
 ## Development State & Roadmap
 
 Currently, *foyer* is still under heavy development.
@@ -210,11 +221,7 @@ Don't forget to pass `make fast` (which means fast check & test) locally before 
 
 If you want to run a broader range of checks locally, run `make full`. 🙌
 
-Thank you for your contribution~
-
-<p>
-    <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" width="10%" />
-</p>
+Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="16px" />
 
 ## Star History
 
