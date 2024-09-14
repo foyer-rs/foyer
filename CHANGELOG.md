@@ -1,3 +1,24 @@
+---
+title: Changelog
+description: Changelog for foyer.
+authors:
+  - name: Croxx
+    title: Author of foyer
+    url: https://github.com/mrcroxx
+    image_url: https://github.com/mrcroxx.png
+    socials:
+      x: CroxxMr
+      github: mrcroxx
+      linkedin: mrcroxx
+      newsletter: https://blog.mrcroxx.com
+tags: [changelog]
+date: 2023-05-12T11:02:09+08:00
+---
+
+# Changelog
+
+<!-- truncate -->
+
 ## 2024-09-12
 
 ### Releases
