@@ -1,3 +1,12 @@
+---
+title: Changelog
+description: Changelog for foyer.
+---
+
+# Changelog
+
+<!-- truncate -->
+
 ## 2024-09-12
 
 ### Releases
