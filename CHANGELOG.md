@@ -9,6 +9,8 @@ authors:
     socials:
       x: CroxxMr
       github: mrcroxx
+      linkedin: mrcroxx
+      newsletter: https://blog.mrcroxx.com
 tags: [changelog]
 date: 2023-05-12T11:02:09+08:00
 ---
