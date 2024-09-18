@@ -15,7 +15,6 @@
 use std::{fmt::Debug, hash::Hasher, time::Instant};
 
 use foyer_common::{
-    bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
@@ -23,7 +22,6 @@ use twox_hash::XxHash64;
 
 use crate::{
     compress::Compression,
-    device::ALIGN,
     error::{Error, Result},
     IoBytesMut,
 };
@@ -97,16 +95,13 @@ impl EntrySerializer {
         Ok(KvInfo { key_len, value_len })
     }
 
-    pub fn size_hint<'a, K, V>(key: &'a K, value: &'a V) -> usize
+    pub fn estimated_size<'a, K, V>(key: &'a K, value: &'a V) -> usize
     where
         K: StorageKey,
         V: StorageValue,
     {
-        let hint = match (bincode::serialized_size(key), bincode::serialized_size(value)) {
-            (Ok(k), Ok(v)) => (k + v) as usize,
-            _ => 0,
-        };
-        bits::align_up(ALIGN, hint)
+        // `serialized_size` should always return `Ok(..)` without a hard size limit.
+        (bincode::serialized_size(key).unwrap() + bincode::serialized_size(value).unwrap()) as usize
     }
 }
 
@@ -174,22 +169,5 @@ impl EntryDeserializer {
                 bincode::deserialize_from(decoder).map_err(Error::from)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_utils::metrics_for_test;
-
-    #[test]
-    fn test_serde_size_hint() {
-        let key = 42u64;
-        let value = vec![b'x'; 114514];
-        let hint = EntrySerializer::size_hint(&key, &value);
-        let mut buf = IoBytesMut::new();
-        EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf, metrics_for_test()).unwrap();
-        assert!(hint >= buf.len());
-        assert!(hint.abs_diff(buf.len()) < ALIGN);
     }
 }

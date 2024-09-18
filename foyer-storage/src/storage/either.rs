@@ -26,7 +26,7 @@ use futures::{
     pin_mut, Future, FutureExt,
 };
 
-use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
+use crate::{error::Result, storage::Storage, DeviceStats};
 
 enum OrderFuture<F1, F2, F3> {
     LeftFirst(F1),
@@ -123,7 +123,8 @@ pub trait Selector: Send + Sync + 'static + Debug {
     type Value: StorageValue;
     type BuildHasher: HashBuilder;
 
-    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBytes) -> Selection;
+    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize)
+        -> Selection;
 }
 
 pub struct Either<K, V, S, SL, SR, SE>
@@ -212,15 +213,15 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
-        match self.selector.select(&entry, &buffer) {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+        match self.selector.select(&entry, estimated_size) {
             Selection::Left => {
                 self.right.delete(entry.hash());
-                self.left.enqueue(entry, buffer, info);
+                self.left.enqueue(entry, estimated_size);
             }
             Selection::Right => {
                 self.right.delete(entry.hash());
-                self.right.enqueue(entry, buffer, info);
+                self.right.enqueue(entry, estimated_size);
             }
         }
     }

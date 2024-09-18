@@ -18,7 +18,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::future::ready;
 
-use crate::{device::monitor::DeviceStats, error::Result, serde::KvInfo, storage::Storage, IoBytes};
+use crate::{device::monitor::DeviceStats, error::Result, storage::Storage};
 
 pub struct Noop<K, V, S>
 where
@@ -70,7 +70,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _buffer: IoBytes, _info: KvInfo) {}
+    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _estimated_size: usize) {}
 
     fn load(&self, _: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         ready(Ok(None))
@@ -112,14 +112,7 @@ mod tests {
         let memory = cache_for_test();
         let store = Noop::open(()).await.unwrap();
 
-        store.enqueue(
-            memory.insert(0, vec![b'x'; 16384]),
-            IoBytes::new(),
-            KvInfo {
-                key_len: 0,
-                value_len: 0,
-            },
-        );
+        store.enqueue(memory.insert(0, vec![b'x'; 16384]), 16384);
         store.wait().await;
         assert!(store.load(memory.hash(&0)).await.unwrap().is_none());
         store.delete(memory.hash(&0));

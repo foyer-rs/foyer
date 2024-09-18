@@ -18,7 +18,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
 
-use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
+use crate::{error::Result, storage::Storage, DeviceStats};
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where
@@ -90,7 +90,7 @@ where
         todo!()
     }
 
-    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _buffer: IoBytes, _info: KvInfo) {
+    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _estimated_size: usize) {
         todo!()
     }
 

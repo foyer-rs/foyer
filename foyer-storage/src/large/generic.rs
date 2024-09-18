@@ -52,10 +52,9 @@ use crate::{
     },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
-    serde::{EntryDeserializer, KvInfo},
+    serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
-    IoBytes,
 };
 
 pub struct GenericLargeStorageConfig<K, V, S>
@@ -296,7 +295,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -462,8 +461,8 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
-        self.enqueue(entry, buffer, info)
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+        self.enqueue(entry, estimated_size)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
