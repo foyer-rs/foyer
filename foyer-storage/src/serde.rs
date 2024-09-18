@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hasher, time::Instant};
+use std::{fmt::Debug, hash::Hasher, io::Write, time::Instant};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
@@ -23,7 +23,6 @@ use twox_hash::XxHash64;
 use crate::{
     compress::Compression,
     error::{Error, Result},
-    IoBytesMut,
 };
 
 #[derive(Debug)]
@@ -44,51 +43,101 @@ pub struct KvInfo {
 }
 
 #[derive(Debug)]
+pub struct TrackedWriter<W> {
+    inner: W,
+    written: usize,
+}
+
+impl<W> TrackedWriter<W> {
+    pub fn new(inner: W) -> Self {
+        Self { inner, written: 0 }
+    }
+
+    pub fn written(&self) -> usize {
+        self.written
+    }
+
+    pub fn recount(&mut self) {
+        self.written = 0;
+    }
+}
+
+impl<W> Write for TrackedWriter<W>
+where
+    W: Write,
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(buf).inspect(|len| self.written += len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.inner.write_vectored(bufs).inspect(|len| self.written += len)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.inner.write_all(buf).inspect(|_| self.written += buf.len())
+    }
+
+    #[cfg(feature = "nightly")]
+    fn write_all_vectored(&mut self, bufs: &mut [std::io::IoSlice<'_>]) -> std::io::Result<()> {
+        self.inner
+            .write_all_vectored(bufs)
+            .inspect(|_| self.count += bufs.iter().map(|slice| slice.len()).sum())
+    }
+}
+
+#[derive(Debug)]
 pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
-    pub fn serialize<'a, K, V>(
+    pub fn serialize<'a, K, V, W>(
         key: &'a K,
         value: &'a V,
         compression: &'a Compression,
-        mut buffer: &'a mut IoBytesMut,
+        writer: W,
         metrics: &Metrics,
     ) -> Result<KvInfo>
     where
         K: StorageKey,
         V: StorageValue,
+        W: Write,
     {
         let now = Instant::now();
 
-        let mut cursor = buffer.len();
+        let mut writer = TrackedWriter::new(writer);
 
         // serialize value
         match compression {
             Compression::None => {
-                bincode::serialize_into(&mut buffer, &value).map_err(Error::from)?;
+                bincode::serialize_into(&mut writer, &value).map_err(Error::from)?;
             }
             Compression::Zstd => {
-                let encoder = zstd::Encoder::new(&mut buffer, 0).map_err(Error::from)?.auto_finish();
-                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
+                // Do not use `auto_finish()` here, for we will lost `ZeroWrite` error.
+                let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::from)?;
+                bincode::serialize_into(&mut encoder, &value).map_err(Error::from)?;
+                encoder.finish().map_err(Error::from)?;
             }
-
             Compression::Lz4 => {
                 let encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .auto_flush(true)
-                    .build(&mut buffer)
+                    .build(&mut writer)
                     .map_err(Error::from)?;
                 bincode::serialize_into(encoder, &value).map_err(Error::from)?;
             }
         }
 
-        let value_len = buffer.len() - cursor;
-        cursor = buffer.len();
+        let value_len = writer.written();
+        writer.recount();
 
         // serialize key
-        bincode::serialize_into(&mut buffer, &key).map_err(Error::from)?;
-        let key_len = buffer.len() - cursor;
+        bincode::serialize_into(&mut writer, &key).map_err(Error::from)?;
+        let key_len = writer.written();
 
         metrics.storage_entry_serialize_duration.record(now.elapsed());
 
