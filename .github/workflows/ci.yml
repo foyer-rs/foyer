@@ -160,6 +160,7 @@ jobs:
         run: |
           cargo fmt --all -- --check
       - name: Run rust clippy check
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         run: |
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
@@ -170,18 +171,47 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity"
+      - name: Run rust test with coverage (igored tests) - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity,nightly"
       - name: Run rust test with coverage
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           cargo llvm-cov --no-report nextest --features "strict_assertions,sanity"
+      - name: Run rust test with coverage - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,nightly"
       - name: Run examples with coverage
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report run --example memory
+          cargo llvm-cov --no-report run --example hybrid
+          cargo llvm-cov --no-report run --example hybrid_full
+          cargo llvm-cov --no-report run --example event_listener
+          cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
+          cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
+      - name: Run examples with coverage - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
@@ -193,7 +223,15 @@ jobs:
           cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
           cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
       - name: Run foyer-bench with coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.rust_toolchain != 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+      - name: Run foyer-bench with coverage - nightly
+        if: runner.os == 'Linux' && matrix.rust_toolchain == 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
