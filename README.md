@@ -56,13 +56,9 @@ Feel free to open a PR and add your projects here:
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 
-## Document
-
-Tutorial & Document: https://foyer.rs
-
-API References: https://docs.rs/foyer
-
 ## Quick Start
+
+**This section only shows briefs. Please visit https://foyer.rs for more details.**
 
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
