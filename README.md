@@ -35,6 +35,11 @@ However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a v
 
 For more details, please visit foyer's website: https://foyer.rs 🥰
 
+[Website](https://foyer.rs) |
+[Tutorial](https://foyer.rs/docs/overview) |
+[API Docs](https://docs.rs/foyer) |
+[Crate](https://crates.io/crates/foyer)
+
 ## Features
 
 - **Hybrid Cache**: Seamlessly integrates both in-memory and disk cache for optimal performance and flexibility.
