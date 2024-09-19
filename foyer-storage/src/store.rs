@@ -139,14 +139,10 @@ where
     pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) {
         let now = Instant::now();
 
-        // FIXME: remove spawn?
-        let this = self.clone();
-        self.inner.write_runtime_handle.spawn(async move {
-            if force || this.pick(entry.key()) {
-                let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-                this.inner.engine.enqueue(entry, estimated_size);
-            }
-        });
+        if force || self.pick(entry.key()) {
+            let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+            self.inner.engine.enqueue(entry, estimated_size);
+        }
 
         self.inner.metrics.storage_enqueue.increment(1);
         self.inner.metrics.storage_enqueue_duration.record(now.elapsed());
