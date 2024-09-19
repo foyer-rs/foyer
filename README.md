@@ -14,6 +14,12 @@
     </a>
 </p>
 
+<p align="center">
+    <a href="https://foyer.rs">
+        <b>Totorial & Document: https://foyer.rs</b>
+    </a>
+</p>
+
 # foyer
 
 ![GitHub License](https://img.shields.io/github/license/foyer-rs/foyer)
