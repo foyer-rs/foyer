@@ -24,7 +24,6 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
-
 use tokio::{
     runtime::Handle,
     sync::{oneshot, OwnedSemaphorePermit, Semaphore},
