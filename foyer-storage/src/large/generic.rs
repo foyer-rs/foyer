@@ -304,8 +304,7 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             entry,
-            buffer,
-            info,
+            estimated_size,
             sequence,
         });
     }
@@ -507,8 +506,8 @@ mod tests {
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
-        test_utils::{metrics_for_test, BiasedPicker},
-        IoBytesMut, TombstoneLogConfigBuilder,
+        test_utils::BiasedPicker,
+        TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -601,17 +600,8 @@ mod tests {
     }
 
     fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
-        let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            &Compression::None,
-            &mut buffer,
-            metrics_for_test(),
-        )
-        .unwrap();
-        let buffer = buffer.freeze();
-        store.enqueue(entry, buffer, info);
+        let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+        store.enqueue(entry, estimated_size);
     }
 
     #[test_log::test(tokio::test)]
