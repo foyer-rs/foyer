@@ -2,13 +2,13 @@
     <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/slogan.min.svg" />
 </p>
 
-<div style="text-align: center;">
+<p align="center">
 
-![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&style=for-the-badge&logo=rust&labelColor=555555)
-![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
-![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
+![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&down_message=website&style=for-the-badge&logo=htmx&link=https%3A%2F%2Ffoyer.rs)
+![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555&link=https%3A%2F%2Fcrates.io%2Fcrates%2Ffoyer)
+![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555&link=https%3A%2F%2Fdocs.rs%2Ffoyer)
 
-</div>
+</p>
 
 # foyer
 
