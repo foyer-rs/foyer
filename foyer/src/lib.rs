@@ -18,9 +18,14 @@
 
 //! A hybrid cache library that supports plug-and-play cache algorithms, in-memory cache and disk cache.
 //!
-//! ![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
-//! ![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
-//! ![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&style=for-the-badge&logo=rust&labelColor=555555)
+//! ![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&down_message=website&style=for-the-badge&logo=htmx&link=https%3A%2F%2Ffoyer.rs)
+//! ![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555&link=https%3A%2F%2Fcrates.io%2Fcrates%2Ffoyer)
+//! ![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555&link=https%3A%2F%2Fdocs.rs%2Ffoyer)
+//!
+//! [Website](https://foyer.rs) |
+//! [Tutorial](https://foyer.rs/docs/overview) |
+//! [API Docs](https://docs.rs/foyer) |
+//! [Crate](https://crates.io/crates/foyer)
 
 use foyer_common as common;
 use foyer_memory as memory;
