@@ -86,7 +86,7 @@ where
     fn write_all_vectored(&mut self, bufs: &mut [std::io::IoSlice<'_>]) -> std::io::Result<()> {
         self.inner
             .write_all_vectored(bufs)
-            .inspect(|_| self.written += bufs.iter().map(|slice| slice.len()).sum())
+            .inspect(|_| self.written += bufs.iter().map(|slice| slice.len()).sum::<usize>())
     }
 }
 
