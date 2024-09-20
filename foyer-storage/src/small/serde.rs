@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::u8;
-
 use bytes::{Buf, BufMut};
 use foyer_common::strict_assert;
 

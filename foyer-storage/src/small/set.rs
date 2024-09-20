@@ -138,34 +138,13 @@ impl SetStorage {
             buffer,
         };
 
-        let c = Checksummer::checksum32(&this.buffer[4..]);
+        let c = Checksummer::checksum32(&this.buffer[4..Self::SET_HEADER_SIZE + this.len]);
         if c != checksum {
-            // Do not report checksum mismiatch. Clear the set directly.
+            // Do not report checksum mismatch. Clear the set directly.
             this.clear();
         }
 
         this
-    }
-
-    pub fn bloom_filter(&self) -> &BloomFilterU64 {
-        &self.bloom_filter
-    }
-
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused)]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused)]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.len = 0;
-        self.bloom_filter.clear();
     }
 
     pub fn update(&mut self) {
@@ -173,8 +152,27 @@ impl SetStorage {
         (&mut self.buffer[12..16]).put_u32(self.len as _);
         self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         (&mut self.buffer[4..12]).put_u64(self.timestamp);
-        self.checksum = Checksummer::checksum32(&self.buffer[4..self.size]);
+        self.checksum = Checksummer::checksum32(&self.buffer[4..Self::SET_HEADER_SIZE + self.len]);
         (&mut self.buffer[0..4]).put_u32(self.checksum);
+    }
+
+    pub fn bloom_filter(&self) -> &BloomFilterU64 {
+        &self.bloom_filter
+    }
+
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.bloom_filter.clear();
     }
 
     pub fn freeze(self) -> IoBytes {
@@ -227,7 +225,7 @@ impl SetStorage {
         }
 
         self.reserve(buffer.len());
-        (&mut self.buffer[Self::SET_HEADER_SIZE + self.len..Self::SET_HEADER_SIZE + self.len + buffer.len()])
+        self.buffer[Self::SET_HEADER_SIZE + self.len..Self::SET_HEADER_SIZE + self.len + buffer.len()]
             .copy_from_slice(buffer);
         self.len += buffer.len();
         for hash in insertions {
@@ -245,8 +243,8 @@ impl SetStorage {
         }
         for entry in self.iter() {
             if hash == entry.hash {
-                let k = EntryDeserializer::deserialize_key::<K>(&entry.key)?;
-                let v = EntryDeserializer::deserialize_value::<V>(&entry.value, crate::Compression::None)?;
+                let k = EntryDeserializer::deserialize_key::<K>(entry.key)?;
+                let v = EntryDeserializer::deserialize_value::<V>(entry.value, crate::Compression::None)?;
                 return Ok(Some((k, v)));
             }
         }
@@ -315,7 +313,6 @@ impl<'a> SetEntry<'a> {
     }
 
     /// Range of the entry in the set data.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
     #[allow(unused)]
     pub fn range(&self) -> Range<usize> {
         self.offset..self.offset + self.len()
@@ -333,7 +330,7 @@ impl<'a> SetIter<'a> {
     }
 
     fn is_valid(&self) -> bool {
-        self.offset < self.set.len as usize
+        self.offset < self.set.len
     }
 
     fn next(&mut self) -> Option<SetEntry<'a>> {
@@ -391,7 +388,7 @@ mod tests {
         let key = key(key_len);
         let value = value(value_len);
 
-        let info = EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf, &metrics_for_test()).unwrap();
+        let info = EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf, metrics_for_test()).unwrap();
 
         let header = EntryHeader::new(hash, info.key_len, info.value_len);
         header.write(&mut buf[0..EntryHeader::ENTRY_HEADER_SIZE]);
@@ -453,12 +450,14 @@ mod tests {
         assert_none(&storage, 3);
         assert_some(&storage, 4, key(100), value(3800));
 
+        storage.update();
+
         let buf = storage.freeze();
         println!("{buf:?}");
 
         let mut buffer = IoBytesMut::with_capacity(PAGE);
         unsafe { buffer.set_len(PAGE) };
-        (&mut buffer[0..buf.len()]).copy_from_slice(&buf);
+        buffer[0..buf.len()].copy_from_slice(&buf);
         let storage = SetStorage::load(buffer);
         assert_eq!(storage.len(), e4.len());
         assert_none(&storage, 1);
