@@ -14,7 +14,9 @@
 
 use std::collections::VecDeque;
 
-use crate::{IoBuffer, IoBytes};
+use foyer_common::bits;
+
+use crate::{device::ALIGN, IoBuffer, IoBytes};
 
 pub enum Buffer {
     IoBuffer(IoBuffer),
@@ -41,6 +43,7 @@ pub struct IoBufferPool {
 
 impl IoBufferPool {
     pub fn new(buffer_size: usize, capacity: usize) -> Self {
+        bits::assert_aligned(ALIGN, buffer_size);
         Self {
             capacity,
             buffer_size,
