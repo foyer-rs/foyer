@@ -251,7 +251,7 @@ impl Dev for DirectFileDevice {
     }
 }
 
-/// [`DirectFiDeviceOptionsBuilder`] is used to build the options for the direct fs device.
+/// [`DirectFileDeviceOptionsBuilder`] is used to build the options for the direct fs device.
 ///
 /// The direct fs device uses a directory in a file system to store the data of disk cache.
 ///
