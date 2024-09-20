@@ -14,13 +14,11 @@
 
 use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
 
+use foyer_common::{code::Key, strict_assert};
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
-use foyer_common::{code::Key, strict_assert};
-
-use crate::handle::KeyedHandle;
-
 use super::Indexer;
+use crate::handle::KeyedHandle;
 
 pub struct HashTableIndexer<K, H>
 where

@@ -12,6 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
+
+use ahash::RandomState;
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+    runtime::BackgroundShutdownRuntime,
+};
+use foyer_memory::{Cache, CacheEntry};
+use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+
 use crate::{
     compress::Compression,
     device::{
@@ -35,15 +47,6 @@ use crate::{
     },
     Dev, DevExt, DirectFileDeviceOptions, IoBytesMut,
 };
-use ahash::RandomState;
-use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
-    runtime::BackgroundShutdownRuntime,
-};
-use foyer_memory::{Cache, CacheEntry};
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
-use tokio::runtime::Handle;
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
 pub struct Store<K, V, S = RandomState>
@@ -141,8 +144,14 @@ where
 
         self.inner.write_runtime_handle.spawn(async move {
             if force || this.pick(entry.key()) {
-                let mut buffer = IoBytesMut::new();
-                match EntrySerializer::serialize(entry.key(), entry.value(), &compression, &mut buffer) {
+                let mut buffer = IoBytesMut::with_capacity(EntrySerializer::size_hint(entry.key(), entry.value()));
+                match EntrySerializer::serialize(
+                    entry.key(),
+                    entry.value(),
+                    &compression,
+                    &mut buffer,
+                    &this.inner.metrics,
+                ) {
                     Ok(info) => {
                         let buffer = buffer.freeze();
                         this.inner.engine.enqueue(entry, buffer, info);
@@ -287,6 +296,7 @@ impl CombinedConfig {
 }
 
 /// Tokio runtime configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokioRuntimeConfig {
     /// Dedicated runtime worker threads.
     ///
@@ -305,6 +315,7 @@ pub struct TokioRuntimeConfig {
 }
 
 /// Configuration for the dedicated runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeConfig {
     /// Disable dedicated runtime. The runtime which foyer is built on will be used.
     Disabled,
@@ -346,8 +357,7 @@ where
     recover_concurrency: usize,
     flushers: usize,
     reclaimers: usize,
-    // FIXME(MrCroxx): rename the field and builder fn.
-    buffer_threshold: usize,
+    buffer_pool_size: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
@@ -376,7 +386,7 @@ where
             recover_concurrency: 8,
             flushers: 1,
             reclaimers: 1,
-            buffer_threshold: 16 * 1024 * 1024, // 16 MiB
+            buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),
@@ -458,6 +468,7 @@ where
         self
     }
 
+    // FIXME(MrCroxx): remove it after 0.12
     /// Set the total flush buffer threshold.
     ///
     /// Each flusher shares a volume at `threshold / flushers`.
@@ -465,8 +476,24 @@ where
     /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
     ///
     /// Default: 16 MiB.
+    #[deprecated(
+        since = "0.11.4",
+        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
+    )]
     pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
-        self.buffer_threshold = threshold;
+        self.buffer_pool_size = threshold;
+        self
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 16 MiB.
+    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
         self
     }
 
@@ -487,7 +514,7 @@ where
     /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
     /// will be applied.
     ///
-    /// If no eviction picker pickes a region, a region will be picked randomly.
+    /// If no eviction picker picks a region, a region will be picked randomly.
     ///
     /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
@@ -560,9 +587,11 @@ where
 
         let build_runtime = |config: &TokioRuntimeConfig, suffix: &str| {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
+            #[cfg(not(madsim))]
             if config.worker_threads != 0 {
                 builder.worker_threads(config.worker_threads);
             }
+            #[cfg(not(madsim))]
             if config.max_blocking_threads != 0 {
                 builder.max_blocking_threads(config.max_blocking_threads);
             }
@@ -610,7 +639,7 @@ where
             let write_runtime_handle = write_runtime_handle.clone();
             let read_runtime_handle = read_runtime_handle.clone();
             let user_runtime_handle = user_runtime_handle.clone();
-            // Use the user runtiem to open engine.
+            // Use the user runtime to open engine.
             tokio::spawn(async move {
                 match self.device_config {
                     DeviceConfig::None => {
@@ -646,7 +675,7 @@ where
                                     eviction_pickers: self.eviction_pickers,
                                     reinsertion_picker: self.reinsertion_picker,
                                     tombstone_log_config: self.tombstone_log_config,
-                                    buffer_threshold: self.buffer_threshold,
+                                    buffer_threshold: self.buffer_pool_size,
                                     statistics: statistics.clone(),
                                     write_runtime_handle,
                                     read_runtime_handle,
@@ -656,16 +685,16 @@ where
                                 .await
                             }
                             CombinedConfig::Small => {
-                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig { 
-                                    set_size: todo!(), 
-                                    set_cache_capacity: todo!(), 
-                                    device, regions: todo!(), 
-                                    flush: todo!(), 
-                                    flushers: todo!(), 
-                                    read_runtime_handle, 
-                                    write_runtime_handle, 
-                                    user_runtime_handle, 
-                                    marker: PhantomData 
+                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
+                                    set_size: todo!(),
+                                    set_cache_capacity: todo!(),
+                                    device, regions: todo!(),
+                                    flush: todo!(),
+                                    flushers: todo!(),
+                                    read_runtime_handle,
+                                    write_runtime_handle,
+                                    user_runtime_handle,
+                                    marker: PhantomData,
                                 }))
                                 .await
                             }
@@ -679,16 +708,16 @@ where
                                     (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
                                 Engine::open(EngineConfig::Combined(EitherConfig {
                                     selector: SizeSelector::new(large_object_threshold),
-                                    left: GenericSmallStorageConfig { 
-                                        set_size: todo!(), 
-                                        set_cache_capacity: todo!(), 
-                                        device, regions: todo!(), 
-                                        flush: todo!(), 
-                                        flushers: todo!(), 
-                                        read_runtime_handle, 
-                                        write_runtime_handle, 
-                                        user_runtime_handle, 
-                                        marker: PhantomData 
+                                    left: GenericSmallStorageConfig {
+                                        set_size: todo!(),
+                                        set_cache_capacity: todo!(),
+                                        device, regions: todo!(),
+                                        flush: todo!(),
+                                        flushers: todo!(),
+                                        read_runtime_handle,
+                                        write_runtime_handle,
+                                        user_runtime_handle,
+                                        marker: PhantomData,
                                     },
                                     right: GenericLargeStorageConfig {
                                         name: self.name,
@@ -705,7 +734,7 @@ where
                                         eviction_pickers: self.eviction_pickers,
                                         reinsertion_picker: self.reinsertion_picker,
                                         tombstone_log_config: self.tombstone_log_config,
-                                        buffer_threshold: self.buffer_threshold,
+                                        buffer_threshold: self.buffer_pool_size,
                                         statistics: statistics.clone(),
                                         write_runtime_handle,
                                         read_runtime_handle,

@@ -56,14 +56,14 @@ pub trait Eviction: Send + Sync + 'static {
     /// The base handle associated to the `ptr` must be set NOT in cache.
     unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
 
-    /// Notify the eviciton container that the `ptr` is acquired by **AN** external user.
+    /// Notify the eviction container that the `ptr` is acquired by **AN** external user.
     ///
     /// # Safety
     ///
     /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
     unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>);
 
-    /// Notify the eviciton container that the `ptr` is released by **ALL** external users.
+    /// Notify the eviction container that the `ptr` is released by **ALL** external users.
     ///
     /// # Safety
     ///

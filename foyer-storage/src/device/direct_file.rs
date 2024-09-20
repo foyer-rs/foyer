@@ -12,7 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer_common::{asyncify::asyncify_with_runtime, bits, fs::freespace};
+use std::{
+    fs::{create_dir_all, File, OpenOptions},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use foyer_common::{asyncify::asyncify_with_runtime, bits};
+use fs4::free_space;
+use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
@@ -21,14 +29,9 @@ use crate::{
     error::{Error, Result},
     IoBytes, IoBytesMut,
 };
-use std::{
-    fs::{create_dir_all, File, OpenOptions},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
 
 /// Options for the direct file device.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectFileDeviceOptions {
     /// Path of the direct file device.
     pub path: PathBuf,
@@ -86,14 +89,20 @@ impl DirectFileDevice {
         );
 
         let file = self.file.clone();
+
         asyncify_with_runtime(&self.runtime, move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
+            let written = {
+                use std::os::windows::fs::FileExt;
+                file.seek_write(buf.as_aligned(), offset)?
+            };
 
-            let written = file.write_at(buf.as_aligned(), offset)?;
+            #[cfg(target_family = "unix")]
+            let written = {
+                use std::os::unix::fs::FileExt;
+                file.write_at(buf.as_aligned(), offset)?
+            };
+
             if written != aligned {
                 return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
             }
@@ -123,14 +132,20 @@ impl DirectFileDevice {
         }
 
         let file = self.file.clone();
+
         let mut buffer = asyncify_with_runtime(&self.runtime, move || {
-            #[cfg(target_family = "unix")]
-            use std::os::unix::fs::FileExt;
-
             #[cfg(target_family = "windows")]
-            use std::os::windows::fs::FileExt;
+            let read = {
+                use std::os::windows::fs::FileExt;
+                file.seek_read(buf.as_mut(), offset)?
+            };
 
-            let read = file.read_at(buf.as_mut(), offset)?;
+            #[cfg(target_family = "unix")]
+            let read = {
+                use std::os::unix::fs::FileExt;
+                file.read_at(buf.as_mut(), offset)?
+            };
+
             if read != aligned {
                 return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
             }
@@ -184,6 +199,12 @@ impl Dev for DirectFileDevice {
         let file = opts.open(&options.path)?;
 
         if file.metadata().unwrap().is_file() {
+            tracing::warn!(
+                "{}\n{}\n{}",
+                "It seems a `DirectFileDevice` is used within a normal file system, which is inefficient.",
+                "Please use `DirectFileDevice` directly on a raw block device.",
+                "Or use `DirectFsDevice` within a normal file system.",
+            );
             file.set_len(options.capacity as _)?;
         }
 
@@ -236,7 +257,7 @@ impl Dev for DirectFileDevice {
     }
 }
 
-/// [`DirectFiDeviceOptionsBuilder`] is used to build the options for the direct fs device.
+/// [`DirectFileDeviceOptionsBuilder`] is used to build the options for the direct fs device.
 ///
 /// The direct fs device uses a directory in a file system to store the data of disk cache.
 ///
@@ -287,10 +308,10 @@ impl DirectFileDeviceOptionsBuilder {
         let align_v = |value: usize, align: usize| value - value % align;
 
         let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get freespace.
+            // Create an empty directory before to get free space.
             let dir = path.parent().expect("path must point to a file").to_path_buf();
             create_dir_all(&dir).unwrap();
-            freespace(&dir).unwrap() / 10 * 8
+            free_space(&dir).unwrap() as usize / 10 * 8
         });
         let capacity = align_v(capacity, ALIGN);
 

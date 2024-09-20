@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage"
-version = "0.9.3"
+version = "0.10.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine for foyer - the hybrid cache for Rust"
@@ -24,11 +24,11 @@ bytes = "1"
 clap = { workspace = true }
 either = "1"
 fastrace = { workspace = true }
-foyer-common = { version = "0.8.1", path = "../foyer-common" }
-foyer-memory = { version = "0.6.1", path = "../foyer-memory" }
+foyer-common = { version = "0.9.3", path = "../foyer-common" }
+foyer-memory = { version = "0.7.3", path = "../foyer-memory" }
+fs4 = "0.9.1"
 futures = "0.3"
 itertools = { workspace = true }
-lazy_static = "1"
 libc = "0.2"
 lz4 = "1.24"
 ordered_hash_map = "0.4"
@@ -55,3 +55,6 @@ strict_assertions = [
     "foyer-memory/strict_assertions",
 ]
 mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }

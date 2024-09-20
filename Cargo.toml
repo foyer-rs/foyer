@@ -4,6 +4,7 @@ members = [
     "examples",
     "foyer",
     "foyer-bench",
+    "foyer-cli",
     "foyer-common",
     "foyer-intrusive",
     "foyer-memory",
@@ -32,6 +33,7 @@ fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.7"
 clap = { version = "4", features = ["derive"] }
+bytesize = { package = "foyer-bytesize", version = "2" }
 
 [profile.release]
 debug = true

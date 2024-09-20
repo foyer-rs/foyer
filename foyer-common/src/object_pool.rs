@@ -58,7 +58,7 @@ impl<T> ObjectPool<T> {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Get or create an object from the objcet pool.
+    /// Get or create an object from the object pool.
     pub fn acquire(&self) -> T {
         match self.inner.queue.as_ref() {
             Some(queue) => queue.pop().unwrap_or((self.inner.create)()),
@@ -66,7 +66,7 @@ impl<T> ObjectPool<T> {
         }
     }
 
-    /// Give back or release an object from the objcet pool.
+    /// Give back or release an object from the object pool.
     pub fn release(&self, item: T) {
         if let Some(queue) = self.inner.queue.as_ref() {
             let _ = queue.push(item);

@@ -185,7 +185,7 @@ where
     }
 }
 
-/// Hybird cache builder modify the disk cache configurations.
+/// Hybrid cache builder modify the disk cache configurations.
 pub struct HybridCacheBuilderPhaseStorage<K, V, S>
 where
     K: StorageKey,
@@ -299,6 +299,7 @@ where
         }
     }
 
+    // FIXME(MrCroxx): remove it after 0.12
     /// Set the total flush buffer threshold.
     ///
     /// Each flusher shares a volume at `threshold / flushers`.
@@ -306,8 +307,29 @@ where
     /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
     ///
     /// Default: 16 MiB.
+    #[deprecated(
+        since = "0.11.4",
+        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
+    )]
     pub fn with_buffer_threshold(self, threshold: usize) -> Self {
-        let builder = self.builder.with_buffer_threshold(threshold);
+        let builder = self.builder.with_buffer_pool_size(threshold);
+        Self {
+            name: self.name,
+            tracing_config: self.tracing_config,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 16 MiB.
+    pub fn with_buffer_pool_size(self, buffer_pool_size: usize) -> Self {
+        let builder = self.builder.with_buffer_pool_size(buffer_pool_size);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,
@@ -338,7 +360,7 @@ where
     /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
     /// will be applied.
     ///
-    /// If no eviction picker pickes a region, a region will be picked randomly.
+    /// If no eviction picker picks a region, a region will be picked randomly.
     ///
     /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {

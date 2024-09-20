@@ -1,6 +1,6 @@
 [package]
 name = "foyer"
-version = "0.10.4"
+version = "0.11.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "Hybrid cache for Rust"
@@ -8,16 +8,16 @@ license = "Apache-2.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://github.com/foyer-rs/foyer"
 readme = "../README.md"
-rust-version = "1.77"
+rust-version = "1.81.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
 fastrace = { workspace = true }
-foyer-common = { version = "0.8.1", path = "../foyer-common" }
-foyer-memory = { version = "0.6.1", path = "../foyer-memory" }
-foyer-storage = { version = "0.9.3", path = "../foyer-storage" }
+foyer-common = { version = "0.9.3", path = "../foyer-common" }
+foyer-memory = { version = "0.7.3", path = "../foyer-memory" }
+foyer-storage = { version = "0.10.3", path = "../foyer-storage" }
 futures = "0.3"
 pin-project = "1"
 tokio = { workspace = true }

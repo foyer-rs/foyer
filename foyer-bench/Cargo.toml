@@ -1,6 +1,6 @@
 [package]
 name = "foyer-bench"
-version = "0.2.3"
+version = "0.3.3"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "bench tool for foyer - the hybrid cache for Rust"
@@ -12,28 +12,21 @@ readme = "../README.md"
 
 [dependencies]
 anyhow = "1"
-bytesize = "1"
+bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { version = "0.10.4", path = "../foyer" }
+foyer = { version = "0.11.3", path = "../foyer" }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.15"
-opentelemetry = { version = "0.24", optional = true }
-opentelemetry-otlp = { version = "0.17", optional = true }
-opentelemetry-semantic-conventions = { version = "0.16", optional = true }
-opentelemetry_sdk = { version = "0.24", features = [
-    "rt-tokio",
-    "trace",
-], optional = true }
 parking_lot = "0.12"
 rand = "0.8.5"
 serde = { workspace = true }
-serde_bytes = "0.11.14"
+serde_bytes = "0.11.15"
 tokio = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.25", optional = true }
@@ -46,13 +39,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 [features]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["console-subscriber"]
-trace = [
-    "opentelemetry",
-    "opentelemetry_sdk",
-    "opentelemetry-otlp",
-    "tracing-opentelemetry",
-    "opentelemetry-semantic-conventions",
-]
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
 jemalloc = ["tikv-jemallocator"]

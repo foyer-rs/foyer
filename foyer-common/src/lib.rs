@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 //! Shared components and utils for foyer.
 
@@ -48,7 +49,3 @@ pub mod runtime;
 pub mod tracing;
 /// An async wait group implementation.
 pub mod wait_group;
-
-/// File system utils.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub mod fs;

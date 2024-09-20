@@ -41,9 +41,8 @@ use futures::FutureExt;
 use pin_project::pin_project;
 use tokio::sync::oneshot;
 
-use crate::HybridCacheWriter;
-
 use super::writer::HybridCacheStorageWriter;
+use crate::HybridCacheWriter;
 
 macro_rules! root_span {
     ($self:ident, mut $name:ident, $label:expr) => {
@@ -212,7 +211,7 @@ where
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static + Clone,
+        Q: Hash + Eq + Send + Sync + 'static + Clone,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::get");
 
@@ -258,7 +257,7 @@ where
 
     /// Get cached entry with the given key from the hybrid cache.
     ///
-    /// Different from `get`, `obtain` dedeplicates the disk cache queries.
+    /// Different from `get`, `obtain` deduplicates the disk cache queries.
     ///
     /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
     /// key is acceptable.
@@ -486,6 +485,7 @@ where
             context,
             || {
                 let metrics = self.metrics.clone();
+                let user_runtime_handle = self.storage().runtimes().user_runtime_handle.clone();
 
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
@@ -502,17 +502,20 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    future
-                        .map(|res| Diversion {
-                            target: res,
-                            store: Some(FetchMark),
-                        })
-                        .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"))
+                    user_runtime_handle
+                        .spawn(
+                            future
+                                .map(|res| Diversion {
+                                    target: res,
+                                    store: Some(FetchMark),
+                                })
+                                .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn")),
+                        )
                         .await
+                        .unwrap()
                 }
             },
-            // TODO(MrCroxx): check regression
-            self.storage().runtimes().user_runtime_handle,
+            self.storage().runtimes().read_runtime_handle,
         );
 
         if inner.state() == FetchState::Hit {

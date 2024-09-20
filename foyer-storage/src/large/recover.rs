@@ -12,36 +12,38 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::collections::HashMap;
-
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-
-use clap::ValueEnum;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use futures::future::try_join_all;
-
-use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
-use tokio::sync::Semaphore;
-
-use crate::error::{Error, Result};
-
-use crate::large::indexer::HashedEntryAddress;
-use crate::large::{
-    scanner::{EntryInfo, RegionScanner},
-    serde::{AtomicSequence, Sequence},
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    ops::Range,
+    sync::{atomic::Ordering, Arc},
 };
 
-use super::generic::GenericLargeStorageConfig;
-use super::indexer::EntryAddress;
-use super::indexer::Indexer;
-use crate::device::RegionId;
-use crate::large::tombstone::Tombstone;
-use crate::region::{Region, RegionManager};
+use clap::ValueEnum;
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
+use futures::future::try_join_all;
+use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use tokio::{runtime::Handle, sync::Semaphore};
+
+use super::{
+    generic::GenericLargeStorageConfig,
+    indexer::{EntryAddress, Indexer},
+};
+use crate::{
+    device::RegionId,
+    error::{Error, Result},
+    large::{
+        indexer::HashedEntryAddress,
+        scanner::{EntryInfo, RegionScanner},
+        serde::{AtomicSequence, Sequence},
+        tombstone::Tombstone,
+    },
+    region::{Region, RegionManager},
+};
 
 /// The recover mode of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -61,6 +63,7 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
+    #[expect(clippy::too_many_arguments)]
     pub async fn run<K, V, S>(
         config: &GenericLargeStorageConfig<K, V, S>,
         regions: Range<RegionId>,
@@ -68,6 +71,7 @@ impl RecoverRunner {
         indexer: &Indexer,
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Result<()>
     where
@@ -81,9 +85,10 @@ impl RecoverRunner {
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
+            let metrics = metrics.clone();
             runtime.spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, region).await;
+                let res = RegionRecoverRunner::run(mode, region, metrics).await;
                 drop(permit);
                 res
             })
@@ -194,7 +199,7 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
+    async fn run(mode: RecoverMode, region: Region, metrics: Arc<Metrics>) -> Result<Vec<EntryInfo>> {
         if mode == RecoverMode::None {
             return Ok(vec![]);
         }
@@ -202,7 +207,7 @@ impl RegionRecoverRunner {
         let mut infos = vec![];
 
         let id = region.id();
-        let mut iter = RegionScanner::new(region);
+        let mut iter = RegionScanner::new(region, metrics);
         loop {
             let r = iter.next().await;
             match r {

@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{fmt::Debug, marker::PhantomData, ops::Range, sync::Arc};
+
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::{
@@ -19,11 +21,9 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
-
 use tokio::runtime::Handle;
 
-use std::{fmt::Debug, marker::PhantomData, ops::Range, sync::Arc};
-
+use super::{flusher::Flusher, set::SetId, set_manager::SetManager};
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
@@ -31,8 +31,6 @@ use crate::{
     storage::Storage,
     DeviceStats, IoBytes,
 };
-
-use super::{flusher::Flusher, set::SetId, set_manager::SetManager};
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where
@@ -228,9 +226,6 @@ where
         self.enqueue(entry, buffer, info);
     }
 
-    // FIXME: REMOVE THE CLIPPY IGNORE.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::manual_async_fn)]
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         self.load(hash)
     }

@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use fastrace::prelude::*;
-
 use std::{
     ops::Deref,
     pin::Pin,
@@ -22,11 +20,13 @@ use std::{
     time::Duration,
 };
 
+use fastrace::prelude::*;
 use futures::{ready, Future};
 use pin_project::pin_project;
+use serde::{Deserialize, Serialize};
 
 /// Configurations for tracing.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TracingConfig {
     /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation in us.
     record_hybrid_insert_threshold_us: AtomicUsize,

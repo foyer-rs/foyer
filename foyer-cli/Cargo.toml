@@ -1,9 +1,9 @@
 [package]
-name = "foyer-intrusive"
-version = "0.9.3"
+name = "foyer-cli"
+version = "0.0.0"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "intrusive data structures for foyer - the hybrid cache for Rust"
+description = "Hybrid cache for Rust"
 license = "Apache-2.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://github.com/foyer-rs/foyer"
@@ -11,8 +11,13 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-foyer-common = { version = "0.9.3", path = "../foyer-common" }
-itertools = { workspace = true }
+anyhow = "1"
+bytesize = { workspace = true }
+clap = { workspace = true }
+thiserror = "1"
 
-[features]
-strict_assertions = ["foyer-common/strict_assertions"]
+[dev-dependencies]
+
+[[bin]]
+name = "foyer"
+path = "src/main.rs"

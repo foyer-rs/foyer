@@ -27,15 +27,14 @@ use futures::future::try_join_all;
 use parking_lot::Mutex;
 use tokio::{runtime::Handle, sync::Notify, task::JoinHandle};
 
+use super::{
+    batch::{Batch, BatchMut, SetBatch},
+    set_manager::SetManager,
+};
 use crate::{
     error::{Error, Result},
     serde::KvInfo,
     IoBytes,
-};
-
-use super::{
-    batch::{Batch, BatchMut, SetBatch},
-    set_manager::SetManager,
 };
 
 pub struct Flusher<K, V, S>

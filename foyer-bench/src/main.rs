@@ -12,17 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#![warn(clippy::allow_attributes)]
+
 mod analyze;
 mod rate;
 mod text;
-
-use bytesize::MIB;
-use foyer::{
-    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
-    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
-};
-use metrics_exporter_prometheus::PrometheusBuilder;
 
 use std::{
     collections::BTreeMap,
@@ -37,10 +31,16 @@ use std::{
 };
 
 use analyze::{analyze, monitor, Metrics};
+use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
-
+use foyer::{
+    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
+    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
+    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
+};
 use futures::future::join_all;
 use itertools::Itertools;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{
     distributions::Distribution,
     rngs::{OsRng, StdRng},
@@ -73,13 +73,13 @@ pub struct Args {
     #[arg(short, long)]
     dir: Option<String>,
 
-    /// In-memory cache capacity. (MiB)
-    #[arg(long, default_value_t = 1024)]
-    mem: usize,
+    /// In-memory cache capacity.
+    #[arg(long, default_value_t = ByteSize::gib(1))]
+    mem: ByteSize,
 
-    /// Disk cache capacity. (MiB)
-    #[arg(long, default_value_t = 1024)]
-    disk: usize,
+    /// Disk cache capacity.
+    #[arg(long, default_value_t = ByteSize::gib(1))]
+    disk: ByteSize,
 
     /// (s)
     #[arg(short, long, default_value_t = 60)]
@@ -89,29 +89,29 @@ pub struct Args {
     #[arg(long, default_value_t = 2)]
     report_interval: u64,
 
-    /// Write rate limit per writer. (MiB)
-    #[arg(long, default_value_t = 0.0)]
-    w_rate: f64,
+    /// Write rate limit per writer.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    w_rate: ByteSize,
 
-    /// Read rate limit per reader. (MiB)
-    #[arg(long, default_value_t = 0.0)]
-    r_rate: f64,
+    /// Read rate limit per reader.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    r_rate: ByteSize,
 
-    /// Min entry size (B).
-    #[arg(long, default_value_t = 64 * 1024)]
-    entry_size_min: usize,
+    /// Min entry size.
+    #[arg(long, default_value_t = ByteSize::kib(64))]
+    entry_size_min: ByteSize,
 
-    /// Max entry size (B).
-    #[arg(long, default_value_t = 64 * 1024)]
-    entry_size_max: usize,
+    /// Max entry size.
+    #[arg(long, default_value_t = ByteSize::kib(64))]
+    entry_size_max: ByteSize,
 
     /// Reader lookup key range.
     #[arg(long, default_value_t = 10000)]
     get_range: u64,
 
-    /// Disk cache region size. (MiB)
-    #[arg(long, default_value_t = 64)]
-    region_size: usize,
+    /// Disk cache region size.
+    #[arg(long, default_value_t = ByteSize::mib(64))]
+    region_size: ByteSize,
 
     /// Flusher count.
     #[arg(long, default_value_t = 4)]
@@ -136,13 +136,13 @@ pub struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// Enable rated ticket admission picker if `admission_rate_limit > 0`. (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    admission_rate_limit: usize,
+    /// Enable rated ticket admission picker if `admission_rate_limit > 0`.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    admission_rate_limit: ByteSize,
 
-    /// Enable rated ticket reinsetion picker if `reinseriton_rate_limit > 0`. (MiB/s)
-    #[arg(long, default_value_t = 0)]
-    reinseriton_rate_limit: usize,
+    /// Enable rated ticket reinsertion picker if `reinsertion_rate_limit > 0`.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    reinsertion_rate_limit: ByteSize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -264,14 +264,14 @@ impl TimeSeriesDistribution {
             "uniform" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
                 let interval =
-                    ((args.entry_size_min + args.entry_size_max) >> 1) as f64 / (args.w_rate * 1024.0 * 1024.0);
+                    ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64 / (args.w_rate.as_u64() as f64);
                 let interval = Duration::from_secs_f64(interval);
                 TimeSeriesDistribution::Uniform { interval }
             }
             "zipf" => {
                 // interval = 1 / freq = 1 / (rate / size) = size / rate
                 let interval =
-                    ((args.entry_size_min + args.entry_size_max) >> 1) as f64 / (args.w_rate * 1024.0 * 1024.0);
+                    ((args.entry_size_min + args.entry_size_max).as_u64() >> 1) as f64 / (args.w_rate.as_u64() as f64);
                 let interval = Duration::from_secs_f64(interval);
                 display_zipf_sample(args.distribution_zipf_n, args.distribution_zipf_s);
                 TimeSeriesDistribution::Zipf {
@@ -313,9 +313,10 @@ impl Deref for Value {
 }
 
 mod arc_bytes {
+    use std::sync::Arc;
+
     use serde::{Deserialize, Deserializer, Serializer};
     use serde_bytes::ByteBuf;
-    use std::sync::Arc;
 
     pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -338,46 +339,6 @@ fn setup() {
     console_subscriber::init();
 }
 
-#[cfg(feature = "trace")]
-fn setup() {
-    use opentelemetry_sdk::{
-        trace::{BatchConfigBuilder, Config},
-        Resource,
-    };
-    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-    use tracing::Level;
-    use tracing_subscriber::{filter::Targets, prelude::*};
-
-    let tracing_config = Config::default().with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-        SERVICE_NAME,
-        "foyer-bench",
-    )]));
-    let batch_config = BatchConfigBuilder::default()
-        .with_max_queue_size(1048576)
-        .with_max_export_batch_size(4096)
-        .with_max_concurrent_exports(4)
-        .build();
-
-    let tracer = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .with_tracing_config(tracing_config)
-        .with_batch_config(batch_config)
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .unwrap();
-    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    tracing_subscriber::registry()
-        .with(
-            Targets::new()
-                .with_target("foyer_storage", Level::DEBUG)
-                .with_target("foyer_common", Level::DEBUG)
-                .with_target("foyer_intrusive", Level::DEBUG)
-                .with_target("foyer_storage_bench", Level::DEBUG),
-        )
-        .with(opentelemetry_layer)
-        .init();
-}
-
 #[cfg(feature = "mtrace")]
 fn setup() {
     use fastrace::collector::Config;
@@ -385,7 +346,7 @@ fn setup() {
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
-#[cfg(not(any(feature = "tokio-console", feature = "trace", feature = "mtrace")))]
+#[cfg(not(any(feature = "tokio-console", feature = "mtrace")))]
 fn setup() {
     use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -470,7 +431,7 @@ async fn benchmark(args: Args) {
 
     let builder = HybridCacheBuilder::new()
         .with_tracing_config(tracing_config)
-        .memory(args.mem * MIB as usize)
+        .memory(args.mem.as_u64() as _)
         .with_shards(args.shards);
 
     let builder = match args.eviction.as_str() {
@@ -492,14 +453,14 @@ async fn benchmark(args: Args) {
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_config(
             DirectFileDeviceOptionsBuilder::new(file)
-                .with_capacity(args.disk * MIB as usize)
-                .with_region_size(args.region_size * MIB as usize)
+                .with_capacity(args.disk.as_u64() as _)
+                .with_region_size(args.region_size.as_u64() as _)
                 .build(),
         ),
         (None, Some(dir)) => builder.with_device_config(
             DirectFsDeviceOptionsBuilder::new(dir)
-                .with_capacity(args.disk * MIB as usize)
-                .with_file_size(args.region_size * MIB as usize)
+                .with_capacity(args.disk.as_u64() as _)
+                .with_file_size(args.region_size.as_u64() as _)
                 .build(),
         ),
         _ => unreachable!(),
@@ -536,13 +497,13 @@ async fn benchmark(args: Args) {
             _ => unreachable!(),
         });
 
-    if args.admission_rate_limit > 0 {
+    if args.admission_rate_limit.as_u64() > 0 {
         builder =
-            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
+            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
-    if args.reinseriton_rate_limit > 0 {
+    if args.reinsertion_rate_limit.as_u64() > 0 {
         builder =
-            builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit * MIB as usize)));
+            builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
 
     if args.clean_region_threshold > 0 {
@@ -609,15 +570,15 @@ async fn benchmark(args: Args) {
 }
 
 async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
-    let w_rate = if args.w_rate == 0.0 {
+    let w_rate = if args.w_rate.as_u64() == 0 {
         None
     } else {
-        Some(args.w_rate * 1024.0 * 1024.0)
+        Some(args.w_rate.as_u64() as _)
     };
-    let r_rate = if args.r_rate == 0.0 {
+    let r_rate = if args.r_rate.as_u64() == 0 {
         None
     } else {
-        Some(args.r_rate * 1024.0 * 1024.0)
+        Some(args.r_rate.as_u64() as _)
     };
 
     let counts = (0..args.writers).map(|_| AtomicU64::default()).collect_vec();
@@ -629,7 +590,7 @@ async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, st
         r_rate,
         get_range: args.get_range,
         counts,
-        entry_size_range: args.entry_size_min..args.entry_size_max + 1,
+        entry_size_range: args.entry_size_min.as_u64() as usize..args.entry_size_max.as_u64() as usize + 1,
         time: Duration::from_secs(args.time),
         warm_up: Duration::from_secs(args.warm_up),
         distribution,

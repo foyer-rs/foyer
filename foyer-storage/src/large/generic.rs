@@ -24,6 +24,7 @@ use std::{
     time::Instant,
 };
 
+use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
@@ -31,7 +32,15 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
+use tokio::{runtime::Handle, sync::Semaphore};
 
+use super::{
+    batch::InvalidStats,
+    flusher::{Flusher, Submission},
+    indexer::Indexer,
+    reclaimer::Reclaimer,
+    recover::{RecoverMode, RecoverRunner},
+};
 use crate::{
     compress::Compression,
     device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
@@ -48,18 +57,6 @@ use crate::{
     storage::Storage,
     IoBytes,
 };
-
-use tokio::{runtime::Handle, sync::Semaphore};
-
-use super::{
-    batch::InvalidStats,
-    flusher::{Flusher, Submission},
-    indexer::Indexer,
-    reclaimer::Reclaimer,
-    recover::{RecoverMode, RecoverRunner},
-};
-
-use fastrace::prelude::*;
 
 pub struct GenericLargeStorageConfig<K, V, S>
 where
@@ -228,6 +225,7 @@ where
             &indexer,
             &region_manager,
             &tombstones,
+            metrics.clone(),
             config.user_runtime_handle.clone(),
         )
         .await?;
@@ -256,6 +254,7 @@ where
                 flushers.clone(),
                 stats.clone(),
                 config.flush,
+                metrics.clone(),
                 config.write_runtime_handle.clone(),
             )
             .await
@@ -338,7 +337,19 @@ where
                 .cache_read_bytes
                 .fetch_add(bits::align_up(device.align(), buffer.len()), Ordering::Relaxed);
 
-            let header = EntryHeader::read(&buffer[..EntryHeader::serialized_len()])?;
+            let header = match EntryHeader::read(&buffer[..EntryHeader::serialized_len()]) {
+                Ok(header) => header,
+                Err(e @ Error::MagicMismatch { .. })
+                | Err(e @ Error::ChecksumMismatch { .. })
+                | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
+                    tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increment(1);
+                    metrics.storage_miss_duration.record(now.elapsed());
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            };
 
             let (k, v) = match EntryDeserializer::deserialize::<K, V>(
                 &buffer[EntryHeader::serialized_len()..],
@@ -346,18 +357,17 @@ where
                 header.value_len as _,
                 header.compression,
                 Some(header.checksum),
+                &metrics,
             ) {
                 Ok(res) => res,
-                Err(e) => match e {
-                    Error::MagicMismatch { .. } | Error::ChecksumMismatch { .. } => {
-                        tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
-                        indexer.remove(hash);
-                        metrics.storage_miss.increment(1);
-                        metrics.storage_miss_duration.record(now.elapsed());
-                        return Ok(None);
-                    }
-                    e => return Err(e),
-                },
+                Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
+                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increment(1);
+                    metrics.storage_miss_duration.record(now.elapsed());
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
             };
 
             metrics.storage_hit.increment(1);
@@ -484,14 +494,13 @@ where
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-
-    use std::path::Path;
+    use std::{fs::File, path::Path};
 
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
 
+    use super::*;
     use crate::{
         device::{
             direct_fs::DirectFsDeviceOptions,
@@ -499,7 +508,7 @@ mod tests {
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
-        test_utils::BiasedPicker,
+        test_utils::{metrics_for_test, BiasedPicker},
         IoBytesMut, TombstoneLogConfigBuilder,
     };
 
@@ -594,7 +603,14 @@ mod tests {
 
     fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
         let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(entry.key(), entry.value(), &Compression::None, &mut buffer).unwrap();
+        let info = EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            &mut buffer,
+            metrics_for_test(),
+        )
+        .unwrap();
         let buffer = buffer.freeze();
         store.enqueue(entry, buffer, info);
     }
@@ -795,7 +811,8 @@ mod tests {
     //     let dir = tempfile::tempdir().unwrap();
 
     //     let memory = cache_for_test();
-    //     let store = store_for_test_with_admission_picker(&memory, dir.path(), Arc::new(BiasedPicker::new([1]))).await;
+    //     let store = store_for_test_with_admission_picker(&memory, dir.path(),
+    // Arc::new(BiasedPicker::new([1]))).await;
 
     //     let e1 = memory.insert(1, vec![1; 7 * KB]);
     //     let e2 = memory.insert(2, vec![2; 7 * KB]);
@@ -904,5 +921,44 @@ mod tests {
                 Some((9, vec![9; 7 * KB])),
             ]
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_magic_checksum_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test(dir.path()).await;
+
+        // write entry 1
+        let e1 = memory.insert(1, vec![1; 7 * KB]);
+        enqueue(&store, e1);
+        store.wait().await;
+
+        // check entry 1
+        let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
+        assert_eq!(r1, (1, vec![1; 7 * KB]));
+
+        // corrupt entry and header
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            if !entry.metadata().unwrap().is_file() {
+                continue;
+            }
+
+            let file = File::options().write(true).open(entry.path()).unwrap();
+            #[cfg(target_family = "unix")]
+            {
+                use std::os::unix::fs::FileExt;
+                file.write_all_at(&[b'x'; 4 * 1024], 0).unwrap();
+            }
+            #[cfg(target_family = "windows")]
+            {
+                use std::os::windows::fs::FileExt;
+                file.seek_write(&[b'x'; 4 * 1024], 0).unwrap();
+            }
+        }
+
+        assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
     }
 }

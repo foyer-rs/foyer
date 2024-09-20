@@ -20,11 +20,13 @@ foyer-common = { path = "../foyer-common" }
 futures = "0.3"
 hashbrown = "0.14"
 itertools = { workspace = true }
-libc = "0.2"
-nix = { version = "0.29", features = ["fs"] }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 serde = { workspace = true }
 tokio = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+nix = { version = "0.29", features = ["fs"] }
 
 [dev-dependencies]
 rand = "0.8.5"

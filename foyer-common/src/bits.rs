@@ -94,7 +94,7 @@ pub fn debug_assert_pow2<U: Unsigned>(v: U) {
     debug_assert_eq!(v & (v - U::from(1)), U::from(0), "v: {}", v);
 }
 
-/// Check if the given value is aligend with the given align.
+/// Check if the given value is aligned with the given align.
 ///
 /// Note: The given align must be a power of 2.
 #[inline(always)]
@@ -103,7 +103,7 @@ pub fn is_aligned<U: Unsigned>(align: U, v: U) -> bool {
     v & (align - U::from(1)) == U::from(0)
 }
 
-/// Assert that the given value is aligend with the given align.
+/// Assert that the given value is aligned with the given align.
 ///
 /// Note: The given align must be a power of 2.
 #[inline(always)]
@@ -112,7 +112,7 @@ pub fn assert_aligned<U: Unsigned>(align: U, v: U) {
     assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
 }
 
-/// Debug assert that the given value is aligend with the given align.
+/// Debug assert that the given value is aligned with the given align.
 ///
 /// Note: The given align must be a power of 2.
 #[inline(always)]

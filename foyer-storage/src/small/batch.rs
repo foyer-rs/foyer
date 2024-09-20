@@ -21,9 +21,8 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use tokio::sync::oneshot;
 
-use crate::{serde::KvInfo, small::serde::EntryHeader, IoBytes, IoBytesMut};
-
 use super::set::SetId;
+use crate::{serde::KvInfo, small::serde::EntryHeader, IoBytes, IoBytesMut};
 
 struct Insertion<K, V, S>
 where

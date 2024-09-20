@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    ops::Range,
+};
 
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
@@ -27,7 +30,7 @@ pub enum Error {
     /// Multiple error list.
     Multiple(MultipleError),
     /// Entry magic mismatch.
-    #[error("magiac mismatch, expected: {expected}, get: {get}")]
+    #[error("magic mismatch, expected: {expected}, get: {get}")]
     MagicMismatch {
         /// Expected magic.
         expected: u32,
@@ -42,6 +45,17 @@ pub enum Error {
         /// Gotten checksum.
         get: u64,
     },
+    /// Out of range.
+    #[error("out of range, valid: {valid:?}, get: {get:?}")]
+    OutOfRange {
+        /// Valid range.
+        valid: Range<usize>,
+        /// Gotten range.
+        get: Range<usize>,
+    },
+    /// Compression algorithm not supported.
+    #[error("compression algorithm not supported: {0}")]
+    CompressionAlgorithmNotSupported(u8),
     /// Other error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),

@@ -113,7 +113,6 @@ pub trait RangeBoundsExt<
     }
 
     /// Map the range with the given method.
-    #[rustversion::since(1.77.2)]
     fn map<F, R>(&self, f: F) -> (Bound<R>, Bound<R>)
     where
         F: Fn(&T) -> R,

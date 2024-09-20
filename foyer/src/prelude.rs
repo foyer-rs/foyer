@@ -12,12 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::common;
-use crate::memory;
-use crate::storage;
-
-use ahash::RandomState;
-
 pub use common::{
     buf::{BufExt, BufMutExt},
     code::{Key, StorageKey, StorageValue, Value},
@@ -25,7 +19,10 @@ pub use common::{
     range::RangeBoundsExt,
     tracing::TracingConfig,
 };
-pub use memory::{CacheContext, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
+pub use memory::{
+    Cache, CacheBuilder, CacheContext, CacheEntry, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
+    S3FifoConfig, Weighter,
+};
 pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevExt, DevOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
@@ -39,8 +36,4 @@ pub use crate::hybrid::{
     cache::{HybridCache, HybridCacheEntry, HybridFetch, HybridFetchInner},
     writer::{HybridCacheStorageWriter, HybridCacheWriter},
 };
-
-/// In-memory cache.
-pub type Cache<K, V, S = RandomState> = memory::Cache<K, V, S>;
-/// In-memory cache builder.
-pub type CacheBuilder<K, V, S> = memory::CacheBuilder<K, V, S>;
+use crate::{common, memory, storage};

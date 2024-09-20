@@ -28,6 +28,7 @@ use std::{
 };
 
 use ahash::RandomState;
+use fastrace::{future::InSpan, prelude::*};
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
@@ -49,8 +50,6 @@ use crate::{
     CacheContext,
 };
 
-use fastrace::{future::InSpan, prelude::*};
-
 // TODO(MrCroxx): Use `trait_alias` after stable.
 /// The weighter for the in-memory cache.
 ///
@@ -65,8 +64,7 @@ struct SharedState<K, V, T> {
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 struct GenericCacheShard<K, V, E, I, S>
 where
     K: Key,
@@ -116,9 +114,8 @@ where
     }
 
     /// Insert a new entry into the cache. The handle for the new entry is returned.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::too_many_arguments)]
+
+    #[expect(clippy::too_many_arguments)]
     #[fastrace::trace(name = "foyer::memory::generic::shard::emplace")]
     unsafe fn emplace(
         &mut self,
@@ -242,8 +239,6 @@ where
     }
 
     /// Clear all cache entries.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     unsafe fn clear(&mut self, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Avoid collecting here?
         let ptrs = self.indexer.drain().collect_vec();
@@ -270,8 +265,6 @@ where
         }
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     #[fastrace::trace(name = "foyer::memory::generic::shard::evict")]
     unsafe fn evict(&mut self, weight: usize, to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>) {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
@@ -293,8 +286,6 @@ where
     /// Release a handle used by an external user.
     ///
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     unsafe fn try_release_external_handle(
         &mut self,
         mut ptr: NonNull<E::Handle>,
@@ -308,8 +299,6 @@ where
     /// Return the entry if the handle is released.
     ///
     /// Recycle it if possible.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
     unsafe fn try_release_handle(
         &mut self,
         mut ptr: NonNull<E::Handle>,
@@ -321,7 +310,7 @@ where
             return None;
         }
 
-        strict_assert!(handle.base().is_inited());
+        strict_assert!(handle.base().is_initialized());
         strict_assert!(!handle.base().has_refs());
 
         // If the entry is deposit (emplace by deposit & never read), remove it from indexer to skip reinsertion.
@@ -474,8 +463,7 @@ where
     }
 }
 
-// TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub struct GenericCache<K, V, E, I, S = RandomState>
 where
     K: Key,
@@ -1016,8 +1004,7 @@ mod tests {
         is_send_sync_static::<LruCache<(), ()>>();
     }
 
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn fuzzy<E>(cache: Arc<GenericCache<u64, u64, E, SanityIndexer<HashTableIndexer<u64, E::Handle>>>>)
     where
         E: Eviction,

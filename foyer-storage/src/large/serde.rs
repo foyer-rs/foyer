@@ -12,13 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+
 use bytes::{Buf, BufMut};
 
 use crate::{
     compress::Compression,
     error::{Error, Result},
 };
-use std::sync::atomic::AtomicU64;
 
 const ENTRY_MAGIC: u32 = 0x97_03_27_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
@@ -64,18 +65,8 @@ impl EntryHeader {
         let checksum = buf.get_u64();
 
         let v = buf.get_u32();
-        let compression = Compression::try_from(v as u8)?;
 
-        let this = Self {
-            key_len,
-            value_len,
-            hash,
-            sequence,
-            compression,
-            checksum,
-        };
-
-        tracing::trace!("{this:#?}");
+        tracing::trace!("read entry header, key len: {key_len}, value_len: {value_len}, hash: {hash}, sequence: {sequence}, checksum: {checksum}, extra: {v}");
 
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
@@ -84,7 +75,15 @@ impl EntryHeader {
                 get: magic,
             });
         }
+        let compression = Compression::try_from(v as u8)?;
 
-        Ok(this)
+        Ok(Self {
+            key_len,
+            value_len,
+            hash,
+            sequence,
+            checksum,
+            compression,
+        })
     }
 }

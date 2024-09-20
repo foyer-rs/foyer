@@ -12,15 +12,30 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![warn(clippy::allow_attributes)]
+//! `foyer-cli` provides debug tools for foyer,
 
-pub mod batch;
-pub mod compact_bloom_filter;
-pub mod continuum;
-pub mod erwlock;
-pub mod iostat;
-pub mod judge;
-pub mod slab;
+mod args;
 
-/// A structured async batch pipeline.
-pub mod async_batch_pipeline;
+use args::ArgsArgs;
+use clap::{Parser, Subcommand};
+
+#[derive(Debug, Parser)]
+#[command(author, version, about)]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Automatic arguments detector.
+    Args(ArgsArgs),
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Args(args) => args::run(args),
+    }
+}

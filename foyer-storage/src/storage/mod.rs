@@ -23,8 +23,6 @@ use foyer_memory::CacheEntry;
 use crate::{device::monitor::DeviceStats, error::Result, serde::KvInfo, IoBytes};
 
 /// The storage trait for the disk cache storage engine.
-// TODO(MrCroxx): Remove this after in-memory cache event listener is removed.
-#[allow(clippy::type_complexity)]
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
     /// Disk cache key type.
     type Key: StorageKey;

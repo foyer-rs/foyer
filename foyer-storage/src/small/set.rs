@@ -23,13 +23,12 @@ use std::{
 use bytes::{Buf, BufMut};
 use foyer_common::code::{StorageKey, StorageValue};
 
+use super::{bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
     error::Result,
     serde::{Checksummer, EntryDeserializer},
     IoBytes, IoBytesMut,
 };
-
-use super::{bloom_filter::BloomFilterU64, serde::EntryHeader};
 
 pub type SetId = u64;
 
@@ -369,9 +368,8 @@ impl<'a> Iterator for SetIter<'a> {
 #[cfg(test)]
 mod tests {
 
-    use crate::{serde::EntrySerializer, Compression};
-
     use super::*;
+    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
 
     const PAGE: usize = 4096;
 
@@ -393,7 +391,7 @@ mod tests {
         let key = key(key_len);
         let value = value(value_len);
 
-        let info = EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf).unwrap();
+        let info = EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf, &metrics_for_test()).unwrap();
 
         let header = EntryHeader::new(hash, info.key_len, info.value_len);
         header.write(&mut buf[0..EntryHeader::ENTRY_HEADER_SIZE]);

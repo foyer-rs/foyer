@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
+
+use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 /// The admission picker for the disk cache.
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {
@@ -36,8 +37,7 @@ pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
 /// The eviction picker for the disk cache.
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
     /// Init the eviction picker with information.
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn init(&mut self, regions: usize, region_size: usize) {}
 
     /// Pick a region to evict.

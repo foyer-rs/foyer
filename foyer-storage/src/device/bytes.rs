@@ -18,10 +18,11 @@ use std::{
     sync::Arc,
 };
 
-use super::{allocator::AlignedAllocator, ALIGN, IO_BUFFER_ALLOCATOR};
 use allocator_api2::{boxed::Box as BoxA, vec::Vec as VecA};
 use bytes::{buf::UninitSlice, Buf, BufMut};
 use foyer_common::bits;
+
+use super::{allocator::AlignedAllocator, ALIGN, IO_BUFFER_ALLOCATOR};
 
 /// A capacity-fixed 4K-aligned u8 buffer.
 pub struct IoBuffer {
@@ -78,7 +79,7 @@ impl Clone for IoBuffer {
     }
 }
 
-/// A 4K-aligend u8 vector.
+/// A 4K-aligned u8 vector.
 ///
 /// # Growth
 ///

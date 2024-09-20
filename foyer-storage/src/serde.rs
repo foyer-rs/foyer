@@ -12,13 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hasher};
-use twox_hash::{XxHash32, XxHash64};
+use std::{fmt::Debug, hash::Hasher, time::Instant};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    bits,
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
+use twox_hash::{XxHash32, XxHash64};
 
 use crate::{
     compress::Compression,
+    device::ALIGN,
     error::{Error, Result},
     IoBytesMut,
 };
@@ -50,18 +55,20 @@ pub struct KvInfo {
 pub struct EntrySerializer;
 
 impl EntrySerializer {
-    #[allow(clippy::needless_borrows_for_generic_args)]
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
     pub fn serialize<'a, K, V>(
         key: &'a K,
         value: &'a V,
         compression: &'a Compression,
         mut buffer: &'a mut IoBytesMut,
+        metrics: &Metrics,
     ) -> Result<KvInfo>
     where
         K: StorageKey,
         V: StorageValue,
     {
+        let now = Instant::now();
+
         let mut cursor = buffer.len();
 
         // serialize value
@@ -91,7 +98,21 @@ impl EntrySerializer {
         bincode::serialize_into(&mut buffer, &key).map_err(Error::from)?;
         let key_len = buffer.len() - cursor;
 
+        metrics.storage_entry_serialize_duration.record(now.elapsed());
+
         Ok(KvInfo { key_len, value_len })
+    }
+
+    pub fn size_hint<'a, K, V>(key: &'a K, value: &'a V) -> usize
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        let hint = match (bincode::serialized_size(key), bincode::serialized_size(value)) {
+            (Ok(k), Ok(v)) => (k + v) as usize,
+            _ => 0,
+        };
+        bits::align_up(ALIGN, hint)
     }
 }
 
@@ -106,11 +127,14 @@ impl EntryDeserializer {
         value_len: usize,
         compression: Compression,
         checksum: Option<u64>,
+        metrics: &Metrics,
     ) -> Result<(K, V)>
     where
         K: StorageKey,
         V: StorageValue,
     {
+        let now = Instant::now();
+
         // deserialize value
         let buf = &buffer[..value_len];
         let value = Self::deserialize_value(buf, compression)?;
@@ -126,6 +150,8 @@ impl EntryDeserializer {
                 return Err(Error::ChecksumMismatch { expected, get });
             }
         }
+
+        metrics.storage_entry_deserialize_duration.record(now.elapsed());
 
         Ok((key, value))
     }
@@ -154,5 +180,22 @@ impl EntryDeserializer {
                 bincode::deserialize_from(decoder).map_err(Error::from)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::metrics_for_test;
+
+    #[test]
+    fn test_serde_size_hint() {
+        let key = 42u64;
+        let value = vec![b'x'; 114514];
+        let hint = EntrySerializer::size_hint(&key, &value);
+        let mut buf = IoBytesMut::new();
+        EntrySerializer::serialize(&key, &value, &Compression::None, &mut buf, metrics_for_test()).unwrap();
+        assert!(hint >= buf.len());
+        assert!(hint.abs_diff(buf.len()) < ALIGN);
     }
 }

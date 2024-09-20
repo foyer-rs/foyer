@@ -12,15 +12,21 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![warn(clippy::allow_attributes)]
+use std::fmt::Debug;
 
-pub mod batch;
-pub mod compact_bloom_filter;
-pub mod continuum;
-pub mod erwlock;
-pub mod iostat;
-pub mod judge;
-pub mod slab;
+/// Disk cache error type.
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// I/O error.
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    /// `fio` not available.
+    #[error("fio not available")]
+    FioNotAvailable,
+    /// Other error.
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
 
-/// A structured async batch pipeline.
-pub mod async_batch_pipeline;
+/// Disk cache result type.
+pub type Result<T> = core::result::Result<T, Error>;

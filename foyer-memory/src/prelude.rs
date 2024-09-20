@@ -12,10 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+pub use ahash::RandomState;
+
 pub use crate::{
     cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
     context::CacheContext,
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
     generic::{FetchMark, FetchState, Weighter},
 };
-pub use ahash::RandomState;

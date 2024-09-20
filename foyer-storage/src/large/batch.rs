@@ -12,6 +12,13 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{
+    fmt::Debug,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut, Range},
+    time::Instant,
+};
+
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
@@ -21,27 +28,20 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use itertools::Itertools;
-use std::{
-    fmt::Debug,
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut, Range},
-    time::Instant,
-};
 use tokio::sync::oneshot;
-
-use crate::{
-    device::{bytes::IoBytes, MonitoredDevice, RegionId},
-    io_buffer_pool::IoBufferPool,
-    large::indexer::HashedEntryAddress,
-    region::{GetCleanRegionHandle, RegionManager},
-    Dev, DevExt, IoBuffer,
-};
 
 use super::{
     indexer::{EntryAddress, Indexer},
     reclaimer::Reinsertion,
     serde::Sequence,
     tombstone::Tombstone,
+};
+use crate::{
+    device::{bytes::IoBytes, MonitoredDevice, RegionId},
+    io_buffer_pool::IoBufferPool,
+    large::indexer::HashedEntryAddress,
+    region::{GetCleanRegionHandle, RegionManager},
+    Dev, DevExt, IoBuffer,
 };
 
 pub struct Allocation {
@@ -117,6 +117,7 @@ where
     S: HashBuilder + Debug,
 {
     pub fn new(capacity: usize, region_manager: RegionManager, device: MonitoredDevice, indexer: Indexer) -> Self {
+        let capacity = bits::align_up(device.align(), capacity);
         let mut batch = Self {
             buffer: IoBuffer::new(capacity),
             len: 0,
@@ -333,7 +334,7 @@ pub struct InvalidStats {
 pub struct RegionHandle {
     /// Handle of the region to write.
     pub handle: GetCleanRegionHandle,
-    /// Offoset of the region to write.
+    /// Offset of the region to write.
     pub offset: u64,
     /// Length of the buffer to write.
     pub len: usize,

@@ -16,6 +16,7 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 mod compress;
 mod device;

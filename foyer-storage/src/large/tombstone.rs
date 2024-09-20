@@ -29,17 +29,16 @@ use crate::{
         monitor::{Monitored, MonitoredOptions},
         Dev, DevExt, RegionId,
     },
+    error::{Error, Result},
     IoBytesMut,
 };
-
-use crate::error::{Error, Result};
 
 /// The configurations for the tombstone log.
 #[derive(Debug, Clone)]
 pub struct TombstoneLogConfig {
     /// Path of the tombstone log.
     pub path: PathBuf,
-    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
+    /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub flush: bool,
 }
 
@@ -61,7 +60,7 @@ impl TombstoneLogConfigBuilder {
 
     /// Set whether to enable flush.
     ///
-    /// If enabeld, `sync` will be called after writes to make sure the data is safely persisted on the device.
+    /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub fn with_flush(mut self, flush: bool) -> Self {
         self.flush = flush;
         self
@@ -308,9 +307,8 @@ mod tests {
     use itertools::Itertools;
     use tempfile::tempdir;
 
-    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
-
     use super::*;
+    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {

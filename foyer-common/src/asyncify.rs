@@ -25,6 +25,9 @@ where
 }
 
 #[cfg(madsim)]
+/// Convert the block call to async call.
+///
+/// madsim compatible mode.
 pub async fn asyncify<F, T>(f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
@@ -33,7 +36,7 @@ where
     f()
 }
 
-/// Convert the block call to async call.
+/// Convert the block call to async call with given runtime.
 #[cfg(not(madsim))]
 pub async fn asyncify_with_runtime<F, T>(runtime: &Handle, f: F) -> T
 where
@@ -44,6 +47,9 @@ where
 }
 
 #[cfg(madsim)]
+/// Convert the block call to async call with given runtime.
+///
+/// madsim compatible mode.
 pub async fn asyncify_with_runtime<F, T>(_: &Handle, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,

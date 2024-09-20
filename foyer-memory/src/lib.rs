@@ -18,7 +18,7 @@
 //!
 //! There are a few goals to achieve with the crate:
 //!
-//! 1. Pluggable eviction algorithm with the same abstraction.
+//! 1. Plug-and-Play eviction algorithm with the same abstraction.
 //! 2. Tracking the real memory usage by the cache. Including both holding by the cache and by the external users.
 //! 3. Reduce the concurrent read-through requests into one.
 //!
@@ -26,13 +26,13 @@
 //!
 //! # Design
 //!
-//! The cache is mainly compused of the following components:
+//! The cache is mainly composed of the following components:
 //! 1. handle             : Carries the cached entry, reference count, pointer links in the eviction container, etc.
 //! 2. indexer            : Indexes cached keys to the handles.
 //! 3. eviction container : Defines the order of eviction. Usually implemented with intrusive data structures.
 //!
 //! Because a handle needs to be referenced and mutated by both the indexer and the eviction container in the same
-//! thread, it is hard to implement in 100% safe Rust without overhead. So, the APIs of the indexer and the eviciton
+//! thread, it is hard to implement in 100% safe Rust without overhead. So, the APIs of the indexer and the eviction
 //! container are defined with `NonNull` pointers of the handles.
 //!
 //! When some entry is inserted into the cache, the associated handle should be transmuted into pointer without
@@ -63,6 +63,7 @@
 //! destroyed.
 
 #![warn(missing_docs)]
+#![warn(clippy::allow_attributes)]
 
 mod cache;
 mod context;

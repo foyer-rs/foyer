@@ -14,15 +14,30 @@
 
 //! Test utils for the `foyer-storage` crate.
 
-use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::HashSet,
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+    sync::{Arc, OnceLock},
+};
 
-use foyer_common::code::StorageKey;
+use foyer_common::{code::StorageKey, metrics::Metrics};
 use parking_lot::Mutex;
 
 use crate::{
     picker::{AdmissionPicker, ReinsertionPicker},
     statistics::Statistics,
 };
+
+/// A phantom metrics for test.
+static METRICS_FOR_TEST: OnceLock<Metrics> = OnceLock::new();
+
+/// Get a phantom metrics for test.
+pub fn metrics_for_test() -> &'static Metrics {
+    METRICS_FOR_TEST.get_or_init(|| Metrics::new("test"))
+}
 
 /// A picker that only admits key from the given list.
 pub struct BiasedPicker<K, Q> {
@@ -40,7 +55,7 @@ where
 }
 
 impl<K, Q> BiasedPicker<K, Q> {
-    /// Create a biased picker with the geiven admit list.
+    /// Create a biased picker with the given admit list.
     pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
     where
         Q: Hash + Eq,
@@ -85,9 +100,9 @@ pub enum Record<K> {
     Evict(K),
 }
 
-/// A recorder that records the cache entry admission and eviciton of a disk cache.
+/// A recorder that records the cache entry admission and eviction of a disk cache.
 ///
-/// [`Recorder`] should be used as both the admission picker and the reisnertion picker to record.
+/// [`Recorder`] should be used as both the admission picker and the reinsertion picker to record.
 pub struct Recorder<K> {
     records: Mutex<Vec<Record<K>>>,
 }

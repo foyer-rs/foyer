@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt
 
 deps:
 	./scripts/install-deps.sh
@@ -7,7 +7,6 @@ deps:
 check:
 	typos
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	cargo fmt --all
@@ -15,13 +14,11 @@ check:
 
 check-all:
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	cargo fmt --all
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
-	cargo clippy --all-targets --features trace
 	cargo clippy --all-targets --features sanity
 	cargo clippy --all-targets --features mtrace
 	cargo clippy --all-targets
@@ -54,23 +51,24 @@ fast: check test example
 
 msrv:
 	shellcheck ./scripts/*
-	./.github/template/generate.sh
 	./scripts/minimize-dashboards.sh
-	cargo +1.77 sort -w
-	cargo +1.77 fmt --all
-	cargo +1.77 clippy --all-targets --features deadlock
-	cargo +1.77 clippy --all-targets --features tokio-console
-	cargo +1.77 clippy --all-targets --features trace
-	cargo +1.77 clippy --all-targets
-	RUST_BACKTRACE=1 cargo +1.77 nextest run --all
-	RUST_BACKTRACE=1 cargo +1.77 test --doc
-	RUST_BACKTRACE=1 cargo +1.77 nextest run --run-ignored ignored-only --no-capture --workspace
+	cargo +1.81.0 sort -w
+	cargo +1.81.0 fmt --all
+	cargo +1.81.0 clippy --all-targets --features deadlock
+	cargo +1.81.0 clippy --all-targets --features tokio-console
+	cargo +1.81.0 clippy --all-targets
+	RUST_BACKTRACE=1 cargo +1.81.0 nextest run --all
+	RUST_BACKTRACE=1 cargo +1.81.0 test --doc
+	RUST_BACKTRACE=1 cargo +1.81.0 nextest run --run-ignored ignored-only --no-capture --workspace
 
 udeps:
-	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-03-17 udeps --all-targets
+	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-07-19 udeps --all-targets
 
 monitor:
 	./scripts/monitor.sh
 
 clear:
 	rm -rf .tmp
+
+ffmt:
+	cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml

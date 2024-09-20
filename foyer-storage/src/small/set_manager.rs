@@ -21,19 +21,17 @@ use std::{
 use foyer_common::strict_assert;
 use itertools::Itertools;
 use ordered_hash_map::OrderedHashMap;
-
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
-use crate::{
-    device::{MonitoredDevice, RegionId},
-    Dev,
-};
 
 use super::{
     bloom_filter::BloomFilterU64,
     set::{Set, SetId, SetMut, SetStorage},
 };
-use crate::error::Result;
+use crate::{
+    device::{MonitoredDevice, RegionId},
+    error::Result,
+    Dev,
+};
 
 struct SetManagerInner {
     /// A phantom rwlock to prevent set storage operations on disk.

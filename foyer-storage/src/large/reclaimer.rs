@@ -14,7 +14,10 @@
 
 use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use futures::future::join_all;
 use itertools::Itertools;
 use tokio::{
@@ -43,8 +46,7 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    // TODO(MrCroxx): use `expect` after `lint_reasons` is stable.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn open<K, V, S>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
@@ -53,6 +55,7 @@ impl Reclaimer {
         flushers: Vec<Flusher<K, V, S>>,
         stats: Arc<Statistics>,
         flush: bool,
+        metrics: Arc<Metrics>,
         runtime: Handle,
     ) -> Self
     where
@@ -70,6 +73,7 @@ impl Reclaimer {
             reinsertion_picker,
             stats,
             flush,
+            metrics,
             wait_rx,
             runtime: runtime.clone(),
         };
@@ -107,6 +111,8 @@ where
     stats: Arc<Statistics>,
 
     flush: bool,
+
+    metrics: Arc<Metrics>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
@@ -167,7 +173,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone());
+        let mut scanner = RegionScanner::new(region.clone(), self.metrics.clone());
         let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:
@@ -238,7 +244,7 @@ where
         // 1. Reclaim runner releases 1 permit on finish. (+1)
         // 2. There is a new clean region. (-1)
         //
-        // Because the total permits to modify is 0 and to avlid concurrent corner case, just forget the permit.
+        // Because the total permits to modify is 0 and to avoid concurrent corner case, just forget the permit.
         //
         // The permit only increase when the a clean region is taken to write.
         permit.forget();
