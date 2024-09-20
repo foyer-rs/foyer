@@ -117,6 +117,7 @@ where
     S: HashBuilder + Debug,
 {
     pub fn new(capacity: usize, region_manager: RegionManager, device: MonitoredDevice, indexer: Indexer) -> Self {
+        let capacity = bits::align_up(device.align(), capacity);
         let mut batch = Self {
             buffer: IoBuffer::new(capacity),
             len: 0,
