@@ -199,6 +199,12 @@ impl Dev for DirectFileDevice {
         let file = opts.open(&options.path)?;
 
         if file.metadata().unwrap().is_file() {
+            tracing::warn!(
+                "{}\n{}\n{}",
+                "It seems a `DirectFileDevice` is used within a normal file system, which is inefficient.",
+                "Please use `DirectFileDevice` directly on a raw block device.",
+                "Or use `DirectFsDevice` within a normal file system.",
+            );
             file.set_len(options.capacity as _)?;
         }
 
