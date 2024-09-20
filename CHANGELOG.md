@@ -2,13 +2,29 @@
 title: Changelog
 description: Changelog for foyer.
 authors: mrcroxx
-tags: [changelog]
 date: 2023-05-12T11:02:09+08:00
 ---
 
 # Changelog
 
 <!-- truncate -->
+
+## 2024-09-20
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.11.3 |
+| foyer-common | 0.9.3 |
+| foyer-intrusive | 0.9.3 |
+| foyer-memory | 0.7.3 |
+| foyer-storage | 0.10.3 |
+| foyer-bench | 0.3.3 |
+
+### Changes
+
+- Fix panicked by io buffer pool alignment issue.
 
 ## 2024-09-12
 
