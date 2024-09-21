@@ -15,7 +15,6 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-07-19
   CARGO_TERM_COLOR: always
   CACHE_KEY_SUFFIX: 20240821
 
@@ -122,7 +121,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust_toolchain: [stable, 1.81.0]
+        rust_toolchain: [stable, 1.81.0, nightly-2024-07-19]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -161,6 +160,7 @@ jobs:
         run: |
           cargo fmt --all -- --check
       - name: Run rust clippy check
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         run: |
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
@@ -171,18 +171,35 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity"
+      - name: Run rust test with coverage (igored tests) - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity,nightly"
       - name: Run rust test with coverage
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           cargo llvm-cov --no-report nextest --features "strict_assertions,sanity"
+      - name: Run rust test with coverage - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,nightly"
       - name: Run examples with coverage
+        if: matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
@@ -193,14 +210,34 @@ jobs:
           cargo llvm-cov --no-report run --example event_listener
           cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
           cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
+      - name: Run examples with coverage - nightly
+        if: matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report run --features "nightly" --example memory
+          cargo llvm-cov --no-report run --features "nightly" --example hybrid
+          cargo llvm-cov --no-report run --features "nightly" --example hybrid_full
+          cargo llvm-cov --no-report run --features "nightly" --example event_listener
+          cargo llvm-cov --no-report run --features "mtrace,jaeger,nightly" --example tail_based_tracing
+          cargo llvm-cov --no-report run --features "mtrace,ot,nightly" --example tail_based_tracing
       - name: Run foyer-bench with coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.rust_toolchain != 'nightly-2024-07-19'
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+      - name: Run foyer-bench with coverage - nightly
+        if: runner.os == 'Linux' && matrix.rust_toolchain == 'nightly-2024-07-19'
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity,nightly" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -250,7 +287,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
+          toolchain: nightly-2024-07-19
       - name: Cache Cargo home
         uses: actions/cache@v4
         id: cache
@@ -268,7 +305,7 @@ jobs:
           RUST_LOG: info
           CI: true
         run: |-
-          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+          cargo +nightly-2024-07-19 test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
@@ -276,7 +313,7 @@ jobs:
           RUST_LOG: info
           CI: true
         run: |-
-          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
+          cargo +nightly-2024-07-19 build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
       - name: Prepare Artifacts on Failure
@@ -298,7 +335,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
+          toolchain: nightly-2024-07-19
       - name: Cache Cargo home
         uses: actions/cache@v4
         id: cache
@@ -316,7 +353,7 @@ jobs:
           RUST_LOG: info
           CI: true
         run: |-
-          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+          cargo +nightly-2024-07-19 test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-bench With Leak Sanitizer
         env:
           RUST_BACKTRACE: 1
@@ -324,7 +361,7 @@ jobs:
           RUST_LOG: info
           CI: true
         run: |-
-          cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
+          cargo +nightly-2024-07-19 build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
       - name: Prepare Artifacts on Failure
