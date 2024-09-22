@@ -25,6 +25,7 @@ use futures::{
     future::{join, ready, select, try_join, Either as EitherFuture},
     pin_mut, Future, FutureExt,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{error::Result, serde::KvInfo, storage::Storage, DeviceStats, IoBytes};
 
@@ -64,7 +65,7 @@ where
 }
 
 /// Order of ops.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Order {
     /// Use the left engine first.
     ///

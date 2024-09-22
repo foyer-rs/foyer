@@ -548,7 +548,8 @@ mod tests {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
-            .storage()
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
             .with_device_config(
                 DirectFsDeviceOptionsBuilder::new(dir)
                     .with_capacity(16 * MB)
@@ -571,7 +572,8 @@ mod tests {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
-            .storage()
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
             .with_device_config(
                 DirectFsDeviceOptionsBuilder::new(dir)
                     .with_capacity(16 * MB)
