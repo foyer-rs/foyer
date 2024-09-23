@@ -316,8 +316,7 @@ impl FromStr for Engine {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        const MIXED_PREFIX: &str = "mixed(";
-        const MIXED_SUFFIX: &str = ")";
+        const MIXED_PREFIX: &str = "mixed=";
 
         match s {
             "large" => return Ok(Engine::Large),
@@ -325,8 +324,8 @@ impl FromStr for Engine {
             _ => {}
         }
 
-        if s.starts_with(MIXED_PREFIX) && s.ends_with(MIXED_SUFFIX) {
-            if let Ok(ratio) = s[MIXED_PREFIX.len()..s.len() - MIXED_SUFFIX.len()].parse::<f64>() {
+        if s.starts_with(MIXED_PREFIX) {
+            if let Ok(ratio) = s[MIXED_PREFIX.len()..s.len()].parse::<f64>() {
                 return Ok(Engine::Mixed(ratio));
             }
         }
