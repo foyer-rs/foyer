@@ -326,7 +326,7 @@ impl FromStr for Engine {
         }
 
         if s.starts_with(MIXED_PREFIX) && s.ends_with(MIXED_SUFFIX) {
-            if let Ok(ratio) = (&s[MIXED_PREFIX.len()..s.len() - MIXED_SUFFIX.len()]).parse::<f64>() {
+            if let Ok(ratio) = s[MIXED_PREFIX.len()..s.len() - MIXED_SUFFIX.len()].parse::<f64>() {
                 return Ok(Engine::Mixed(ratio));
             }
         }
@@ -411,7 +411,7 @@ where
 {
     /// Setup disk cache store for the given in-memory cache.
     pub fn new(memory: Cache<K, V, S>, engine: Engine) -> Self {
-        if matches!(engine, Engine::Mixed(ratio) if ratio <0.0 && ratio > 1.0) {
+        if matches!(engine, Engine::Mixed(ratio) if !(0.0..=1.0).contains(&ratio)) {
             panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
         }
 
@@ -729,6 +729,17 @@ where
     _marker: PhantomData<(K, V, S)>,
 }
 
+impl<K, V, S> Default for LargeEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V, S> LargeEngineOptions<K, V, S>
 where
     K: StorageKey,
@@ -877,6 +888,17 @@ where
     flushers: usize,
 
     _marker: PhantomData<(K, V, S)>,
+}
+
+impl<K, V, S> Default for SmallEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Create small object disk cache engine default options.

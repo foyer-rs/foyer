@@ -160,12 +160,12 @@ impl SetStorage {
         &self.bloom_filter
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn len(&self) -> usize {
         self.len
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -313,7 +313,7 @@ impl<'a> SetEntry<'a> {
     }
 
     /// Range of the entry in the set data.
-    #[allow(unused)]
+    #[expect(unused)]
     pub fn range(&self) -> Range<usize> {
         self.offset..self.offset + self.len()
     }
