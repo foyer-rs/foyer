@@ -207,7 +207,7 @@ where
         let indexer = Indexer::new(config.indexer_shards);
         let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         for picker in eviction_pickers.iter_mut() {
-            picker.init(device.regions(), device.region_size());
+            picker.init(0..device.regions() as RegionId, device.region_size());
         }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(
