@@ -143,7 +143,7 @@ where
             header.write(&mut buf);
             deletions.insert(entry.insertion.entry.hash());
             insertions.push(entry.insertion.entry.hash());
-            buf.copy_from_slice(&entry.insertion.buffer);
+            buf.extend_from_slice(&entry.insertion.buffer);
             entries.push(entry.insertion.entry);
         }
 
