@@ -39,7 +39,7 @@ struct SetManagerInner {
     /// All set disk operations must be prevented by the lock.
     ///
     /// In addition, the rwlock also serves as the lock of the in-memory bloom filter.
-    sets: Vec<RwLock<BloomFilterU64>>,
+    sets: Vec<RwLock<BloomFilterU64<4>>>,
     cache: Mutex<OrderedHashMap<SetId, Arc<SetStorage>>>,
     set_cache_capacity: usize,
 
@@ -147,7 +147,7 @@ impl SetManager {
 
         // Update in-memory bloom filter.
         storage.update();
-        *guard.bloom_filter = BloomFilterU64::from(storage.bloom_filter().value());
+        *guard.bloom_filter = storage.bloom_filter().clone();
 
         let buffer = storage.freeze();
 
@@ -216,7 +216,7 @@ impl DropPanicGuard {
 
 #[derive(Debug)]
 pub struct SetWriteGuard<'a> {
-    bloom_filter: RwLockWriteGuard<'a, BloomFilterU64>,
+    bloom_filter: RwLockWriteGuard<'a, BloomFilterU64<4>>,
     id: SetId,
     set: SetMut,
     drop: DropPanicGuard,
@@ -238,7 +238,7 @@ impl<'a> DerefMut for SetWriteGuard<'a> {
 
 #[derive(Debug)]
 pub struct SetReadGuard<'a> {
-    _bloom_filter: RwLockReadGuard<'a, BloomFilterU64>,
+    _bloom_filter: RwLockReadGuard<'a, BloomFilterU64<4>>,
     _id: SetId,
     set: Set,
 }

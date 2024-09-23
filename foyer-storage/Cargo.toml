@@ -33,6 +33,7 @@ libc = "0.2"
 lz4 = "1.24"
 ordered_hash_map = "0.4"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+paste = "1"
 pin-project = "1"
 rand = "0.8"
 serde = { workspace = true }

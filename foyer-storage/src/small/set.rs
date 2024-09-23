@@ -84,6 +84,7 @@ impl SetMut {
 ///
 /// ```plain
 /// | checksum (4B) | timestamp (8B) | len (4B) |
+/// | bloom filter (4 * 8B = 32B) |
 /// ```
 pub struct SetStorage {
     /// Set checksum.
@@ -98,7 +99,7 @@ pub struct SetStorage {
     /// Set last updated timestamp.
     timestamp: u64,
     /// Set bloom filter.
-    bloom_filter: BloomFilterU64,
+    bloom_filter: BloomFilterU64<4>,
 
     buffer: IoBytesMut,
 }
@@ -117,7 +118,7 @@ impl Debug for SetStorage {
 }
 
 impl SetStorage {
-    pub const SET_HEADER_SIZE: usize = 24;
+    pub const SET_HEADER_SIZE: usize = 48;
 
     pub fn load(buffer: IoBytesMut) -> Self {
         assert!(buffer.len() >= Self::SET_HEADER_SIZE);
@@ -125,8 +126,7 @@ impl SetStorage {
         let checksum = (&buffer[0..4]).get_u32();
         let timestamp = (&buffer[4..12]).get_u64();
         let len = (&buffer[12..16]).get_u32() as usize;
-        let bloom_filter_value = (&buffer[16..24]).get_u64();
-        let bloom_filter = BloomFilterU64::from(bloom_filter_value);
+        let bloom_filter = BloomFilterU64::read(&buffer[16..48]);
 
         let mut this = Self {
             checksum,
@@ -153,7 +153,7 @@ impl SetStorage {
     }
 
     pub fn update(&mut self) {
-        (&mut self.buffer[16..24]).put_u64(self.bloom_filter.value());
+        self.bloom_filter.write(&mut self.buffer[16..48]);
         (&mut self.buffer[12..16]).put_u32(self.len as _);
         self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         (&mut self.buffer[4..12]).put_u64(self.timestamp);
@@ -161,7 +161,7 @@ impl SetStorage {
         (&mut self.buffer[0..4]).put_u32(self.checksum);
     }
 
-    pub fn bloom_filter(&self) -> &BloomFilterU64 {
+    pub fn bloom_filter(&self) -> &BloomFilterU64<4> {
         &self.bloom_filter
     }
 
