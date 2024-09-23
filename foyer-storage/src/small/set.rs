@@ -138,10 +138,15 @@ impl SetStorage {
             buffer,
         };
 
-        let c = Checksummer::checksum32(&this.buffer[4..Self::SET_HEADER_SIZE + this.len]);
-        if c != checksum {
-            // Do not report checksum mismatch. Clear the set directly.
+        if Self::SET_HEADER_SIZE + this.len >= this.buffer.len() {
+            // invalid len
             this.clear();
+        } else {
+            let c = Checksummer::checksum32(&this.buffer[4..Self::SET_HEADER_SIZE + this.len]);
+            if c != checksum {
+                // checksum mismatch
+                this.clear();
+            }
         }
 
         this
