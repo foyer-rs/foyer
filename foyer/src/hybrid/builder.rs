@@ -21,7 +21,10 @@ use foyer_common::{
     tracing::TracingConfig,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
-use foyer_storage::{AdmissionPicker, Compression, DeviceConfig, Engine, RecoverMode, RuntimeConfig, StoreBuilder};
+use foyer_storage::{
+    AdmissionPicker, Compression, DeviceConfig, Engine, LargeEngineOptions, RecoverMode, RuntimeConfig,
+    SmallEngineOptions, StoreBuilder,
+};
 
 use crate::HybridCache;
 
@@ -271,6 +274,32 @@ where
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
         let builder = self.builder.with_runtime_config(runtime_config);
+        Self {
+            name: self.name,
+            tracing_config: self.tracing_config,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Setup the large object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
+    pub fn with_large_object_disk_cache_options(self, options: LargeEngineOptions<K, V, S>) -> Self {
+        let builder = self.builder.with_large_object_disk_cache_options(options);
+        Self {
+            name: self.name,
+            tracing_config: self.tracing_config,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Setup the small object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
+    pub fn with_small_object_disk_cache_options(self, options: SmallEngineOptions<K, V, S>) -> Self {
+        let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,

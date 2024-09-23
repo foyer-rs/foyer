@@ -12,7 +12,15 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    borrow::Borrow,
+    fmt::{Debug, Display},
+    hash::Hash,
+    marker::PhantomData,
+    str::FromStr,
+    sync::Arc,
+    time::Instant,
+};
 
 use ahash::RandomState;
 use foyer_common::{
@@ -251,21 +259,18 @@ impl From<DirectFsDeviceOptions> for DeviceConfig {
 /// If [`Engine::Mixed`] is used, it will use the `Either` engine
 /// with the small object disk cache as the left engine,
 /// and the large object disk cache as the right engine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Engine {
     /// All space are used as the large object disk cache.
     Large,
     /// All space are used as the small object disk cache.
     Small,
     /// Mixed the large object disk cache and the small object disk cache.
-    Mixed {
-        /// The ratio of the large object disk cache.
-        large_object_cache_ratio: f64,
-        /// The serialized entry size threshold to use the large object disk cache.
-        large_object_threshold: usize,
-        /// Load order.
-        load_order: Order,
-    },
+    ///
+    /// The argument controls the ratio of the small object disk cache.
+    ///
+    /// Range: [0 ~ 1]
+    Mixed(f64),
 }
 
 impl Default for Engine {
@@ -276,6 +281,11 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Threshold for distinguishing small and large objects.
+    pub const LARGE_OBJECT_SIZE_THRESHOLD: usize = 2048;
+    /// Check the large object disk cache first, for checking it does NOT involve disk ops.
+    pub const MIXED_LOAD_ORDER: Order = Order::RightFirst;
+
     /// Default large object disk cache only config.
     pub fn large() -> Self {
         Self::Large
@@ -286,13 +296,42 @@ impl Engine {
         Self::Small
     }
 
-    /// Default mixed large object disk cache and small object disk cache only config.
+    /// Default mixed large object disk cache and small object disk cache config.
     pub fn mixed() -> Self {
-        Self::Mixed {
-            large_object_cache_ratio: 0.5,
-            large_object_threshold: 4096,
-            load_order: Order::RightFirst,
+        Self::Mixed(0.1)
+    }
+}
+
+impl Display for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Engine::Large => write!(f, "large"),
+            Engine::Small => write!(f, "small"),
+            Engine::Mixed(ratio) => write!(f, "mixed({ratio})"),
         }
+    }
+}
+
+impl FromStr for Engine {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        const MIXED_PREFIX: &str = "mixed(";
+        const MIXED_SUFFIX: &str = ")";
+
+        match s {
+            "large" => return Ok(Engine::Large),
+            "small" => return Ok(Engine::Small),
+            _ => {}
+        }
+
+        if s.starts_with(MIXED_PREFIX) && s.ends_with(MIXED_SUFFIX) {
+            if let Ok(ratio) = (&s[MIXED_PREFIX.len()..s.len() - MIXED_SUFFIX.len()]).parse::<f64>() {
+                return Ok(Engine::Mixed(ratio));
+            }
+        }
+
+        Err(format!("invalid input: {s}"))
     }
 }
 
@@ -372,6 +411,10 @@ where
 {
     /// Setup disk cache store for the given in-memory cache.
     pub fn new(memory: Cache<K, V, S>, engine: Engine) -> Self {
+        if matches!(engine, Engine::Mixed(ratio) if ratio <0.0 && ratio > 1.0) {
+            panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
+        }
+
         Self {
             name: "foyer".to_string(),
             memory,
@@ -596,17 +639,12 @@ where
                             }))
                             .await
                         }
-                        Engine::Mixed {
-                            large_object_cache_ratio,
-                            large_object_threshold,
-                            load_order,
-                        } => {
-                            let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
-                            let large_regions =
-                                (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
-                            let small_regions = 0..((device.regions() - large_region_count) as RegionId);
+                        Engine::Mixed(ratio) => {
+                            let small_region_count = std::cmp::max((device.regions() as f64 * ratio) as usize,1);
+                            let small_regions = 0..small_region_count as RegionId;
+                            let large_regions = small_region_count as RegionId..device.regions() as RegionId;
                             EngineEnum::open(EngineConfig::Mixed(EitherConfig {
-                                selector: SizeSelector::new(large_object_threshold),
+                                selector: SizeSelector::new(Engine::LARGE_OBJECT_SIZE_THRESHOLD),
                                 left: GenericSmallStorageConfig {
                                     set_size: self.small.set_size,
                                     set_cache_capacity: self.small.set_cache_capacity,
@@ -641,7 +679,7 @@ where
                                     user_runtime_handle,
                                     marker: PhantomData,
                                 },
-                                load_order,
+                                load_order: Engine::MIXED_LOAD_ORDER,
                             }))
                             .await
                         }
@@ -848,7 +886,8 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    fn new() -> Self {
+    /// Create small object disk cache engine default options.
+    pub fn new() -> Self {
         Self {
             set_size: 16 * 1024,    // 16 KiB
             set_cache_capacity: 64, // 64 sets
