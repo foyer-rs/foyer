@@ -36,7 +36,7 @@ use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use foyer::{
     Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, Engine, FifoConfig, FifoPicker,
     HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker,
-    RecoverMode, RuntimeConfig, S3FifoConfig, TokioRuntimeConfig, TracingConfig,
+    RecoverMode, RuntimeConfig, S3FifoConfig, SmallEngineOptions, TokioRuntimeConfig, TracingConfig,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -237,6 +237,12 @@ pub struct Args {
 
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
+
+    #[arg(long, default_value_t = ByteSize::kib(16))]
+    set_size: ByteSize,
+
+    #[arg(long, default_value_t = 64)]
+    set_cache_capacity: usize,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
@@ -504,6 +510,11 @@ async fn benchmark(args: Args) {
             Box::<FifoPicker>::default(),
         ]);
 
+    let small = SmallEngineOptions::new()
+        .with_flushers(args.flushers)
+        .with_set_size(args.set_size.as_u64() as _)
+        .with_set_cache_capacity(args.set_cache_capacity);
+
     if args.admission_rate_limit.as_u64() > 0 {
         builder =
             builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
@@ -518,6 +529,7 @@ async fn benchmark(args: Args) {
 
     let hybrid = builder
         .with_large_object_disk_cache_options(large)
+        .with_small_object_disk_cache_options(small)
         .build()
         .await
         .unwrap();
