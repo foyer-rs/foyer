@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2024-09-25
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.11.5 |
+| foyer-common | 0.9.5 |
+| foyer-intrusive | 0.9.5 |
+| foyer-memory | 0.7.5 |
+| foyer-storage | 0.10.5 |
+| foyer-bench | 0.3.5 |
+
+### Changes
+
+- Fix panic on dropping the hybrid cache. #736
+
 ## 2024-09-24
 
 ### Releases

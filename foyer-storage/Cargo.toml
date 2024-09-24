@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage"
-version = "0.10.4"
+version = "0.10.5"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine for foyer - the hybrid cache for Rust"
@@ -26,8 +26,8 @@ clap = { workspace = true }
 either = "1"
 fastrace = { workspace = true }
 flume = "0.11"
-foyer-common = { version = "0.9.4", path = "../foyer-common" }
-foyer-memory = { version = "0.7.4", path = "../foyer-memory" }
+foyer-common = { version = "0.9.5", path = "../foyer-common" }
+foyer-memory = { version = "0.7.5", path = "../foyer-memory" }
 fs4 = "0.9.1"
 futures = "0.3"
 itertools = { workspace = true }
