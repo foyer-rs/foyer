@@ -186,13 +186,14 @@ where
         let mut tombstones = vec![];
         let tombstone_log = match &config.tombstone_log_config {
             None => None,
-            Some(config) => {
+            Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &config.path,
+                    &tombstone_log_config.path,
                     device.clone(),
-                    config.flush,
+                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
+                    config.runtime.clone(),
                 )
                 .await?;
                 Some(log)
@@ -514,15 +515,19 @@ mod tests {
     }
 
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
-        Monitored::open(MonitoredOptions {
-            options: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            }
-            .into(),
-            metrics: Arc::new(Metrics::new("test")),
-        })
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredOptions {
+                options: DirectFsDeviceOptions {
+                    dir: dir.as_ref().into(),
+                    capacity: 64 * KB,
+                    file_size: 16 * KB,
+                }
+                .into(),
+                metrics: Arc::new(Metrics::new("test")),
+            },
+            runtime,
+        )
         .await
         .unwrap()
     }

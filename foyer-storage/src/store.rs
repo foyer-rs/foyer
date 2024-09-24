@@ -607,7 +607,7 @@ where
                         let device = match Monitored::open(MonitoredOptions {
                             options,
                             metrics: metrics.clone(),
-                        })
+                        }, runtime.clone())
                         .await {
                             Ok(device) => device,
                             Err(e) =>return Err(e),
