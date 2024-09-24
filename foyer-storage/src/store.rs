@@ -282,7 +282,7 @@ impl Default for Engine {
 
 impl Engine {
     /// Threshold for distinguishing small and large objects.
-    pub const LARGE_OBJECT_SIZE_THRESHOLD: usize = 2048;
+    pub const OBJECT_SIZE_THRESHOLD: usize = 2048;
     /// Check the large object disk cache first, for checking it does NOT involve disk ops.
     pub const MIXED_LOAD_ORDER: Order = Order::RightFirst;
 
@@ -643,7 +643,7 @@ where
                             let small_regions = 0..small_region_count as RegionId;
                             let large_regions = small_region_count as RegionId..device.regions() as RegionId;
                             EngineEnum::open(EngineConfig::Mixed(EitherConfig {
-                                selector: SizeSelector::new(Engine::LARGE_OBJECT_SIZE_THRESHOLD),
+                                selector: SizeSelector::new(Engine::OBJECT_SIZE_THRESHOLD),
                                 left: GenericSmallStorageConfig {
                                     set_size: self.small.set_size,
                                     set_cache_capacity: self.small.set_cache_capacity,
