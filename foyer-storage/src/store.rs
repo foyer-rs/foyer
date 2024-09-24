@@ -338,8 +338,7 @@ where
     recover_concurrency: usize,
     flushers: usize,
     reclaimers: usize,
-    // FIXME(MrCroxx): rename the field and builder fn.
-    buffer_threshold: usize,
+    buffer_pool_size: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
@@ -368,7 +367,7 @@ where
             recover_concurrency: 8,
             flushers: 1,
             reclaimers: 1,
-            buffer_threshold: 16 * 1024 * 1024, // 16 MiB
+            buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),
@@ -450,6 +449,7 @@ where
         self
     }
 
+    // FIXME(MrCroxx): remove it after 0.12
     /// Set the total flush buffer threshold.
     ///
     /// Each flusher shares a volume at `threshold / flushers`.
@@ -457,8 +457,24 @@ where
     /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
     ///
     /// Default: 16 MiB.
+    #[deprecated(
+        since = "0.11.4",
+        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
+    )]
     pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
-        self.buffer_threshold = threshold;
+        self.buffer_pool_size = threshold;
+        self
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 16 MiB.
+    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
         self
     }
 
@@ -640,7 +656,7 @@ where
                                     eviction_pickers: self.eviction_pickers,
                                     reinsertion_picker: self.reinsertion_picker,
                                     tombstone_log_config: self.tombstone_log_config,
-                                    buffer_threshold: self.buffer_threshold,
+                                    buffer_threshold: self.buffer_pool_size,
                                     statistics: statistics.clone(),
                                     write_runtime_handle,
                                     read_runtime_handle,
@@ -683,7 +699,7 @@ where
                                         eviction_pickers: self.eviction_pickers,
                                         reinsertion_picker: self.reinsertion_picker,
                                         tombstone_log_config: self.tombstone_log_config,
-                                        buffer_threshold: self.buffer_threshold,
+                                        buffer_threshold: self.buffer_pool_size,
                                         statistics: statistics.clone(),
                                         write_runtime_handle,
                                         read_runtime_handle,

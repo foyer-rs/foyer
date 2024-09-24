@@ -199,6 +199,12 @@ impl Dev for DirectFileDevice {
         let file = opts.open(&options.path)?;
 
         if file.metadata().unwrap().is_file() {
+            tracing::warn!(
+                "{}\n{}\n{}",
+                "It seems a `DirectFileDevice` is used within a normal file system, which is inefficient.",
+                "Please use `DirectFileDevice` directly on a raw block device.",
+                "Or use `DirectFsDevice` within a normal file system.",
+            );
             file.set_len(options.capacity as _)?;
         }
 
@@ -251,7 +257,7 @@ impl Dev for DirectFileDevice {
     }
 }
 
-/// [`DirectFiDeviceOptionsBuilder`] is used to build the options for the direct fs device.
+/// [`DirectFileDeviceOptionsBuilder`] is used to build the options for the direct fs device.
 ///
 /// The direct fs device uses a directory in a file system to store the data of disk cache.
 ///

@@ -92,6 +92,7 @@ where
         indexer: Indexer,
         metrics: Arc<Metrics>,
     ) -> Self {
+        let capacity = bits::align_up(device.align(), capacity);
         let mut batch = Self {
             buffer: IoBuffer::new(capacity),
             len: 0,

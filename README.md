@@ -2,12 +2,27 @@
     <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/slogan.min.svg" />
 </p>
 
+<p align="center">
+    <a href="https://foyer.rs">
+        <img src="https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&down_message=website&style=for-the-badge&logo=htmx" alt="docs.rs" />
+    </a>
+    <a href="https://crates.io/crates/foyer">
+        <img src="https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555" alt="crates.io" />
+    </a>
+    <a href="https://docs.rs/foyer">
+        <img src="https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555" alt="docs.rs" />
+    </a>
+</p>
+
+<p align="center">
+    <b>Tutorial & Document:</b>
+    <a href="https://foyer.rs"><b>https://foyer.rs</b></a>
+</p>
+
 # foyer
 
-![Crates.io Version](https://img.shields.io/crates/v/foyer)
-![Crates.io MSRV](https://img.shields.io/crates/msrv/foyer)
 ![GitHub License](https://img.shields.io/github/license/foyer-rs/foyer)
-
+![Crates.io MSRV](https://img.shields.io/crates/msrv/foyer)
 [![CI](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml)
 [![License Checker](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml)
 [![codecov](https://codecov.io/github/foyer-rs/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/foyer-rs/foyer)
@@ -18,9 +33,16 @@ foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cac
 
 However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
+For more details, please visit foyer's website: https://foyer.rs 🥰
+
+[Website](https://foyer.rs) |
+[Tutorial](https://foyer.rs/docs/overview) |
+[API Docs](https://docs.rs/foyer) |
+[Crate](https://crates.io/crates/foyer)
+
 ## Features
 
-- **Hybrid Cache**: Seamlessly integrates both in-memory and disk-based caching for optimal performance and flexibility.
+- **Hybrid Cache**: Seamlessly integrates both in-memory and disk cache for optimal performance and flexibility.
 - **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
 - **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
 - **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
@@ -34,7 +56,9 @@ Feel free to open a PR and add your projects here:
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 
-## Usage
+## Quick Start
+
+**This section only shows briefs. Please visit https://foyer.rs for more details.**
 
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
