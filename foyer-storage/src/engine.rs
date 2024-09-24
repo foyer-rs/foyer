@@ -28,13 +28,12 @@ use futures::Future;
 use crate::{
     error::Result,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
-    serde::KvInfo,
     small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
     storage::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    DeviceStats, IoBytes, Storage,
+    DeviceStats, Storage,
 };
 
 pub struct SizeSelector<K, V, S>
@@ -84,8 +83,12 @@ where
     type Value = V;
     type BuildHasher = S;
 
-    fn select(&self, _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: &IoBytes) -> Selection {
-        if buffer.len() < self.threshold {
+    fn select(
+        &self,
+        _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
+        estimated_size: usize,
+    ) -> Selection {
+        if estimated_size < self.threshold {
             Selection::Left
         } else {
             Selection::Right
@@ -239,12 +242,12 @@ where
         }
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
         match self {
-            Engine::Noop(storage) => storage.enqueue(entry, buffer, info),
-            Engine::Large(storage) => storage.enqueue(entry, buffer, info),
-            Engine::Small(storage) => storage.enqueue(entry, buffer, info),
-            Engine::Combined(storage) => storage.enqueue(entry, buffer, info),
+            Engine::Noop(storage) => storage.enqueue(entry, estimated_size),
+            Engine::Large(storage) => storage.enqueue(entry, estimated_size),
+            Engine::Small(storage) => storage.enqueue(entry, estimated_size),
+            Engine::Combined(storage) => storage.enqueue(entry, estimated_size),
         }
     }
 
