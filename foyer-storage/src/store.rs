@@ -54,7 +54,7 @@ use crate::{
         either::{EitherConfig, Order},
         Storage,
     },
-    Dev, DevExt, DirectFileDeviceOptions, IoBytesMut,
+    Dev, DevExt, DirectFileDeviceOptions,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -148,29 +148,10 @@ where
     pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) {
         let now = Instant::now();
 
-        let compression = self.inner.compression;
-        let this = self.clone();
-
-        self.inner.write_runtime_handle.spawn(async move {
-            if force || this.pick(entry.key()) {
-                let mut buffer = IoBytesMut::with_capacity(EntrySerializer::size_hint(entry.key(), entry.value()));
-                match EntrySerializer::serialize(
-                    entry.key(),
-                    entry.value(),
-                    &compression,
-                    &mut buffer,
-                    &this.inner.metrics,
-                ) {
-                    Ok(info) => {
-                        let buffer = buffer.freeze();
-                        this.inner.engine.enqueue(entry, buffer, info);
-                    }
-                    Err(e) => {
-                        tracing::warn!("[store]: serialize kv error: {e}");
-                    }
-                }
-            }
-        });
+        if force || self.pick(entry.key()) {
+            let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+            self.inner.engine.enqueue(entry, estimated_size);
+        }
 
         self.inner.metrics.storage_enqueue.increment(1);
         self.inner.metrics.storage_enqueue_duration.record(now.elapsed());

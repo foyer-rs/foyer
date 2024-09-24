@@ -9,6 +9,25 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2024-09-24
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.11.4 |
+| foyer-common | 0.9.4 |
+| foyer-intrusive | 0.9.4 |
+| foyer-memory | 0.7.4 |
+| foyer-storage | 0.10.4 |
+| foyer-bench | 0.3.4 |
+
+### Changes
+
+- Revert pre-serialization design. The insert latency and memory usage would be better for most cases.
+- Rename `with_buffer_threshold` to `with_buffer_pool_size`. The old method is kept but marked as deprecated.
+- Raise a warn when using `DirectFileDevice` on within a file system.
+
 ## 2024-09-20
 
 ### Releases

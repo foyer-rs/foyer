@@ -12,19 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut, Range},
-    time::Instant,
-};
+use std::{fmt::Debug, ops::Range, sync::Arc, time::Instant};
 
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
     range::RangeBoundsExt,
     strict_assert_eq,
-    wait_group::{WaitGroup, WaitGroupFuture, WaitGroupGuard},
 };
 use foyer_memory::CacheEntry;
 use itertools::Itertools;
@@ -39,37 +34,11 @@ use super::{
 use crate::{
     device::{bytes::IoBytes, MonitoredDevice, RegionId},
     io_buffer_pool::IoBufferPool,
-    large::indexer::HashedEntryAddress,
+    large::{indexer::HashedEntryAddress, serde::EntryHeader},
     region::{GetCleanRegionHandle, RegionManager},
-    Dev, DevExt, IoBuffer,
+    serde::{Checksummer, EntrySerializer},
+    Compression, Dev, DevExt, IoBuffer,
 };
-
-pub struct Allocation {
-    _guard: WaitGroupGuard,
-    slice: ManuallyDrop<Box<[u8]>>,
-}
-
-impl Deref for Allocation {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.slice.as_ref()
-    }
-}
-
-impl DerefMut for Allocation {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.slice.as_mut()
-    }
-}
-
-impl Allocation {
-    unsafe fn new(buffer: &mut [u8], guard: WaitGroupGuard) -> Self {
-        let fake = Vec::from_raw_parts(buffer.as_mut_ptr(), buffer.len(), buffer.len());
-        let slice = ManuallyDrop::new(fake.into_boxed_slice());
-        Self { _guard: guard, slice }
-    }
-}
 
 pub struct BatchMut<K, V, S>
 where
@@ -83,7 +52,6 @@ where
     tombstones: Vec<TombstoneInfo>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Option<Instant>,
-    wait: WaitGroup,
 
     /// Cache write buffer between rotation to reduce page fault.
     buffer_pool: IoBufferPool,
@@ -91,6 +59,7 @@ where
     region_manager: RegionManager,
     device: MonitoredDevice,
     indexer: Indexer,
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S> Debug for BatchMut<K, V, S>
@@ -116,7 +85,13 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(capacity: usize, region_manager: RegionManager, device: MonitoredDevice, indexer: Indexer) -> Self {
+    pub fn new(
+        capacity: usize,
+        region_manager: RegionManager,
+        device: MonitoredDevice,
+        indexer: Indexer,
+        metrics: Arc<Metrics>,
+    ) -> Self {
         let capacity = bits::align_up(device.align(), capacity);
         let mut batch = Self {
             buffer: IoBuffer::new(capacity),
@@ -125,26 +100,56 @@ where
             tombstones: vec![],
             waiters: vec![],
             init: None,
-            wait: WaitGroup::default(),
             buffer_pool: IoBufferPool::new(capacity, 1),
             region_manager,
             device,
             indexer,
+            metrics,
         };
         batch.append_group();
         batch
     }
 
-    pub fn entry(&mut self, size: usize, entry: CacheEntry<K, V, S>, sequence: Sequence) -> Option<Allocation> {
+    pub fn entry(&mut self, entry: CacheEntry<K, V, S>, compression: &Compression, sequence: Sequence) -> bool {
         tracing::trace!("[batch]: append entry with sequence: {sequence}");
 
-        let aligned = bits::align_up(self.device.align(), size);
+        self.may_init();
 
-        if entry.is_outdated() || self.len + aligned > self.buffer.len() {
-            return None;
+        if entry.is_outdated() {
+            return false;
         }
 
-        let allocation = self.allocate(aligned);
+        let pos = self.len;
+
+        let info = match EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            compression,
+            &mut self.buffer[pos + EntryHeader::serialized_len()..],
+            &self.metrics,
+        ) {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::warn!("[batch]: serialize entry error: {e}");
+                return false;
+            }
+        };
+
+        let header = EntryHeader {
+            key_len: info.key_len as _,
+            value_len: info.value_len as _,
+            hash: entry.hash(),
+            sequence,
+            checksum: Checksummer::checksum64(
+                &self.buffer[pos + EntryHeader::serialized_len()
+                    ..pos + EntryHeader::serialized_len() + info.key_len + info.value_len],
+            ),
+            compression: *compression,
+        };
+        header.write(&mut self.buffer[pos..pos + EntryHeader::serialized_len()]);
+
+        let aligned = bits::align_up(self.device.align(), header.entry_len());
+        self.advance(aligned);
 
         let group = self.groups.last_mut().unwrap();
         group.indices.push(HashedEntryAddress {
@@ -152,7 +157,7 @@ where
             address: EntryAddress {
                 region: RegionId::MAX,
                 offset: group.region.offset as u32 + group.region.len as u32,
-                len: size as _,
+                len: header.entry_len() as _,
                 sequence,
             },
         });
@@ -160,27 +165,35 @@ where
         group.region.len += aligned;
         group.range.end += aligned;
 
-        Some(allocation)
+        true
     }
 
     pub fn tombstone(&mut self, tombstone: Tombstone, stats: Option<InvalidStats>) {
         tracing::trace!("[batch]: append tombstone");
+
         self.may_init();
+
         self.tombstones.push(TombstoneInfo { tombstone, stats });
     }
 
-    pub fn reinsertion(&mut self, reinsertion: &Reinsertion) -> Option<Allocation> {
+    pub fn reinsertion(&mut self, reinsertion: &Reinsertion) -> bool {
         tracing::trace!("[batch]: submit reinsertion");
+
+        self.may_init();
 
         let aligned = bits::align_up(self.device.align(), reinsertion.buffer.len());
 
         // Skip if the entry is no longer in the indexer.
         // Skip if the batch buffer size exceeds the threshold.
         if self.indexer.get(reinsertion.hash).is_none() || self.len + aligned > self.buffer.len() {
-            return None;
+            return false;
         }
 
-        let allocation = self.allocate(aligned);
+        let pos = self.len;
+
+        self.buffer[pos..pos + reinsertion.buffer.len()].copy_from_slice(&reinsertion.buffer);
+
+        self.advance(aligned);
 
         let group = self.groups.last_mut().unwrap();
         // Reserve buffer space for entry.
@@ -196,22 +209,17 @@ where
         group.region.len += aligned;
         group.range.end += aligned;
 
-        Some(allocation)
+        true
     }
 
     /// Register a waiter to be notified after the batch is finished.
-    pub fn wait(&mut self) -> oneshot::Receiver<()> {
+    pub fn wait(&mut self, tx: oneshot::Sender<()>) {
         tracing::trace!("[batch]: register waiter");
         self.may_init();
-        let (tx, rx) = oneshot::channel();
         self.waiters.push(tx);
-        rx
     }
 
-    // Note: Make sure `rotate` is called after all buffer from the last batch are dropped.
-    //
-    // Otherwise, the page fault caused by the buffer pool will hurt the performance.
-    pub fn rotate(&mut self) -> Option<(Batch<K, V, S>, WaitGroupFuture)> {
+    pub fn rotate(&mut self) -> Option<Batch<K, V, S>> {
         if self.is_empty() {
             return None;
         }
@@ -221,8 +229,6 @@ where
         self.len = 0;
         let buffer = IoBytes::from(buffer);
         self.buffer_pool.release(buffer.clone());
-
-        let wait = std::mem::take(&mut self.wait);
 
         let init = self.init.take();
 
@@ -269,20 +275,16 @@ where
             None => self.append_group(),
         }
 
-        Some((
-            Batch {
-                groups,
-                tombstones,
-                waiters,
-                init,
-            },
-            wait.wait(),
-        ))
+        Some(Batch {
+            groups,
+            tombstones,
+            waiters,
+            init,
+        })
     }
 
-    fn allocate(&mut self, len: usize) -> Allocation {
+    fn advance(&mut self, len: usize) {
         assert!(bits::is_aligned(self.device.align(), len));
-        self.may_init();
         assert!(bits::is_aligned(self.device.align(), self.len));
 
         // Rotate group if the current one is full.
@@ -292,24 +294,22 @@ where
             self.append_group();
         }
 
-        // Reserve buffer space for entry.
-        let start = self.len;
-        let end = start + len;
-        self.len = end;
-
-        unsafe { Allocation::new(&mut self.buffer[start..end], self.wait.acquire()) }
+        self.len += len;
     }
 
-    fn is_empty(&self) -> bool {
+    #[inline]
+    pub fn is_empty(&self) -> bool {
         self.tombstones.is_empty() && self.groups.iter().all(|group| group.range.is_empty()) && self.waiters.is_empty()
     }
 
+    #[inline]
     fn may_init(&mut self) {
         if self.init.is_none() {
             self.init = Some(Instant::now());
         }
     }
 
+    #[inline]
     fn append_group(&mut self) {
         self.groups.push(GroupMut {
             region: RegionHandle {

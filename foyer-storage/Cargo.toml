@@ -1,6 +1,6 @@
 [package]
 name = "foyer-storage"
-version = "0.10.3"
+version = "0.10.4"
 edition = "2021"
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 description = "storage engine for foyer - the hybrid cache for Rust"
@@ -18,14 +18,16 @@ anyhow = "1.0"
 # TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
 array-util = "1"
 async-channel = "2"
+auto_enums = { version = "0.8", features = ["futures03"] }
 bincode = "1"
 bitflags = "2.3.1"
 bytes = "1"
 clap = { workspace = true }
 either = "1"
 fastrace = { workspace = true }
-foyer-common = { version = "0.9.3", path = "../foyer-common" }
-foyer-memory = { version = "0.7.3", path = "../foyer-memory" }
+flume = "0.11"
+foyer-common = { version = "0.9.4", path = "../foyer-common" }
+foyer-memory = { version = "0.7.4", path = "../foyer-memory" }
 fs4 = "0.9.1"
 futures = "0.3"
 itertools = { workspace = true }

@@ -52,10 +52,9 @@ use crate::{
     },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
-    serde::{EntryDeserializer, KvInfo},
+    serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
-    IoBytes,
 };
 
 pub struct GenericLargeStorageConfig<K, V, S>
@@ -296,7 +295,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -305,8 +304,7 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             entry,
-            buffer,
-            info,
+            estimated_size,
             sequence,
         });
     }
@@ -462,8 +460,8 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
-        self.enqueue(entry, buffer, info)
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+        self.enqueue(entry, estimated_size)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
@@ -508,8 +506,8 @@ mod tests {
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
-        test_utils::{metrics_for_test, BiasedPicker},
-        IoBytesMut, TombstoneLogConfigBuilder,
+        test_utils::BiasedPicker,
+        TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -602,17 +600,8 @@ mod tests {
     }
 
     fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
-        let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            &Compression::None,
-            &mut buffer,
-            metrics_for_test(),
-        )
-        .unwrap();
-        let buffer = buffer.freeze();
-        store.enqueue(entry, buffer, info);
+        let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+        store.enqueue(entry, estimated_size);
     }
 
     #[test_log::test(tokio::test)]

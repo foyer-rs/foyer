@@ -20,7 +20,7 @@ use std::{fmt::Debug, future::Future, sync::Arc};
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 
-use crate::{device::monitor::DeviceStats, error::Result, serde::KvInfo, IoBytes};
+use crate::{device::monitor::DeviceStats, error::Result};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
@@ -44,7 +44,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Push a in-memory cache entry to the disk cache write queue.
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo);
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///

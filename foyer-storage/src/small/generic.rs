@@ -23,11 +23,11 @@ use futures::{
 use itertools::Itertools;
 use tokio::runtime::Handle;
 
-use super::{flusher::Flusher, set::SetId, set_manager::SetManager};
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
     serde::KvInfo,
+    small::{flusher::Flusher, set::SetId, set_manager::SetManager},
     storage::Storage,
     DeviceStats, IoBytes,
 };
@@ -222,7 +222,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _estimated_size: usize) {
         self.enqueue(entry, buffer, info);
     }
 
