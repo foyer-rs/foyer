@@ -24,10 +24,7 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
-use tokio::{
-    runtime::Handle,
-    sync::{oneshot, OwnedSemaphorePermit, Semaphore},
-};
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::{
     batch::{Batch, BatchMut, InvalidStats, TombstoneInfo},
@@ -41,6 +38,7 @@ use crate::{
     device::MonitoredDevice,
     error::{Error, Result},
     region::RegionManager,
+    runtime::Runtime,
     Compression, Statistics,
 };
 
@@ -138,7 +136,7 @@ where
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
-        runtime: Handle,
+        runtime: &Runtime,
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
 
@@ -164,7 +162,7 @@ where
             metrics: metrics.clone(),
         };
 
-        runtime.spawn(async move {
+        runtime.write().spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!("[flusher]: flusher exit with error: {e}");
             }

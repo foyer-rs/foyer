@@ -27,7 +27,7 @@ use foyer_common::{
 use futures::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tokio::{runtime::Handle, sync::Semaphore};
+use tokio::sync::Semaphore;
 
 use super::{
     generic::GenericLargeStorageConfig,
@@ -43,6 +43,7 @@ use crate::{
         tombstone::Tombstone,
     },
     region::{Region, RegionManager},
+    runtime::Runtime,
 };
 
 /// The recover mode of the disk cache.
@@ -72,7 +73,7 @@ impl RecoverRunner {
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
         metrics: Arc<Metrics>,
-        runtime: Handle,
+        runtime: Runtime,
     ) -> Result<()>
     where
         K: StorageKey,
@@ -86,7 +87,7 @@ impl RecoverRunner {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
             let metrics = metrics.clone();
-            runtime.spawn(async move {
+            runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
                 let res = RegionRecoverRunner::run(mode, region, metrics).await;
                 drop(permit);

@@ -38,6 +38,7 @@ use crate::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    runtime::Runtime,
     serde::EntrySerializer,
     small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
@@ -72,12 +73,7 @@ where
 
     compression: Compression,
 
-    read_runtime: Option<Arc<BackgroundShutdownRuntime>>,
-    write_runtime: Option<Arc<BackgroundShutdownRuntime>>,
-
-    read_runtime_handle: Handle,
-    write_runtime_handle: Handle,
-    user_runtime_handle: Handle,
+    runtime: Runtime,
 
     statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
@@ -95,11 +91,7 @@ where
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("compression", &self.inner.compression)
-            .field("read_runtime", &self.inner.read_runtime)
-            .field("write_runtime", &self.inner.write_runtime)
-            .field("read_runtime_handle", &self.inner.read_runtime_handle)
-            .field("write_runtime_handle", &self.inner.write_runtime_handle)
-            .field("user_runtime_handle", &self.inner.user_runtime_handle)
+            .field("runtimes", &self.inner.runtime)
             .finish()
     }
 }
@@ -156,7 +148,7 @@ where
     {
         let hash = self.inner.memory.hash(key);
         let future = self.inner.engine.load(hash);
-        match self.inner.read_runtime_handle.spawn(future).await.unwrap() {
+        match self.inner.runtime.read().spawn(future).await.unwrap() {
             Ok(Some((k, v))) if k.borrow() == key => Ok(Some((k, v))),
             Ok(_) => Ok(None),
             Err(e) => Err(e),
@@ -196,12 +188,17 @@ where
     }
 
     /// Get the runtime handles.
-    pub fn runtimes(&self) -> RuntimeHandles<'_> {
-        RuntimeHandles {
-            read_runtime_handle: &self.inner.read_runtime_handle,
-            write_runtime_handle: &self.inner.write_runtime_handle,
-            user_runtime_handle: &self.inner.user_runtime_handle,
-        }
+    #[deprecated(
+        since = "0.11.5",
+        note = "The function will be renamed to \"runtime()\", use it instead."
+    )]
+    pub fn runtimes(&self) -> &Runtime {
+        &self.inner.runtime
+    }
+
+    /// Get the runtime.
+    pub fn runtime(&self) -> &Runtime {
+        &self.inner.runtime
     }
 }
 
@@ -309,16 +306,6 @@ pub enum RuntimeConfig {
         /// Dedicated runtime for both foreground and background writes
         write_runtime_config: TokioRuntimeConfig,
     },
-}
-
-/// Runtime handles.
-pub struct RuntimeHandles<'a> {
-    /// Runtime handle for reads.
-    pub read_runtime_handle: &'a Handle,
-    /// Runtime handle for writes.
-    pub write_runtime_handle: &'a Handle,
-    /// User runtime handle.
-    pub user_runtime_handle: &'a Handle,
 }
 
 /// The builder of the disk cache.
@@ -582,19 +569,15 @@ where
             Ok::<_, Error>(Arc::new(runtime))
         };
 
-        let (read_runtime, write_runtime, read_runtime_handle, write_runtime_handle) = match self.runtime_config {
+        let user_runtime_handle = Handle::current();
+        let (read_runtime, write_runtime) = match self.runtime_config {
             RuntimeConfig::Disabled => {
                 tracing::warn!("[store]: Dedicated runtime is disabled");
-                (None, None, Handle::current(), Handle::current())
+                (None, None)
             }
             RuntimeConfig::Unified(runtime_config) => {
                 let runtime = build_runtime(&runtime_config, "unified")?;
-                (
-                    Some(runtime.clone()),
-                    Some(runtime.clone()),
-                    runtime.handle().clone(),
-                    runtime.handle().clone(),
-                )
+                (Some(runtime.clone()), Some(runtime.clone()))
             }
             RuntimeConfig::Separated {
                 read_runtime_config,
@@ -602,24 +585,15 @@ where
             } => {
                 let read_runtime = build_runtime(&read_runtime_config, "read")?;
                 let write_runtime = build_runtime(&write_runtime_config, "write")?;
-                let read_runtime_handle = read_runtime.handle().clone();
-                let write_runtime_handle = write_runtime.handle().clone();
-                (
-                    Some(read_runtime),
-                    Some(write_runtime),
-                    read_runtime_handle,
-                    write_runtime_handle,
-                )
+                (Some(read_runtime), Some(write_runtime))
             }
         };
-        let user_runtime_handle = Handle::current();
+        let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
         let engine = {
             let statistics = statistics.clone();
             let metrics = metrics.clone();
-            let write_runtime_handle = write_runtime_handle.clone();
-            let read_runtime_handle = read_runtime_handle.clone();
-            let user_runtime_handle = user_runtime_handle.clone();
+            let runtime = runtime.clone();
             // Use the user runtime to open engine.
             tokio::spawn(async move {
                 match self.device_config {
@@ -658,9 +632,7 @@ where
                                     tombstone_log_config: self.tombstone_log_config,
                                     buffer_threshold: self.buffer_pool_size,
                                     statistics: statistics.clone(),
-                                    write_runtime_handle,
-                                    read_runtime_handle,
-                                    user_runtime_handle,
+                                    runtime,
                                     marker: PhantomData,
                                 }))
                                 .await
@@ -701,9 +673,7 @@ where
                                         tombstone_log_config: self.tombstone_log_config,
                                         buffer_threshold: self.buffer_pool_size,
                                         statistics: statistics.clone(),
-                                        write_runtime_handle,
-                                        read_runtime_handle,
-                                        user_runtime_handle,
+                                        runtime,
                                         marker: PhantomData,
                                     },
                                     load_order,
@@ -721,11 +691,7 @@ where
             engine,
             admission_picker,
             compression,
-            read_runtime,
-            write_runtime,
-            read_runtime_handle,
-            write_runtime_handle,
-            user_runtime_handle,
+            runtime,
             statistics,
             metrics,
         };
