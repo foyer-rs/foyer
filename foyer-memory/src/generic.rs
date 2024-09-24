@@ -35,6 +35,7 @@ use foyer_common::{
     future::{Diversion, DiversionFuture},
     metrics::Metrics,
     object_pool::ObjectPool,
+    runtime::SingletonHandle,
     strict_assert, strict_assert_eq,
 };
 use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
@@ -739,7 +740,12 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(key, CacheContext::default(), fetch, &tokio::runtime::Handle::current())
+        self.fetch_inner(
+            key,
+            CacheContext::default(),
+            fetch,
+            &tokio::runtime::Handle::current().into(),
+        )
     }
 
     pub fn fetch_with_context<F, FU, ER>(
@@ -753,15 +759,16 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current())
+        self.fetch_inner(key, context, fetch, &tokio::runtime::Handle::current().into())
     }
 
+    #[doc(hidden)]
     pub fn fetch_inner<F, FU, ER, ID>(
         self: &Arc<Self>,
         key: K,
         context: CacheContext,
         fetch: F,
-        runtime: &tokio::runtime::Handle,
+        runtime: &SingletonHandle,
     ) -> GenericFetch<K, V, E, I, S, ER>
     where
         F: FnOnce() -> FU,

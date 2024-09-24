@@ -25,7 +25,7 @@ use monitor::Monitored;
 
 use crate::{
     error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
-    IoBytesMut,
+    IoBytesMut, Runtime,
 };
 
 pub const ALIGN: usize = 4096;
@@ -52,9 +52,10 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
     /// The region size of the device, must be 4K aligned.
     fn region_size(&self) -> usize;
 
+    // TODO(MrCroxx): Refactor the builder.
     /// Open the device with the given options.
     #[must_use]
-    fn open(options: Self::Options) -> impl Future<Output = Result<Self>> + Send;
+    fn open(options: Self::Options, runtime: Runtime) -> impl Future<Output = Result<Self>> + Send;
 
     /// Write API for the device.
     #[must_use]
@@ -134,10 +135,10 @@ impl Dev for Device {
         }
     }
 
-    async fn open(options: Self::Options) -> Result<Self> {
+    async fn open(options: Self::Options, runtime: Runtime) -> Result<Self> {
         match options {
-            DeviceOptions::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts).await?)),
-            DeviceOptions::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts).await?)),
+            DeviceOptions::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts, runtime).await?)),
+            DeviceOptions::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts, runtime).await?)),
         }
     }
 

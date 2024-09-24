@@ -24,7 +24,7 @@ use std::{
 use foyer_common::{bits, metrics::Metrics};
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice, IoBytes, IoBytesMut};
+use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -87,8 +87,8 @@ impl<D> Monitored<D>
 where
     D: Dev,
 {
-    async fn open(options: MonitoredOptions<D>) -> Result<Self> {
-        let device = D::open(options.options).await?;
+    async fn open(options: MonitoredOptions<D>, runtime: Runtime) -> Result<Self> {
+        let device = D::open(options.options, runtime).await?;
         Ok(Self {
             device,
             stats: Arc::default(),
@@ -159,8 +159,8 @@ where
         self.device.region_size()
     }
 
-    async fn open(options: Self::Options) -> Result<Self> {
-        Self::open(options).await
+    async fn open(options: Self::Options, runtime: Runtime) -> Result<Self> {
+        Self::open(options, runtime).await
     }
 
     async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {

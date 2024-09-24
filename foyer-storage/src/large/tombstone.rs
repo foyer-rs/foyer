@@ -30,7 +30,7 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    IoBytesMut,
+    IoBytesMut, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -121,6 +121,7 @@ impl TombstoneLog {
         flush: bool,
         tombstones: &mut Vec<Tombstone>,
         metrics: Arc<Metrics>,
+        runtime: Runtime,
     ) -> Result<Self>
     where
         D: Dev,
@@ -134,13 +135,16 @@ impl TombstoneLog {
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
-        let device = Monitored::open(MonitoredOptions {
-            options: DirectFileDeviceOptionsBuilder::new(path)
-                .with_region_size(align)
-                .with_capacity(capacity)
-                .build(),
-            metrics,
-        })
+        let device = Monitored::open(
+            MonitoredOptions {
+                options: DirectFileDeviceOptionsBuilder::new(path)
+                    .with_region_size(align)
+                    .with_capacity(capacity)
+                    .build(),
+                metrics,
+            },
+            runtime,
+        )
         .await?;
 
         let tasks = bits::align_up(Self::RECOVER_IO_SIZE, capacity) / Self::RECOVER_IO_SIZE;
@@ -312,6 +316,8 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {
+        let runtime = Runtime::current();
+
         let dir = tempdir().unwrap();
 
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
@@ -319,6 +325,7 @@ mod tests {
             DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(4 * 1024 * 1024)
                 .build(),
+            runtime.clone(),
         )
         .await
         .unwrap();
@@ -329,6 +336,7 @@ mod tests {
             true,
             &mut vec![],
             Arc::new(Metrics::new("test")),
+            runtime.clone(),
         )
         .await
         .unwrap();
@@ -358,6 +366,7 @@ mod tests {
             true,
             &mut vec![],
             Arc::new(Metrics::new("test")),
+            runtime,
         )
         .await
         .unwrap();

@@ -23,13 +23,12 @@ use fs4::free_space;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
 
 use super::{Dev, DevExt, DevOptions, RegionId};
 use crate::{
     device::ALIGN,
     error::{Error, Result},
-    IoBytes, IoBytesMut,
+    IoBytes, IoBytesMut, Runtime,
 };
 
 /// Options for the direct fs device.
@@ -56,7 +55,7 @@ struct DirectFsDeviceInner {
     capacity: usize,
     file_size: usize,
 
-    runtime: Handle,
+    runtime: Runtime,
 }
 
 impl DevOptions for DirectFsDeviceOptions {
@@ -106,17 +105,16 @@ impl Dev for DirectFsDevice {
     }
 
     #[fastrace::trace(name = "foyer::storage::device::direct_fs::open")]
-    async fn open(options: Self::Options) -> Result<Self> {
-        let runtime = Handle::current();
-
+    async fn open(options: Self::Options, runtime: Runtime) -> Result<Self> {
         options.verify()?;
 
         // TODO(MrCroxx): write and read options to a manifest file for pinning
 
         let regions = options.capacity / options.file_size;
 
-        let path = options.dir.clone();
-        asyncify_with_runtime(&runtime, move || create_dir_all(path)).await?;
+        if !options.dir.exists() {
+            create_dir_all(&options.dir)?;
+        }
 
         let futures = (0..regions)
             .map(|i| {
@@ -165,7 +163,7 @@ impl Dev for DirectFsDevice {
 
         let file = self.file(region).clone();
 
-        asyncify_with_runtime(&self.inner.runtime, move || {
+        asyncify_with_runtime(self.inner.runtime.write(), move || {
             #[cfg(target_family = "windows")]
             let written = {
                 use std::os::windows::fs::FileExt;
@@ -207,7 +205,7 @@ impl Dev for DirectFsDevice {
 
         let file = self.file(region).clone();
 
-        let mut buffer = asyncify_with_runtime(&self.inner.runtime, move || {
+        let mut buffer = asyncify_with_runtime(self.inner.runtime.read(), move || {
             #[cfg(target_family = "unix")]
             let read = {
                 use std::os::unix::fs::FileExt;
@@ -237,7 +235,7 @@ impl Dev for DirectFsDevice {
     async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
         let flush = |region: RegionId| {
             let file = self.file(region).clone();
-            asyncify_with_runtime(&self.inner.runtime, move || file.sync_all().map_err(Error::from))
+            asyncify_with_runtime(self.inner.runtime.write(), move || file.sync_all().map_err(Error::from))
         };
 
         if let Some(region) = region {
@@ -352,6 +350,7 @@ mod tests {
     #[test_log::test(tokio::test)]
     async fn test_direct_fd_device_io() {
         let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::current();
 
         let options = DirectFsDeviceOptionsBuilder::new(dir.path())
             .with_capacity(4 * 1024 * 1024)
@@ -360,7 +359,7 @@ mod tests {
 
         tracing::debug!("{options:?}");
 
-        let device = DirectFsDevice::open(options.clone()).await.unwrap();
+        let device = DirectFsDevice::open(options.clone(), runtime.clone()).await.unwrap();
 
         let mut buf = IoBytesMut::with_capacity(64 * 1024);
         buf.extend(repeat_n(b'x', 64 * 1024 - 100));
@@ -375,7 +374,7 @@ mod tests {
 
         drop(device);
 
-        let device = DirectFsDevice::open(options).await.unwrap();
+        let device = DirectFsDevice::open(options, runtime).await.unwrap();
 
         let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
         assert_eq!(buf, b);

@@ -19,6 +19,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
+    runtime::SingletonHandle,
 };
 use futures::Future;
 use pin_project::pin_project;
@@ -834,7 +835,7 @@ where
         key: K,
         context: CacheContext,
         fetch: F,
-        runtime: &tokio::runtime::Handle,
+        runtime: &SingletonHandle,
     ) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,

@@ -14,11 +14,15 @@
 
 use std::{
     fmt::Debug,
+    future::Future,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
 };
 
-use tokio::runtime::Runtime;
+use tokio::{
+    runtime::{Handle, Runtime},
+    task::JoinHandle,
+};
 
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
 ///
@@ -60,5 +64,83 @@ impl DerefMut for BackgroundShutdownRuntime {
 impl From<Runtime> for BackgroundShutdownRuntime {
     fn from(runtime: Runtime) -> Self {
         Self(ManuallyDrop::new(runtime))
+    }
+}
+
+/// A non-clonable runtime handle.
+#[derive(Debug)]
+pub struct SingletonHandle(Handle);
+
+impl From<Handle> for SingletonHandle {
+    fn from(handle: Handle) -> Self {
+        Self(handle)
+    }
+}
+
+impl SingletonHandle {
+    /// Spawns a future onto the Tokio runtime.
+    ///
+    /// This spawns the given future onto the runtime's executor, usually a
+    /// thread pool. The thread pool is then responsible for polling the future
+    /// until it completes.
+    ///
+    /// The provided future will start running in the background immediately
+    /// when `spawn` is called, even if you don't await the returned
+    /// `JoinHandle`.
+    ///
+    /// See [module level][mod] documentation for more details.
+    ///
+    /// [mod]: index.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tokio::runtime::Runtime;
+    ///
+    /// # fn dox() {
+    /// // Create the runtime
+    /// let rt = Runtime::new().unwrap();
+    /// // Get a handle from this runtime
+    /// let handle = rt.handle();
+    ///
+    /// // Spawn a future onto the runtime using the handle
+    /// handle.spawn(async {
+    ///     println!("now running on a worker thread");
+    /// });
+    /// # }
+    /// ```
+    pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.0.spawn(future)
+    }
+
+    /// Runs the provided function on an executor dedicated to blocking
+    /// operations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tokio::runtime::Runtime;
+    ///
+    /// # fn dox() {
+    /// // Create the runtime
+    /// let rt = Runtime::new().unwrap();
+    /// // Get a handle from this runtime
+    /// let handle = rt.handle();
+    ///
+    /// // Spawn a blocking function onto the runtime using the handle
+    /// handle.spawn_blocking(|| {
+    ///     println!("now running on a worker thread");
+    /// });
+    /// # }
+    pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.0.spawn_blocking(func)
     }
 }
