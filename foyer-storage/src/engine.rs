@@ -12,15 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use ahash::RandomState;
+use auto_enums::auto_enum;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::Future;
@@ -92,45 +87,6 @@ where
             Selection::Left
         } else {
             Selection::Right
-        }
-    }
-}
-
-enum StoreFuture<F1, F2, F3, F4> {
-    Noop(F1),
-    Large(F2),
-    Small(F3),
-    Combined(F4),
-}
-
-impl<F1, F2, F3, F4> StoreFuture<F1, F2, F3, F4> {
-    pub fn as_pin_mut(self: Pin<&mut Self>) -> StoreFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>, Pin<&mut F4>> {
-        unsafe {
-            match *Pin::get_unchecked_mut(self) {
-                StoreFuture::Noop(ref mut inner) => StoreFuture::Noop(Pin::new_unchecked(inner)),
-                StoreFuture::Large(ref mut inner) => StoreFuture::Large(Pin::new_unchecked(inner)),
-                StoreFuture::Small(ref mut inner) => StoreFuture::Small(Pin::new_unchecked(inner)),
-                StoreFuture::Combined(ref mut inner) => StoreFuture::Combined(Pin::new_unchecked(inner)),
-            }
-        }
-    }
-}
-
-impl<F1, F2, F3, F4> Future for StoreFuture<F1, F2, F3, F4>
-where
-    F1: Future,
-    F2: Future<Output = F1::Output>,
-    F3: Future<Output = F1::Output>,
-    F4: Future<Output = F1::Output>,
-{
-    type Output = F1::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.as_pin_mut() {
-            StoreFuture::Noop(future) => future.poll(cx),
-            StoreFuture::Large(future) => future.poll(cx),
-            StoreFuture::Small(future) => future.poll(cx),
-            StoreFuture::Combined(future) => future.poll(cx),
         }
     }
 }
@@ -251,12 +207,13 @@ where
         }
     }
 
+    #[auto_enum(Future)]
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         match self {
-            Engine::Noop(storage) => StoreFuture::Noop(storage.load(hash)),
-            Engine::Large(storage) => StoreFuture::Large(storage.load(hash)),
-            Engine::Small(storage) => StoreFuture::Small(storage.load(hash)),
-            Engine::Combined(storage) => StoreFuture::Combined(storage.load(hash)),
+            Engine::Noop(storage) => storage.load(hash),
+            Engine::Large(storage) => storage.load(hash),
+            Engine::Small(storage) => storage.load(hash),
+            Engine::Combined(storage) => storage.load(hash),
         }
     }
 
@@ -296,12 +253,13 @@ where
         }
     }
 
+    #[auto_enum(Future)]
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         match self {
-            Engine::Noop(storage) => StoreFuture::Noop(storage.wait()),
-            Engine::Large(storage) => StoreFuture::Large(storage.wait()),
-            Engine::Small(storage) => StoreFuture::Small(storage.wait()),
-            Engine::Combined(storage) => StoreFuture::Combined(storage.wait()),
+            Engine::Noop(storage) => storage.wait(),
+            Engine::Large(storage) => storage.wait(),
+            Engine::Small(storage) => storage.wait(),
+            Engine::Combined(storage) => storage.wait(),
         }
     }
 }

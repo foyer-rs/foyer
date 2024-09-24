@@ -18,6 +18,7 @@ anyhow = "1.0"
 # TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
 array-util = "1"
 async-channel = "2"
+auto_enums = { version = "0.8", features = ["futures03"] }
 bincode = "1"
 bitflags = "2.3.1"
 bytes = "1"
