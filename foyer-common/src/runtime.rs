@@ -14,15 +14,15 @@
 
 use std::{
     fmt::Debug,
+    future::Future,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
 };
 
-use std::future::Future;
-
-use tokio::{runtime::Handle, task::JoinHandle};
-
-use tokio::runtime::Runtime;
+use tokio::{
+    runtime::{Handle, Runtime},
+    task::JoinHandle,
+};
 
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
 ///
