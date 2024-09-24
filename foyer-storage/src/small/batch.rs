@@ -286,3 +286,40 @@ where
     pub bytes: IoBytes,
     pub entries: Vec<CacheEntry<K, V, S>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use foyer_memory::{Cache, CacheBuilder};
+
+    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
+
+    use super::*;
+
+    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+        CacheBuilder::new(10).build()
+    }
+
+    fn serialize(entry: &CacheEntry<u64, Vec<u8>>) -> (IoBytes, KvInfo) {
+        let mut bytes = IoBytesMut::new();
+        let info = EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            &mut bytes,
+            &metrics_for_test(),
+        )
+        .unwrap();
+        (bytes.freeze(), info)
+    }
+
+    #[test]
+    fn test_batch_insert() {
+        let cache = cache_for_test();
+        let mut batch: BatchMut<u64, Vec<u8>, ahash::RandomState> = BatchMut::new(4, 1000);
+
+        let e1 = cache.insert(1, vec![b'1'; 10]);
+        let (b1, i1) = serialize(&e1);
+
+        batch.append(e1, b1, i1);
+    }
+}
