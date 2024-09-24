@@ -12,13 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{fmt::Debug, sync::Arc};
 
+use auto_enums::auto_enum;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::{
@@ -27,41 +23,6 @@ use futures::{
 };
 
 use crate::{error::Result, storage::Storage, DeviceStats};
-
-enum OrderFuture<F1, F2, F3> {
-    LeftFirst(F1),
-    RightFirst(F2),
-    Parallel(F3),
-}
-
-impl<F1, F2, F3> OrderFuture<F1, F2, F3> {
-    pub fn as_pin_mut(self: Pin<&mut Self>) -> OrderFuture<Pin<&mut F1>, Pin<&mut F2>, Pin<&mut F3>> {
-        unsafe {
-            match *Pin::get_unchecked_mut(self) {
-                OrderFuture::LeftFirst(ref mut inner) => OrderFuture::LeftFirst(Pin::new_unchecked(inner)),
-                OrderFuture::RightFirst(ref mut inner) => OrderFuture::RightFirst(Pin::new_unchecked(inner)),
-                OrderFuture::Parallel(ref mut inner) => OrderFuture::Parallel(Pin::new_unchecked(inner)),
-            }
-        }
-    }
-}
-
-impl<F1, F2, F3> Future for OrderFuture<F1, F2, F3>
-where
-    F1: Future,
-    F2: Future<Output = F1::Output>,
-    F3: Future<Output = F1::Output>,
-{
-    type Output = F1::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.as_pin_mut() {
-            OrderFuture::LeftFirst(future) => future.poll(cx),
-            OrderFuture::RightFirst(future) => future.poll(cx),
-            OrderFuture::Parallel(future) => future.poll(cx),
-        }
-    }
-}
 
 /// Order of ops.
 #[derive(Debug, Clone, Copy)]
@@ -226,24 +187,25 @@ where
         }
     }
 
+    #[auto_enum(Future)]
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         let fleft = self.left.load(hash);
         let fright = self.right.load(hash);
         match self.load_order {
             // FIXME(MrCroxx): false-positive on hash collision.
-            Order::LeftFirst => OrderFuture::LeftFirst(fleft.then(|res| match res {
+            Order::LeftFirst => fleft.then(|res| match res {
                 Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
                 Err(e) => ready(Err(e)).left_future(),
                 Ok(None) => fright.right_future(),
-            })),
+            }),
             // FIXME(MrCroxx): false-positive on hash collision.
-            Order::RightFirst => OrderFuture::RightFirst(fright.then(|res| match res {
+            Order::RightFirst => fright.then(|res| match res {
                 Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
                 Err(e) => ready(Err(e)).left_future(),
                 Ok(None) => fleft.right_future(),
-            })),
+            }),
             Order::Parallel => {
-                OrderFuture::Parallel(async move {
+                async move {
                     pin_mut!(fleft);
                     pin_mut!(fright);
                     // Returns a 4-way `Either` by nesting `Either` in `Either`.
@@ -261,7 +223,7 @@ where
                             },
                         })
                         .await
-                })
+                }
             }
         }
     }
