@@ -291,9 +291,8 @@ where
 mod tests {
     use foyer_memory::{Cache, CacheBuilder};
 
-    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
-
     use super::*;
+    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
         CacheBuilder::new(10).build()
