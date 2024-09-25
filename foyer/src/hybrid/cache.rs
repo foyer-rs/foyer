@@ -485,7 +485,7 @@ where
             context,
             || {
                 let metrics = self.metrics.clone();
-                let user_runtime_handle = self.storage().runtimes().user_runtime_handle.clone();
+                let runtime = self.storage().runtime().clone();
 
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
@@ -502,7 +502,8 @@ where
                     metrics.hybrid_miss.increment(1);
                     metrics.hybrid_miss_duration.record(now.elapsed());
 
-                    user_runtime_handle
+                    runtime
+                        .user()
                         .spawn(
                             future
                                 .map(|res| Diversion {
@@ -515,7 +516,7 @@ where
                         .unwrap()
                 }
             },
-            self.storage().runtimes().read_runtime_handle,
+            self.storage().runtime().read(),
         );
 
         if inner.state() == FetchState::Hit {

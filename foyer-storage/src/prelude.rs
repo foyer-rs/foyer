@@ -30,10 +30,11 @@ pub use crate::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    runtime::Runtime,
     statistics::Statistics,
     storage::{either::Order, Storage},
     store::{
-        DeviceConfig, Engine, LargeEngineOptions, RuntimeConfig, RuntimeHandles, SmallEngineOptions, Store,
-        StoreBuilder, TokioRuntimeConfig,
+        DeviceConfig, Engine, LargeEngineOptions, RuntimeConfig, SmallEngineOptions, Store, StoreBuilder,
+        TokioRuntimeConfig,
     },
 };

@@ -21,7 +21,6 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
-use tokio::runtime::Handle;
 
 use crate::{
     device::{MonitoredDevice, RegionId},
@@ -29,7 +28,7 @@ use crate::{
     serde::KvInfo,
     small::{flusher::Flusher, set::SetId, set_manager::SetManager},
     storage::Storage,
-    DeviceStats, IoBytes,
+    DeviceStats, IoBytes, Runtime,
 };
 
 pub struct GenericSmallStorageConfig<K, V, S>
@@ -51,9 +50,7 @@ where
     /// Flusher count.
     pub flushers: usize,
 
-    pub read_runtime_handle: Handle,
-    pub write_runtime_handle: Handle,
-    pub user_runtime_handle: Handle,
+    pub runtime: Runtime,
 
     pub marker: PhantomData<(K, V, S)>,
 }
@@ -80,9 +77,7 @@ where
     device: MonitoredDevice,
     set_manager: SetManager,
 
-    read_runtime_handle: Handle,
-    _write_runtime_handle: Handle,
-    _user_runtime_handle: Handle,
+    runtime: Runtime,
 }
 
 pub struct GenericSmallStorage<K, V, S>
@@ -134,16 +129,14 @@ where
         );
 
         let flushers = (0..config.flushers)
-            .map(|_| Flusher::new(set_manager.clone(), &config.write_runtime_handle))
+            .map(|_| Flusher::new(set_manager.clone(), &config.runtime))
             .collect_vec();
 
         let inner = GenericSmallStorageInner {
             flushers,
             device: config.device,
             set_manager,
-            read_runtime_handle: config.read_runtime_handle,
-            _write_runtime_handle: config.write_runtime_handle,
-            _user_runtime_handle: config.user_runtime_handle,
+            runtime: config.runtime,
         };
         let inner = Arc::new(inner);
 
@@ -186,7 +179,8 @@ where
         let sid = hash % set_manager.sets() as SetId;
         // FIXME: Anyway without blocking? Use atomic?
         self.inner
-            .read_runtime_handle
+            .runtime
+            .read()
             .block_on(async move { set_manager.contains(sid, hash).await })
     }
 

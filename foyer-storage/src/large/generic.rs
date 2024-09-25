@@ -32,7 +32,7 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
-use tokio::{runtime::Handle, sync::Semaphore};
+use tokio::sync::Semaphore;
 
 use super::{
     batch::InvalidStats,
@@ -52,6 +52,7 @@ use crate::{
     },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
+    runtime::Runtime,
     serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
@@ -79,9 +80,7 @@ where
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
-    pub read_runtime_handle: Handle,
-    pub write_runtime_handle: Handle,
-    pub user_runtime_handle: Handle,
+    pub runtime: Runtime,
     pub marker: PhantomData<(V, S)>,
 }
 
@@ -108,8 +107,7 @@ where
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
             .field("statistics", &self.statistics)
-            .field("read_runtime_handle", &self.read_runtime_handle)
-            .field("write_runtime_handle", &self.write_runtime_handle)
+            .field("runtime", &self.runtime)
             .finish()
     }
 }
@@ -153,9 +151,7 @@ where
 
     sequence: AtomicSequence,
 
-    _read_runtime_handle: Handle,
-    write_runtime_handle: Handle,
-    _user_runtime_handle: Handle,
+    runtime: Runtime,
 
     active: AtomicBool,
 
@@ -190,13 +186,14 @@ where
         let mut tombstones = vec![];
         let tombstone_log = match &config.tombstone_log_config {
             None => None,
-            Some(config) => {
+            Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &config.path,
+                    &tombstone_log_config.path,
                     device.clone(),
-                    config.flush,
+                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
+                    config.runtime.clone(),
                 )
                 .await?;
                 Some(log)
@@ -225,7 +222,7 @@ where
             &region_manager,
             &tombstones,
             metrics.clone(),
-            config.user_runtime_handle.clone(),
+            config.runtime.clone(),
         )
         .await?;
 
@@ -238,7 +235,7 @@ where
                 tombstone_log.clone(),
                 stats.clone(),
                 metrics.clone(),
-                config.write_runtime_handle.clone(),
+                &config.runtime,
             )
             .await
         }))
@@ -254,7 +251,7 @@ where
                 stats.clone(),
                 config.flush,
                 metrics.clone(),
-                config.write_runtime_handle.clone(),
+                &config.runtime,
             )
             .await
         }))
@@ -270,9 +267,7 @@ where
                 statistics: stats,
                 flush: config.flush,
                 sequence,
-                _read_runtime_handle: config.read_runtime_handle,
-                write_runtime_handle: config.write_runtime_handle,
-                _user_runtime_handle: config.user_runtime_handle,
+                runtime: config.runtime,
                 active: AtomicBool::new(true),
                 metrics,
             }),
@@ -390,7 +385,7 @@ where
         });
 
         let this = self.clone();
-        self.inner.write_runtime_handle.spawn(async move {
+        self.inner.runtime.write().spawn(async move {
             let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
             this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
                 tombstone: Tombstone { hash, sequence },
@@ -497,6 +492,7 @@ mod tests {
     use ahash::RandomState;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
+    use tokio::runtime::Handle;
 
     use super::*;
     use crate::{
@@ -519,15 +515,19 @@ mod tests {
     }
 
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
-        Monitored::open(MonitoredOptions {
-            options: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            }
-            .into(),
-            metrics: Arc::new(Metrics::new("test")),
-        })
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredOptions {
+                options: DirectFsDeviceOptions {
+                    dir: dir.as_ref().into(),
+                    capacity: 64 * KB,
+                    file_size: 16 * KB,
+                }
+                .into(),
+                metrics: Arc::new(Metrics::new("test")),
+            },
+            runtime,
+        )
         .await
         .unwrap()
     }
@@ -560,9 +560,7 @@ mod tests {
             tombstone_log_config: None,
             buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
-            read_runtime_handle: Handle::current(),
-            write_runtime_handle: Handle::current(),
-            user_runtime_handle: Handle::current(),
+            runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
@@ -591,9 +589,7 @@ mod tests {
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_threshold: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
-            read_runtime_handle: Handle::current(),
-            write_runtime_handle: Handle::current(),
-            user_runtime_handle: Handle::current(),
+            runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()

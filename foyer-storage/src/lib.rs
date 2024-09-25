@@ -27,6 +27,7 @@ mod io_buffer_pool;
 mod large;
 mod picker;
 mod region;
+mod runtime;
 mod serde;
 mod small;
 mod statistics;

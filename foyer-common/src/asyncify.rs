@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use tokio::runtime::Handle;
+use crate::runtime::SingletonHandle;
 
 /// Convert the block call to async call.
 #[cfg(not(madsim))]
@@ -36,9 +36,9 @@ where
     f()
 }
 
-/// Convert the block call to async call with given runtime.
+/// Convert the block call to async call with given runtime handle.
 #[cfg(not(madsim))]
-pub async fn asyncify_with_runtime<F, T>(runtime: &Handle, f: F) -> T
+pub async fn asyncify_with_runtime<F, T>(runtime: &SingletonHandle, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
@@ -50,7 +50,7 @@ where
 /// Convert the block call to async call with given runtime.
 ///
 /// madsim compatible mode.
-pub async fn asyncify_with_runtime<F, T>(_: &Handle, f: F) -> T
+pub async fn asyncify_with_runtime<F, T>(_: &SingletonHandle, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,

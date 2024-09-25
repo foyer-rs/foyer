@@ -25,7 +25,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
 use futures::future::try_join_all;
 use parking_lot::Mutex;
-use tokio::{runtime::Handle, sync::Notify, task::JoinHandle};
+use tokio::{sync::Notify, task::JoinHandle};
 
 use super::{
     batch::{Batch, BatchMut, SetBatch},
@@ -34,7 +34,7 @@ use super::{
 use crate::{
     error::{Error, Result},
     serde::KvInfo,
-    IoBytes,
+    IoBytes, Runtime,
 };
 
 pub struct Flusher<K, V, S>
@@ -57,7 +57,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(set_manager: SetManager, runtime: &Handle) -> Self {
+    pub fn new(set_manager: SetManager, runtime: &Runtime) -> Self {
         let batch = Arc::new(Mutex::new(BatchMut::new(
             set_manager.sets() as _,
             set_manager.set_data_size(),
@@ -73,7 +73,7 @@ where
             stop: stop.clone(),
         };
 
-        let handle = runtime.spawn(async move {
+        let handle = runtime.write().spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!("[sodc flusher]: flusher exit with error: {e}");
             }
