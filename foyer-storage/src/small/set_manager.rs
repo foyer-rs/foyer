@@ -43,7 +43,7 @@ struct SetManagerInner {
     cache: Mutex<OrderedHashMap<SetId, Arc<SetStorage>>>,
     set_cache_capacity: usize,
 
-    set_capacity: usize,
+    set_size: usize,
     device: MonitoredDevice,
     regions: Range<RegionId>,
     flush: bool,
@@ -57,9 +57,10 @@ pub struct SetManager {
 impl Debug for SetManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SetManager")
-            .field("sets", &self.inner.sets.len())
-            .field("cache_capacity", &self.inner.set_cache_capacity)
-            .field("size", &self.inner.set_capacity)
+            .field("sets", &self.inner.sets)
+            .field("cache", &self.inner.cache)
+            .field("set_cache_capacity", &self.inner.set_cache_capacity)
+            .field("set_size", &self.inner.set_size)
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
             .field("flush", &self.inner.flush)
@@ -85,7 +86,7 @@ impl SetManager {
             sets,
             cache,
             set_cache_capacity,
-            set_capacity: set_size,
+            set_size,
             device,
             regions,
             flush,
@@ -170,23 +171,27 @@ impl SetManager {
         self.inner.sets.len()
     }
 
+    pub fn set_size(&self) -> usize {
+        self.inner.set_size
+    }
+
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
-        let buffer = self.inner.device.read(region, offset, self.inner.set_capacity).await?;
+        let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
         let storage = SetStorage::load(buffer);
         Ok(storage)
     }
 
     #[inline]
     fn region_sets(&self) -> usize {
-        self.inner.device.region_size() / self.inner.set_capacity
+        self.inner.device.region_size() / self.inner.set_size
     }
 
     #[inline]
     fn locate(&self, id: SetId) -> (RegionId, u64) {
         let region_sets = self.region_sets();
         let region = id as RegionId / region_sets as RegionId;
-        let offset = ((id as usize % region_sets) * self.inner.set_capacity) as u64;
+        let offset = ((id as usize % region_sets) * self.inner.set_size) as u64;
         (region, offset)
     }
 }

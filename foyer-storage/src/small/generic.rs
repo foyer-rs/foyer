@@ -33,7 +33,7 @@ use crate::{
     error::Result,
     small::{flusher::Flusher, set::SetId, set_manager::SetManager},
     storage::Storage,
-    DeviceStats, Runtime,
+    DeviceStats, Runtime, Statistics,
 };
 
 pub struct GenericSmallStorageConfig<K, V, S>
@@ -49,9 +49,8 @@ where
     pub flush: bool,
     pub flushers: usize,
     pub buffer_pool_size: usize,
-
+    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
-
     pub marker: PhantomData<(K, V, S)>,
 }
 
@@ -62,7 +61,18 @@ where
     S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GenericSmallStorageConfig").finish()
+        f.debug_struct("GenericSmallStorageConfig")
+            .field("set_size", &self.set_size)
+            .field("set_cache_capacity", &self.set_cache_capacity)
+            .field("device", &self.device)
+            .field("regions", &self.regions)
+            .field("flush", &self.flush)
+            .field("flushers", &self.flushers)
+            .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("statistics", &self.statistics)
+            .field("runtime", &self.runtime)
+            .field("marker", &self.marker)
+            .finish()
     }
 }
 
@@ -79,6 +89,7 @@ where
 
     active: AtomicBool,
 
+    stats: Arc<Statistics>,
     runtime: Runtime,
 }
 
@@ -122,6 +133,7 @@ where
     S: HashBuilder + Debug,
 {
     async fn open(config: GenericSmallStorageConfig<K, V, S>) -> Result<Self> {
+        let stats = config.statistics.clone();
         let metrics = config.device.metrics().clone();
 
         let set_manager = SetManager::new(
@@ -133,7 +145,7 @@ where
         );
 
         let flushers = (0..config.flushers)
-            .map(|_| Flusher::open(&config, set_manager.clone(), metrics.clone()))
+            .map(|_| Flusher::open(&config, set_manager.clone(), stats.clone(), metrics.clone()))
             .collect_vec();
 
         let inner = GenericSmallStorageInner {
@@ -141,6 +153,7 @@ where
             device: config.device,
             set_manager,
             active: AtomicBool::new(true),
+            stats,
             runtime: config.runtime,
         };
         let inner = Arc::new(inner);
@@ -175,7 +188,13 @@ where
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
         let sid = hash % set_manager.sets() as SetId;
+        let stats = self.inner.stats.clone();
+
         async move {
+            stats
+                .cache_read_bytes
+                .fetch_add(set_manager.set_size(), Ordering::Relaxed);
+
             match set_manager.read(sid, hash).await? {
                 Some(set) => {
                     let kv = set.get(hash)?;

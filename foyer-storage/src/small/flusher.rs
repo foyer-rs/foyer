@@ -12,7 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, future::Future, sync::Arc};
+use std::{
+    fmt::Debug,
+    future::Future,
+    sync::{atomic::Ordering, Arc},
+};
 
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
@@ -27,7 +31,10 @@ use super::{
     generic::GenericSmallStorageConfig,
     set_manager::SetManager,
 };
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    Statistics,
+};
 
 pub enum Submission<K, V, S>
 where
@@ -83,7 +90,12 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn open(config: &GenericSmallStorageConfig<K, V, S>, set_manager: SetManager, metrics: Arc<Metrics>) -> Self {
+    pub fn open(
+        config: &GenericSmallStorageConfig<K, V, S>,
+        set_manager: SetManager,
+        stats: Arc<Statistics>,
+        metrics: Arc<Metrics>,
+    ) -> Self {
         let (tx, rx) = flume::unbounded();
 
         let buffer_size = config.buffer_pool_size / config.flushers;
@@ -95,6 +107,7 @@ where
             batch,
             flight: Arc::new(Semaphore::new(1)),
             set_manager,
+            stats,
             metrics,
         };
 
@@ -135,6 +148,7 @@ where
 
     set_manager: SetManager,
 
+    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -184,10 +198,15 @@ where
 
         let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {
             let set_manager = self.set_manager.clone();
+            let stats = self.stats.clone();
             async move {
                 let mut set = set_manager.write(sid).await?;
                 set.apply(&deletions, items);
                 set_manager.apply(set).await?;
+
+                stats
+                    .cache_write_bytes
+                    .fetch_add(set_manager.set_size(), Ordering::Relaxed);
 
                 Ok::<_, Error>(())
             }

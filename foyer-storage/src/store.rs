@@ -575,6 +575,7 @@ where
                                 flush: self.flush,
                                 flushers: self.small.flushers,
                                 buffer_pool_size: self.small.buffer_pool_size,
+                                statistics: statistics.clone(),
                                 runtime,
                                 marker: PhantomData,
                             }))
@@ -594,6 +595,7 @@ where
                                     flush: self.flush,
                                     flushers: self.small.flushers,
                                     buffer_pool_size: self.small.buffer_pool_size,
+                                    statistics: statistics.clone(),
                                     runtime: runtime.clone(),
                                     marker: PhantomData,
                                 },
