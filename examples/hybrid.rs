@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptionsBuilder, Engine, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
+        .storage(Engine::Large) // use large object disk cache engine only
         .with_device_config(
             DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(256 * 1024 * 1024)

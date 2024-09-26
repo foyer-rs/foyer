@@ -34,9 +34,9 @@ use analyze::{analyze, monitor, Metrics};
 use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use foyer::{
-    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
-    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
+    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, Engine, FifoConfig, FifoPicker,
+    HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker,
+    RecoverMode, RuntimeConfig, S3FifoConfig, SmallEngineOptions, TokioRuntimeConfig, TracingConfig,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -204,6 +204,11 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
 
+    // TODO(MrCroxx): use mixed engine by default.
+    /// Disk cache engine.
+    #[arg(long, default_value_t = Engine::Large)]
+    engine: Engine,
+
     /// Time-series operation distribution.
     ///
     /// Available values: "none", "uniform", "zipf".
@@ -232,6 +237,12 @@ pub struct Args {
 
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
+
+    #[arg(long, default_value_t = ByteSize::kib(16))]
+    set_size: ByteSize,
+
+    #[arg(long, default_value_t = 64)]
+    set_cache_capacity: usize,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
@@ -448,7 +459,7 @@ async fn benchmark(args: Args) {
 
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
-        .storage();
+        .storage(args.engine);
 
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_config(
@@ -468,15 +479,7 @@ async fn benchmark(args: Args) {
 
     builder = builder
         .with_flush(args.flush)
-        .with_indexer_shards(args.shards)
         .with_recover_mode(args.recover_mode)
-        .with_recover_concurrency(args.recover_concurrency)
-        .with_flushers(args.flushers)
-        .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![
-            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-            Box::<FifoPicker>::default(),
-        ])
         .with_compression(args.compression)
         .with_runtime_config(match args.runtime.as_str() {
             "disabled" => RuntimeConfig::Disabled,
@@ -497,20 +500,39 @@ async fn benchmark(args: Args) {
             _ => unreachable!(),
         });
 
+    let mut large = LargeEngineOptions::new()
+        .with_indexer_shards(args.shards)
+        .with_recover_concurrency(args.recover_concurrency)
+        .with_flushers(args.flushers)
+        .with_reclaimers(args.reclaimers)
+        .with_eviction_pickers(vec![
+            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+            Box::<FifoPicker>::default(),
+        ]);
+
+    let small = SmallEngineOptions::new()
+        .with_flushers(args.flushers)
+        .with_set_size(args.set_size.as_u64() as _)
+        .with_set_cache_capacity(args.set_cache_capacity);
+
     if args.admission_rate_limit.as_u64() > 0 {
         builder =
             builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
     if args.reinsertion_rate_limit.as_u64() > 0 {
-        builder =
-            builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
+        large = large.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
 
     if args.clean_region_threshold > 0 {
-        builder = builder.with_clean_region_threshold(args.clean_region_threshold);
+        large = large.with_clean_region_threshold(args.clean_region_threshold);
     }
 
-    let hybrid = builder.build().await.unwrap();
+    let hybrid = builder
+        .with_large_object_disk_cache_options(large)
+        .with_small_object_disk_cache_options(small)
+        .build()
+        .await
+        .unwrap();
 
     #[cfg(feature = "mtrace")]
     hybrid.enable_tracing();

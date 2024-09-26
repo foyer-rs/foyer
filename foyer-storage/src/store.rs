@@ -12,10 +12,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    borrow::Borrow,
+    fmt::{Debug, Display},
+    hash::Hash,
+    marker::PhantomData,
+    str::FromStr,
+    sync::Arc,
+    time::Instant,
+};
 
 use ahash::RandomState;
 use foyer_common::{
+    bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
     runtime::BackgroundShutdownRuntime,
@@ -29,9 +38,9 @@ use crate::{
     device::{
         direct_fs::DirectFsDeviceOptions,
         monitor::{DeviceStats, Monitored, MonitoredOptions},
-        DeviceOptions, RegionId,
+        DeviceOptions, RegionId, ALIGN,
     },
-    engine::{Engine, EngineConfig, SizeSelector},
+    engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
@@ -67,7 +76,7 @@ where
 {
     memory: Cache<K, V, S>,
 
-    engine: Engine<K, V, S>,
+    engine: EngineEnum<K, V, S>,
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
 
@@ -187,15 +196,6 @@ where
         self.inner.engine.stats()
     }
 
-    /// Get the runtime handles.
-    #[deprecated(
-        since = "0.11.5",
-        note = "The function will be renamed to \"runtime()\", use it instead."
-    )]
-    pub fn runtimes(&self) -> &Runtime {
-        &self.inner.runtime
-    }
-
     /// Get the runtime.
     pub fn runtime(&self) -> &Runtime {
         &self.inner.runtime
@@ -223,36 +223,38 @@ impl From<DirectFsDeviceOptions> for DeviceConfig {
     }
 }
 
-/// [`CombinedConfig`] controls the ratio of the large object disk cache and the small object disk cache.
+/// [`Engine`] controls the ratio of the large object disk cache and the small object disk cache.
 ///
-/// If [`CombinedConfig::Combined`] is used, it will use the `Either` engine
+/// If [`Engine::Mixed`] is used, it will use the `Either` engine
 /// with the small object disk cache as the left engine,
 /// and the large object disk cache as the right engine.
-#[derive(Debug, Clone)]
-pub enum CombinedConfig {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum Engine {
     /// All space are used as the large object disk cache.
     Large,
     /// All space are used as the small object disk cache.
     Small,
-    /// Combined the large object disk cache and the small object disk cache.
-    Combined {
-        /// The ratio of the large object disk cache.
-        large_object_cache_ratio: f64,
-        /// The serialized entry size threshold to use the large object disk cache.
-        large_object_threshold: usize,
-        /// Load order.
-        load_order: Order,
-    },
+    /// Mixed the large object disk cache and the small object disk cache.
+    ///
+    /// The argument controls the ratio of the small object disk cache.
+    ///
+    /// Range: [0 ~ 1]
+    Mixed(f64),
 }
 
-impl Default for CombinedConfig {
+impl Default for Engine {
     fn default() -> Self {
-        // TODO(MrCroxx): Use combined cache after small object disk cache is ready.
+        // TODO(MrCroxx): Use Mixed cache after small object disk cache is ready.
         Self::Large
     }
 }
 
-impl CombinedConfig {
+impl Engine {
+    /// Threshold for distinguishing small and large objects.
+    pub const OBJECT_SIZE_THRESHOLD: usize = 2048;
+    /// Check the large object disk cache first, for checking it does NOT involve disk ops.
+    pub const MIXED_LOAD_ORDER: Order = Order::RightFirst;
+
     /// Default large object disk cache only config.
     pub fn large() -> Self {
         Self::Large
@@ -263,13 +265,41 @@ impl CombinedConfig {
         Self::Small
     }
 
-    /// Default combined large object disk cache and small object disk cache only config.
-    pub fn combined() -> Self {
-        Self::Combined {
-            large_object_cache_ratio: 0.5,
-            large_object_threshold: 4096,
-            load_order: Order::RightFirst,
+    /// Default mixed large object disk cache and small object disk cache config.
+    pub fn mixed() -> Self {
+        Self::Mixed(0.1)
+    }
+}
+
+impl Display for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Engine::Large => write!(f, "large"),
+            Engine::Small => write!(f, "small"),
+            Engine::Mixed(ratio) => write!(f, "mixed({ratio})"),
         }
+    }
+}
+
+impl FromStr for Engine {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        const MIXED_PREFIX: &str = "mixed=";
+
+        match s {
+            "large" => return Ok(Engine::Large),
+            "small" => return Ok(Engine::Small),
+            _ => {}
+        }
+
+        if s.starts_with(MIXED_PREFIX) {
+            if let Ok(ratio) = s[MIXED_PREFIX.len()..s.len()].parse::<f64>() {
+                return Ok(Engine::Mixed(ratio));
+            }
+        }
+
+        Err(format!("invalid input: {s}"))
     }
 }
 
@@ -315,25 +345,20 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    name: String,
     memory: Cache<K, V, S>,
 
-    name: String,
     device_config: DeviceConfig,
-    flush: bool,
-    indexer_shards: usize,
-    recover_mode: RecoverMode,
-    recover_concurrency: usize,
-    flushers: usize,
-    reclaimers: usize,
-    buffer_pool_size: usize,
-    clean_region_threshold: Option<usize>,
-    eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
-    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
-    compression: Compression,
-    tombstone_log_config: Option<TombstoneLogConfig>,
-    combined_config: CombinedConfig,
+    engine: Engine,
     runtime_config: RuntimeConfig,
+
+    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    compression: Compression,
+    recover_mode: RecoverMode,
+    flush: bool,
+
+    large: LargeEngineOptions<K, V, S>,
+    small: SmallEngineOptions<K, V, S>,
 }
 
 impl<K, V, S> StoreBuilder<K, V, S>
@@ -343,26 +368,26 @@ where
     S: HashBuilder + Debug,
 {
     /// Setup disk cache store for the given in-memory cache.
-    pub fn new(memory: Cache<K, V, S>) -> Self {
+    pub fn new(memory: Cache<K, V, S>, engine: Engine) -> Self {
+        if matches!(engine, Engine::Mixed(ratio) if !(0.0..=1.0).contains(&ratio)) {
+            panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
+        }
+
         Self {
-            memory,
             name: "foyer".to_string(),
+            memory,
+
             device_config: DeviceConfig::None,
-            flush: false,
-            indexer_shards: 64,
-            recover_mode: RecoverMode::Quiet,
-            recover_concurrency: 8,
-            flushers: 1,
-            reclaimers: 1,
-            buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
-            clean_region_threshold: None,
-            eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker<K>>::default(),
-            reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
-            compression: Compression::None,
-            tombstone_log_config: None,
-            combined_config: CombinedConfig::default(),
+            engine,
             runtime_config: RuntimeConfig::Disabled,
+
+            admission_picker: Arc::<AdmitAllPicker<K>>::default(),
+            compression: Compression::None,
+            recover_mode: RecoverMode::Quiet,
+            flush: false,
+
+            large: LargeEngineOptions::new(),
+            small: SmallEngineOptions::new(),
         }
     }
 
@@ -390,11 +415,11 @@ where
         self
     }
 
-    /// Set the shard num of the indexer. Each shard has its own lock.
+    /// Set the compression algorithm of the disk cache store.
     ///
-    /// Default: `64`.
-    pub fn with_indexer_shards(mut self, indexer_shards: usize) -> Self {
-        self.indexer_shards = indexer_shards;
+    /// Default: [`Compression::None`].
+    pub fn with_compression(mut self, compression: Compression) -> Self {
+        self.compression = compression;
         self
     }
 
@@ -408,88 +433,6 @@ where
         self
     }
 
-    /// Set the recover concurrency for the disk cache store.
-    ///
-    /// Default: `8`.
-    pub fn with_recover_concurrency(mut self, recover_concurrency: usize) -> Self {
-        self.recover_concurrency = recover_concurrency;
-        self
-    }
-
-    /// Set the flusher count for the disk cache store.
-    ///
-    /// The flusher count limits how many regions can be concurrently written.
-    ///
-    /// Default: `1`.
-    pub fn with_flushers(mut self, flushers: usize) -> Self {
-        self.flushers = flushers;
-        self
-    }
-
-    /// Set the reclaimer count for the disk cache store.
-    ///
-    /// The reclaimer count limits how many regions can be concurrently reclaimed.
-    ///
-    /// Default: `1`.
-    pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
-        self.reclaimers = reclaimers;
-        self
-    }
-
-    // FIXME(MrCroxx): remove it after 0.12
-    /// Set the total flush buffer threshold.
-    ///
-    /// Each flusher shares a volume at `threshold / flushers`.
-    ///
-    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
-    ///
-    /// Default: 16 MiB.
-    #[deprecated(
-        since = "0.11.4",
-        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
-    )]
-    pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
-        self.buffer_pool_size = threshold;
-        self
-    }
-
-    /// Set the total flush buffer pool size.
-    ///
-    /// Each flusher shares a volume at `threshold / flushers`.
-    ///
-    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
-    ///
-    /// Default: 16 MiB.
-    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
-        self.buffer_pool_size = buffer_pool_size;
-        self
-    }
-
-    /// Set the clean region threshold for the disk cache store.
-    ///
-    /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.
-    ///
-    /// Default: the same value as the `reclaimers`.
-    pub fn with_clean_region_threshold(mut self, clean_region_threshold: usize) -> Self {
-        self.clean_region_threshold = Some(clean_region_threshold);
-        self
-    }
-
-    /// Set the eviction pickers for th disk cache store.
-    ///
-    /// The eviction picker is used to pick the region to reclaim.
-    ///
-    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
-    /// will be applied.
-    ///
-    /// If no eviction picker picks a region, a region will be picked randomly.
-    ///
-    /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
-    pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
-        self.eviction_pickers = eviction_pickers;
-        self
-    }
-
     /// Set the admission pickers for th disk cache store.
     ///
     /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
@@ -500,57 +443,42 @@ where
         self
     }
 
-    /// Set the reinsertion pickers for th disk cache store.
-    ///
-    /// The reinsertion picker is used to pick the entries that can be reinsertion into the disk cache store while
-    /// reclaiming.
-    ///
-    /// Note: Only extremely important entries should be picked. If too many entries are picked, both insertion and
-    /// reinsertion will be stuck.
-    ///
-    /// Default: [`RejectAllPicker`].
-    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
-        self.reinsertion_picker = reinsertion_picker;
-        self
-    }
-
-    /// Set the compression algorithm of the disk cache store.
-    ///
-    /// Default: [`Compression::None`].
-    pub fn with_compression(mut self, compression: Compression) -> Self {
-        self.compression = compression;
-        self
-    }
-
-    /// Enable the tombstone log with the given config.
-    ///
-    /// For updatable cache, either the tombstone log or [`RecoverMode::None`] must be enabled to prevent from the
-    /// phantom entries after reopen.
-    pub fn with_tombstone_log_config(mut self, tombstone_log_config: TombstoneLogConfig) -> Self {
-        self.tombstone_log_config = Some(tombstone_log_config);
-        self
-    }
-
-    /// Set the ratio of the large object disk cache and the small object disk cache.
-    pub fn with_combined_config(mut self, combined_config: CombinedConfig) -> Self {
-        self.combined_config = combined_config;
-        self
-    }
-
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_config(mut self, runtime_config: RuntimeConfig) -> Self {
         self.runtime_config = runtime_config;
         self
     }
 
+    /// Setup the large object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
+    pub fn with_large_object_disk_cache_options(mut self, options: LargeEngineOptions<K, V, S>) -> Self {
+        if matches!(self.engine, Engine::Small { .. }) {
+            tracing::warn!("[store builder]: Setting up large object disk cache options, but only small object disk cache is enabled.");
+        }
+        self.large = options;
+        self
+    }
+
+    /// Setup the small object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
+    pub fn with_small_object_disk_cache_options(mut self, options: SmallEngineOptions<K, V, S>) -> Self {
+        if matches!(self.engine, Engine::Large { .. }) {
+            tracing::warn!("[store builder]: Setting up small object disk cache options, but only large object disk cache is enabled.");
+        }
+        self.small = options;
+        self
+    }
+
     /// Build the disk cache store with the given configuration.
     pub async fn build(self) -> Result<Store<K, V, S>> {
-        let clean_region_threshold = self.clean_region_threshold.unwrap_or(self.reclaimers);
-
         let memory = self.memory.clone();
         let admission_picker = self.admission_picker.clone();
+
         let metrics = Arc::new(Metrics::new(&self.name));
         let statistics = Arc::<Statistics>::default();
+
         let compression = self.compression;
 
         let build_runtime = |config: &TokioRuntimeConfig, suffix: &str| {
@@ -596,94 +524,109 @@ where
             let runtime = runtime.clone();
             // Use the user runtime to open engine.
             tokio::spawn(async move {
-                match self.device_config {
-                    DeviceConfig::None => {
-                        tracing::warn!(
-                            "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
-                        );
-                        Engine::open(EngineConfig::Noop).await
-                    }
-                    DeviceConfig::DeviceOptions(options) => {
-                        let device = match Monitored::open(MonitoredOptions {
-                            options,
-                            metrics: metrics.clone(),
-                        }, runtime.clone())
-                        .await {
-                            Ok(device) => device,
-                            Err(e) =>return Err(e),
-                        };
-                        match self.combined_config {
-                            CombinedConfig::Large => {
-                                let regions = 0..device.regions() as RegionId;
-                                Engine::open(EngineConfig::Large(GenericLargeStorageConfig {
+            match self.device_config {
+                DeviceConfig::None => {
+                    tracing::warn!(
+                        "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
+                    );
+                    EngineEnum::open(EngineConfig::Noop).await
+                }
+                DeviceConfig::DeviceOptions(options) => {
+                    let device = match Monitored::open(MonitoredOptions {
+                        options,
+                        metrics: metrics.clone(),
+                    }, runtime.clone())
+                    .await {
+                        Ok(device) => device,
+                        Err(e) =>return Err(e),
+                    };
+                    match self.engine {
+                        Engine::Large => {
+                            let regions = 0..device.regions() as RegionId;
+                            EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
+                                name: self.name,
+                                device,
+                                regions,
+                                compression: self.compression,
+                                flush: self.flush,
+                                indexer_shards: self.large.indexer_shards,
+                                recover_mode: self.recover_mode,
+                                recover_concurrency: self.large.recover_concurrency,
+                                flushers: self.large.flushers,
+                                reclaimers: self.large.reclaimers,
+                                clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
+                                eviction_pickers: self.large.eviction_pickers,
+                                reinsertion_picker: self.large.reinsertion_picker,
+                                tombstone_log_config: self.large.tombstone_log_config,
+                                buffer_pool_size: self.large.buffer_pool_size,
+                                statistics: statistics.clone(),
+                                runtime,
+                                marker: PhantomData,
+                            }))
+                            .await
+                        }
+                        Engine::Small => {
+                            let regions = 0..device.regions() as RegionId;
+                            EngineEnum::open(EngineConfig::Small(GenericSmallStorageConfig {
+                                set_size: self.small.set_size,
+                                set_cache_capacity: self.small.set_cache_capacity,
+                                device,
+                                regions,
+                                flush: self.flush,
+                                flushers: self.small.flushers,
+                                buffer_pool_size: self.small.buffer_pool_size,
+                                statistics: statistics.clone(),
+                                runtime,
+                                marker: PhantomData,
+                            }))
+                            .await
+                        }
+                        Engine::Mixed(ratio) => {
+                            let small_region_count = std::cmp::max((device.regions() as f64 * ratio) as usize,1);
+                            let small_regions = 0..small_region_count as RegionId;
+                            let large_regions = small_region_count as RegionId..device.regions() as RegionId;
+                            EngineEnum::open(EngineConfig::Mixed(EitherConfig {
+                                selector: SizeSelector::new(Engine::OBJECT_SIZE_THRESHOLD),
+                                left: GenericSmallStorageConfig {
+                                    set_size: self.small.set_size,
+                                    set_cache_capacity: self.small.set_cache_capacity,
+                                    device: device.clone(),
+                                    regions: small_regions,
+                                    flush: self.flush,
+                                    flushers: self.small.flushers,
+                                    buffer_pool_size: self.small.buffer_pool_size,
+                                    statistics: statistics.clone(),
+                                    runtime: runtime.clone(),
+                                    marker: PhantomData,
+                                },
+                                right: GenericLargeStorageConfig {
                                     name: self.name,
                                     device,
-                                    regions,
+                                    regions: large_regions,
                                     compression: self.compression,
                                     flush: self.flush,
-                                    indexer_shards: self.indexer_shards,
+                                    indexer_shards: self.large.indexer_shards,
                                     recover_mode: self.recover_mode,
-                                    recover_concurrency: self.recover_concurrency,
-                                    flushers: self.flushers,
-                                    reclaimers: self.reclaimers,
-                                    clean_region_threshold,
-                                    eviction_pickers: self.eviction_pickers,
-                                    reinsertion_picker: self.reinsertion_picker,
-                                    tombstone_log_config: self.tombstone_log_config,
-                                    buffer_threshold: self.buffer_pool_size,
+                                    recover_concurrency: self.large.recover_concurrency,
+                                    flushers: self.large.flushers,
+                                    reclaimers: self.large.reclaimers,
+                                    clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
+                                    eviction_pickers: self.large.eviction_pickers,
+                                    reinsertion_picker: self.large.reinsertion_picker,
+                                    tombstone_log_config: self.large.tombstone_log_config,
+                                    buffer_pool_size: self.large.buffer_pool_size,
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
-                                }))
-                                .await
-                            }
-                            CombinedConfig::Small => {
-                                Engine::open(EngineConfig::Small(GenericSmallStorageConfig {
-                                    placeholder: PhantomData,
-                                }))
-                                .await
-                            }
-                            CombinedConfig::Combined {
-                                large_object_cache_ratio,
-                                large_object_threshold,
-                                load_order,
-                            } => {
-                                let large_region_count = (device.regions() as f64 * large_object_cache_ratio) as usize;
-                                let large_regions =
-                                    (device.regions() - large_region_count) as RegionId..device.regions() as RegionId;
-                                Engine::open(EngineConfig::Combined(EitherConfig {
-                                    selector: SizeSelector::new(large_object_threshold),
-                                    left: GenericSmallStorageConfig {
-                                        placeholder: PhantomData,
-                                    },
-                                    right: GenericLargeStorageConfig {
-                                        name: self.name,
-                                        device,
-                                        regions: large_regions,
-                                        compression: self.compression,
-                                        flush: self.flush,
-                                        indexer_shards: self.indexer_shards,
-                                        recover_mode: self.recover_mode,
-                                        recover_concurrency: self.recover_concurrency,
-                                        flushers: self.flushers,
-                                        reclaimers: self.reclaimers,
-                                        clean_region_threshold,
-                                        eviction_pickers: self.eviction_pickers,
-                                        reinsertion_picker: self.reinsertion_picker,
-                                        tombstone_log_config: self.tombstone_log_config,
-                                        buffer_threshold: self.buffer_pool_size,
-                                        statistics: statistics.clone(),
-                                        runtime,
-                                        marker: PhantomData,
-                                    },
-                                    load_order,
-                                }))
-                                .await
-                            }
+                                },
+                                load_order: Engine::MIXED_LOAD_ORDER,
+                            }))
+                            .await
                         }
                     }
                 }
-            }).await.unwrap()?
+            }
+        }).await.unwrap()?
         };
 
         let inner = StoreInner {
@@ -699,5 +642,243 @@ where
         let store = Store { inner };
 
         Ok(store)
+    }
+}
+
+/// Large object disk cache engine default options.
+pub struct LargeEngineOptions<K, V, S = RandomState>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    indexer_shards: usize,
+    recover_concurrency: usize,
+    flushers: usize,
+    reclaimers: usize,
+    buffer_pool_size: usize,
+    clean_region_threshold: Option<usize>,
+    eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    tombstone_log_config: Option<TombstoneLogConfig>,
+
+    _marker: PhantomData<(K, V, S)>,
+}
+
+impl<K, V, S> Default for LargeEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V, S> LargeEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Create large object disk cache engine default options.
+    pub fn new() -> Self {
+        Self {
+            indexer_shards: 64,
+            recover_concurrency: 8,
+            flushers: 1,
+            reclaimers: 1,
+            buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
+            clean_region_threshold: None,
+            eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
+            reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
+            tombstone_log_config: None,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Set the shard num of the indexer. Each shard has its own lock.
+    ///
+    /// Default: `64`.
+    pub fn with_indexer_shards(mut self, indexer_shards: usize) -> Self {
+        self.indexer_shards = indexer_shards;
+        self
+    }
+
+    /// Set the recover concurrency for the disk cache store.
+    ///
+    /// Default: `8`.
+    pub fn with_recover_concurrency(mut self, recover_concurrency: usize) -> Self {
+        self.recover_concurrency = recover_concurrency;
+        self
+    }
+
+    /// Set the flusher count for the disk cache store.
+    ///
+    /// The flusher count limits how many regions can be concurrently written.
+    ///
+    /// Default: `1`.
+    pub fn with_flushers(mut self, flushers: usize) -> Self {
+        self.flushers = flushers;
+        self
+    }
+
+    /// Set the reclaimer count for the disk cache store.
+    ///
+    /// The reclaimer count limits how many regions can be concurrently reclaimed.
+    ///
+    /// Default: `1`.
+    pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
+        self.reclaimers = reclaimers;
+        self
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 16 MiB.
+    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
+        self
+    }
+
+    /// Set the clean region threshold for the disk cache store.
+    ///
+    /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.
+    ///
+    /// Default: the same value as the `reclaimers`.
+    pub fn with_clean_region_threshold(mut self, clean_region_threshold: usize) -> Self {
+        self.clean_region_threshold = Some(clean_region_threshold);
+        self
+    }
+
+    /// Set the eviction pickers for th disk cache store.
+    ///
+    /// The eviction picker is used to pick the region to reclaim.
+    ///
+    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
+    /// will be applied.
+    ///
+    /// If no eviction picker picks a region, a region will be picked randomly.
+    ///
+    /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
+    pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
+        self.eviction_pickers = eviction_pickers;
+        self
+    }
+
+    /// Set the reinsertion pickers for th disk cache store.
+    ///
+    /// The reinsertion picker is used to pick the entries that can be reinsertion into the disk cache store while
+    /// reclaiming.
+    ///
+    /// Note: Only extremely important entries should be picked. If too many entries are picked, both insertion and
+    /// reinsertion will be stuck.
+    ///
+    /// Default: [`RejectAllPicker`].
+    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
+        self.reinsertion_picker = reinsertion_picker;
+        self
+    }
+
+    /// Enable the tombstone log with the given config.
+    ///
+    /// For updatable cache, either the tombstone log or [`RecoverMode::None`] must be enabled to prevent from the
+    /// phantom entries after reopen.
+    pub fn with_tombstone_log_config(mut self, tombstone_log_config: TombstoneLogConfig) -> Self {
+        self.tombstone_log_config = Some(tombstone_log_config);
+        self
+    }
+}
+
+/// Small object disk cache engine default options.
+pub struct SmallEngineOptions<K, V, S = RandomState>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    set_size: usize,
+    set_cache_capacity: usize,
+    buffer_pool_size: usize,
+    flushers: usize,
+
+    _marker: PhantomData<(K, V, S)>,
+}
+
+impl<K, V, S> Default for SmallEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Create small object disk cache engine default options.
+impl<K, V, S> SmallEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Create small object disk cache engine default options.
+    pub fn new() -> Self {
+        Self {
+            set_size: 16 * 1024,    // 16 KiB
+            set_cache_capacity: 64, // 64 sets
+            flushers: 1,
+            buffer_pool_size: 4 * 1024 * 1024, // 4 MiB
+            _marker: PhantomData,
+        }
+    }
+
+    /// Set the set size of the set-associated cache.
+    ///
+    /// The set size will be 4K aligned.
+    ///
+    /// Default: 16 KiB
+    pub fn with_set_size(mut self, set_size: usize) -> Self {
+        bits::assert_aligned(ALIGN, set_size);
+        self.set_size = set_size;
+        self
+    }
+
+    /// Set the capacity of the set cache.
+    ///
+    /// Count by set amount.
+    ///
+    /// Default: 64
+    pub fn with_set_cache_capacity(mut self, set_cache_capacity: usize) -> Self {
+        self.set_cache_capacity = set_cache_capacity;
+        self
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 4 MiB.
+    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
+        self
+    }
+
+    /// Set the flusher count for the disk cache store.
+    ///
+    /// The flusher count limits how many regions can be concurrently written.
+    ///
+    /// Default: `1`.
+    pub fn with_flushers(mut self, flushers: usize) -> Self {
+        self.flushers = flushers;
+        self
     }
 }

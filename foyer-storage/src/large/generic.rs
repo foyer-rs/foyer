@@ -74,7 +74,7 @@ where
     pub recover_concurrency: usize,
     pub flushers: usize,
     pub reclaimers: usize,
-    pub buffer_threshold: usize,
+    pub buffer_pool_size: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -101,7 +101,7 @@ where
             .field("recover_concurrency", &self.recover_concurrency)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
-            .field("buffer_threshold", &self.buffer_threshold)
+            .field("buffer_pool_size", &self.buffer_pool_size)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
@@ -203,7 +203,7 @@ where
         let indexer = Indexer::new(config.indexer_shards);
         let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         for picker in eviction_pickers.iter_mut() {
-            picker.init(device.regions(), device.region_size());
+            picker.init(0..device.regions() as RegionId, device.region_size());
         }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(
@@ -237,7 +237,6 @@ where
                 metrics.clone(),
                 &config.runtime,
             )
-            .await
         }))
         .await?;
 
@@ -253,7 +252,6 @@ where
                 metrics.clone(),
                 &config.runtime,
             )
-            .await
         }))
         .await;
 
@@ -558,7 +556,7 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
             tombstone_log_config: None,
-            buffer_threshold: 16 * 1024 * 1024,
+            buffer_pool_size: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
@@ -587,7 +585,7 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
-            buffer_threshold: 16 * 1024 * 1024,
+            buffer_pool_size: 16 * 1024 * 1024,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,

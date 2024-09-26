@@ -16,6 +16,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     marker::PhantomData,
+    ops::Range,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -257,7 +258,7 @@ impl InvalidRatioPicker {
 }
 
 impl EvictionPicker for InvalidRatioPicker {
-    fn init(&mut self, _: usize, region_size: usize) {
+    fn init(&mut self, _: Range<RegionId>, region_size: usize) {
         self.region_size = region_size;
     }
 
@@ -321,7 +322,7 @@ mod tests {
     #[test]
     fn test_invalid_ratio_picker() {
         let mut picker = InvalidRatioPicker::new(0.5);
-        picker.init(10, 10);
+        picker.init(0..10, 10);
 
         let mut m = HashMap::new();
 

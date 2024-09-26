@@ -22,8 +22,8 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
-    AdmissionPicker, Compression, DeviceConfig, EvictionPicker, RecoverMode, ReinsertionPicker, RuntimeConfig,
-    StoreBuilder, TombstoneLogConfig,
+    AdmissionPicker, Compression, DeviceConfig, Engine, LargeEngineOptions, RecoverMode, RuntimeConfig,
+    SmallEngineOptions, StoreBuilder,
 };
 
 use crate::HybridCache;
@@ -173,11 +173,11 @@ where
         }
     }
 
-    /// Continue to modify the in-memory cache configurations.
-    pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
+    /// Continue to modify the disk cache configurations.
+    pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
-            builder: StoreBuilder::new(memory.clone()).with_name(&self.name),
+            builder: StoreBuilder::new(memory.clone(), engine).with_name(&self.name),
             name: self.name,
             tracing_config: self.tracing_config,
             memory,
@@ -228,19 +228,6 @@ where
         }
     }
 
-    /// Set the shard num of the indexer. Each shard has its own lock.
-    ///
-    /// Default: `64`.
-    pub fn with_indexer_shards(self, indexer_shards: usize) -> Self {
-        let builder = self.builder.with_indexer_shards(indexer_shards);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
     /// Set the recover mode for the disk cache store.
     ///
     /// See more in [`RecoverMode`].
@@ -248,123 +235,6 @@ where
     /// Default: [`RecoverMode::Quiet`].
     pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
         let builder = self.builder.with_recover_mode(recover_mode);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the recover concurrency for the disk cache store.
-    ///
-    /// Default: `8`.
-    pub fn with_recover_concurrency(self, recover_concurrency: usize) -> Self {
-        let builder = self.builder.with_recover_concurrency(recover_concurrency);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the flusher count for the disk cache store.
-    ///
-    /// The flusher count limits how many regions can be concurrently written.
-    ///
-    /// Default: `1`.
-    pub fn with_flushers(self, flushers: usize) -> Self {
-        let builder = self.builder.with_flushers(flushers);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the reclaimer count for the disk cache store.
-    ///
-    /// The reclaimer count limits how many regions can be concurrently reclaimed.
-    ///
-    /// Default: `1`.
-    pub fn with_reclaimers(self, reclaimers: usize) -> Self {
-        let builder = self.builder.with_reclaimers(reclaimers);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    // FIXME(MrCroxx): remove it after 0.12
-    /// Set the total flush buffer threshold.
-    ///
-    /// Each flusher shares a volume at `threshold / flushers`.
-    ///
-    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
-    ///
-    /// Default: 16 MiB.
-    #[deprecated(
-        since = "0.11.4",
-        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
-    )]
-    pub fn with_buffer_threshold(self, threshold: usize) -> Self {
-        let builder = self.builder.with_buffer_pool_size(threshold);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the total flush buffer pool size.
-    ///
-    /// Each flusher shares a volume at `threshold / flushers`.
-    ///
-    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
-    ///
-    /// Default: 16 MiB.
-    pub fn with_buffer_pool_size(self, buffer_pool_size: usize) -> Self {
-        let builder = self.builder.with_buffer_pool_size(buffer_pool_size);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the clean region threshold for the disk cache store.
-    ///
-    /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.
-    ///
-    /// Default: the same value as the `reclaimers`.
-    pub fn with_clean_region_threshold(self, clean_region_threshold: usize) -> Self {
-        let builder = self.builder.with_clean_region_threshold(clean_region_threshold);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the eviction pickers for th disk cache store.
-    ///
-    /// The eviction picker is used to pick the region to reclaim.
-    ///
-    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
-    /// will be applied.
-    ///
-    /// If no eviction picker picks a region, a region will be picked randomly.
-    ///
-    /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
-    pub fn with_eviction_pickers(self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
-        let builder = self.builder.with_eviction_pickers(eviction_pickers);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,
@@ -388,25 +258,6 @@ where
         }
     }
 
-    /// Set the reinsertion pickers for th disk cache store.
-    ///
-    /// The reinsertion picker is used to pick the entries that can be reinsertion into the disk cache store while
-    /// reclaiming.
-    ///
-    /// Note: Only extremely important entries should be picked. If too many entries are picked, both insertion and
-    /// reinsertion will be stuck.
-    ///
-    /// Default: [`RejectAllPicker`].
-    pub fn with_reinsertion_picker(self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
-        let builder = self.builder.with_reinsertion_picker(reinsertion_picker);
-        Self {
-            name: self.name,
-            tracing_config: self.tracing_config,
-            memory: self.memory,
-            builder,
-        }
-    }
-
     /// Set the compression algorithm of the disk cache store.
     ///
     /// Default: [`Compression::None`].
@@ -420,12 +271,9 @@ where
         }
     }
 
-    /// Enable the tombstone log with the given config.
-    ///
-    /// For updatable cache, either the tombstone log or [`RecoverMode::None`] must be enabled to prevent from the
-    /// phantom entries after reopen.
-    pub fn with_tombstone_log_config(self, tombstone_log_config: TombstoneLogConfig) -> Self {
-        let builder = self.builder.with_tombstone_log_config(tombstone_log_config);
+    /// Configure the dedicated runtime for the disk cache store.
+    pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
+        let builder = self.builder.with_runtime_config(runtime_config);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,
@@ -434,9 +282,24 @@ where
         }
     }
 
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
-        let builder = self.builder.with_runtime_config(runtime_config);
+    /// Setup the large object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
+    pub fn with_large_object_disk_cache_options(self, options: LargeEngineOptions<K, V, S>) -> Self {
+        let builder = self.builder.with_large_object_disk_cache_options(options);
+        Self {
+            name: self.name,
+            tracing_config: self.tracing_config,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Setup the small object disk cache engine with the given options.
+    ///
+    /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
+    pub fn with_small_object_disk_cache_options(self, options: SmallEngineOptions<K, V, S>) -> Self {
+        let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,

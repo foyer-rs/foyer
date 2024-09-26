@@ -18,7 +18,7 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
-use twox_hash::XxHash64;
+use twox_hash::{XxHash32, XxHash64};
 
 use crate::{
     compress::Compression,
@@ -29,10 +29,16 @@ use crate::{
 pub struct Checksummer;
 
 impl Checksummer {
-    pub fn checksum(buf: &[u8]) -> u64 {
+    pub fn checksum64(buf: &[u8]) -> u64 {
         let mut hasher = XxHash64::with_seed(0);
         hasher.write(buf);
         hasher.finish()
+    }
+
+    pub fn checksum32(buf: &[u8]) -> u32 {
+        let mut hasher = XxHash32::with_seed(0);
+        hasher.write(buf);
+        hasher.finish() as u32
     }
 }
 
@@ -183,7 +189,7 @@ impl EntryDeserializer {
 
         // calculate checksum if needed
         if let Some(expected) = checksum {
-            let get = Checksummer::checksum(&buffer[..value_len + ken_len]);
+            let get = Checksummer::checksum64(&buffer[..value_len + ken_len]);
             if expected != get {
                 return Err(Error::ChecksumMismatch { expected, get });
             }

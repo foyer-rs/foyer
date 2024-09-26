@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptionsBuilder, Engine, HybridCache, HybridCacheBuilder};
 
 #[cfg(feature = "jaeger")]
 fn init_jaeger_exporter() {
@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
+        .storage(Engine::Large)
         .with_device_config(
             DirectFsDeviceOptionsBuilder::new(dir.path())
                 .with_capacity(256 * 1024 * 1024)

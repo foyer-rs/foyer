@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
@@ -38,7 +38,7 @@ pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
     /// Init the eviction picker with information.
     #[expect(unused_variables)]
-    fn init(&mut self, regions: usize, region_size: usize) {}
+    fn init(&mut self, regions: Range<RegionId>, region_size: usize) {}
 
     /// Pick a region to evict.
     ///
