@@ -504,14 +504,30 @@ mod tests {
         assert_none(&storage, e3.hash());
         assert_some(&storage, &e4);
 
+        // test recovery
         storage.update();
+        let bytes = storage.freeze();
+        let mut buf = IoBytesMut::with_capacity(PAGE);
+        unsafe { buf.set_len(PAGE) };
+        buf[0..bytes.len()].copy_from_slice(&bytes);
+        let mut storage = SetStorage::load(buf);
 
-        let buf = storage.freeze();
+        assert_eq!(storage.len(), b4.len());
+        assert_none(&storage, e1.hash());
+        assert_none(&storage, e2.hash());
+        assert_none(&storage, e3.hash());
+        assert_some(&storage, &e4);
 
-        let mut buffer = IoBytesMut::with_capacity(PAGE);
-        unsafe { buffer.set_len(PAGE) };
-        buffer[0..buf.len()].copy_from_slice(&buf);
-        let storage = SetStorage::load(buffer);
+        // test oversize entry
+        let e5 = memory.insert(5, vec![b'5'; 20 * 1024]);
+        let b5 = buffer(&e5);
+        storage.apply(
+            &HashSet::new(),
+            vec![Item {
+                buffer: b5.clone(),
+                entry: e5.clone(),
+            }],
+        );
         assert_eq!(storage.len(), b4.len());
         assert_none(&storage, e1.hash());
         assert_none(&storage, e2.hash());

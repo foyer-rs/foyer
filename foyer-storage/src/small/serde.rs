@@ -13,15 +13,13 @@
 //  limitations under the License.
 
 use bytes::{Buf, BufMut};
-use foyer_common::strict_assert;
 
 /// max key/value len: `64 KiB - 1`
 ///
 /// # Format
 ///
 /// ```plain
-/// | hash 64b |
-/// | key len low 8b | value len low 8b | key len high 4b | value len high 4b |
+/// | hash 64b | key len 16b | value len 16b |
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryHeader {
@@ -31,11 +29,9 @@ pub struct EntryHeader {
 }
 
 impl EntryHeader {
-    pub const ENTRY_HEADER_SIZE: usize = (12 + 12 + 64) / 8;
+    pub const ENTRY_HEADER_SIZE: usize = (16 + 16 + 64) / 8;
 
     pub fn new(hash: u64, key_len: usize, value_len: usize) -> Self {
-        strict_assert!(key_len < (1 << 12));
-        strict_assert!(value_len < (1 << 12));
         Self {
             hash,
             key_len: key_len as _,
@@ -65,19 +61,14 @@ impl EntryHeader {
 
     pub fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(self.hash);
-        buf.put_u8(self.key_len as u8);
-        buf.put_u8(self.value_len as u8);
-        let v = ((self.key_len >> 4) as u8 & 0b_1111_0000) | (self.value_len >> 8) as u8;
-        buf.put_u8(v);
+        buf.put_u16(self.key_len);
+        buf.put_u16(self.value_len);
     }
 
     pub fn read(mut buf: impl Buf) -> Self {
         let hash = buf.get_u64();
-        let mut key_len = buf.get_u8() as u16;
-        let mut value_len = buf.get_u8() as u16;
-        let v = buf.get_u8() as u16;
-        key_len |= (v & 0b_1111_0000) << 8;
-        value_len |= (v & 0b_0000_1111) << 8;
+        let key_len = buf.get_u16();
+        let value_len = buf.get_u16();
         Self {
             hash,
             key_len,
