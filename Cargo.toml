@@ -12,6 +12,17 @@ members = [
     "foyer-util",
 ]
 
+[workspace.package]
+version = "0.12.0-dev"
+edition = "2021"
+rust-version = "1.81.0"
+repository = "https://github.com/foyer-rs/foyer"
+homepage = "https://foyer.rs"
+keywords = ["cache", "hybrid"]
+authors = ["MrCroxx <mrcroxx@outlook.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+
 [workspace.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
     "rt",
@@ -34,6 +45,12 @@ fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.7"
 clap = { version = "4", features = ["derive"] }
 bytesize = { package = "foyer-bytesize", version = "2" }
+# foyer components
+foyer-common = { version = "0.12.0-dev", path = "foyer-common" }
+foyer-intrusive = { version = "0.12.0-dev", path = "foyer-intrusive" }
+foyer-memory = { version = "0.12.0-dev", path = "foyer-memory" }
+foyer-storage = { version = "0.12.0-dev", path = "foyer-storage" }
+foyer = { version = "0.12.0-dev", path = "foyer" }
 
 [profile.release]
 debug = true

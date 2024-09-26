@@ -1,7 +1,7 @@
 header:
   license:
     spdx-id: Apache-2.0
-    copyright-owner: Foyer Project Authors
+    copyright-owner: foyer Project Authors
 
   paths:
     - "**/*.rs"
