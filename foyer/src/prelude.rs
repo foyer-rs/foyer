@@ -27,8 +27,8 @@ pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevExt, DevOptions, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder, DirectFsDevice, DirectFsDeviceOptions,
     DirectFsDeviceOptionsBuilder, Engine, EvictionPicker, FifoPicker, InvalidRatioPicker, LargeEngineOptions,
-    RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeConfig, RuntimeHandles,
-    SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeConfig, SmallEngineOptions,
+    Storage, Store, StoreBuilder, TokioRuntimeConfig, TombstoneLogConfigBuilder,
 };
 
 pub use crate::hybrid::{

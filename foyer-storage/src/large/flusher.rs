@@ -128,7 +128,7 @@ where
     S: HashBuilder + Debug,
 {
     #[expect(clippy::too_many_arguments)]
-    pub async fn open(
+    pub fn open(
         config: &GenericLargeStorageConfig<K, V, S>,
         indexer: Indexer,
         region_manager: RegionManager,
@@ -140,7 +140,7 @@ where
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
 
-        let buffer_size = config.buffer_threshold / config.flushers;
+        let buffer_size = config.buffer_pool_size / config.flushers;
         let batch = BatchMut::new(
             buffer_size,
             region_manager.clone(),

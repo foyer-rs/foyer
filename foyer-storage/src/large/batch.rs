@@ -86,13 +86,13 @@ where
     S: HashBuilder + Debug,
 {
     pub fn new(
-        capacity: usize,
+        buffer_size: usize,
         region_manager: RegionManager,
         device: MonitoredDevice,
         indexer: Indexer,
         metrics: Arc<Metrics>,
     ) -> Self {
-        let capacity = bits::align_up(device.align(), capacity);
+        let capacity = bits::align_up(device.align(), buffer_size);
         let mut batch = Self {
             buffer: IoBuffer::new(capacity),
             len: 0,
@@ -130,7 +130,7 @@ where
         ) {
             Ok(info) => info,
             Err(e) => {
-                tracing::warn!("[batch]: serialize entry error: {e}");
+                tracing::warn!("[lodc batch]: serialize entry error: {e}");
                 return false;
             }
         };

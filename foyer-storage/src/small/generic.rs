@@ -12,24 +12,30 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, ops::Range, sync::Arc};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    ops::Range,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheEntry;
-use futures::{
-    future::{join_all, try_join_all},
-    Future,
-};
+use futures::{future::join_all, Future};
 use itertools::Itertools;
 
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
-    serde::KvInfo,
     small::{flusher::Flusher, set::SetId, set_manager::SetManager},
     storage::Storage,
-    DeviceStats, IoBytes, Runtime,
+    DeviceStats, Runtime,
 };
+
+use super::flusher::Submission;
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where
@@ -37,18 +43,13 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set size in bytes.
     pub set_size: usize,
-    /// Set cache capacity by set count.
     pub set_cache_capacity: usize,
-    /// Device for small object disk cache.
     pub device: MonitoredDevice,
-    /// Regions of the device to use.
     pub regions: Range<RegionId>,
-    /// Whether to flush after writes.
     pub flush: bool,
-    /// Flusher count.
     pub flushers: usize,
+    pub buffer_pool_size: usize,
 
     pub runtime: Runtime,
 
@@ -76,6 +77,8 @@ where
 
     device: MonitoredDevice,
     set_manager: SetManager,
+
+    active: AtomicBool,
 
     runtime: Runtime,
 }
@@ -120,22 +123,25 @@ where
     S: HashBuilder + Debug,
 {
     async fn open(config: GenericSmallStorageConfig<K, V, S>) -> Result<Self> {
+        let metrics = config.device.metrics().clone();
+
         let set_manager = SetManager::new(
             config.set_size,
             config.set_cache_capacity,
             config.device.clone(),
-            config.regions,
+            config.regions.clone(),
             config.flush,
         );
 
         let flushers = (0..config.flushers)
-            .map(|_| Flusher::new(set_manager.clone(), &config.runtime))
+            .map(|_| Flusher::open(&config, set_manager.clone(), metrics.clone()))
             .collect_vec();
 
         let inner = GenericSmallStorageInner {
             flushers,
             device: config.device,
             set_manager,
+            active: AtomicBool::new(true),
             runtime: config.runtime,
         };
         let inner = Arc::new(inner);
@@ -143,15 +149,28 @@ where
         Ok(Self { inner })
     }
 
+    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+        let wait_flushers = join_all(self.inner.flushers.iter().map(|flusher| flusher.wait()));
+        async move {
+            wait_flushers.await;
+        }
+    }
+
     async fn close(&self) -> Result<()> {
-        try_join_all(self.inner.flushers.iter().map(|flusher| flusher.close())).await?;
+        self.inner.active.store(false, Ordering::Relaxed);
+        self.wait().await;
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            tracing::warn!("cannot enqueue new entry after closed");
+            return;
+        }
+
         // Entries with the same hash must be grouped in the batch.
         let id = entry.hash() as usize % self.inner.flushers.len();
-        self.inner.flushers[id].entry(entry, buffer, info);
+        self.inner.flushers[id].submit(Submission::Insertion { entry, estimated_size });
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
@@ -169,9 +188,14 @@ where
     }
 
     fn delete(&self, hash: u64) {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            tracing::warn!("cannot enqueue new entry after closed");
+            return;
+        }
+
         // Entries with the same hash MUST be grouped in the same batch.
         let id = hash as usize % self.inner.flushers.len();
-        self.inner.flushers[id].deletion(hash);
+        self.inner.flushers[id].submit(Submission::Deletion { hash });
     }
 
     fn may_contains(&self, hash: u64) -> bool {
@@ -186,13 +210,6 @@ where
 
     fn stats(&self) -> Arc<DeviceStats> {
         self.inner.device.stat().clone()
-    }
-
-    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let wait_flushers = join_all(self.inner.flushers.iter().map(|flusher| flusher.wait()));
-        async move {
-            wait_flushers.await;
-        }
     }
 }
 
@@ -216,8 +233,8 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _estimated_size: usize) {
-        self.enqueue(entry, buffer, info);
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+        self.enqueue(entry, estimated_size);
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {

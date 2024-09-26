@@ -196,15 +196,6 @@ where
         self.inner.engine.stats()
     }
 
-    /// Get the runtime handles.
-    #[deprecated(
-        since = "0.11.5",
-        note = "The function will be renamed to \"runtime()\", use it instead."
-    )]
-    pub fn runtimes(&self) -> &Runtime {
-        &self.inner.runtime
-    }
-
     /// Get the runtime.
     pub fn runtime(&self) -> &Runtime {
         &self.inner.runtime
@@ -567,7 +558,7 @@ where
                                 eviction_pickers: self.large.eviction_pickers,
                                 reinsertion_picker: self.large.reinsertion_picker,
                                 tombstone_log_config: self.large.tombstone_log_config,
-                                buffer_threshold: self.large.buffer_pool_size,
+                                buffer_pool_size: self.large.buffer_pool_size,
                                 statistics: statistics.clone(),
                                 runtime,
                                 marker: PhantomData,
@@ -583,6 +574,7 @@ where
                                 regions,
                                 flush: self.flush,
                                 flushers: self.small.flushers,
+                                buffer_pool_size: self.small.buffer_pool_size,
                                 runtime,
                                 marker: PhantomData,
                             }))
@@ -601,6 +593,7 @@ where
                                     regions: small_regions,
                                     flush: self.flush,
                                     flushers: self.small.flushers,
+                                    buffer_pool_size: self.small.buffer_pool_size,
                                     runtime: runtime.clone(),
                                     marker: PhantomData,
                                 },
@@ -619,7 +612,7 @@ where
                                     eviction_pickers: self.large.eviction_pickers,
                                     reinsertion_picker: self.large.reinsertion_picker,
                                     tombstone_log_config: self.large.tombstone_log_config,
-                                    buffer_threshold: self.large.buffer_pool_size,
+                                    buffer_pool_size: self.large.buffer_pool_size,
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
@@ -739,23 +732,6 @@ where
         self
     }
 
-    // FIXME(MrCroxx): remove it after 0.12
-    /// Set the total flush buffer threshold.
-    ///
-    /// Each flusher shares a volume at `threshold / flushers`.
-    ///
-    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
-    ///
-    /// Default: 16 MiB.
-    #[deprecated(
-        since = "0.11.4",
-        note = "The function will be renamed to \"with_buffer_pool_size()\", use it instead."
-    )]
-    pub fn with_buffer_threshold(mut self, threshold: usize) -> Self {
-        self.buffer_pool_size = threshold;
-        self
-    }
-
     /// Set the total flush buffer pool size.
     ///
     /// Each flusher shares a volume at `threshold / flushers`.
@@ -826,6 +802,7 @@ where
 {
     set_size: usize,
     set_cache_capacity: usize,
+    buffer_pool_size: usize,
     flushers: usize,
 
     _marker: PhantomData<(K, V, S)>,
@@ -855,6 +832,7 @@ where
             set_size: 16 * 1024,    // 16 KiB
             set_cache_capacity: 64, // 64 sets
             flushers: 1,
+            buffer_pool_size: 4 * 1024 * 1024, // 4 MiB
             _marker: PhantomData,
         }
     }
@@ -877,6 +855,18 @@ where
     /// Default: 64
     pub fn with_set_cache_capacity(mut self, set_cache_capacity: usize) -> Self {
         self.set_cache_capacity = set_cache_capacity;
+        self
+    }
+
+    /// Set the total flush buffer pool size.
+    ///
+    /// Each flusher shares a volume at `threshold / flushers`.
+    ///
+    /// If the buffer of the flush queue exceeds the threshold, the further entries will be ignored.
+    ///
+    /// Default: 4 MiB.
+    pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
         self
     }
 

@@ -45,7 +45,7 @@ pub struct Reclaimer {
 
 impl Reclaimer {
     #[expect(clippy::too_many_arguments)]
-    pub async fn open<K, V, S>(
+    pub fn open<K, V, S>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,

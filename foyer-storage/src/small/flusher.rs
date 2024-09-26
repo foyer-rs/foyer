@@ -12,30 +12,62 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    future::Future,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{fmt::Debug, future::Future, sync::Arc};
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use foyer_memory::CacheEntry;
 use futures::future::try_join_all;
-use parking_lot::Mutex;
-use tokio::{sync::Notify, task::JoinHandle};
+
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::{
     batch::{Batch, BatchMut, SetBatch},
+    generic::GenericSmallStorageConfig,
     set_manager::SetManager,
 };
-use crate::{
-    error::{Error, Result},
-    serde::KvInfo,
-    IoBytes, Runtime,
-};
+use crate::error::{Error, Result};
+
+pub enum Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    Insertion {
+        entry: CacheEntry<K, V, S>,
+        estimated_size: usize,
+    },
+    Deletion {
+        hash: u64,
+    },
+    Wait {
+        tx: oneshot::Sender<()>,
+    },
+}
+
+impl<K, V, S> Debug for Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Insertion {
+                entry: _,
+                estimated_size,
+            } => f
+                .debug_struct("Insertion")
+                .field("estimated_size", estimated_size)
+                .finish(),
+            Self::Deletion { hash } => f.debug_struct("Deletion").field("hash", hash).finish(),
+            Self::Wait { .. } => f.debug_struct("Wait").finish(),
+        }
+    }
+}
 
 pub struct Flusher<K, V, S>
 where
@@ -43,12 +75,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    batch: Arc<Mutex<BatchMut<K, V, S>>>,
-
-    notify: Arc<Notify>,
-
-    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
-    stop: Arc<AtomicBool>,
+    tx: flume::Sender<Submission<K, V, S>>,
 }
 
 impl<K, V, S> Flusher<K, V, S>
@@ -57,63 +84,43 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(set_manager: SetManager, runtime: &Runtime) -> Self {
-        let batch = Arc::new(Mutex::new(BatchMut::new(
-            set_manager.sets() as _,
-            set_manager.set_data_size(),
-        )));
-        let notify = Arc::<Notify>::default();
+    pub fn open(config: &GenericSmallStorageConfig<K, V, S>, set_manager: SetManager, metrics: Arc<Metrics>) -> Self {
+        let (tx, rx) = flume::unbounded();
 
-        let stop = Arc::<AtomicBool>::default();
+        let buffer_size = config.buffer_pool_size / config.flushers;
+
+        let batch = BatchMut::new(set_manager.sets() as _, buffer_size, metrics.clone());
 
         let runner = Runner {
-            batch: batch.clone(),
-            notify: notify.clone(),
+            rx,
+            batch,
+            flight: Arc::new(Semaphore::new(1)),
             set_manager,
-            stop: stop.clone(),
+            metrics,
         };
 
-        let handle = runtime.write().spawn(async move {
+        config.runtime.write().spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!("[sodc flusher]: flusher exit with error: {e}");
             }
         });
-        let handle = Arc::new(Mutex::new(Some(handle)));
 
-        Self {
-            batch,
-            notify,
-            handle,
-            stop,
+        Self { tx }
+    }
+
+    pub fn submit(&self, submission: Submission<K, V, S>) {
+        tracing::trace!("[sodc flusher]: submit task: {submission:?}");
+        if let Err(e) = self.tx.send(submission) {
+            tracing::error!("[sodc flusher]: error raised when submitting task, error: {e}");
         }
     }
 
     pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let waiter = self.batch.lock().wait();
-        self.notify.notify_one();
+        let (tx, rx) = oneshot::channel();
+        self.submit(Submission::Wait { tx });
         async move {
-            let _ = waiter.await;
+            let _ = rx.await;
         }
-    }
-
-    pub fn entry(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
-        self.batch.lock().append(entry, buffer, info);
-        self.notify.notify_one();
-    }
-
-    pub fn deletion(&self, hash: u64) {
-        self.batch.lock().delete(hash);
-        self.notify.notify_one();
-    }
-
-    pub async fn close(&self) -> Result<()> {
-        self.stop.store(true, Ordering::SeqCst);
-        self.notify.notify_one();
-        let handle = self.handle.lock().take();
-        if let Some(handle) = handle {
-            handle.await.unwrap();
-        }
-        Ok(())
     }
 }
 
@@ -123,13 +130,13 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    batch: Arc<Mutex<BatchMut<K, V, S>>>,
-
-    notify: Arc<Notify>,
+    rx: flume::Receiver<Submission<K, V, S>>,
+    batch: BatchMut<K, V, S>,
+    flight: Arc<Semaphore>,
 
     set_manager: SetManager,
 
-    stop: Arc<AtomicBool>,
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S> Runner<K, V, S>
@@ -138,43 +145,54 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         loop {
-            let batch = self.batch.lock().rotate();
-            if batch.sets.is_empty() {
-                if self.stop.load(Ordering::SeqCst) {
-                    return Ok(());
+            let flight = self.flight.clone();
+            tokio::select! {
+                biased;
+                Ok(permit) = flight.acquire_owned(), if !self.batch.is_empty() => {
+                    // TODO(MrCroxx): `rotate()` should always return a `Some(..)` here.
+                    if let Some(batch) = self.batch.rotate() {
+                        self.commit(batch, permit).await;
+                    }
                 }
-                self.notify.notified().await;
-                continue;
+                Ok(submission) = self.rx.recv_async() => {
+                    self.submit(submission);
+                }
+                // Graceful shutdown.
+                else => break,
             }
-            self.commit(batch).await
+        }
+        Ok(())
+    }
+
+    fn submit(&mut self, submission: Submission<K, V, S>) {
+        let report = |enqueued: bool| {
+            if !enqueued {
+                self.metrics.storage_queue_drop.increment(1);
+            }
+        };
+
+        match submission {
+            Submission::Insertion { entry, estimated_size } => report(self.batch.insert(entry, estimated_size)),
+            Submission::Deletion { hash } => self.batch.delete(hash),
+            Submission::Wait { tx } => self.batch.wait(tx),
         }
     }
 
-    pub async fn commit(&self, batch: Batch<K, V, S>) {
-        let futures = batch.sets.into_iter().map(
-            |(
-                sid,
-                SetBatch {
-                    deletions,
-                    insertions,
-                    bytes,
-                    entries,
-                },
-            )| {
-                let set_manager = self.set_manager.clone();
-                async move {
-                    let mut set = set_manager.write(sid).await?;
-                    set.apply(&deletions, insertions.into_iter(), &bytes[..]);
-                    set_manager.apply(set).await?;
+    pub async fn commit(&self, batch: Batch<K, V, S>, permit: OwnedSemaphorePermit) {
+        tracing::trace!("[sodc flusher] commit batch: {batch:?}");
 
-                    drop(entries);
+        let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {
+            let set_manager = self.set_manager.clone();
+            async move {
+                let mut set = set_manager.write(sid).await?;
+                set.apply(&deletions, items);
+                set_manager.apply(set).await?;
 
-                    Ok::<_, Error>(())
-                }
-            },
-        );
+                Ok::<_, Error>(())
+            }
+        });
 
         if let Err(e) = try_join_all(futures).await {
             tracing::error!("[sodc flusher]: error raised when committing batch, error: {e}");
@@ -183,5 +201,7 @@ where
         for waiter in batch.waiters {
             let _ = waiter.send(());
         }
+
+        drop(permit);
     }
 }

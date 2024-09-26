@@ -13,195 +13,66 @@
 //  limitations under the License.
 
 use std::{
-    collections::{hash_map::HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
+    ops::Range,
+    sync::Arc,
+    time::Instant,
 };
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    bits,
+    code::{HashBuilder, StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use foyer_memory::CacheEntry;
+use itertools::Itertools;
 use tokio::sync::oneshot;
 
-use super::set::SetId;
-use crate::{serde::KvInfo, small::serde::EntryHeader, IoBytes, IoBytesMut};
+use crate::{
+    device::ALIGN,
+    io_buffer_pool::IoBufferPool,
+    serde::EntrySerializer,
+    small::{serde::EntryHeader, set::SetId},
+    Compression, IoBuffer, IoBytes,
+};
 
-struct Insertion<K, V, S>
+type Sequence = usize;
+
+#[derive(Debug)]
+struct ItemMut<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
+    range: Range<usize>,
     entry: CacheEntry<K, V, S>,
-    buffer: IoBytes,
-    info: KvInfo,
+    sequence: Sequence,
 }
 
-struct Deletion {
-    hash: u64,
-}
-
-struct Entry<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    insertion: Insertion<K, V, S>,
-    prev_hash: Option<u64>,
-    next_hash: Option<u64>,
-}
-
+#[derive(Debug)]
 struct SetBatchMut<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    entries: HashMap<u64, Entry<K, V, S>>,
-    deletions: HashMap<u64, Deletion>,
-
-    head_hash: Option<u64>,
-    tail_hash: Option<u64>,
-
-    len: usize,
-    capacity: usize,
+    items: Vec<ItemMut<K, V, S>>,
+    deletes: HashMap<u64, Sequence>,
 }
 
-impl<K, V, S> Debug for SetBatchMut<K, V, S>
+impl<K, V, S> Default for SetBatchMut<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SetMut")
-            .field("count", &self.entries.len())
-            .field("len", &self.len)
-            .finish()
-    }
-}
-
-impl<K, V, S> SetBatchMut<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    fn new(capacity: usize) -> Self {
+    fn default() -> Self {
         Self {
-            entries: HashMap::new(),
-            deletions: HashMap::new(),
-            head_hash: None,
-            tail_hash: None,
-            len: 0,
-            capacity,
+            items: vec![],
+            deletes: HashMap::new(),
         }
-    }
-
-    fn insert(&mut self, insertion: Insertion<K, V, S>) {
-        self.deletions.remove(&insertion.entry.hash());
-
-        let mut entry = Entry {
-            insertion,
-            prev_hash: None,
-            next_hash: None,
-        };
-
-        self.list_push(&mut entry);
-        self.len += EntryHeader::ENTRY_HEADER_SIZE + entry.insertion.buffer.len();
-        if let Some(mut old) = self.entries.insert(entry.insertion.entry.hash(), entry) {
-            self.list_unlink(&mut old);
-            self.len -= EntryHeader::ENTRY_HEADER_SIZE + old.insertion.buffer.len();
-        }
-
-        while self.len > self.capacity {
-            let entry = self.pop().unwrap();
-            self.len -= EntryHeader::ENTRY_HEADER_SIZE + entry.insertion.buffer.len();
-        }
-    }
-
-    fn delete(&mut self, deletion: Deletion) {
-        if let Some(mut entry) = self.entries.remove(&deletion.hash) {
-            self.list_unlink(&mut entry);
-            self.len -= EntryHeader::ENTRY_HEADER_SIZE + entry.insertion.buffer.len();
-        }
-
-        self.deletions.insert(deletion.hash, deletion);
-    }
-
-    fn freeze(mut self) -> SetBatch<K, V, S> {
-        let mut buf = IoBytesMut::with_capacity(self.len);
-        let mut entries = Vec::with_capacity(self.entries.len());
-        let mut deletions = HashSet::with_capacity(self.entries.len() + self.deletions.len());
-        let mut insertions = Vec::with_capacity(self.entries.len());
-
-        while let Some(entry) = self.pop() {
-            let header = EntryHeader::new(
-                entry.insertion.entry.hash(),
-                entry.insertion.info.key_len,
-                entry.insertion.info.value_len,
-            );
-            header.write(&mut buf);
-            deletions.insert(entry.insertion.entry.hash());
-            insertions.push(entry.insertion.entry.hash());
-            buf.extend_from_slice(&entry.insertion.buffer);
-            entries.push(entry.insertion.entry);
-        }
-
-        for deletion in self.deletions.into_values() {
-            deletions.insert(deletion.hash);
-        }
-
-        assert_eq!(buf.len(), self.len);
-
-        SetBatch {
-            deletions,
-            insertions,
-            bytes: buf.freeze(),
-            entries,
-        }
-    }
-
-    fn list_unlink(&mut self, entry: &mut Entry<K, V, S>) {
-        if let Some(prev_hash) = entry.prev_hash {
-            self.entries.get_mut(&prev_hash).unwrap().next_hash = entry.next_hash;
-        } else {
-            assert_eq!(self.head_hash, Some(entry.insertion.entry.hash()));
-            self.head_hash = entry.next_hash;
-        }
-        if let Some(next_hash) = entry.next_hash {
-            self.entries.get_mut(&next_hash).unwrap().prev_hash = entry.prev_hash;
-        } else {
-            assert_eq!(self.tail_hash, Some(entry.insertion.entry.hash()));
-            self.tail_hash = entry.prev_hash;
-        }
-        entry.prev_hash = None;
-        entry.next_hash = None;
-    }
-
-    fn list_push(&mut self, entry: &mut Entry<K, V, S>) {
-        assert!(entry.prev_hash.is_none());
-        assert!(entry.next_hash.is_none());
-
-        if let Some(tail_hash) = self.tail_hash {
-            let tail = self.entries.get_mut(&tail_hash).unwrap();
-
-            tail.next_hash = Some(entry.insertion.entry.hash());
-            entry.prev_hash = Some(tail_hash);
-
-            self.tail_hash = Some(entry.insertion.entry.hash());
-        } else {
-            assert!(self.head_hash.is_none());
-
-            self.head_hash = Some(entry.insertion.entry.hash());
-            self.tail_hash = Some(entry.insertion.entry.hash());
-        }
-    }
-
-    fn pop(&mut self) -> Option<Entry<K, V, S>> {
-        let head_hash = self.head_hash?;
-        let mut entry = self.entries.remove(&head_hash).unwrap();
-        self.list_unlink(&mut entry);
-        Some(entry)
     }
 }
 
@@ -212,13 +83,22 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    sets: HashMap<SetId, SetBatchMut<K, V, S>>,
     /// Total set count.
     total: SetId,
-    /// Set data capacity.
-    set_capacity: usize,
+
+    sets: HashMap<SetId, SetBatchMut<K, V, S>>,
+    buffer: IoBuffer,
+    len: usize,
+    sequence: Sequence,
+
+    /// Cache write buffer between rotation to reduce page fault.
+    buffer_pool: IoBufferPool,
 
     waiters: Vec<oneshot::Sender<()>>,
+
+    init: Option<Instant>,
+
+    metrics: Arc<Metrics>,
 }
 
 impl<K, V, S> BatchMut<K, V, S>
@@ -227,41 +107,183 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(total: SetId, set_data_size: usize) -> Self {
+    pub fn new(total: SetId, buffer_size: usize, metrics: Arc<Metrics>) -> Self {
+        let buffer_size = bits::align_up(ALIGN, buffer_size);
+
         Self {
-            sets: HashMap::new(),
             total,
-            set_capacity: set_data_size,
+            sets: HashMap::new(),
+            buffer: IoBuffer::new(buffer_size),
+            len: 0,
+            sequence: 0,
+            buffer_pool: IoBufferPool::new(buffer_size, 1),
             waiters: vec![],
+            init: None,
+            metrics,
         }
     }
 
-    pub fn append(&mut self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
-        let sid = entry.hash() % self.total;
-        let set = self.sets.entry(sid).or_insert(SetBatchMut::new(self.set_capacity));
-        let insertion = Insertion { entry, buffer, info };
-        set.insert(insertion);
+    pub fn insert(&mut self, entry: CacheEntry<K, V, S>, estimated_size: usize) -> bool {
+        // For the small object disk cache does NOT compress entries, `estimated_size` is actually `exact_size`.
+        tracing::trace!("[sodc batch]: insert entry");
+
+        if self.init.is_none() {
+            self.init = Some(Instant::now());
+        }
+        self.sequence += 1;
+
+        let sid = self.sid(entry.hash());
+        let len = EntryHeader::ENTRY_HEADER_SIZE + estimated_size;
+
+        let set = &mut self.sets.entry(sid).or_default();
+
+        set.deletes.insert(entry.hash(), self.sequence);
+
+        if entry.is_outdated() || self.len + len > self.buffer.len() {
+            return false;
+        }
+
+        let info = match EntrySerializer::serialize(
+            entry.key(),
+            entry.value(),
+            &Compression::None,
+            &mut self.buffer[self.len + EntryHeader::ENTRY_HEADER_SIZE..self.len + len],
+            &self.metrics,
+        ) {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::warn!("[sodc batch]: serialize entry error: {e}");
+                return false;
+            }
+        };
+        assert_eq!(info.key_len + info.value_len + EntryHeader::ENTRY_HEADER_SIZE, len);
+        let header = EntryHeader::new(entry.hash(), info.key_len, info.value_len);
+        header.write(&mut self.buffer[self.len..self.len + EntryHeader::ENTRY_HEADER_SIZE]);
+
+        set.items.push(ItemMut {
+            range: self.len..self.len + len,
+            entry,
+            sequence: self.sequence,
+        });
+        self.len += len;
+
+        true
     }
 
     pub fn delete(&mut self, hash: u64) {
-        let sid = hash % self.total;
-        let set = self.sets.entry(sid).or_insert(SetBatchMut::new(self.set_capacity));
-        set.delete(Deletion { hash })
-    }
+        tracing::trace!("[sodc batch]: delete entry");
 
-    pub fn rotate(&mut self) -> Batch<K, V, S> {
-        let sets = std::mem::take(&mut self.sets);
-        let sets = sets.into_iter().map(|(id, set)| (id, set.freeze())).collect();
-        let waiters = std::mem::take(&mut self.waiters);
-        Batch { sets, waiters }
+        if self.init.is_none() {
+            self.init = Some(Instant::now());
+        }
+        self.sequence += 1;
+
+        let sid = self.sid(hash);
+        self.sets.entry(sid).or_default().deletes.insert(hash, self.sequence);
     }
 
     /// Register a waiter to be notified after the batch is finished.
-    pub fn wait(&mut self) -> oneshot::Receiver<()> {
-        tracing::trace!("[batch]: register waiter");
-        let (tx, rx) = oneshot::channel();
+    pub fn wait(&mut self, tx: oneshot::Sender<()>) {
+        tracing::trace!("[sodc batch]: register waiter");
+        if self.init.is_none() {
+            self.init = Some(Instant::now());
+        }
         self.waiters.push(tx);
-        rx
+    }
+
+    fn sid(&self, hash: u64) -> SetId {
+        hash % self.total
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.init.is_none()
+    }
+
+    pub fn rotate(&mut self) -> Option<Batch<K, V, S>> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let mut buffer = self.buffer_pool.acquire();
+        std::mem::swap(&mut self.buffer, &mut buffer);
+        self.len = 0;
+        self.sequence = 0;
+        let buffer = IoBytes::from(buffer);
+        self.buffer_pool.release(buffer.clone());
+
+        let sets = self
+            .sets
+            .drain()
+            .map(|(sid, batch)| {
+                let items = batch
+                    .items
+                    .into_iter()
+                    .filter(|item| item.sequence >= batch.deletes.get(&item.entry.hash()).copied().unwrap_or_default())
+                    .map(|item| Item {
+                        buffer: buffer.slice(item.range),
+                        entry: item.entry,
+                    })
+                    .collect_vec();
+                let deletes = batch.deletes.keys().copied().collect();
+                (
+                    sid,
+                    SetBatch {
+                        deletions: deletes,
+                        items,
+                    },
+                )
+            })
+            .collect();
+
+        let waiters = std::mem::take(&mut self.waiters);
+        let init = self.init.take();
+
+        Some(Batch { sets, waiters, init })
+    }
+}
+
+pub struct Item<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    pub buffer: IoBytes,
+    pub entry: CacheEntry<K, V, S>,
+}
+
+impl<K, V, S> Debug for Item<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Item").field("hash", &self.entry.hash()).finish()
+    }
+}
+
+pub struct SetBatch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    pub deletions: HashSet<u64>,
+    pub items: Vec<Item<K, V, S>>,
+}
+
+impl<K, V, S> Debug for SetBatch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetBatch")
+            .field("deletes", &self.deletions)
+            .field("items", &self.items)
+            .finish()
     }
 }
 
@@ -273,52 +295,35 @@ where
 {
     pub sets: HashMap<SetId, SetBatch<K, V, S>>,
     pub waiters: Vec<oneshot::Sender<()>>,
+    pub init: Option<Instant>,
 }
 
-pub struct SetBatch<K, V, S>
+impl<K, V, S> Default for Batch<K, V, S>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub deletions: HashSet<u64>,
-    pub insertions: Vec<u64>,
-    pub bytes: IoBytes,
-    pub entries: Vec<CacheEntry<K, V, S>>,
+    fn default() -> Self {
+        Self {
+            sets: HashMap::new(),
+            waiters: vec![],
+            init: None,
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use foyer_memory::{Cache, CacheBuilder};
-
-    use super::*;
-    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
-
-    fn cache_for_test() -> Cache<u64, Vec<u8>> {
-        CacheBuilder::new(10).build()
-    }
-
-    fn serialize(entry: &CacheEntry<u64, Vec<u8>>) -> (IoBytes, KvInfo) {
-        let mut bytes = IoBytesMut::new();
-        let info = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            &Compression::None,
-            &mut bytes,
-            &metrics_for_test(),
-        )
-        .unwrap();
-        (bytes.freeze(), info)
-    }
-
-    #[test]
-    fn test_batch_insert() {
-        let cache = cache_for_test();
-        let mut batch: BatchMut<u64, Vec<u8>, ahash::RandomState> = BatchMut::new(4, 1000);
-
-        let e1 = cache.insert(1, vec![b'1'; 10]);
-        let (b1, i1) = serialize(&e1);
-
-        batch.append(e1, b1, i1);
+impl<K, V, S> Debug for Batch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Batch")
+            .field("sets", &self.sets)
+            .field("waiters", &self.waiters)
+            .field("init", &self.init)
+            .finish()
     }
 }

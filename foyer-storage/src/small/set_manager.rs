@@ -43,7 +43,7 @@ struct SetManagerInner {
     cache: Mutex<OrderedHashMap<SetId, Arc<SetStorage>>>,
     set_cache_capacity: usize,
 
-    set_size: usize,
+    set_capacity: usize,
     device: MonitoredDevice,
     regions: Range<RegionId>,
     flush: bool,
@@ -59,7 +59,7 @@ impl Debug for SetManager {
         f.debug_struct("SetManager")
             .field("sets", &self.inner.sets.len())
             .field("cache_capacity", &self.inner.set_cache_capacity)
-            .field("size", &self.inner.set_size)
+            .field("size", &self.inner.set_capacity)
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
             .field("flush", &self.inner.flush)
@@ -85,7 +85,7 @@ impl SetManager {
             sets,
             cache,
             set_cache_capacity,
-            set_size,
+            set_capacity: set_size,
             device,
             regions,
             flush,
@@ -170,27 +170,23 @@ impl SetManager {
         self.inner.sets.len()
     }
 
-    pub fn set_data_size(&self) -> usize {
-        self.inner.set_size - SetStorage::SET_HEADER_SIZE
-    }
-
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
-        let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
+        let buffer = self.inner.device.read(region, offset, self.inner.set_capacity).await?;
         let storage = SetStorage::load(buffer);
         Ok(storage)
     }
 
     #[inline]
     fn region_sets(&self) -> usize {
-        self.inner.device.region_size() / self.inner.set_size
+        self.inner.device.region_size() / self.inner.set_capacity
     }
 
     #[inline]
     fn locate(&self, id: SetId) -> (RegionId, u64) {
         let region_sets = self.region_sets();
         let region = id as RegionId / region_sets as RegionId;
-        let offset = ((id as usize % region_sets) * self.inner.set_size) as u64;
+        let offset = ((id as usize % region_sets) * self.inner.set_capacity) as u64;
         (region, offset)
     }
 }

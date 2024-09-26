@@ -18,6 +18,7 @@ use foyer_common::bits;
 
 use crate::{device::ALIGN, IoBuffer, IoBytes};
 
+#[derive(Debug)]
 pub enum Buffer {
     IoBuffer(IoBuffer),
     IoBytes(IoBytes),
@@ -35,6 +36,7 @@ impl From<IoBytes> for Buffer {
     }
 }
 
+#[derive(Debug)]
 pub struct IoBufferPool {
     capacity: usize,
     buffer_size: usize,
