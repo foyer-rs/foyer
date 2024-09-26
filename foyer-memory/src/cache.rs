@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -338,7 +338,7 @@ where
 {
     /// Set the name of the foyer in-memory cache instance.
     ///
-    /// Foyer will use the name as the prefix of the metric names.
+    /// foyer will use the name as the prefix of the metric names.
     ///
     /// Default: `foyer`.
     pub fn with_name(mut self, name: &str) -> Self {

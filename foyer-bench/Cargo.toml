@@ -1,13 +1,15 @@
 [package]
 name = "foyer-bench"
-version = "0.3.5"
-edition = "2021"
-authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "bench tool for foyer - the hybrid cache for Rust"
-license = "Apache-2.0"
-repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://github.com/foyer-rs/foyer"
-readme = "../README.md"
+description = "bench tool for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -17,7 +19,7 @@ clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { version = "0.11.5", path = "../foyer" }
+foyer = { workspace = true }
 futures = "0.3"
 hdrhistogram = "7"
 itertools = { workspace = true }
