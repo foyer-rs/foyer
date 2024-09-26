@@ -27,6 +27,7 @@ use foyer_memory::CacheEntry;
 use futures::{future::join_all, Future};
 use itertools::Itertools;
 
+use super::flusher::Submission;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
@@ -34,8 +35,6 @@ use crate::{
     storage::Storage,
     DeviceStats, Runtime,
 };
-
-use super::flusher::Submission;
 
 pub struct GenericSmallStorageConfig<K, V, S>
 where

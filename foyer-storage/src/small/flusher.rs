@@ -20,7 +20,6 @@ use foyer_common::{
 };
 use foyer_memory::CacheEntry;
 use futures::future::try_join_all;
-
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::{
