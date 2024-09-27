@@ -48,7 +48,7 @@ pub struct MonitoredConfig<D>
 where
     D: Dev,
 {
-    pub options: D::Config,
+    pub config: D::Config,
     pub metrics: Arc<Metrics>,
 }
 
@@ -58,7 +58,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MonitoredOptions")
-            .field("options", &self.options)
+            .field("options", &self.config)
             .field("metrics", &self.metrics)
             .finish()
     }
@@ -69,7 +69,7 @@ where
     D: Dev,
 {
     fn verify(&self) -> Result<()> {
-        self.options.verify()
+        self.config.verify()
     }
 }
 
@@ -88,7 +88,7 @@ where
     D: Dev,
 {
     async fn open(options: MonitoredConfig<D>, runtime: Runtime) -> Result<Self> {
-        let device = D::open(options.options, runtime).await?;
+        let device = D::open(options.config, runtime).await?;
         Ok(Self {
             device,
             stats: Arc::default(),

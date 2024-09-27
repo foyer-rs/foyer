@@ -31,15 +31,11 @@ use crate::{
     IoBytes, IoBytesMut, Runtime,
 };
 
-/// Options for the direct fs device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectFsDeviceConfig {
-    /// Directory of the direct fs device.
-    pub dir: PathBuf,
-    /// Capacity of the direct fs device.
-    pub capacity: usize,
-    /// Direct i/o file size of the direct fs device.
-    pub file_size: usize,
+    dir: PathBuf,
+    capacity: usize,
+    file_size: usize,
 }
 
 /// A device that uses direct i/o files in a directory of a file system.

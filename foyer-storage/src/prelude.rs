@@ -16,8 +16,8 @@ pub use crate::{
     compress::Compression,
     device::{
         bytes::{IoBuffer, IoBytes, IoBytesMut},
-        direct_file::{DirectFileDevice, DirectFileDeviceConfig, DirectFileDeviceOptions},
-        direct_fs::{DirectFsDevice, DirectFsDeviceConfig, DirectFsDeviceOptions},
+        direct_file::{DirectFileDevice, DirectFileDeviceOptions},
+        direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
         Dev, DevConfig, DevExt,
     },
@@ -34,7 +34,7 @@ pub use crate::{
     statistics::Statistics,
     storage::{either::Order, Storage},
     store::{
-        DeviceOptionsEnum, Engine, LargeEngineOptions, RuntimeConfig, SmallEngineOptions, Store, StoreBuilder,
+        DeviceOptions, Engine, LargeEngineOptions, RuntimeConfig, SmallEngineOptions, Store, StoreBuilder,
         TokioRuntimeConfig,
     },
 };

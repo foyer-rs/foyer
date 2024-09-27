@@ -241,6 +241,8 @@ impl RegionScanner {
 mod tests {
     use std::path::Path;
 
+    use bytesize::ByteSize;
+
     use super::*;
     use crate::{
         device::{
@@ -248,21 +250,17 @@ mod tests {
             Dev, MonitoredDevice,
         },
         region::RegionStats,
-        DirectFsDeviceConfig, Runtime,
+        DirectFsDeviceOptions, Runtime,
     };
-
-    const KB: usize = 1024;
 
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
             MonitoredConfig {
-                options: DirectFsDeviceConfig {
-                    dir: dir.as_ref().into(),
-                    capacity: 64 * KB,
-                    file_size: 16 * KB,
-                }
-                .into(),
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
                 metrics: Arc::new(Metrics::new("test")),
             },
             runtime,

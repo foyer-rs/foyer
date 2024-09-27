@@ -25,10 +25,9 @@ pub use memory::{
 };
 pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevConfig, DevExt, DeviceStats, DirectFileDevice,
-    DirectFileDeviceConfig, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceConfig, DirectFsDeviceOptions,
-    Engine, EvictionPicker, FifoPicker, InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode,
-    ReinsertionPicker, RejectAllPicker, Runtime, RuntimeConfig, SmallEngineOptions, Storage, Store, StoreBuilder,
-    TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine, EvictionPicker, FifoPicker,
+    InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime,
+    RuntimeConfig, SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeConfig, TombstoneLogConfigBuilder,
 };
 
 pub use crate::hybrid::{

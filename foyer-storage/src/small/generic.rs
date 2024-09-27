@@ -311,7 +311,7 @@ mod tests {
             Dev,
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceConfig,
+        DevExt, DirectFsDeviceOptions,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
@@ -324,12 +324,10 @@ mod tests {
         let runtime = Runtime::current();
         Monitored::open(
             MonitoredConfig {
-                options: DirectFsDeviceConfig {
-                    dir: dir.as_ref().into(),
-                    capacity: ByteSize::kib(64).as_u64() as _,
-                    file_size: ByteSize::kib(16).as_u64() as _,
-                }
-                .into(),
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
                 metrics: Arc::new(Metrics::new("test")),
             },
             runtime,

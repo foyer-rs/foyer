@@ -137,7 +137,7 @@ impl TombstoneLog {
 
         let device = Monitored::open(
             MonitoredConfig {
-                options: DirectFileDeviceOptions::new(path)
+                config: DirectFileDeviceOptions::new(path)
                     .with_region_size(align)
                     .with_capacity(capacity)
                     .into(),

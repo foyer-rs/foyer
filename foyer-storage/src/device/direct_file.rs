@@ -29,15 +29,11 @@ use crate::{
     IoBytes, IoBytesMut, Runtime,
 };
 
-/// Options for the direct file device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectFileDeviceConfig {
-    /// Path of the direct file device.
-    pub path: PathBuf,
-    /// Capacity of the direct file device.
-    pub capacity: usize,
-    /// Region size of the direct file device.
-    pub region_size: usize,
+    path: PathBuf,
+    capacity: usize,
+    region_size: usize,
 }
 
 /// A device that uses a single direct i/o file.

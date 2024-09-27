@@ -21,11 +21,13 @@ pub mod monitor;
 use std::{fmt::Debug, future::Future};
 
 use allocator::AlignedAllocator;
+use direct_file::DirectFileDeviceConfig;
+use direct_fs::DirectFsDeviceConfig;
 use monitor::Monitored;
 
 use crate::{
-    error::Result, DirectFileDevice, DirectFileDeviceConfig, DirectFsDevice, DirectFsDeviceConfig, IoBytes, IoBytesMut,
-    Runtime,
+    error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
+    IoBytesMut, Runtime,
 };
 
 pub const ALIGN: usize = 4096;
@@ -91,15 +93,15 @@ pub enum DeviceConfig {
     DirectFs(DirectFsDeviceConfig),
 }
 
-impl From<DirectFileDeviceConfig> for DeviceConfig {
-    fn from(value: DirectFileDeviceConfig) -> Self {
-        Self::DirectFile(value)
+impl From<DirectFileDeviceOptions> for DeviceConfig {
+    fn from(options: DirectFileDeviceOptions) -> Self {
+        Self::DirectFile(options.into())
     }
 }
 
-impl From<DirectFsDeviceConfig> for DeviceConfig {
-    fn from(value: DirectFsDeviceConfig) -> Self {
-        Self::DirectFs(value)
+impl From<DirectFsDeviceOptions> for DeviceConfig {
+    fn from(options: DirectFsDeviceOptions) -> Self {
+        Self::DirectFs(options.into())
     }
 }
 
