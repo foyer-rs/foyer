@@ -33,7 +33,7 @@ use crate::{
     device::ALIGN,
     io_buffer_pool::IoBufferPool,
     serde::EntrySerializer,
-    small::{serde::EntryHeader, set::SetId},
+    small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
     Compression, IoBuffer, IoBytes,
 };
 
@@ -83,9 +83,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Total set count.
-    total: SetId,
-
     sets: HashMap<SetId, SetBatchMut<K, V, S>>,
     buffer: IoBuffer,
     len: usize,
@@ -93,6 +90,7 @@ where
 
     /// Cache write buffer between rotation to reduce page fault.
     buffer_pool: IoBufferPool,
+    set_picker: SetPicker,
 
     waiters: Vec<oneshot::Sender<()>>,
 
@@ -107,16 +105,16 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(total: SetId, buffer_size: usize, metrics: Arc<Metrics>) -> Self {
+    pub fn new(sets: usize, buffer_size: usize, metrics: Arc<Metrics>) -> Self {
         let buffer_size = bits::align_up(ALIGN, buffer_size);
 
         Self {
-            total,
             sets: HashMap::new(),
             buffer: IoBuffer::new(buffer_size),
             len: 0,
             sequence: 0,
             buffer_pool: IoBufferPool::new(buffer_size, 1),
+            set_picker: SetPicker::new(sets),
             waiters: vec![],
             init: None,
             metrics,
@@ -192,7 +190,7 @@ where
     }
 
     fn sid(&self, hash: u64) -> SetId {
-        hash % self.total
+        self.set_picker.sid(hash)
     }
 
     pub fn is_empty(&self) -> bool {

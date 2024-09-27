@@ -18,6 +18,7 @@ use std::{
     sync::Arc,
 };
 
+use bytes::{Buf, BufMut};
 use foyer_common::strict_assert;
 use itertools::Itertools;
 use ordered_hash_map::OrderedHashMap;
@@ -25,12 +26,12 @@ use tokio::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
     bloom_filter::BloomFilterU64,
-    set::{Set, SetId, SetMut, SetStorage},
+    set::{Set, SetId, SetMut, SetStorage, SetTimestamp},
 };
 use crate::{
-    device::{MonitoredDevice, RegionId},
+    device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    Dev,
+    IoBytesMut,
 };
 
 struct SetManagerInner {
@@ -42,6 +43,9 @@ struct SetManagerInner {
     sets: Vec<RwLock<BloomFilterU64<4>>>,
     cache: Mutex<OrderedHashMap<SetId, Arc<SetStorage>>>,
     set_cache_capacity: usize,
+    set_picker: SetPicker,
+
+    metadata: RwLock<Metadata>,
 
     set_size: usize,
     device: MonitoredDevice,
@@ -60,6 +64,8 @@ impl Debug for SetManager {
             .field("sets", &self.inner.sets)
             .field("cache", &self.inner.cache)
             .field("set_cache_capacity", &self.inner.set_cache_capacity)
+            .field("set_picker", &self.inner.set_picker)
+            .field("metadata", &self.inner.metadata)
             .field("set_size", &self.inner.set_size)
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
@@ -69,15 +75,22 @@ impl Debug for SetManager {
 }
 
 impl SetManager {
-    pub fn new(
+    pub async fn open(
         set_size: usize,
         set_cache_capacity: usize,
         device: MonitoredDevice,
         regions: Range<RegionId>,
         flush: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         let sets = (device.region_size() / set_size) * (regions.end - regions.start) as usize;
         assert!(sets > 0);
+
+        let set_picker = SetPicker::new(sets);
+
+        // load & flush metadata
+        let metadata = Metadata::load(&device).await?;
+        metadata.flush(&device).await?;
+        let metadata = RwLock::new(metadata);
 
         let sets = (0..sets).map(|_| RwLock::default()).collect_vec();
         let cache = Mutex::new(OrderedHashMap::with_capacity(set_cache_capacity));
@@ -86,13 +99,15 @@ impl SetManager {
             sets,
             cache,
             set_cache_capacity,
+            set_picker,
+            metadata,
             set_size,
             device,
             regions,
             flush,
         };
         let inner = Arc::new(inner);
-        Self { inner }
+        Ok(Self { inner })
     }
 
     pub async fn write(&self, id: SetId) -> Result<SetWriteGuard<'_>> {
@@ -175,10 +190,32 @@ impl SetManager {
         self.inner.set_size
     }
 
+    pub fn set_picker(&self) -> &SetPicker {
+        &self.inner.set_picker
+    }
+
+    pub async fn watermark(&self) -> u128 {
+        self.inner.metadata.read().await.watermark
+    }
+
+    pub async fn destroy(&self) -> Result<()> {
+        self.update_watermark().await?;
+        self.inner.cache.lock().await.clear();
+        Ok(())
+    }
+
+    async fn update_watermark(&self) -> Result<()> {
+        let mut metadata = self.inner.metadata.write().await;
+
+        let watermark = SetTimestamp::current();
+        metadata.watermark = watermark;
+        metadata.flush(&self.inner.device).await
+    }
+
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
         let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
-        let storage = SetStorage::load(buffer);
+        let storage = SetStorage::load(buffer, self.watermark().await);
         Ok(storage)
     }
 
@@ -249,5 +286,77 @@ impl<'a> Deref for SetReadGuard<'a> {
 
     fn deref(&self) -> &Self::Target {
         &self.set
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SetPicker {
+    sets: usize,
+}
+
+impl SetPicker {
+    /// Create a [`SetPicker`] with a total size count.
+    ///
+    /// The `sets` should be the count of all sets.
+    ///
+    /// Note:
+    ///
+    /// The 0th set will be used as the meta set.
+    pub fn new(sets: usize) -> Self {
+        Self { sets }
+    }
+
+    pub fn sid(&self, hash: u64) -> SetId {
+        // skip the meta set
+        hash % (self.sets as SetId - 1) + 1
+    }
+}
+
+#[derive(Debug)]
+struct Metadata {
+    /// watermark timestamp
+    watermark: u128,
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self {
+            watermark: SetTimestamp::current(),
+        }
+    }
+}
+
+impl Metadata {
+    const MAGIC: u64 = 0x20230512deadbeef;
+    const SIZE: usize = 8 + 16;
+
+    fn write(&self, mut buf: impl BufMut) {
+        buf.put_u64(Self::MAGIC);
+        buf.put_u128(self.watermark);
+    }
+
+    fn read(mut buf: impl Buf) -> Self {
+        let magic = buf.get_u64();
+        let watermark = buf.get_u128();
+
+        if magic != Self::MAGIC || watermark > SetTimestamp::current() {
+            return Self::default();
+        }
+
+        Self { watermark }
+    }
+
+    async fn flush(&self, device: &MonitoredDevice) -> Result<()> {
+        let mut buf = IoBytesMut::with_capacity(Self::SIZE);
+        self.write(&mut buf);
+        let buf = buf.freeze();
+        device.write(buf, 0, 0).await?;
+        Ok(())
+    }
+
+    async fn load(device: &MonitoredDevice) -> Result<Self> {
+        let buf = device.read(0, 0, Metadata::SIZE).await?;
+        let metadata = Metadata::read(&buf[..Metadata::SIZE]);
+        Ok(metadata)
     }
 }

@@ -27,11 +27,13 @@ use foyer_memory::CacheEntry;
 use futures::{future::join_all, Future};
 use itertools::Itertools;
 
-use super::flusher::Submission;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
-    small::{flusher::Flusher, set::SetId, set_manager::SetManager},
+    small::{
+        flusher::{Flusher, Submission},
+        set_manager::SetManager,
+    },
     storage::Storage,
     DeviceStats, Runtime, Statistics,
 };
@@ -136,13 +138,20 @@ where
         let stats = config.statistics.clone();
         let metrics = config.device.metrics().clone();
 
-        let set_manager = SetManager::new(
+        assert_eq!(
+            config.regions.start, 0,
+            "small object disk cache must start with region 0, current: {:?}",
+            config.regions
+        );
+
+        let set_manager = SetManager::open(
             config.set_size,
             config.set_cache_capacity,
             config.device.clone(),
             config.regions.clone(),
             config.flush,
-        );
+        )
+        .await?;
 
         let flushers = (0..config.flushers)
             .map(|_| Flusher::open(&config, set_manager.clone(), stats.clone(), metrics.clone()))
@@ -187,7 +196,7 @@ where
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
-        let sid = hash % set_manager.sets() as SetId;
+        let sid = set_manager.set_picker().sid(hash);
         let stats = self.inner.stats.clone();
 
         async move {
@@ -216,9 +225,14 @@ where
         self.inner.flushers[id].submit(Submission::Deletion { hash });
     }
 
+    async fn destroy(&self) -> Result<()> {
+        // TODO(MrCroxx): reset bloom filters
+        self.inner.set_manager.destroy().await
+    }
+
     fn may_contains(&self, hash: u64) -> bool {
         let set_manager = self.inner.set_manager.clone();
-        let sid = hash % set_manager.sets() as SetId;
+        let sid = set_manager.set_picker().sid(hash);
         // FIXME: Anyway without blocking? Use atomic?
         self.inner
             .runtime
@@ -268,7 +282,7 @@ where
     }
 
     async fn destroy(&self) -> Result<()> {
-        todo!()
+        self.destroy().await
     }
 
     fn stats(&self) -> Arc<DeviceStats> {
@@ -277,5 +291,121 @@ where
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         self.wait()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use ahash::RandomState;
+    use bytesize::ByteSize;
+    use foyer_common::metrics::Metrics;
+    use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use tokio::runtime::Handle;
+
+    use super::*;
+    use crate::{
+        device::{
+            monitor::{Monitored, MonitoredOptions},
+            Dev,
+        },
+        serde::EntrySerializer,
+        DevExt, DirectFsDeviceOptions,
+    };
+
+    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+        CacheBuilder::new(10)
+            .with_eviction_config(FifoConfig::default())
+            .build()
+    }
+
+    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredOptions {
+                options: DirectFsDeviceOptions {
+                    dir: dir.as_ref().into(),
+                    capacity: ByteSize::kib(64).as_u64() as _,
+                    file_size: ByteSize::kib(16).as_u64() as _,
+                }
+                .into(),
+                metrics: Arc::new(Metrics::new("test")),
+            },
+            runtime,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, RandomState> {
+        let device = device_for_test(dir).await;
+        let regions = 0..device.regions() as RegionId;
+        let config = GenericSmallStorageConfig {
+            set_size: ByteSize::kib(4).as_u64() as _,
+            set_cache_capacity: 4,
+            device,
+            regions,
+            flush: false,
+            flushers: 1,
+            buffer_pool_size: ByteSize::kib(64).as_u64() as _,
+            statistics: Arc::<Statistics>::default(),
+            runtime: Runtime::new(None, None, Handle::current()),
+            marker: PhantomData,
+        };
+        GenericSmallStorage::open(config).await.unwrap()
+    }
+
+    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>, RandomState>, entry: &CacheEntry<u64, Vec<u8>>) {
+        let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+        store.enqueue(entry.clone(), estimated_size);
+    }
+
+    async fn assert_some(store: &GenericSmallStorage<u64, Vec<u8>, RandomState>, entry: &CacheEntry<u64, Vec<u8>>) {
+        assert_eq!(
+            store.load(entry.hash()).await.unwrap().unwrap(),
+            (*entry.key(), entry.value().clone())
+        );
+    }
+
+    async fn assert_none(store: &GenericSmallStorage<u64, Vec<u8>, RandomState>, entry: &CacheEntry<u64, Vec<u8>>) {
+        assert!(store.load(entry.hash()).await.unwrap().is_none());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_store_enqueue_lookup_destroy_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = store_for_test(dir.path()).await;
+
+        let e1 = memory.insert(1, vec![1; 42]);
+        enqueue(&store, &e1);
+        store.wait().await;
+
+        assert_some(&store, &e1).await;
+
+        store.delete(e1.hash());
+        store.wait().await;
+
+        assert_none(&store, &e1).await;
+
+        let e2 = memory.insert(2, vec![2; 192]);
+        let e3 = memory.insert(3, vec![3; 168]);
+
+        enqueue(&store, &e1);
+        enqueue(&store, &e2);
+        enqueue(&store, &e3);
+        store.wait().await;
+
+        assert_some(&store, &e1).await;
+        assert_some(&store, &e2).await;
+        assert_some(&store, &e3).await;
+
+        store.destroy().await.unwrap();
+
+        assert_none(&store, &e1).await;
+        assert_none(&store, &e2).await;
+        assert_none(&store, &e3).await;
     }
 }

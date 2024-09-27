@@ -48,6 +48,7 @@ twox-hash = "1"
 zstd = "0.13"
 
 [dev-dependencies]
+bytesize = { workspace = true }
 tempfile = "3"
 test-log = { workspace = true }
 
