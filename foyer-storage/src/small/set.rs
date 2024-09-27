@@ -120,7 +120,10 @@ impl Debug for SetStorage {
 impl SetStorage {
     pub const SET_HEADER_SIZE: usize = 48;
 
-    pub fn load(buffer: IoBytesMut) -> Self {
+    /// Load the set storage from buffer.
+    ///
+    /// If `after` is set and the set storage is before the timestamp, load an empty set storage.
+    pub fn load(buffer: IoBytesMut, watermark: u64) -> Self {
         assert!(buffer.len() >= Self::SET_HEADER_SIZE);
 
         let checksum = (&buffer[0..4]).get_u32();
@@ -138,7 +141,7 @@ impl SetStorage {
             buffer,
         };
 
-        if Self::SET_HEADER_SIZE + this.len >= this.buffer.len() {
+        if Self::SET_HEADER_SIZE + this.len >= this.buffer.len() || this.timestamp < watermark {
             // invalid len
             this.clear();
         } else {
@@ -155,7 +158,7 @@ impl SetStorage {
     pub fn update(&mut self) {
         self.bloom_filter.write(&mut self.buffer[16..48]);
         (&mut self.buffer[12..16]).put_u32(self.len as _);
-        self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        self.timestamp = SetTimestamp::current();
         (&mut self.buffer[4..12]).put_u64(self.timestamp);
         self.checksum = Checksummer::checksum32(&self.buffer[4..Self::SET_HEADER_SIZE + self.len]);
         (&mut self.buffer[0..4]).put_u32(self.checksum);
@@ -384,6 +387,14 @@ impl<'a> Iterator for SetIter<'a> {
     }
 }
 
+pub struct SetTimestamp;
+
+impl SetTimestamp {
+    pub fn current() -> u64 {
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as _
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -436,7 +447,7 @@ mod tests {
     #[should_panic]
     fn test_set_storage_empty() {
         let buffer = IoBytesMut::new();
-        SetStorage::load(buffer);
+        SetStorage::load(buffer, 0);
     }
 
     #[test]
@@ -447,7 +458,7 @@ mod tests {
         unsafe { buf.set_len(PAGE) };
 
         // load will result in an empty set
-        let mut storage = SetStorage::load(buf);
+        let mut storage = SetStorage::load(buf, 0);
         assert!(storage.is_empty());
 
         let e1 = memory.insert(1, vec![b'1'; 42]);
@@ -510,7 +521,7 @@ mod tests {
         let mut buf = IoBytesMut::with_capacity(PAGE);
         unsafe { buf.set_len(PAGE) };
         buf[0..bytes.len()].copy_from_slice(&bytes);
-        let mut storage = SetStorage::load(buf);
+        let mut storage = SetStorage::load(buf, 0);
 
         assert_eq!(storage.len(), b4.len());
         assert_none(&storage, e1.hash());
