@@ -225,6 +225,11 @@ where
         self.inner.flushers[id].submit(Submission::Deletion { hash });
     }
 
+    async fn destroy(&self) -> Result<()> {
+        // TODO(MrCroxx): reset bloom filters
+        self.inner.set_manager.destroy().await
+    }
+
     fn may_contains(&self, hash: u64) -> bool {
         let set_manager = self.inner.set_manager.clone();
         let sid = set_manager.set_picker().sid(hash);
@@ -277,7 +282,7 @@ where
     }
 
     async fn destroy(&self) -> Result<()> {
-        self.inner.set_manager.update_watermark().await
+        self.destroy().await
     }
 
     fn stats(&self) -> Arc<DeviceStats> {
@@ -356,6 +361,17 @@ mod tests {
         store.enqueue(entry.clone(), estimated_size);
     }
 
+    async fn assert_some(store: &GenericSmallStorage<u64, Vec<u8>, RandomState>, entry: &CacheEntry<u64, Vec<u8>>) {
+        assert_eq!(
+            store.load(entry.hash()).await.unwrap().unwrap(),
+            (*entry.key(), entry.value().clone())
+        );
+    }
+
+    async fn assert_none(store: &GenericSmallStorage<u64, Vec<u8>, RandomState>, entry: &CacheEntry<u64, Vec<u8>>) {
+        assert!(store.load(entry.hash()).await.unwrap().is_none());
+    }
+
     #[test_log::test(tokio::test)]
     async fn test_store_enqueue_lookup_destroy_recovery() {
         let dir = tempfile::tempdir().unwrap();
@@ -367,12 +383,29 @@ mod tests {
         enqueue(&store, &e1);
         store.wait().await;
 
-        let r1 = store.load(e1.hash()).await.unwrap().unwrap();
-        assert_eq!(r1, (1, vec![1; 42]));
+        assert_some(&store, &e1).await;
 
         store.delete(e1.hash());
         store.wait().await;
 
-        assert!(store.load(e1.hash()).await.unwrap().is_none());
+        assert_none(&store, &e1).await;
+
+        let e2 = memory.insert(2, vec![2; 192]);
+        let e3 = memory.insert(3, vec![3; 168]);
+
+        enqueue(&store, &e1);
+        enqueue(&store, &e2);
+        enqueue(&store, &e3);
+        store.wait().await;
+
+        assert_some(&store, &e1).await;
+        assert_some(&store, &e2).await;
+        assert_some(&store, &e3).await;
+
+        store.destroy().await.unwrap();
+
+        assert_none(&store, &e1).await;
+        assert_none(&store, &e2).await;
+        assert_none(&store, &e3).await;
     }
 }

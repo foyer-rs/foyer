@@ -194,11 +194,17 @@ impl SetManager {
         &self.inner.set_picker
     }
 
-    pub async fn watermark(&self) -> u64 {
+    pub async fn watermark(&self) -> u128 {
         self.inner.metadata.read().await.watermark
     }
 
-    pub async fn update_watermark(&self) -> Result<()> {
+    pub async fn destroy(&self) -> Result<()> {
+        self.update_watermark().await?;
+        self.inner.cache.lock().await.clear();
+        Ok(())
+    }
+
+    async fn update_watermark(&self) -> Result<()> {
         let mut metadata = self.inner.metadata.write().await;
 
         let watermark = SetTimestamp::current();
@@ -309,7 +315,7 @@ impl SetPicker {
 #[derive(Debug)]
 struct Metadata {
     /// watermark timestamp
-    watermark: u64,
+    watermark: u128,
 }
 
 impl Default for Metadata {
@@ -322,16 +328,16 @@ impl Default for Metadata {
 
 impl Metadata {
     const MAGIC: u64 = 0x20230512deadbeef;
-    const SIZE: usize = 8 + 8;
+    const SIZE: usize = 8 + 16;
 
     fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(Self::MAGIC);
-        buf.put_u64(self.watermark);
+        buf.put_u128(self.watermark);
     }
 
     fn read(mut buf: impl Buf) -> Self {
         let magic = buf.get_u64();
-        let watermark = buf.get_u64();
+        let watermark = buf.get_u128();
 
         if magic != Self::MAGIC || watermark > SetTimestamp::current() {
             return Self::default();

@@ -83,7 +83,7 @@ impl SetMut {
 /// # Format
 ///
 /// ```plain
-/// | checksum (4B) | timestamp (8B) | len (4B) |
+/// | checksum (4B) | ns timestamp (16B) | len (4B) |
 /// | bloom filter (4 * 8B = 32B) |
 /// ```
 pub struct SetStorage {
@@ -97,7 +97,7 @@ pub struct SetStorage {
     /// Set size.
     size: usize,
     /// Set last updated timestamp.
-    timestamp: u64,
+    timestamp: u128,
     /// Set bloom filter.
     bloom_filter: BloomFilterU64<4>,
 
@@ -118,18 +118,18 @@ impl Debug for SetStorage {
 }
 
 impl SetStorage {
-    pub const SET_HEADER_SIZE: usize = 48;
+    pub const SET_HEADER_SIZE: usize = 56;
 
     /// Load the set storage from buffer.
     ///
     /// If `after` is set and the set storage is before the timestamp, load an empty set storage.
-    pub fn load(buffer: IoBytesMut, watermark: u64) -> Self {
+    pub fn load(buffer: IoBytesMut, watermark: u128) -> Self {
         assert!(buffer.len() >= Self::SET_HEADER_SIZE);
 
         let checksum = (&buffer[0..4]).get_u32();
-        let timestamp = (&buffer[4..12]).get_u64();
-        let len = (&buffer[12..16]).get_u32() as usize;
-        let bloom_filter = BloomFilterU64::read(&buffer[16..48]);
+        let timestamp = (&buffer[4..20]).get_u128();
+        let len = (&buffer[20..24]).get_u32() as usize;
+        let bloom_filter = BloomFilterU64::read(&buffer[24..56]);
 
         let mut this = Self {
             checksum,
@@ -141,25 +141,29 @@ impl SetStorage {
             buffer,
         };
 
-        if Self::SET_HEADER_SIZE + this.len >= this.buffer.len() || this.timestamp < watermark {
-            // invalid len
-            this.clear();
-        } else {
-            let c = Checksummer::checksum32(&this.buffer[4..Self::SET_HEADER_SIZE + this.len]);
-            if c != checksum {
-                // checksum mismatch
-                this.clear();
-            }
-        }
+        this.verify(watermark);
 
         this
     }
 
+    fn verify(&mut self, watermark: u128) {
+        if Self::SET_HEADER_SIZE + self.len >= self.buffer.len() || self.timestamp < watermark {
+            // invalid len
+            self.clear();
+        } else {
+            let c = Checksummer::checksum32(&self.buffer[4..Self::SET_HEADER_SIZE + self.len]);
+            if c != self.checksum {
+                // checksum mismatch
+                self.clear();
+            }
+        }
+    }
+
     pub fn update(&mut self) {
-        self.bloom_filter.write(&mut self.buffer[16..48]);
-        (&mut self.buffer[12..16]).put_u32(self.len as _);
+        self.bloom_filter.write(&mut self.buffer[24..56]);
+        (&mut self.buffer[20..24]).put_u32(self.len as _);
         self.timestamp = SetTimestamp::current();
-        (&mut self.buffer[4..12]).put_u64(self.timestamp);
+        (&mut self.buffer[4..20]).put_u128(self.timestamp);
         self.checksum = Checksummer::checksum32(&self.buffer[4..Self::SET_HEADER_SIZE + self.len]);
         (&mut self.buffer[0..4]).put_u32(self.checksum);
     }
@@ -390,8 +394,8 @@ impl<'a> Iterator for SetIter<'a> {
 pub struct SetTimestamp;
 
 impl SetTimestamp {
-    pub fn current() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as _
+    pub fn current() -> u128 {
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
     }
 }
 
