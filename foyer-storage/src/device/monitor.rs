@@ -24,7 +24,7 @@ use std::{
 use foyer_common::{bits, metrics::Metrics};
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevConfig, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
+use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -61,15 +61,6 @@ where
             .field("options", &self.config)
             .field("metrics", &self.metrics)
             .finish()
-    }
-}
-
-impl<D> DevConfig for MonitoredConfig<D>
-where
-    D: Dev,
-{
-    fn verify(&self) -> Result<()> {
-        self.config.verify()
     }
 }
 

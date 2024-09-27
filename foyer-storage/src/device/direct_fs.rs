@@ -24,7 +24,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use super::{Dev, DevConfig, DevExt, RegionId};
+use super::{Dev, DevExt, RegionId};
 use crate::{
     device::ALIGN,
     error::{Error, Result},
@@ -38,23 +38,7 @@ pub struct DirectFsDeviceConfig {
     file_size: usize,
 }
 
-/// A device that uses direct i/o files in a directory of a file system.
-#[derive(Debug, Clone)]
-pub struct DirectFsDevice {
-    inner: Arc<DirectFsDeviceInner>,
-}
-
-#[derive(Debug)]
-struct DirectFsDeviceInner {
-    files: Vec<Arc<File>>,
-
-    capacity: usize,
-    file_size: usize,
-
-    runtime: Runtime,
-}
-
-impl DevConfig for DirectFsDeviceConfig {
+impl DirectFsDeviceConfig {
     fn verify(&self) -> Result<()> {
         if self.file_size == 0 || self.file_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
@@ -75,6 +59,22 @@ impl DevConfig for DirectFsDeviceConfig {
 
         Ok(())
     }
+}
+
+/// A device that uses direct i/o files in a directory of a file system.
+#[derive(Debug, Clone)]
+pub struct DirectFsDevice {
+    inner: Arc<DirectFsDeviceInner>,
+}
+
+#[derive(Debug)]
+struct DirectFsDeviceInner {
+    files: Vec<Arc<File>>,
+
+    capacity: usize,
+    file_size: usize,
+
+    runtime: Runtime,
 }
 
 impl DirectFsDevice {

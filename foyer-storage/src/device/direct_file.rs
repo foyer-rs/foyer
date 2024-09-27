@@ -22,7 +22,7 @@ use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
 use serde::{Deserialize, Serialize};
 
-use super::{Dev, DevConfig, DevExt, RegionId};
+use super::{Dev, DevExt, RegionId};
 use crate::{
     device::ALIGN,
     error::{Error, Result},
@@ -36,18 +36,7 @@ pub struct DirectFileDeviceConfig {
     region_size: usize,
 }
 
-/// A device that uses a single direct i/o file.
-#[derive(Debug, Clone)]
-pub struct DirectFileDevice {
-    file: Arc<File>,
-
-    capacity: usize,
-    region_size: usize,
-
-    runtime: Runtime,
-}
-
-impl DevConfig for DirectFileDeviceConfig {
+impl DirectFileDeviceConfig {
     fn verify(&self) -> Result<()> {
         if self.region_size == 0 || self.region_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(
@@ -68,6 +57,17 @@ impl DevConfig for DirectFileDeviceConfig {
 
         Ok(())
     }
+}
+
+/// A device that uses a single direct i/o file.
+#[derive(Debug, Clone)]
+pub struct DirectFileDevice {
+    file: Arc<File>,
+
+    capacity: usize,
+    region_size: usize,
+
+    runtime: Runtime,
 }
 
 impl DirectFileDevice {

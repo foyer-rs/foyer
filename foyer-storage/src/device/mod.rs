@@ -36,10 +36,8 @@ pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new()
 pub type RegionId = u32;
 
 /// Config for the device.
-pub trait DevConfig: Send + Sync + 'static + Debug {
-    /// Verify the correctness of the config.
-    fn verify(&self) -> Result<()>;
-}
+pub trait DevConfig: Send + Sync + 'static + Debug {}
+impl<T: Send + Sync + 'static + Debug> DevConfig for T {}
 
 /// [`Dev`] represents 4K aligned block device.
 ///
@@ -102,15 +100,6 @@ impl From<DirectFileDeviceOptions> for DeviceConfig {
 impl From<DirectFsDeviceOptions> for DeviceConfig {
     fn from(options: DirectFsDeviceOptions) -> Self {
         Self::DirectFs(options.into())
-    }
-}
-
-impl DevConfig for DeviceConfig {
-    fn verify(&self) -> Result<()> {
-        match self {
-            DeviceConfig::DirectFile(dev) => dev.verify(),
-            DeviceConfig::DirectFs(dev) => dev.verify(),
-        }
     }
 }
 
