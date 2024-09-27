@@ -299,6 +299,7 @@ mod tests {
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use tokio::runtime::Handle;
 
+    use super::*;
     use crate::{
         device::{
             monitor::{Monitored, MonitoredOptions},
@@ -307,8 +308,6 @@ mod tests {
         serde::EntrySerializer,
         DevExt, DirectFsDeviceOptions,
     };
-
-    use super::*;
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
         CacheBuilder::new(10)
