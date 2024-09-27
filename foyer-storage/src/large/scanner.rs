@@ -244,11 +244,11 @@ mod tests {
     use super::*;
     use crate::{
         device::{
-            monitor::{Monitored, MonitoredOptions},
+            monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice,
         },
         region::RegionStats,
-        DirectFsDeviceOptions, Runtime,
+        DirectFsDeviceConfig, Runtime,
     };
 
     const KB: usize = 1024;
@@ -256,8 +256,8 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
-            MonitoredOptions {
-                options: DirectFsDeviceOptions {
+            MonitoredConfig {
+                options: DirectFsDeviceConfig {
                     dir: dir.as_ref().into(),
                     capacity: 64 * KB,
                     file_size: 16 * KB,

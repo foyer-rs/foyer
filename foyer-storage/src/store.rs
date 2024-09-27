@@ -36,9 +36,9 @@ use tokio::runtime::Handle;
 use crate::{
     compress::Compression,
     device::{
-        direct_fs::DirectFsDeviceOptions,
-        monitor::{DeviceStats, Monitored, MonitoredOptions},
-        DeviceOptions, RegionId, ALIGN,
+        direct_fs::DirectFsDeviceConfig,
+        monitor::{DeviceStats, Monitored, MonitoredConfig},
+        DeviceConfig, RegionId, ALIGN,
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
@@ -55,7 +55,7 @@ use crate::{
         either::{EitherConfig, Order},
         Storage,
     },
-    Dev, DevExt, DirectFileDeviceOptions,
+    Dev, DevExt, DirectFileDeviceConfig, DirectFileDeviceOptions, DirectFsDeviceOptions,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -204,22 +204,24 @@ where
 
 /// The configurations for the device.
 #[derive(Debug, Clone)]
-pub enum DeviceConfig {
+pub enum DeviceOptionsEnum {
     /// No device.
     None,
     /// With device options.
-    DeviceOptions(DeviceOptions),
+    DeviceConfig(DeviceConfig),
 }
 
-impl From<DirectFileDeviceOptions> for DeviceConfig {
-    fn from(value: DirectFileDeviceOptions) -> Self {
-        Self::DeviceOptions(value.into())
+impl From<DirectFileDeviceOptions> for DeviceOptionsEnum {
+    fn from(options: DirectFileDeviceOptions) -> Self {
+        let config: DirectFileDeviceConfig = options.into();
+        Self::DeviceConfig(config.into())
     }
 }
 
-impl From<DirectFsDeviceOptions> for DeviceConfig {
-    fn from(value: DirectFsDeviceOptions) -> Self {
-        Self::DeviceOptions(value.into())
+impl From<DirectFsDeviceOptions> for DeviceOptionsEnum {
+    fn from(options: DirectFsDeviceOptions) -> Self {
+        let config: DirectFsDeviceConfig = options.into();
+        Self::DeviceConfig(config.into())
     }
 }
 
@@ -348,7 +350,7 @@ where
     name: String,
     memory: Cache<K, V, S>,
 
-    device_config: DeviceConfig,
+    device_options: DeviceOptionsEnum,
     engine: Engine,
     runtime_config: RuntimeConfig,
 
@@ -377,7 +379,7 @@ where
             name: "foyer".to_string(),
             memory,
 
-            device_config: DeviceConfig::None,
+            device_options: DeviceOptionsEnum::None,
             engine,
             runtime_config: RuntimeConfig::Disabled,
 
@@ -401,9 +403,9 @@ where
         self
     }
 
-    /// Set device config for the disk cache store.
-    pub fn with_device_config(mut self, device_config: impl Into<DeviceConfig>) -> Self {
-        self.device_config = device_config.into();
+    /// Set device options for the disk cache store.
+    pub fn with_device_options(mut self, device_options: impl Into<DeviceOptionsEnum>) -> Self {
+        self.device_options = device_options.into();
         self
     }
 
@@ -524,15 +526,15 @@ where
             let runtime = runtime.clone();
             // Use the user runtime to open engine.
             tokio::spawn(async move {
-            match self.device_config {
-                DeviceConfig::None => {
+            match self.device_options {
+                DeviceOptionsEnum::None => {
                     tracing::warn!(
                         "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
                     );
                     EngineEnum::open(EngineConfig::Noop).await
                 }
-                DeviceConfig::DeviceOptions(options) => {
-                    let device = match Monitored::open(MonitoredOptions {
+                DeviceOptionsEnum::DeviceConfig(options) => {
+                    let device = match Monitored::open(MonitoredConfig {
                         options,
                         metrics: metrics.clone(),
                     }, runtime.clone())

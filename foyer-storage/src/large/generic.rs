@@ -495,8 +495,8 @@ mod tests {
     use super::*;
     use crate::{
         device::{
-            direct_fs::DirectFsDeviceOptions,
-            monitor::{Monitored, MonitoredOptions},
+            direct_fs::DirectFsDeviceConfig,
+            monitor::{Monitored, MonitoredConfig},
         },
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
@@ -515,8 +515,8 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
-            MonitoredOptions {
-                options: DirectFsDeviceOptions {
+            MonitoredConfig {
+                options: DirectFsDeviceConfig {
                     dir: dir.as_ref().into(),
                     capacity: 64 * KB,
                     file_size: 16 * KB,

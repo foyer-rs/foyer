@@ -24,7 +24,7 @@ use std::{
 use foyer_common::{bits, metrics::Metrics};
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
+use crate::{error::Result, Dev, DevConfig, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -44,15 +44,15 @@ pub struct DeviceStats {
 }
 
 #[derive(Clone)]
-pub struct MonitoredOptions<D>
+pub struct MonitoredConfig<D>
 where
     D: Dev,
 {
-    pub options: D::Options,
+    pub options: D::Config,
     pub metrics: Arc<Metrics>,
 }
 
-impl<D> Debug for MonitoredOptions<D>
+impl<D> Debug for MonitoredConfig<D>
 where
     D: Dev,
 {
@@ -64,7 +64,7 @@ where
     }
 }
 
-impl<D> DevOptions for MonitoredOptions<D>
+impl<D> DevConfig for MonitoredConfig<D>
 where
     D: Dev,
 {
@@ -87,7 +87,7 @@ impl<D> Monitored<D>
 where
     D: Dev,
 {
-    async fn open(options: MonitoredOptions<D>, runtime: Runtime) -> Result<Self> {
+    async fn open(options: MonitoredConfig<D>, runtime: Runtime) -> Result<Self> {
         let device = D::open(options.options, runtime).await?;
         Ok(Self {
             device,
@@ -149,7 +149,7 @@ impl<D> Dev for Monitored<D>
 where
     D: Dev,
 {
-    type Options = MonitoredOptions<D>;
+    type Config = MonitoredConfig<D>;
 
     fn capacity(&self) -> usize {
         self.device.capacity()
@@ -159,8 +159,8 @@ where
         self.device.region_size()
     }
 
-    async fn open(options: Self::Options, runtime: Runtime) -> Result<Self> {
-        Self::open(options, runtime).await
+    async fn open(config: Self::Config, runtime: Runtime) -> Result<Self> {
+        Self::open(config, runtime).await
     }
 
     async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {

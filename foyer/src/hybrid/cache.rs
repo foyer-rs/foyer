@@ -551,11 +551,10 @@ mod tests {
             .memory(4 * MB)
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage(Engine::Large)
-            .with_device_config(
-                DirectFsDeviceOptionsBuilder::new(dir)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
-                    .with_file_size(MB)
-                    .build(),
+                    .with_file_size(MB),
             )
             .build()
             .await
@@ -575,11 +574,10 @@ mod tests {
             .memory(4 * MB)
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage(Engine::Large)
-            .with_device_config(
-                DirectFsDeviceOptionsBuilder::new(dir)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
-                    .with_file_size(MB)
-                    .build(),
+                    .with_file_size(MB),
             )
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
             .build()

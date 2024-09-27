@@ -307,11 +307,11 @@ mod tests {
     use super::*;
     use crate::{
         device::{
-            monitor::{Monitored, MonitoredOptions},
+            monitor::{Monitored, MonitoredConfig},
             Dev,
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceOptions,
+        DevExt, DirectFsDeviceConfig,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
@@ -323,8 +323,8 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
-            MonitoredOptions {
-                options: DirectFsDeviceOptions {
+            MonitoredConfig {
+                options: DirectFsDeviceConfig {
                     dir: dir.as_ref().into(),
                     capacity: ByteSize::kib(64).as_u64() as _,
                     file_size: ByteSize::kib(16).as_u64() as _,
