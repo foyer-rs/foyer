@@ -34,9 +34,9 @@ use analyze::{analyze, monitor, Metrics};
 use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use foyer::{
-    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, Engine, FifoConfig, FifoPicker,
-    HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker,
-    RecoverMode, RuntimeConfig, S3FifoConfig, SmallEngineOptions, TokioRuntimeConfig, TracingConfig,
+    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
+    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
+    RuntimeConfig, S3FifoConfig, SmallEngineOptions, TokioRuntimeConfig, TracingConfig,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -462,17 +462,15 @@ async fn benchmark(args: Args) {
         .storage(args.engine);
 
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
-        (Some(file), None) => builder.with_device_config(
-            DirectFileDeviceOptionsBuilder::new(file)
+        (Some(file), None) => builder.with_device_options(
+            DirectFileDeviceOptions::new(file)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _)
-                .build(),
+                .with_region_size(args.region_size.as_u64() as _),
         ),
-        (None, Some(dir)) => builder.with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir)
+        (None, Some(dir)) => builder.with_device_options(
+            DirectFsDeviceOptions::new(dir)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _)
-                .build(),
+                .with_file_size(args.region_size.as_u64() as _),
         ),
         _ => unreachable!(),
     };

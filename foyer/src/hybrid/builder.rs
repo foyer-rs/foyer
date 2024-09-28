@@ -22,7 +22,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
-    AdmissionPicker, Compression, DeviceConfig, Engine, LargeEngineOptions, RecoverMode, RuntimeConfig,
+    AdmissionPicker, Compression, DeviceOptions, Engine, LargeEngineOptions, RecoverMode, RuntimeConfig,
     SmallEngineOptions, StoreBuilder,
 };
 
@@ -204,9 +204,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set device config for the disk cache store.
-    pub fn with_device_config(self, device_config: impl Into<DeviceConfig>) -> Self {
-        let builder = self.builder.with_device_config(device_config);
+    /// Set device options for the disk cache store.
+    pub fn with_device_options(self, device_options: impl Into<DeviceOptions>) -> Self {
+        let builder = self.builder.with_device_options(device_options);
         Self {
             name: self.name,
             tracing_config: self.tracing_config,

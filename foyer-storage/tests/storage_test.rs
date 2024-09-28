@@ -19,7 +19,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use ahash::RandomState;
 use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
 use foyer_storage::{
-    test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, Engine, LargeEngineOptions, StoreBuilder,
+    test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
 };
 
 const KB: usize = 1024;
@@ -110,11 +110,10 @@ fn basic(
 ) -> StoreBuilder<u64, Vec<u8>> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new(memory.clone(), Engine::Large)
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(path)
+        .with_device_options(
+            DirectFsDeviceOptions::new(path)
                 .with_capacity(4 * MB)
-                .with_file_size(MB)
-                .build(),
+                .with_file_size(MB),
         )
         .with_admission_picker(recorder.clone())
         .with_flush(true)

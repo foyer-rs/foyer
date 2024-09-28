@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
+    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
     RateLimitPicker, RecoverMode, RuntimeConfig, SmallEngineOptions, TokioRuntimeConfig, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
@@ -36,11 +36,10 @@ async fn main() -> Result<()> {
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
         .storage(Engine::Mixed(0.1))
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
+        .with_device_options(
+            DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
-                .build(),
+                .with_file_size(4 * 1024 * 1024),
         )
         .with_flush(true)
         .with_recover_mode(RecoverMode::Quiet)

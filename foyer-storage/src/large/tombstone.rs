@@ -25,12 +25,12 @@ use tokio::sync::Mutex;
 
 use crate::{
     device::{
-        direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
-        monitor::{Monitored, MonitoredOptions},
+        direct_file::DirectFileDevice,
+        monitor::{Monitored, MonitoredConfig},
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    IoBytesMut, Runtime,
+    DirectFileDeviceOptions, IoBytesMut, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -136,11 +136,11 @@ impl TombstoneLog {
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
         let device = Monitored::open(
-            MonitoredOptions {
-                options: DirectFileDeviceOptionsBuilder::new(path)
+            MonitoredConfig {
+                config: DirectFileDeviceOptions::new(path)
                     .with_region_size(align)
                     .with_capacity(capacity)
-                    .build(),
+                    .into(),
                 metrics,
             },
             runtime,
@@ -312,7 +312,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
+    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions};
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {
@@ -322,9 +322,9 @@ mod tests {
 
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
         let device = DirectFsDevice::open(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
+            DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(4 * 1024 * 1024)
-                .build(),
+                .into(),
             runtime.clone(),
         )
         .await

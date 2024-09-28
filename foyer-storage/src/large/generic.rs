@@ -488,20 +488,18 @@ mod tests {
     use std::{fs::File, path::Path};
 
     use ahash::RandomState;
+    use bytesize::ByteSize;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
     use tokio::runtime::Handle;
 
     use super::*;
     use crate::{
-        device::{
-            direct_fs::DirectFsDeviceOptions,
-            monitor::{Monitored, MonitoredOptions},
-        },
+        device::monitor::{Monitored, MonitoredConfig},
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        TombstoneLogConfigBuilder,
+        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -515,13 +513,11 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
-            MonitoredOptions {
-                options: DirectFsDeviceOptions {
-                    dir: dir.as_ref().into(),
-                    capacity: 64 * KB,
-                    file_size: 16 * KB,
-                }
-                .into(),
+            MonitoredConfig {
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
                 metrics: Arc::new(Metrics::new("test")),
             },
             runtime,

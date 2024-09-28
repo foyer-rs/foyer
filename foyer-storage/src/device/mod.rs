@@ -21,6 +21,8 @@ pub mod monitor;
 use std::{fmt::Debug, future::Future};
 
 use allocator::AlignedAllocator;
+use direct_file::DirectFileDeviceConfig;
+use direct_fs::DirectFsDeviceConfig;
 use monitor::Monitored;
 
 use crate::{
@@ -33,18 +35,16 @@ pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new()
 
 pub type RegionId = u32;
 
-/// Options for the device.
-pub trait DevOptions: Send + Sync + 'static + Debug + Clone {
-    /// Verify the correctness of the options.
-    fn verify(&self) -> Result<()>;
-}
+/// Config for the device.
+pub trait DevConfig: Send + Sync + 'static + Debug {}
+impl<T: Send + Sync + 'static + Debug> DevConfig for T {}
 
 /// [`Dev`] represents 4K aligned block device.
 ///
 /// Both i/o block and i/o buffer must be aligned to 4K.
 pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
-    /// Options for the device.
-    type Options: DevOptions;
+    /// Config for the device.
+    type Config: DevConfig;
 
     /// The capacity of the device, must be 4K aligned.
     fn capacity(&self) -> usize;
@@ -53,9 +53,9 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
     fn region_size(&self) -> usize;
 
     // TODO(MrCroxx): Refactor the builder.
-    /// Open the device with the given options.
+    /// Open the device with the given config.
     #[must_use]
-    fn open(options: Self::Options, runtime: Runtime) -> impl Future<Output = Result<Self>> + Send;
+    fn open(config: Self::Config, runtime: Runtime) -> impl Future<Output = Result<Self>> + Send;
 
     /// Write API for the device.
     #[must_use]
@@ -86,29 +86,20 @@ pub trait DevExt: Dev {
 impl<T> DevExt for T where T: Dev {}
 
 #[derive(Debug, Clone)]
-pub enum DeviceOptions {
-    DirectFile(DirectFileDeviceOptions),
-    DirectFs(DirectFsDeviceOptions),
+pub enum DeviceConfig {
+    DirectFile(DirectFileDeviceConfig),
+    DirectFs(DirectFsDeviceConfig),
 }
 
-impl From<DirectFileDeviceOptions> for DeviceOptions {
-    fn from(value: DirectFileDeviceOptions) -> Self {
-        Self::DirectFile(value)
+impl From<DirectFileDeviceOptions> for DeviceConfig {
+    fn from(options: DirectFileDeviceOptions) -> Self {
+        Self::DirectFile(options.into())
     }
 }
 
-impl From<DirectFsDeviceOptions> for DeviceOptions {
-    fn from(value: DirectFsDeviceOptions) -> Self {
-        Self::DirectFs(value)
-    }
-}
-
-impl DevOptions for DeviceOptions {
-    fn verify(&self) -> Result<()> {
-        match self {
-            DeviceOptions::DirectFile(dev) => dev.verify(),
-            DeviceOptions::DirectFs(dev) => dev.verify(),
-        }
+impl From<DirectFsDeviceOptions> for DeviceConfig {
+    fn from(options: DirectFsDeviceOptions) -> Self {
+        Self::DirectFs(options.into())
     }
 }
 
@@ -119,7 +110,7 @@ pub enum Device {
 }
 
 impl Dev for Device {
-    type Options = DeviceOptions;
+    type Config = DeviceConfig;
 
     fn capacity(&self) -> usize {
         match self {
@@ -135,10 +126,10 @@ impl Dev for Device {
         }
     }
 
-    async fn open(options: Self::Options, runtime: Runtime) -> Result<Self> {
+    async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         match options {
-            DeviceOptions::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts, runtime).await?)),
-            DeviceOptions::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts, runtime).await?)),
+            DeviceConfig::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts, runtime).await?)),
+            DeviceConfig::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts, runtime).await?)),
         }
     }
 

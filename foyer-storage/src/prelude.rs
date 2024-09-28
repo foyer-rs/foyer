@@ -16,10 +16,10 @@ pub use crate::{
     compress::Compression,
     device::{
         bytes::{IoBuffer, IoBytes, IoBytesMut},
-        direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
-        direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
+        direct_file::{DirectFileDevice, DirectFileDeviceOptions},
+        direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
-        Dev, DevExt, DevOptions,
+        Dev, DevConfig, DevExt,
     },
     error::{Error, Result},
     large::{
@@ -34,7 +34,7 @@ pub use crate::{
     statistics::Statistics,
     storage::{either::Order, Storage},
     store::{
-        DeviceConfig, Engine, LargeEngineOptions, RuntimeConfig, SmallEngineOptions, Store, StoreBuilder,
+        DeviceOptions, Engine, LargeEngineOptions, RuntimeConfig, SmallEngineOptions, Store, StoreBuilder,
         TokioRuntimeConfig,
     },
 };

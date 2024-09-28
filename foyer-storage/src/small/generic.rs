@@ -307,7 +307,7 @@ mod tests {
     use super::*;
     use crate::{
         device::{
-            monitor::{Monitored, MonitoredOptions},
+            monitor::{Monitored, MonitoredConfig},
             Dev,
         },
         serde::EntrySerializer,
@@ -323,13 +323,11 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
-            MonitoredOptions {
-                options: DirectFsDeviceOptions {
-                    dir: dir.as_ref().into(),
-                    capacity: ByteSize::kib(64).as_u64() as _,
-                    file_size: ByteSize::kib(16).as_u64() as _,
-                }
-                .into(),
+            MonitoredConfig {
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
                 metrics: Arc::new(Metrics::new("test")),
             },
             runtime,
