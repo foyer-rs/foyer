@@ -121,6 +121,11 @@ where
 
         let pos = self.len;
 
+        if pos + EntryHeader::serialized_len() >= self.buffer.len() {
+            // Only handle start position overflow. End position overflow will be handled by serde.
+            return false;
+        }
+
         let info = match EntrySerializer::serialize(
             entry.key(),
             entry.value(),
