@@ -18,7 +18,7 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Instant,
@@ -75,6 +75,7 @@ where
     pub flushers: usize,
     pub reclaimers: usize,
     pub buffer_pool_size: usize,
+    pub submit_queue_size_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -102,6 +103,7 @@ where
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
@@ -144,6 +146,9 @@ where
 
     flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
+
+    submit_queue_size: Arc<AtomicUsize>,
+    submit_queue_size_threshold: usize,
 
     statistics: Arc<Statistics>,
 
@@ -213,6 +218,7 @@ where
             metrics.clone(),
         );
         let sequence = AtomicSequence::default();
+        let submit_queue_size = Arc::<AtomicUsize>::default();
 
         RecoverRunner::run(
             &config,
@@ -232,6 +238,7 @@ where
                 indexer.clone(),
                 region_manager.clone(),
                 device.clone(),
+                submit_queue_size.clone(),
                 tombstone_log.clone(),
                 stats.clone(),
                 metrics.clone(),
@@ -262,6 +269,8 @@ where
                 region_manager,
                 flushers,
                 reclaimers,
+                submit_queue_size,
+                submit_queue_size_threshold: config.submit_queue_size_threshold,
                 statistics: stats,
                 flush: config.flush,
                 sequence,
@@ -294,7 +303,17 @@ where
             return;
         }
 
+        if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
+            tracing::warn!(
+                "[lodc] {} {}",
+                "submit queue overflow, new entry ignored.",
+                "Hint: set an appropriate rate limiter as the admission picker"
+            );
+            return;
+        }
+
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             entry,
             estimated_size,
@@ -553,6 +572,7 @@ mod tests {
             reinsertion_picker,
             tombstone_log_config: None,
             buffer_pool_size: 16 * 1024 * 1024,
+            submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
@@ -582,6 +602,7 @@ mod tests {
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
+            submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
