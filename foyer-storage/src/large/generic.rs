@@ -307,7 +307,7 @@ where
             tracing::warn!(
                 "[lodc] {} {}",
                 "submit queue overflow, new entry ignored.",
-                "Hint: set an appropriate rate limiter as the admission picker"
+                "Hint: set an appropriate rate limiter as the admission picker or scale out flushers."
             );
             return;
         }
