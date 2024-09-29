@@ -15,7 +15,10 @@
 use std::{
     fmt::Debug,
     future::Future,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use foyer_common::{
@@ -103,6 +106,7 @@ where
     S: HashBuilder + Debug,
 {
     tx: flume::Sender<Submission<K, V, S>>,
+    submit_queue_size: Arc<AtomicUsize>,
 
     metrics: Arc<Metrics>,
 }
@@ -116,6 +120,7 @@ where
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
+            submit_queue_size: self.submit_queue_size.clone(),
             metrics: self.metrics.clone(),
         }
     }
@@ -133,6 +138,7 @@ where
         indexer: Indexer,
         region_manager: RegionManager,
         device: MonitoredDevice,
+        submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
@@ -153,6 +159,7 @@ where
             rx,
             batch,
             flight: Arc::new(Semaphore::new(1)),
+            submit_queue_size: submit_queue_size.clone(),
             region_manager,
             indexer,
             tombstone_log,
@@ -168,11 +175,18 @@ where
             }
         });
 
-        Ok(Self { tx, metrics })
+        Ok(Self {
+            tx,
+            submit_queue_size,
+            metrics,
+        })
     }
 
     pub fn submit(&self, submission: Submission<K, V, S>) {
         tracing::trace!("[lodc flusher]: submit task: {submission:?}");
+        if let Submission::CacheEntry { estimated_size, .. } = &submission {
+            self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
+        }
         if let Err(e) = self.tx.send(submission) {
             tracing::error!("[lodc flusher]: error raised when submitting task, error: {e}");
         }
@@ -196,6 +210,7 @@ where
     rx: flume::Receiver<Submission<K, V, S>>,
     batch: BatchMut<K, V, S>,
     flight: Arc<Semaphore>,
+    submit_queue_size: Arc<AtomicUsize>,
 
     region_manager: RegionManager,
     indexer: Indexer,
@@ -245,9 +260,13 @@ where
         match submission {
             Submission::CacheEntry {
                 entry,
-                estimated_size: _,
+                estimated_size,
                 sequence,
-            } => report(self.batch.entry(entry, &self.compression, sequence)),
+            } => {
+                report(self.batch.entry(entry, &self.compression, sequence));
+                self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
+            }
+
             Submission::Tombstone { tombstone, stats } => self.batch.tombstone(tombstone, stats),
             Submission::Reinsertion { reinsertion } => report(self.batch.reinsertion(&reinsertion)),
             Submission::Wait { tx } => self.batch.wait(tx),
