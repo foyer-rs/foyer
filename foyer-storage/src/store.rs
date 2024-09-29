@@ -558,6 +558,7 @@ where
                                 reinsertion_picker: self.large.reinsertion_picker,
                                 tombstone_log_config: self.large.tombstone_log_config,
                                 buffer_pool_size: self.large.buffer_pool_size,
+                                submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
                                 statistics: statistics.clone(),
                                 runtime,
                                 marker: PhantomData,
@@ -614,6 +615,7 @@ where
                                     reinsertion_picker: self.large.reinsertion_picker,
                                     tombstone_log_config: self.large.tombstone_log_config,
                                     buffer_pool_size: self.large.buffer_pool_size,
+                                    submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
@@ -656,6 +658,7 @@ where
     flushers: usize,
     reclaimers: usize,
     buffer_pool_size: usize,
+    submit_queue_size_threshold: Option<usize>,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -689,6 +692,7 @@ where
             flushers: 1,
             reclaimers: 1,
             buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
+            submit_queue_size_threshold: None,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
@@ -741,6 +745,17 @@ where
     ///
     /// Default: 16 MiB.
     pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
+        self.buffer_pool_size = buffer_pool_size;
+        self
+    }
+
+    /// Set the submit queue size threshold.
+    ///
+    /// If the total entry estimated size in the submit queue exceeds the threshold, the further entries will be
+    /// ignored.
+    ///
+    /// Default: `buffer_pool_size`` * 2.
+    pub fn with_submit_queue_size_threshold(mut self, buffer_pool_size: usize) -> Self {
         self.buffer_pool_size = buffer_pool_size;
         self
     }
