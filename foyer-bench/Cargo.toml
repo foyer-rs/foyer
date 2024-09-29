@@ -36,12 +36,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
+default = ["jemalloc", "jeprof", "mtrace"]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
 jemalloc = ["tikv-jemallocator"]
+jeprof = ["tikv-jemallocator/profiling"]
 mtrace = ["foyer/mtrace", "fastrace-jaeger", "fastrace"]
