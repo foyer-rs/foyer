@@ -33,7 +33,7 @@ use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
     metrics::Metrics,
-    tracing::{InRootSpan, TracingConfig},
+    tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
 use foyer_storage::{DeviceStats, Store};
@@ -130,23 +130,24 @@ where
         name: String,
         memory: Cache<K, V, S>,
         storage: Store<K, V, S>,
-        tracing_config: TracingConfig,
+        tracing_options: TracingOptions,
     ) -> Self {
         let metrics = Arc::new(Metrics::new(&name));
-        let tracing_config = Arc::new(tracing_config);
-        let trace = Arc::new(AtomicBool::new(false));
+        let tracing_config = Arc::<TracingConfig>::default();
+        tracing_config.update(tracing_options);
+        let tracing = Arc::new(AtomicBool::new(false));
         Self {
             memory,
             storage,
             metrics,
             tracing_config,
-            tracing: trace,
+            tracing,
         }
     }
 
-    /// Access the trace config.
-    pub fn tracing_config(&self) -> &TracingConfig {
-        &self.tracing_config
+    /// Access the trace config with options.
+    pub fn update_tracing_options(&self, options: TracingOptions) {
+        self.tracing_config.update(options);
     }
 
     /// Access the in-memory cache.

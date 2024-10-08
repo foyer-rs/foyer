@@ -18,7 +18,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeConfig, SmallEngineOptions, TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -45,12 +45,12 @@ async fn main() -> Result<()> {
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)
-        .with_runtime_config(RuntimeConfig::Separated {
-            read_runtime_config: TokioRuntimeConfig {
+        .with_runtime_options(RuntimeOptions::Separated {
+            read_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
-            write_runtime_config: TokioRuntimeConfig {
+            write_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
