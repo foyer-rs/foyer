@@ -53,4 +53,4 @@ foyer-storage = { version = "0.12.0-dev", path = "foyer-storage" }
 foyer = { version = "0.12.0-dev", path = "foyer" }
 
 [profile.release]
-debug = true
+debug = "full"
