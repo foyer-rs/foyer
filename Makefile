@@ -20,7 +20,7 @@ check-all:
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features sanity
-	cargo clippy --all-targets --features mtrace
+	cargo clippy --all-targets --features tracing
 	cargo clippy --all-targets
 
 test:
@@ -42,8 +42,8 @@ example:
 	cargo run --example hybrid
 	cargo run --example hybrid_full
 	cargo run --example event_listener
-	cargo run --features "mtrace,jaeger" --example tail_based_tracing
-	cargo run --features "mtrace,ot" --example tail_based_tracing
+	cargo run --features "tracing,jaeger" --example tail_based_tracing
+	cargo run --features "tracing,ot" --example tail_based_tracing
 
 full: check-all test-all example udeps
 

@@ -38,9 +38,9 @@ strict_assertions = [
     "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
-mtrace = [
+tracing = [
     "fastrace/enable",
-    "foyer-common/mtrace",
-    "foyer-memory/mtrace",
-    "foyer-storage/mtrace",
+    "foyer-common/tracing",
+    "foyer-memory/tracing",
+    "foyer-storage/tracing",
 ]
