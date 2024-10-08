@@ -39,11 +39,11 @@ zipf = "7"
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
-default = ["jemalloc", "jeprof"]
+default = ["jemalloc"]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
 jemalloc = ["tikv-jemallocator"]
-jeprof = ["tikv-jemallocator/profiling"]
+jeprof = ["jemalloc", "tikv-jemallocator/profiling"]
 mtrace = ["foyer/mtrace", "fastrace-jaeger", "fastrace"]
