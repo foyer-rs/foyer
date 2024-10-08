@@ -351,7 +351,7 @@ date: 2023-05-12T11:02:09+08:00
 
 ### Changes
 
-- Make `HybridCache` clonable.
+- Make `HybridCache` cloneable.
 
 ## 2024-04-27
 
@@ -566,7 +566,7 @@ date: 2023-05-12T11:02:09+08:00
 
 ### Changes
 
-- Make eviction config clonable.
+- Make eviction config cloneable.
 
 ## 2024-03-13
 
