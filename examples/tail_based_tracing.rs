@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder, TracingOptions};
 
 #[cfg(feature = "jaeger")]
 fn init_jaeger_exporter() {
@@ -76,9 +76,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     hybrid.enable_tracing();
-    hybrid
-        .tracing_config()
-        .set_record_hybrid_get_threshold(Duration::from_millis(10));
+    hybrid.update_tracing_options(TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)));
 
     hybrid.insert(42, "The answer to life, the universe, and everything.".to_string());
     assert_eq!(
