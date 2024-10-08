@@ -1,4 +1,4 @@
-name: License Checker
+name: License Check
 
 on:
   push:
@@ -8,7 +8,8 @@ on:
   pull_request:
     branches: 
     - main
-    - "v*.*.*-rc"
+    - "release-*.*"
+    
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
