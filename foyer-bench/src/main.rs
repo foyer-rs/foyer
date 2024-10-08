@@ -479,7 +479,7 @@ async fn benchmark(args: Args) {
         .with_flush(args.flush)
         .with_recover_mode(args.recover_mode)
         .with_compression(args.compression)
-        .with_runtime_config(match args.runtime.as_str() {
+        .with_runtime_options(match args.runtime.as_str() {
             "disabled" => RuntimeOptions::Disabled,
             "unified" => RuntimeOptions::Unified(TokioRuntimeOptions {
                 worker_threads: args.runtime_worker_threads,

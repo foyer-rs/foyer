@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)
-        .with_runtime_config(RuntimeOptions::Separated {
+        .with_runtime_options(RuntimeOptions::Separated {
             read_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,

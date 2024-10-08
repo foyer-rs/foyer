@@ -443,8 +443,8 @@ where
     }
 
     /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_config(mut self, runtime_config: RuntimeOptions) -> Self {
-        self.runtime_config = runtime_config;
+    pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
+        self.runtime_config = runtime_options;
         self
     }
 
