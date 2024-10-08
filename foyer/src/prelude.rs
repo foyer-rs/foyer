@@ -17,7 +17,7 @@ pub use common::{
     code::{Key, StorageKey, StorageValue, Value},
     event::EventListener,
     range::RangeBoundsExt,
-    tracing::TracingConfig,
+    tracing::TracingOptions,
 };
 pub use memory::{
     Cache, CacheBuilder, CacheContext, CacheEntry, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
@@ -27,7 +27,7 @@ pub use storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevConfig, DevExt, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine, EvictionPicker, FifoPicker,
     InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime,
-    RuntimeConfig, SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    RuntimeOptions, SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 
 pub use crate::hybrid::{

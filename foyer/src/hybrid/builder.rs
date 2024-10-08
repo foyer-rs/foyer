@@ -18,11 +18,11 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
-    tracing::TracingConfig,
+    tracing::TracingOptions,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
-    AdmissionPicker, Compression, DeviceOptions, Engine, LargeEngineOptions, RecoverMode, RuntimeConfig,
+    AdmissionPicker, Compression, DeviceOptions, Engine, LargeEngineOptions, RecoverMode, RuntimeOptions,
     SmallEngineOptions, StoreBuilder,
 };
 
@@ -32,7 +32,7 @@ use crate::HybridCache;
 pub struct HybridCacheBuilder<K, V> {
     name: String,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
-    tracing_config: TracingConfig,
+    tracing_options: TracingOptions,
 }
 
 impl<K, V> Default for HybridCacheBuilder<K, V> {
@@ -47,7 +47,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
         Self {
             name: "foyer".to_string(),
             event_listener: None,
-            tracing_config: TracingConfig::default(),
+            tracing_options: TracingOptions::default(),
         }
     }
 
@@ -69,11 +69,11 @@ impl<K, V> HybridCacheBuilder<K, V> {
         self
     }
 
-    /// Set tracing config.
+    /// Set tracing options.
     ///
     /// Default: Only operations over 1s will be recorded.
-    pub fn with_tracing_config(mut self, tracing_config: TracingConfig) -> Self {
-        self.tracing_config = tracing_config;
+    pub fn with_tracing_options(mut self, tracing_options: TracingOptions) -> Self {
+        self.tracing_options = tracing_options;
         self
     }
 
@@ -90,7 +90,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
         HybridCacheBuilderPhaseMemory {
             builder,
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
         }
     }
 }
@@ -103,7 +103,7 @@ where
     S: HashBuilder + Debug,
 {
     name: String,
-    tracing_config: TracingConfig,
+    tracing_options: TracingOptions,
     builder: CacheBuilder<K, V, S>,
 }
 
@@ -119,7 +119,7 @@ where
         let builder = self.builder.with_shards(shards);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -131,7 +131,7 @@ where
         let builder = self.builder.with_eviction_config(eviction_config.into());
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -145,7 +145,7 @@ where
         let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -158,7 +158,7 @@ where
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -168,7 +168,7 @@ where
         let builder = self.builder.with_weighter(weighter);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -179,7 +179,7 @@ where
         HybridCacheBuilderPhaseStorage {
             builder: StoreBuilder::new(memory.clone(), engine).with_name(&self.name),
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory,
         }
     }
@@ -193,7 +193,7 @@ where
     S: HashBuilder + Debug,
 {
     name: String,
-    tracing_config: TracingConfig,
+    tracing_options: TracingOptions,
     memory: Cache<K, V, S>,
     builder: StoreBuilder<K, V, S>,
 }
@@ -209,7 +209,7 @@ where
         let builder = self.builder.with_device_options(device_options);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -222,7 +222,7 @@ where
         let builder = self.builder.with_flush(flush);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -237,7 +237,7 @@ where
         let builder = self.builder.with_recover_mode(recover_mode);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -252,7 +252,7 @@ where
         let builder = self.builder.with_admission_picker(admission_picker);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -265,18 +265,18 @@ where
         let builder = self.builder.with_compression(compression);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
     }
 
     /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_config(self, runtime_config: RuntimeConfig) -> Self {
+    pub fn with_runtime_config(self, runtime_config: RuntimeOptions) -> Self {
         let builder = self.builder.with_runtime_config(runtime_config);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -289,7 +289,7 @@ where
         let builder = self.builder.with_large_object_disk_cache_options(options);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -302,7 +302,7 @@ where
         let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
-            tracing_config: self.tracing_config,
+            tracing_options: self.tracing_options,
             memory: self.memory,
             builder,
         }
@@ -311,6 +311,6 @@ where
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let storage = self.builder.build().await?;
-        Ok(HybridCache::new(self.name, self.memory, storage, self.tracing_config))
+        Ok(HybridCache::new(self.name, self.memory, storage, self.tracing_options))
     }
 }

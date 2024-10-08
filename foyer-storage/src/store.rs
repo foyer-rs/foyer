@@ -304,7 +304,7 @@ impl FromStr for Engine {
 
 /// Tokio runtime configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TokioRuntimeConfig {
+pub struct TokioRuntimeOptions {
     /// Dedicated runtime worker threads.
     ///
     /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
@@ -321,19 +321,19 @@ pub struct TokioRuntimeConfig {
     pub max_blocking_threads: usize,
 }
 
-/// Configuration for the dedicated runtime.
+/// Options for the dedicated runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RuntimeConfig {
+pub enum RuntimeOptions {
     /// Disable dedicated runtime. The runtime which foyer is built on will be used.
     Disabled,
     /// Use unified dedicated runtime for both reads and writes.
-    Unified(TokioRuntimeConfig),
+    Unified(TokioRuntimeOptions),
     /// Use separated dedicated runtime for reads or writes.
     Separated {
         /// Dedicated runtime for reads.
-        read_runtime_config: TokioRuntimeConfig,
+        read_runtime_options: TokioRuntimeOptions,
         /// Dedicated runtime for both foreground and background writes
-        write_runtime_config: TokioRuntimeConfig,
+        write_runtime_options: TokioRuntimeOptions,
     },
 }
 
@@ -349,7 +349,7 @@ where
 
     device_options: DeviceOptions,
     engine: Engine,
-    runtime_config: RuntimeConfig,
+    runtime_config: RuntimeOptions,
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     compression: Compression,
@@ -378,7 +378,7 @@ where
 
             device_options: DeviceOptions::None,
             engine,
-            runtime_config: RuntimeConfig::Disabled,
+            runtime_config: RuntimeOptions::Disabled,
 
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),
             compression: Compression::None,
@@ -443,7 +443,7 @@ where
     }
 
     /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_config(mut self, runtime_config: RuntimeConfig) -> Self {
+    pub fn with_runtime_config(mut self, runtime_config: RuntimeOptions) -> Self {
         self.runtime_config = runtime_config;
         self
     }
@@ -480,7 +480,7 @@ where
 
         let compression = self.compression;
 
-        let build_runtime = |config: &TokioRuntimeConfig, suffix: &str| {
+        let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             #[cfg(not(madsim))]
             if config.worker_threads != 0 {
@@ -498,17 +498,17 @@ where
 
         let user_runtime_handle = Handle::current();
         let (read_runtime, write_runtime) = match self.runtime_config {
-            RuntimeConfig::Disabled => {
+            RuntimeOptions::Disabled => {
                 tracing::warn!("[store]: Dedicated runtime is disabled");
                 (None, None)
             }
-            RuntimeConfig::Unified(runtime_config) => {
+            RuntimeOptions::Unified(runtime_config) => {
                 let runtime = build_runtime(&runtime_config, "unified")?;
                 (Some(runtime.clone()), Some(runtime.clone()))
             }
-            RuntimeConfig::Separated {
-                read_runtime_config,
-                write_runtime_config,
+            RuntimeOptions::Separated {
+                read_runtime_options: read_runtime_config,
+                write_runtime_options: write_runtime_config,
             } => {
                 let read_runtime = build_runtime(&read_runtime_config, "read")?;
                 let write_runtime = build_runtime(&write_runtime_config, "write")?;

@@ -36,7 +36,7 @@ use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use foyer::{
     Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
     HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfig, S3FifoConfig, SmallEngineOptions, TokioRuntimeConfig, TracingConfig,
+    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
 };
 use futures::future::join_all;
 use itertools::Itertools;
@@ -245,20 +245,20 @@ pub struct Args {
     set_cache_capacity: usize,
 
     /// Record insert trace threshold. Only effective with "tracing" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_insert_us: usize,
+    #[arg(long, default_value = "1s")]
+    trace_insert: humantime::Duration,
     /// Record get trace threshold. Only effective with "tracing" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_get_us: usize,
+    #[arg(long, default_value = "1s")]
+    trace_get: humantime::Duration,
     /// Record obtain trace threshold. Only effective with "tracing" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_obtain_us: usize,
+    #[arg(long, default_value = "1s")]
+    trace_obtain: humantime::Duration,
     /// Record remove trace threshold. Only effective with "tracing" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_remove_us: usize,
+    #[arg(long, default_value = "1s")]
+    trace_remove: humantime::Duration,
     /// Record fetch trace threshold. Only effective with "tracing" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_fetch_us: usize,
+    #[arg(long, default_value = "1s")]
+    trace_fetch: humantime::Duration,
 }
 
 #[derive(Debug)]
@@ -433,15 +433,15 @@ async fn benchmark(args: Args) {
             .unwrap();
     }
 
-    let tracing_config = TracingConfig::default();
-    tracing_config.set_record_hybrid_insert_threshold(Duration::from_micros(args.trace_insert_us as _));
-    tracing_config.set_record_hybrid_get_threshold(Duration::from_micros(args.trace_get_us as _));
-    tracing_config.set_record_hybrid_obtain_threshold(Duration::from_micros(args.trace_obtain_us as _));
-    tracing_config.set_record_hybrid_remove_threshold(Duration::from_micros(args.trace_remove_us as _));
-    tracing_config.set_record_hybrid_fetch_threshold(Duration::from_micros(args.trace_fetch_us as _));
+    let tracing_options = TracingOptions::new()
+        .with_record_hybrid_insert_threshold(args.trace_insert.into())
+        .with_record_hybrid_get_threshold(args.trace_get.into())
+        .with_record_hybrid_obtain_threshold(args.trace_obtain.into())
+        .with_record_hybrid_remove_threshold(args.trace_remove.into())
+        .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
     let builder = HybridCacheBuilder::new()
-        .with_tracing_config(tracing_config)
+        .with_tracing_options(tracing_options)
         .memory(args.mem.as_u64() as _)
         .with_shards(args.shards);
 
@@ -480,17 +480,17 @@ async fn benchmark(args: Args) {
         .with_recover_mode(args.recover_mode)
         .with_compression(args.compression)
         .with_runtime_config(match args.runtime.as_str() {
-            "disabled" => RuntimeConfig::Disabled,
-            "unified" => RuntimeConfig::Unified(TokioRuntimeConfig {
+            "disabled" => RuntimeOptions::Disabled,
+            "unified" => RuntimeOptions::Unified(TokioRuntimeOptions {
                 worker_threads: args.runtime_worker_threads,
                 max_blocking_threads: args.runtime_max_blocking_threads,
             }),
-            "separated" => RuntimeConfig::Separated {
-                read_runtime_config: TokioRuntimeConfig {
+            "separated" => RuntimeOptions::Separated {
+                read_runtime_options: TokioRuntimeOptions {
                     worker_threads: args.read_runtime_worker_threads,
                     max_blocking_threads: args.read_runtime_max_blocking_threads,
                 },
-                write_runtime_config: TokioRuntimeConfig {
+                write_runtime_options: TokioRuntimeOptions {
                     worker_threads: args.write_runtime_worker_threads,
                     max_blocking_threads: args.write_runtime_max_blocking_threads,
                 },

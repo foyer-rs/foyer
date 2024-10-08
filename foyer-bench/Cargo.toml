@@ -22,6 +22,7 @@ fastrace-jaeger = { workspace = true, optional = true }
 foyer = { workspace = true }
 futures = "0.3"
 hdrhistogram = "7"
+humantime = "2"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.15"
