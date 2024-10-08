@@ -67,7 +67,7 @@ impl From<Runtime> for BackgroundShutdownRuntime {
     }
 }
 
-/// A non-clonable runtime handle.
+/// A non-cloneable runtime handle.
 #[derive(Debug)]
 pub struct SingletonHandle(Handle);
 

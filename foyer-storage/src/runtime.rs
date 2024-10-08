@@ -27,7 +27,7 @@ struct RuntimeInner {
     user_runtime_handle: SingletonHandle,
 }
 
-/// [`Runtime`] holds the runtime reference and non-clonable handles to prevent handle usage after runtime shutdown.
+/// [`Runtime`] holds the runtime reference and non-cloneable handles to prevent handle usage after runtime shutdown.
 #[derive(Debug, Clone)]
 pub struct Runtime {
     inner: Arc<RuntimeInner>,
@@ -72,17 +72,17 @@ impl Runtime {
         }
     }
 
-    /// Get the non-clonable read runtime handle.
+    /// Get the non-cloneable read runtime handle.
     pub fn read(&self) -> &SingletonHandle {
         &self.inner.read_runtime_handle
     }
 
-    /// Get the non-clonable write runtime handle.
+    /// Get the non-cloneable write runtime handle.
     pub fn write(&self) -> &SingletonHandle {
         &self.inner.write_runtime_handle
     }
 
-    /// Get the non-clonable user runtime handle.
+    /// Get the non-cloneable user runtime handle.
     pub fn user(&self) -> &SingletonHandle {
         &self.inner.user_runtime_handle
     }
