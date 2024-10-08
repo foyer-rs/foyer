@@ -20,7 +20,7 @@ fastrace = { workspace = true }
 foyer-common = { workspace = true }
 foyer-intrusive = { workspace = true }
 futures = "0.3"
-hashbrown = "0.14"
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 parking_lot = "0.12"
 pin-project = "1"
@@ -43,7 +43,7 @@ strict_assertions = [
     "foyer-intrusive/strict_assertions",
 ]
 sanity = ["strict_assertions"]
-mtrace = ["fastrace/enable", "foyer-common/mtrace"]
+tracing = ["fastrace/enable", "foyer-common/tracing"]
 
 [[bench]]
 name = "bench_hit_ratio"

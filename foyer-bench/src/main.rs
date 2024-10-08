@@ -244,19 +244,19 @@ pub struct Args {
     #[arg(long, default_value_t = 64)]
     set_cache_capacity: usize,
 
-    /// Record insert trace threshold. Only effective with "mtrace" feature.
+    /// Record insert trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_insert_us: usize,
-    /// Record get trace threshold. Only effective with "mtrace" feature.
+    /// Record get trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_get_us: usize,
-    /// Record obtain trace threshold. Only effective with "mtrace" feature.
+    /// Record obtain trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_obtain_us: usize,
-    /// Record remove trace threshold. Only effective with "mtrace" feature.
+    /// Record remove trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_remove_us: usize,
-    /// Record fetch trace threshold. Only effective with "mtrace" feature.
+    /// Record fetch trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value_t = 1000 * 1000)]
     trace_fetch_us: usize,
 }
@@ -350,14 +350,14 @@ fn setup() {
     console_subscriber::init();
 }
 
-#[cfg(feature = "mtrace")]
+#[cfg(feature = "tracing")]
 fn setup() {
     use fastrace::collector::Config;
     let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
-#[cfg(not(any(feature = "tokio-console", feature = "mtrace")))]
+#[cfg(not(any(feature = "tokio-console", feature = "tracing")))]
 fn setup() {
     use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -371,10 +371,10 @@ fn setup() {
         .init();
 }
 
-#[cfg(not(any(feature = "mtrace")))]
+#[cfg(not(any(feature = "tracing")))]
 fn teardown() {}
 
-#[cfg(feature = "mtrace")]
+#[cfg(feature = "tracing")]
 fn teardown() {
     fastrace::flush();
 }
@@ -532,7 +532,7 @@ async fn benchmark(args: Args) {
         .await
         .unwrap();
 
-    #[cfg(feature = "mtrace")]
+    #[cfg(feature = "tracing")]
     hybrid.enable_tracing();
 
     let stats = hybrid.stats();

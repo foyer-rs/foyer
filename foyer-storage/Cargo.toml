@@ -32,6 +32,7 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 fs4 = "0.9.1"
 futures = "0.3"
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24"
@@ -60,7 +61,7 @@ strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-memory/strict_assertions",
 ]
-mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]
+tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+[lints]
+workspace = true

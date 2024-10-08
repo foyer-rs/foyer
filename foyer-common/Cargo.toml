@@ -18,7 +18,7 @@ cfg-if = "1"
 crossbeam = "0.8"
 fastrace = { workspace = true }
 futures = "0.3"
-hashbrown = "0.14"
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -32,7 +32,7 @@ rand = "0.8.5"
 
 [features]
 strict_assertions = []
-mtrace = ["fastrace/enable"]
+tracing = ["fastrace/enable"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+[lints]
+workspace = true
