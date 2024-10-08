@@ -12,18 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub use common::{
+pub use crate::common::{
     buf::{BufExt, BufMutExt},
     code::{Key, StorageKey, StorageValue, Value},
     event::EventListener,
     range::RangeBoundsExt,
     tracing::TracingOptions,
 };
-pub use memory::{
+pub use crate::memory::{
     Cache, CacheBuilder, CacheContext, CacheEntry, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
     S3FifoConfig, Weighter,
 };
-pub use storage::{
+pub use crate::storage::{
     AdmissionPicker, AdmitAllPicker, Compression, Dev, DevConfig, DevExt, DeviceStats, DirectFileDevice,
     DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine, EvictionPicker, FifoPicker,
     InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime,
@@ -35,4 +35,3 @@ pub use crate::hybrid::{
     cache::{HybridCache, HybridCacheEntry, HybridFetch, HybridFetchInner},
     writer::{HybridCacheStorageWriter, HybridCacheWriter},
 };
-use crate::{common, memory, storage};
