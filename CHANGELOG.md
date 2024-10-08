@@ -9,6 +9,28 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2024-10-08
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.12.0 |
+| foyer-common | 0.12.0 |
+| foyer-intrusive | 0.12.0 |
+| foyer-memory | 0.12.0 |
+| foyer-storage | 0.12.0 |
+| foyer-bench | 0.12.0 |
+
+### Changes
+
+- Introduce small object disk cache. 🎉
+- Introduce mixed/large/small storage engine.
+- Refactor builders for the hybrid cache.
+- Introduce submit queue size threshold to prevent from channel piling up.
+- Support `jeprof` for foyer-bench.
+- Rename feature "mtrace" to "tracing".
+
 ## 2024-09-25
 
 ### Releases
