@@ -45,7 +45,7 @@ fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.7"
 clap = { version = "4", features = ["derive"] }
 bytesize = { package = "foyer-bytesize", version = "2" }
-hashbrown = "0.15"
+hashbrown = "0.14"
 # foyer components
 foyer-common = { version = "0.12.0", path = "foyer-common" }
 foyer-intrusive = { version = "0.12.0", path = "foyer-intrusive" }
