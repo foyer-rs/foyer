@@ -34,8 +34,7 @@ test-all: test test-ignored
 
 madsim:
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" cargo clippy --all-targets
-	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all
-	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo test --doc
+	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity"
 
 example:
 	cargo run --example memory
