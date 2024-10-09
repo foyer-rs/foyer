@@ -24,6 +24,7 @@ date: 2023-05-12T11:02:09+08:00
 
 ### Changes
 
+- Align the versions of all components to the same. 📣
 - Introduce small object disk cache. 🎉
 - Introduce mixed/large/small storage engine.
 - Refactor builders for the hybrid cache.
