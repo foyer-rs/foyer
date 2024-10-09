@@ -214,7 +214,13 @@ impl SingletonHandle {
     /// [`tokio::fs`]: crate::fs
     /// [`tokio::net`]: crate::net
     /// [`tokio::time`]: crate::time
+    #[cfg(not(madsim))]
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         self.0.block_on(future)
+    }
+
+    #[cfg(madsim)]
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        unimplemented!("`block_on()` is not supported with madsim")
     }
 }
