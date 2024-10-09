@@ -63,13 +63,13 @@ Feel free to open a PR and add your projects here:
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.11"
+foyer = "0.12"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.11", features = ["nightly"] }
+foyer = { version = "0.12", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -90,7 +90,7 @@ fn main() {
 ### Easy-to-use Hybrid Cache
 
 ```rust
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -98,12 +98,8 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
-                .with_capacity(256 * 1024 * 1024)
-                .build(),
-        )
+        .storage(Engine::Large) // use large object disk cache engine only
+        .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
         .build()
         .await?;
 
@@ -125,8 +121,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfig, TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
+    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -143,40 +139,48 @@ async fn main() -> Result<()> {
         .with_object_pool_capacity(1024)
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
+        .storage(Engine::Mixed(0.1))
+        .with_device_options(
+            DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
-                .build(),
+                .with_file_size(4 * 1024 * 1024),
         )
         .with_flush(true)
-        .with_indexer_shards(64)
         .with_recover_mode(RecoverMode::Quiet)
-        .with_recover_concurrency(8)
-        .with_flushers(2)
-        .with_reclaimers(2)
-        .with_buffer_threshold(256 * 1024 * 1024)
-        .with_clean_region_threshold(4)
-        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
-        .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)
-        .with_tombstone_log_config(
-            TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                .with_flush(true)
-                .build(),
-        )
-        .with_runtime_config(RuntimeConfig::Separated {
-            read_runtime_config: TokioRuntimeConfig {
+        .with_runtime_options(RuntimeOptions::Separated {
+            read_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
-            write_runtime_config: TokioRuntimeConfig {
+            write_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
         })
+        .with_large_object_disk_cache_options(
+            LargeEngineOptions::new()
+                .with_indexer_shards(64)
+                .with_recover_concurrency(8)
+                .with_flushers(2)
+                .with_reclaimers(2)
+                .with_buffer_pool_size(256 * 1024 * 1024)
+                .with_clean_region_threshold(4)
+                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
+                .with_tombstone_log_config(
+                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
+                        .with_flush(true)
+                        .build(),
+                ),
+        )
+        .with_small_object_disk_cache_options(
+            SmallEngineOptions::new()
+                .with_set_size(16 * 1024)
+                .with_set_cache_capacity(64)
+                .with_flushers(2),
+        )
         .build()
         .await?;
 
