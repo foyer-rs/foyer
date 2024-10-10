@@ -36,20 +36,28 @@ use crate::{
 /// # Lock Order
 ///
 /// load (async set cache, not good):
+///
+/// ```plain
 ///                                                                  |------------ requires async mutex -------------|
 /// lock(R) bloom filter => unlock(R) bloom filter => lock(R) set => lock(e) set cache => load => unlock(e) set cache => unlock(r) set
+/// ```
 ///
 /// load (sync set cache, good):
 ///
+/// ```plain
 /// lock(R) bloom filter => unlock(R) bloom filter => lock(R) set => lock(e) set cache => unlock(e) set cache => load => lock(e) set cache => unlock(e) set cache => unlock(r) set
+/// ```
 ///
 /// update:
 ///
+/// ```plain
 /// lock(W) set => lock(e) set cache => invalid set cache => unlock(e) set cache => update set => lock(w) bloom filter => unlock(w) bloom filter => unlock(w) set
+/// ```
 struct SetManagerInner {
     // TODO(MrCroxx): Refine this!!! Make `Set` a RAII type.
     sets: Vec<AsyncRwLock<()>>,
-    /// As a cache, it is okay that the bloom filter returns a false-negative result, which doesn't harm the correctness.
+    /// As a cache, it is okay that the bloom filter returns a false-negative result, which doesn't break the
+    /// correctness.
     loose_bloom_filters: Vec<RwLock<BloomFilterU64<4>>>,
     set_cache: SetCache,
     metadata: AsyncRwLock<Metadata>,
@@ -166,8 +174,6 @@ impl SetManager {
         V: StorageValue,
         S: HashBuilder + Debug,
     {
-        // lock(W) set => lock(e) set cache => invalid set cache => unlock(e) set cache => update set => lock(w) bloom filter => unlock(w) bloom filter => unlock(w) set
-
         // Acquire set lock.
         let set = self.inner.sets[sid as usize].write().await;
 
