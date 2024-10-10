@@ -11,7 +11,7 @@ on:
       - "v*.*.*-rc"
 
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+    group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
