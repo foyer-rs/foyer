@@ -9,6 +9,26 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2024-10-10
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.12.1 |
+| foyer-common | 0.12.1 |
+| foyer-intrusive | 0.12.1 |
+| foyer-memory | 0.12.1 |
+| foyer-storage | 0.12.1 |
+| foyer-bench | 0.12.1 |
+
+### Changes
+
+- Downgrade hashbrown to 0.14 to fix build on nightly for projects using hashbrown < 0.15.
+- Fix build with madsim.
+- Refine small object disk cache.
+- Scale shards to 1 when there is not enough capacity.
+
 ## 2024-10-09
 
 ### Releases
