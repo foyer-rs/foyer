@@ -497,6 +497,8 @@ where
     S: HashBuilder,
 {
     pub fn new(config: GenericCacheConfig<K, V, E, S>) -> Self {
+        assert!(config.capacity >= config.shards);
+
         let metrics = Arc::new(Metrics::new(&config.name));
 
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();
@@ -695,6 +697,10 @@ where
 
     pub fn hash_builder(&self) -> &S {
         &self.hash_builder
+    }
+
+    pub fn shards(&self) -> usize {
+        self.shards.len()
     }
 
     unsafe fn try_release_external_handle(&self, ptr: NonNull<E::Handle>) {

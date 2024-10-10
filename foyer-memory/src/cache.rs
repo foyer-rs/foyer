@@ -401,7 +401,16 @@ where
     }
 
     /// Build in-memory cache with the given configuration.
-    pub fn build(self) -> Cache<K, V, S> {
+    pub fn build(mut self) -> Cache<K, V, S> {
+        if self.capacity < self.shards {
+            tracing::warn!(
+                "The in-memory cache capacity({}) < shards({})",
+                self.capacity,
+                self.shards
+            );
+            self.shards = 1;
+        }
+
         match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
                 name: self.name,
@@ -657,12 +666,22 @@ where
     }
 
     /// Get the hash builder of the in-memory cache.
-    fn hash_builder(&self) -> &S {
+    pub fn hash_builder(&self) -> &S {
         match self {
             Cache::Fifo(cache) => cache.hash_builder(),
             Cache::Lru(cache) => cache.hash_builder(),
             Cache::Lfu(cache) => cache.hash_builder(),
             Cache::S3Fifo(cache) => cache.hash_builder(),
+        }
+    }
+
+    /// Get the shards of the in-memory cache.
+    pub fn shards(&self) -> usize {
+        match self {
+            Cache::Fifo(cache) => cache.shards(),
+            Cache::Lru(cache) => cache.shards(),
+            Cache::Lfu(cache) => cache.shards(),
+            Cache::S3Fifo(cache) => cache.shards(),
         }
     }
 }
@@ -869,6 +888,12 @@ mod tests {
     const RANGE: Range<u64> = 0..1000;
     const OPS: usize = 10000;
     const CONCURRENCY: usize = 8;
+
+    #[test]
+    fn test_not_enough_capacity() {
+        let cache: Cache<u64, u64> = CacheBuilder::new(4).with_shards(64).build();
+        assert_eq!(cache.shards(), 1);
+    }
 
     fn fifo() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
