@@ -12,21 +12,20 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut, Range},
-    sync::Arc,
-};
+use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc};
 
 use bytes::{Buf, BufMut};
-use foyer_common::strict_assert;
+use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use itertools::Itertools;
-use ordered_hash_map::OrderedHashMap;
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::RwLock;
+use tokio::sync::RwLock as AsyncRwLock;
 
 use super::{
+    batch::Item,
     bloom_filter::BloomFilterU64,
-    set::{Set, SetId, SetMut, SetStorage, SetTimestamp},
+    generic::GenericSmallStorageConfig,
+    set::{SetId, SetStorage, SetTimestamp},
+    set_cache::SetCache,
 };
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
@@ -34,18 +33,27 @@ use crate::{
     IoBytesMut,
 };
 
+/// # Lock Order
+///
+/// load (async set cache, not good):
+///                                                                  |------------ requires async mutex -------------|
+/// lock(R) bloom filter => unlock(R) bloom filter => lock(R) set => lock(e) set cache => load => unlock(e) set cache => unlock(r) set
+///
+/// load (sync set cache, good):
+///
+/// lock(R) bloom filter => unlock(R) bloom filter => lock(R) set => lock(e) set cache => unlock(e) set cache => load => lock(e) set cache => unlock(e) set cache => unlock(r) set
+///
+/// update:
+///
+/// lock(W) set => lock(e) set cache => invalid set cache => unlock(e) set cache => update set => lock(w) bloom filter => unlock(w) bloom filter => unlock(w) set
 struct SetManagerInner {
-    /// A phantom rwlock to prevent set storage operations on disk.
-    ///
-    /// All set disk operations must be prevented by the lock.
-    ///
-    /// In addition, the rwlock also serves as the lock of the in-memory bloom filter.
-    sets: Vec<RwLock<BloomFilterU64<4>>>,
-    cache: Mutex<OrderedHashMap<SetId, Arc<SetStorage>>>,
-    set_cache_capacity: usize,
+    // TODO(MrCroxx): Refine this!!! Make `Set` a RAII type.
+    sets: Vec<AsyncRwLock<()>>,
+    /// As a cache, it is okay that the bloom filter returns a false-negative result, which doesn't harm the correctness.
+    loose_bloom_filters: Vec<RwLock<BloomFilterU64<4>>>,
+    set_cache: SetCache,
+    metadata: AsyncRwLock<Metadata>,
     set_picker: SetPicker,
-
-    metadata: RwLock<Metadata>,
 
     set_size: usize,
     device: MonitoredDevice,
@@ -62,9 +70,9 @@ impl Debug for SetManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SetManager")
             .field("sets", &self.inner.sets)
-            .field("cache", &self.inner.cache)
-            .field("set_cache_capacity", &self.inner.set_cache_capacity)
+            .field("loose_bloom_filters", &self.inner.loose_bloom_filters)
             .field("set_picker", &self.inner.set_picker)
+            .field("set_cache", &self.inner.set_cache)
             .field("metadata", &self.inner.metadata)
             .field("set_size", &self.inner.set_size)
             .field("device", &self.inner.device)
@@ -75,111 +83,113 @@ impl Debug for SetManager {
 }
 
 impl SetManager {
-    pub async fn open(
-        set_size: usize,
-        set_cache_capacity: usize,
-        device: MonitoredDevice,
-        regions: Range<RegionId>,
-        flush: bool,
-    ) -> Result<Self> {
-        let sets = (device.region_size() / set_size) * (regions.end - regions.start) as usize;
-        assert!(sets > 0);
+    pub async fn open<K, V, S>(config: &GenericSmallStorageConfig<K, V, S>) -> Result<Self>
+    where
+        K: StorageKey,
+        V: StorageValue,
+        S: HashBuilder + Debug,
+    {
+        let device = config.device.clone();
+        let regions = config.regions.clone();
+
+        let sets = (device.region_size() / config.set_size) * (regions.end - regions.start) as usize;
+        assert!(sets > 0); // TODO: assert > 1? Set with id = 0 is used as metadata.
 
         let set_picker = SetPicker::new(sets);
 
         // load & flush metadata
         let metadata = Metadata::load(&device).await?;
         metadata.flush(&device).await?;
-        let metadata = RwLock::new(metadata);
+        let metadata = AsyncRwLock::new(metadata);
 
-        let sets = (0..sets).map(|_| RwLock::default()).collect_vec();
-        let cache = Mutex::new(OrderedHashMap::with_capacity(set_cache_capacity));
+        let set_cache = SetCache::new(config.set_cache_capacity, config.set_cache_shards);
+        let loose_bloom_filters = (0..sets).map(|_| RwLock::new(BloomFilterU64::new())).collect_vec();
+
+        let sets = (0..sets).map(|_| AsyncRwLock::default()).collect_vec();
 
         let inner = SetManagerInner {
             sets,
-            cache,
-            set_cache_capacity,
+            loose_bloom_filters,
+            set_cache,
             set_picker,
             metadata,
-            set_size,
+            set_size: config.set_size,
             device,
             regions,
-            flush,
+            flush: config.flush,
         };
         let inner = Arc::new(inner);
         Ok(Self { inner })
     }
 
-    pub async fn write(&self, id: SetId) -> Result<SetWriteGuard<'_>> {
-        let guard = self.inner.sets[id as usize].write().await;
-
-        let invalid = self.inner.cache.lock().await.remove(&id);
-        let storage = match invalid {
-            // `guard` already guarantees that there is only one storage reference left.
-            Some(storage) => Arc::into_inner(storage).unwrap(),
-            None => self.storage(id).await?,
-        };
-
-        Ok(SetWriteGuard {
-            bloom_filter: guard,
-            id,
-            set: SetMut::new(storage),
-            drop: DropPanicGuard::default(),
-        })
+    pub fn may_contains(&self, hash: u64) -> bool {
+        let sid = self.inner.set_picker.sid(hash);
+        self.inner.loose_bloom_filters[sid as usize].read().lookup(hash)
     }
 
-    pub async fn read(&self, id: SetId, hash: u64) -> Result<Option<SetReadGuard<'_>>> {
-        let guard = self.inner.sets[id as usize].read().await;
-        if !guard.lookup(hash) {
+    pub async fn load<K, V>(&self, hash: u64) -> Result<Option<(K, V)>>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        let sid = self.inner.set_picker.sid(hash);
+
+        // Query bloom filter.
+        if !self.inner.loose_bloom_filters[sid as usize].read().lookup(hash) {
             return Ok(None);
         }
 
-        let mut cache = self.inner.cache.lock().await;
-        let cached = cache.get(&id).cloned();
-        let storage = match cached {
-            Some(storage) => storage,
-            None => {
-                let storage = self.storage(id).await?;
-                let storage = Arc::new(storage);
-                cache.insert(id, storage.clone());
-                if cache.len() > self.inner.set_cache_capacity {
-                    cache.pop_front();
-                    strict_assert!(cache.len() <= self.inner.set_cache_capacity);
-                }
-                storage
-            }
-        };
-        drop(cache);
+        // Acquire set lock.
+        let set = self.inner.sets[sid as usize].read().await;
 
-        Ok(Some(SetReadGuard {
-            _bloom_filter: guard,
-            _id: id,
-            set: Set::new(storage),
-        }))
+        // Query form set cache.
+        if let Some(cached) = self.inner.set_cache.lookup(&sid) {
+            return cached.get(hash);
+        }
+
+        // Set cache miss, load from disk.
+        let storage = self.storage(sid).await?;
+        let res = storage.get(hash);
+
+        // Update set cache on cache miss.
+        self.inner.set_cache.insert(sid, storage);
+
+        // Release set lock.
+        drop(set);
+
+        res
     }
 
-    pub async fn apply(&self, mut guard: SetWriteGuard<'_>) -> Result<()> {
-        let mut storage = guard.set.into_storage();
+    pub async fn update<K, V, S>(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item<K, V, S>>) -> Result<()>
+    where
+        K: StorageKey,
+        V: StorageValue,
+        S: HashBuilder + Debug,
+    {
+        // lock(W) set => lock(e) set cache => invalid set cache => unlock(e) set cache => update set => lock(w) bloom filter => unlock(w) bloom filter => unlock(w) set
 
-        // Update in-memory bloom filter.
+        // Acquire set lock.
+        let set = self.inner.sets[sid as usize].write().await;
+
+        self.inner.set_cache.invalid(&sid);
+
+        let mut storage = self.storage(sid).await?;
+        storage.apply(deletions, items);
         storage.update();
-        *guard.bloom_filter = storage.bloom_filter().clone();
+
+        *self.inner.loose_bloom_filters[sid as usize].write() = storage.bloom_filter().clone();
 
         let buffer = storage.freeze();
-
-        let (region, offset) = self.locate(guard.id);
+        let (region, offset) = self.locate(sid);
         self.inner.device.write(buffer, region, offset).await?;
         if self.inner.flush {
             self.inner.device.flush(Some(region)).await?;
         }
-        guard.drop.disable();
-        drop(guard.bloom_filter);
-        Ok(())
-    }
 
-    pub async fn contains(&self, id: SetId, hash: u64) -> bool {
-        let guard = self.inner.sets[id as usize].read().await;
-        guard.lookup(hash)
+        // Release set lock.
+        drop(set);
+
+        Ok(())
     }
 
     pub fn sets(&self) -> usize {
@@ -190,17 +200,13 @@ impl SetManager {
         self.inner.set_size
     }
 
-    pub fn set_picker(&self) -> &SetPicker {
-        &self.inner.set_picker
-    }
-
     pub async fn watermark(&self) -> u128 {
         self.inner.metadata.read().await.watermark
     }
 
     pub async fn destroy(&self) -> Result<()> {
         self.update_watermark().await?;
-        self.inner.cache.lock().await.clear();
+        self.inner.set_cache.clear();
         Ok(())
     }
 
@@ -230,62 +236,6 @@ impl SetManager {
         let region = id as RegionId / region_sets as RegionId;
         let offset = ((id as usize % region_sets) * self.inner.set_size) as u64;
         (region, offset)
-    }
-}
-
-#[derive(Debug, Default)]
-struct DropPanicGuard {
-    disabled: bool,
-}
-
-impl Drop for DropPanicGuard {
-    fn drop(&mut self) {
-        if !self.disabled {
-            panic!("unexpected drop panic guard drop");
-        }
-    }
-}
-
-impl DropPanicGuard {
-    fn disable(&mut self) {
-        self.disabled = true;
-    }
-}
-
-#[derive(Debug)]
-pub struct SetWriteGuard<'a> {
-    bloom_filter: RwLockWriteGuard<'a, BloomFilterU64<4>>,
-    id: SetId,
-    set: SetMut,
-    drop: DropPanicGuard,
-}
-
-impl<'a> Deref for SetWriteGuard<'a> {
-    type Target = SetMut;
-
-    fn deref(&self) -> &Self::Target {
-        &self.set
-    }
-}
-
-impl<'a> DerefMut for SetWriteGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.set
-    }
-}
-
-#[derive(Debug)]
-pub struct SetReadGuard<'a> {
-    _bloom_filter: RwLockReadGuard<'a, BloomFilterU64<4>>,
-    _id: SetId,
-    set: Set,
-}
-
-impl<'a> Deref for SetReadGuard<'a> {
-    type Target = Set;
-
-    fn deref(&self) -> &Self::Target {
-        &self.set
     }
 }
 

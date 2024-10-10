@@ -46,6 +46,7 @@ where
 {
     pub set_size: usize,
     pub set_cache_capacity: usize,
+    pub set_cache_shards: usize,
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
     pub flush: bool,
@@ -66,6 +67,7 @@ where
         f.debug_struct("GenericSmallStorageConfig")
             .field("set_size", &self.set_size)
             .field("set_cache_capacity", &self.set_cache_capacity)
+            .field("set_cache_shards", &self.set_cache_shards)
             .field("device", &self.device)
             .field("regions", &self.regions)
             .field("flush", &self.flush)
@@ -92,7 +94,7 @@ where
     active: AtomicBool,
 
     stats: Arc<Statistics>,
-    runtime: Runtime,
+    _runtime: Runtime,
 }
 
 pub struct GenericSmallStorage<K, V, S>
@@ -144,14 +146,7 @@ where
             config.regions
         );
 
-        let set_manager = SetManager::open(
-            config.set_size,
-            config.set_cache_capacity,
-            config.device.clone(),
-            config.regions.clone(),
-            config.flush,
-        )
-        .await?;
+        let set_manager = SetManager::open(&config).await?;
 
         let flushers = (0..config.flushers)
             .map(|_| Flusher::open(&config, set_manager.clone(), stats.clone(), metrics.clone()))
@@ -163,7 +158,7 @@ where
             set_manager,
             active: AtomicBool::new(true),
             stats,
-            runtime: config.runtime,
+            _runtime: config.runtime,
         };
         let inner = Arc::new(inner);
 
@@ -196,7 +191,6 @@ where
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
-        let sid = set_manager.set_picker().sid(hash);
         let stats = self.inner.stats.clone();
 
         async move {
@@ -204,13 +198,7 @@ where
                 .cache_read_bytes
                 .fetch_add(set_manager.set_size(), Ordering::Relaxed);
 
-            match set_manager.read(sid, hash).await? {
-                Some(set) => {
-                    let kv = set.get(hash)?;
-                    Ok(kv)
-                }
-                None => Ok(None),
-            }
+            set_manager.load(hash).await
         }
     }
 
@@ -231,13 +219,7 @@ where
     }
 
     fn may_contains(&self, hash: u64) -> bool {
-        let set_manager = self.inner.set_manager.clone();
-        let sid = set_manager.set_picker().sid(hash);
-        // FIXME: Anyway without blocking? Use atomic?
-        self.inner
-            .runtime
-            .read()
-            .block_on(async move { set_manager.contains(sid, hash).await })
+        self.inner.set_manager.may_contains(hash)
     }
 
     fn stats(&self) -> Arc<DeviceStats> {
@@ -342,6 +324,7 @@ mod tests {
         let config = GenericSmallStorageConfig {
             set_size: ByteSize::kib(4).as_u64() as _,
             set_cache_capacity: 4,
+            set_cache_shards: 1,
             device,
             regions,
             flush: false,

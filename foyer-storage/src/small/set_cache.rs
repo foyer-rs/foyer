@@ -18,52 +18,46 @@ use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
 
 use super::set::{SetId, SetStorage};
 
-#[derive(Debug)]
-pub struct SetCacheShard {
-    cache: OrderedHashMap<SetId, SetStorage>,
-    capacity: usize,
-}
-
 /// In-memory set cache to reduce disk io.
 ///
 /// Simple FIFO cache.
 #[derive(Debug)]
 pub struct SetCache {
-    shards: Vec<RwLock<SetCacheShard>>,
+    shards: Vec<RwLock<OrderedHashMap<SetId, SetStorage>>>,
+    shard_capacity: usize,
 }
 
 impl SetCache {
     pub fn new(capacity: usize, shards: usize) -> Self {
         let shard_capacity = capacity / shards;
         let shards = (0..shards)
-            .map(|_| {
-                RwLock::new(SetCacheShard {
-                    cache: OrderedHashMap::with_capacity(shard_capacity),
-                    capacity: shard_capacity,
-                })
-            })
+            .map(|_| RwLock::new(OrderedHashMap::with_capacity(shard_capacity)))
             .collect_vec();
-        Self { shards }
+        Self { shards, shard_capacity }
     }
 
     pub fn insert(&self, id: SetId, storage: SetStorage) {
         let mut shard = self.shards[self.shard(&id)].write();
-        if shard.cache.len() == shard.capacity {
-            shard.cache.pop_front();
+        if shard.len() == self.shard_capacity {
+            shard.pop_front();
         }
 
-        assert!(shard.cache.len() < shard.capacity);
+        assert!(shard.len() < self.shard_capacity);
 
-        shard.cache.insert(id, storage);
+        shard.insert(id, storage);
     }
 
     pub fn invalid(&self, id: &SetId) {
         let mut shard = self.shards[self.shard(id)].write();
-        shard.cache.remove(id);
+        shard.remove(id);
     }
 
     pub fn lookup(&self, id: &SetId) -> Option<MappedRwLockReadGuard<'_, SetStorage>> {
-        RwLockReadGuard::try_map(self.shards[self.shard(id)].read(), |shard| shard.cache.get(id)).ok()
+        RwLockReadGuard::try_map(self.shards[self.shard(id)].read(), |shard| shard.get(id)).ok()
+    }
+
+    pub fn clear(&self) {
+        self.shards.iter().for_each(|shard| shard.write().clear());
     }
 
     fn shard(&self, id: &SetId) -> usize {
