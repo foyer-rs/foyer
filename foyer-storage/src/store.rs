@@ -570,6 +570,7 @@ where
                             EngineEnum::open(EngineConfig::Small(GenericSmallStorageConfig {
                                 set_size: self.small.set_size,
                                 set_cache_capacity: self.small.set_cache_capacity,
+                                set_cache_shards: self.small.set_cache_shards,
                                 device,
                                 regions,
                                 flush: self.flush,
@@ -590,6 +591,7 @@ where
                                 left: GenericSmallStorageConfig {
                                     set_size: self.small.set_size,
                                     set_cache_capacity: self.small.set_cache_capacity,
+                                    set_cache_shards: self.small.set_cache_shards,
                                     device: device.clone(),
                                     regions: small_regions,
                                     flush: self.flush,
@@ -818,6 +820,7 @@ where
 {
     set_size: usize,
     set_cache_capacity: usize,
+    set_cache_shards: usize,
     buffer_pool_size: usize,
     flushers: usize,
 
@@ -847,6 +850,7 @@ where
         Self {
             set_size: 16 * 1024,    // 16 KiB
             set_cache_capacity: 64, // 64 sets
+            set_cache_shards: 4,
             flushers: 1,
             buffer_pool_size: 4 * 1024 * 1024, // 4 MiB
             _marker: PhantomData,
@@ -871,6 +875,14 @@ where
     /// Default: 64
     pub fn with_set_cache_capacity(mut self, set_cache_capacity: usize) -> Self {
         self.set_cache_capacity = set_cache_capacity;
+        self
+    }
+
+    /// Set the shards of the set cache.
+    ///
+    /// Default: 4
+    pub fn with_set_cache_shards(mut self, set_cache_shards: usize) -> Self {
+        self.set_cache_shards = set_cache_shards;
         self
     }
 

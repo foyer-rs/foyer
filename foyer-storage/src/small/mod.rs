@@ -18,4 +18,5 @@ pub mod flusher;
 pub mod generic;
 pub mod serde;
 pub mod set;
+pub mod set_cache;
 pub mod set_manager;

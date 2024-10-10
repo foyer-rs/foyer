@@ -200,9 +200,7 @@ where
             let set_manager = self.set_manager.clone();
             let stats = self.stats.clone();
             async move {
-                let mut set = set_manager.write(sid).await?;
-                set.apply(&deletions, items);
-                set_manager.apply(set).await?;
+                set_manager.update(sid, &deletions, items).await?;
 
                 stats
                     .cache_write_bytes

@@ -15,8 +15,7 @@
 use std::{
     collections::HashSet,
     fmt::Debug,
-    ops::{Deref, DerefMut, Range},
-    sync::Arc,
+    ops::Range,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -31,54 +30,6 @@ use crate::{
 };
 
 pub type SetId = u64;
-
-#[derive(Debug)]
-pub struct Set {
-    storage: Arc<SetStorage>,
-}
-
-impl Deref for Set {
-    type Target = SetStorage;
-
-    fn deref(&self) -> &Self::Target {
-        &self.storage
-    }
-}
-
-impl Set {
-    pub fn new(storage: Arc<SetStorage>) -> Self {
-        Self { storage }
-    }
-}
-
-#[derive(Debug)]
-pub struct SetMut {
-    storage: SetStorage,
-}
-
-impl Deref for SetMut {
-    type Target = SetStorage;
-
-    fn deref(&self) -> &Self::Target {
-        &self.storage
-    }
-}
-
-impl DerefMut for SetMut {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.storage
-    }
-}
-
-impl SetMut {
-    pub fn new(storage: SetStorage) -> Self {
-        Self { storage }
-    }
-
-    pub fn into_storage(self) -> SetStorage {
-        self.storage
-    }
-}
 
 /// # Format
 ///
