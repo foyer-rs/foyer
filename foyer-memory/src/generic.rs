@@ -497,8 +497,6 @@ where
     S: HashBuilder,
 {
     pub fn new(config: GenericCacheConfig<K, V, E, S>) -> Self {
-        assert!(config.capacity >= config.shards);
-
         let metrics = Arc::new(Metrics::new(&config.name));
 
         let usages = (0..config.shards).map(|_| Arc::new(AtomicUsize::new(0))).collect_vec();

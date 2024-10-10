@@ -401,14 +401,13 @@ where
     }
 
     /// Build in-memory cache with the given configuration.
-    pub fn build(mut self) -> Cache<K, V, S> {
+    pub fn build(self) -> Cache<K, V, S> {
         if self.capacity < self.shards {
             tracing::warn!(
-                "The in-memory cache capacity({}) < shards({})",
+                "The in-memory cache capacity({}) < shards({}).",
                 self.capacity,
                 self.shards
             );
-            self.shards = 1;
         }
 
         match self.eviction_config {
@@ -888,12 +887,6 @@ mod tests {
     const RANGE: Range<u64> = 0..1000;
     const OPS: usize = 10000;
     const CONCURRENCY: usize = 8;
-
-    #[test]
-    fn test_not_enough_capacity() {
-        let cache: Cache<u64, u64> = CacheBuilder::new(4).with_shards(64).build();
-        assert_eq!(cache.shards(), 1);
-    }
 
     fn fifo() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
