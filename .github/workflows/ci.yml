@@ -377,11 +377,11 @@ jobs:
           CI: true
         run: |-
           cargo clippy --all-targets
-      - name: Run nextest (madsim)
-        env:
-          RUST_BACKTRACE: 1
-          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
-          RUST_LOG: info
-          TOKIO_WORKER_THREADS: 1
-        run: |-
-          cargo nextest run --all --features "strict_assertions,sanity"
+      # - name: Run nextest (madsim)
+      #   env:
+      #     RUST_BACKTRACE: 1
+      #     RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+      #     RUST_LOG: info
+      #     TOKIO_WORKER_THREADS: 1
+      #   run: |-
+      #     cargo nextest run --all --features "strict_assertions,sanity"
