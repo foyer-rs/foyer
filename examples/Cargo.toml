@@ -17,6 +17,7 @@ publish = false
 ahash = "0.8"
 anyhow = "1"
 chrono = "0.4"
+equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
@@ -60,3 +61,7 @@ path = "event_listener.rs"
 [[example]]
 name = "tail_based_tracing"
 path = "tail_based_tracing.rs"
+
+[[example]]
+name = "equivalent"
+path = "equivalent.rs"

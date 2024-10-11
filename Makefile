@@ -43,6 +43,7 @@ example:
 	cargo run --example event_listener
 	cargo run --features "tracing,jaeger" --example tail_based_tracing
 	cargo run --features "tracing,ot" --example tail_based_tracing
+	cargo run --example equivalent
 
 full: check-all test-all example udeps
 
