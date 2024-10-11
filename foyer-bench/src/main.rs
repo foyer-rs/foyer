@@ -59,17 +59,23 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
-#[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir"]))]
+#[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir", "no_disk"]))]
 pub struct Args {
+    /// Run with in-memory cache compatible mode.
+    ///
+    /// One of `no_disk`, `file`, `dir` must be set.
+    #[arg(long)]
+    no_disk: bool,
+
     /// File for disk cache data. Use `DirectFile` as device.
     ///
-    /// Either `file` or `dir` must be set.
+    /// One of `no_disk`, `file`, `dir` must be set.
     #[arg(short, long)]
     file: Option<String>,
 
     /// Directory for disk cache data. Use `DirectFs` as device.
     ///
-    /// Either `file` or `dir` must be set.
+    /// One of `no_disk`, `file`, `dir` must be set.
     #[arg(short, long)]
     dir: Option<String>,
 
@@ -472,6 +478,7 @@ async fn benchmark(args: Args) {
                 .with_capacity(args.disk.as_u64() as _)
                 .with_file_size(args.region_size.as_u64() as _),
         ),
+        (None, None) => builder,
         _ => unreachable!(),
     };
 
