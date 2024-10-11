@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -28,6 +27,7 @@ use std::{
 };
 
 use ahash::RandomState;
+use equivalent::Equivalent;
 use fastrace::prelude::*;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
@@ -211,8 +211,7 @@ where
     /// Get cached entry with the given key from the hybrid cache.
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + Send + Sync + 'static + Clone,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::get");
 
@@ -312,8 +311,7 @@ where
     /// Remove a cached entry with the given key from the hybrid cache.
     pub fn remove<Q>(&self, key: &Q)
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::remove");
 
@@ -335,8 +333,7 @@ where
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.memory.contains(key) || self.storage.may_contains(key)
     }
@@ -537,7 +534,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{borrow::Borrow, fmt::Debug, hash::Hash, path::Path, sync::Arc};
+    use std::{path::Path, sync::Arc};
 
     use storage::test_utils::BiasedPicker;
 
@@ -562,14 +559,10 @@ mod tests {
             .unwrap()
     }
 
-    async fn open_with_biased_admission_picker<Q>(
+    async fn open_with_biased_admission_picker(
         dir: impl AsRef<Path>,
-        admits: impl IntoIterator<Item = Q>,
-    ) -> HybridCache<u64, Vec<u8>>
-    where
-        u64: Borrow<Q>,
-        Q: Hash + Eq + Send + Sync + 'static + Debug,
-    {
+        admits: impl IntoIterator<Item = u64>,
+    ) -> HybridCache<u64, Vec<u8>> {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)

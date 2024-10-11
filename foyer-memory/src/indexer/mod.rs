@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
+use std::{hash::Hash, ptr::NonNull};
 
+use equivalent::Equivalent;
 use foyer_common::code::Key;
 
 use crate::handle::KeyedHandle;
@@ -26,12 +27,10 @@ pub trait Indexer: Send + Sync + 'static {
     unsafe fn insert(&mut self, ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
+        Q: Hash + Equivalent<Self::Key> + ?Sized;
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
+        Q: Hash + Equivalent<Self::Key> + ?Sized;
     unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
 }
 

@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -28,6 +27,7 @@ use std::{
 };
 
 use ahash::RandomState;
+use equivalent::Equivalent;
 use fastrace::{future::InSpan, prelude::*};
 use foyer_common::{
     code::{HashBuilder, Key, Value},
@@ -171,8 +171,7 @@ where
 
     unsafe fn get<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<E::Handle>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let mut ptr = match self.indexer.get(hash, key) {
             Some(ptr) => {
@@ -196,16 +195,14 @@ where
 
     unsafe fn contains<Q>(&mut self, hash: u64, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.indexer.get(hash, key).is_some()
     }
 
     unsafe fn touch<Q>(&mut self, hash: u64, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let res = self.indexer.get(hash, key);
         if let Some(ptr) = res {
@@ -219,8 +216,7 @@ where
     /// Return `Some(..)` if the handle is released, or `None` if the handle is still in use.
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<E::Handle>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let mut ptr = self.indexer.remove(hash, key)?;
         let handle = ptr.as_mut();
@@ -608,8 +604,7 @@ where
     #[fastrace::trace(name = "foyer::memory::generic::remove")]
     pub fn remove<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.hash_builder.hash_one(key);
 
@@ -625,8 +620,7 @@ where
     #[fastrace::trace(name = "foyer::memory::generic::get")]
     pub fn get<Q>(self: &Arc<Self>, key: &Q) -> Option<GenericCacheEntry<K, V, E, I, S>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.hash_builder.hash_one(key);
 
@@ -641,8 +635,7 @@ where
 
     pub fn contains<Q>(self: &Arc<Self>, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.hash_builder.hash_one(key);
 
@@ -654,8 +647,7 @@ where
 
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.hash_builder.hash_one(key);
 

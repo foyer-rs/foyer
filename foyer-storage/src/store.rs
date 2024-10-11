@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 use std::{
-    borrow::Borrow,
     fmt::{Debug, Display},
     hash::Hash,
     marker::PhantomData,
@@ -23,6 +22,7 @@ use std::{
 };
 
 use ahash::RandomState;
+use equivalent::Equivalent;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
@@ -151,13 +151,12 @@ where
     /// Load a cache entry from the disk cache.
     pub async fn load<Q>(&self, key: &Q) -> Result<Option<(K, V)>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         let hash = self.inner.memory.hash(key);
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
-            Ok(Some((k, v))) if k.borrow() == key => Ok(Some((k, v))),
+            Ok(Some((k, v))) if key.equivalent(&k) => Ok(Some((k, v))),
             Ok(_) => Ok(None),
             Err(e) => Err(e),
         }
@@ -166,8 +165,7 @@ where
     /// Delete the cache entry with the given key from the disk cache.
     pub fn delete<'a, Q>(&'a self, key: &'a Q)
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.inner.memory.hash(key);
         self.inner.engine.delete(hash)
@@ -178,8 +176,7 @@ where
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn may_contains<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.inner.memory.hash(key);
         self.inner.engine.may_contains(hash)

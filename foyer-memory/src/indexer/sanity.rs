@@ -14,6 +14,8 @@
 
 use std::ptr::NonNull;
 
+use equivalent::Equivalent;
+
 use super::Indexer;
 #[cfg(feature = "sanity")]
 use crate::handle::Handle;
@@ -49,8 +51,7 @@ where
 
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
+        Q: std::hash::Hash + Equivalent<Self::Key> + ?Sized,
     {
         self.indexer
             .get(hash, key)
@@ -59,8 +60,7 @@ where
 
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
+        Q: std::hash::Hash + Equivalent<Self::Key> + ?Sized,
     {
         self.indexer
             .remove(hash, key)
@@ -90,16 +90,14 @@ where
 
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
+        Q: std::hash::Hash + Equivalent<Self::Key> + ?Sized,
     {
         self.indexer.get(hash, key)
     }
 
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: std::borrow::Borrow<Q>,
-        Q: std::hash::Hash + Eq + ?Sized,
+        Q: std::hash::Hash + Equivalent<Self::Key> + ?Sized,
     {
         self.indexer.remove(hash, key)
     }

@@ -12,8 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
+use std::{hash::Hash, ptr::NonNull};
 
+use equivalent::Equivalent;
 use foyer_common::{code::Key, strict_assert};
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
@@ -83,20 +84,18 @@ where
 
     unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<Self::Key> + ?Sized,
     {
-        self.table.find(hash, |p| p.as_ref().key().borrow() == key).copied()
+        self.table.find(hash, |p| key.equivalent(p.as_ref().key())).copied()
     }
 
     unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<Self::Key> + ?Sized,
     {
         match self
             .table
-            .entry(hash, |p| p.as_ref().key().borrow() == key, |p| p.as_ref().base().hash())
+            .entry(hash, |p| key.equivalent(p.as_ref().key()), |p| p.as_ref().base().hash())
         {
             HashTableEntry::Occupied(o) => {
                 let (mut p, _) = o.remove();

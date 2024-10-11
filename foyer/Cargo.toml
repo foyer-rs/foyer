@@ -15,6 +15,7 @@ readme = { workspace = true }
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
+equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
