@@ -24,6 +24,20 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
+bytesize = { package = "foyer-bytesize", version = "2" }
+clap = { version = "4", features = ["derive"] }
+equivalent = "1"
+fastrace = "0.7"
+fastrace-jaeger = "0.7"
+fastrace-opentelemetry = "0.7"
+hashbrown = "0.14"
+itertools = "0.13"
+metrics = "0.23"
+serde = { version = "1", features = ["derive", "rc"] }
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
 tokio = { package = "madsim-tokio", version = "0.2", features = [
     "rt",
     "rt-multi-thread",
@@ -33,19 +47,7 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "signal",
     "fs",
 ] }
-serde = { version = "1", features = ["derive", "rc"] }
-test-log = { version = "0.2", default-features = false, features = [
-    "trace",
-    "color",
-] }
-itertools = "0.13"
-metrics = "0.23"
-fastrace = "0.7"
-fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.7"
-clap = { version = "4", features = ["derive"] }
-bytesize = { package = "foyer-bytesize", version = "2" }
-hashbrown = "0.14"
+
 # foyer components
 foyer-common = { version = "0.12.2", path = "foyer-common" }
 foyer-intrusive = { version = "0.12.2", path = "foyer-intrusive" }

@@ -17,7 +17,7 @@ use std::hash::{BuildHasher, Hash};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Key trait for the in-memory cache.
-pub trait Key: Send + Sync + 'static + Hash + Eq + PartialEq {}
+pub trait Key: Send + Sync + 'static + Hash + Eq {}
 /// Value trait for the in-memory cache.
 pub trait Value: Send + Sync + 'static {}
 

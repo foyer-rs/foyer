@@ -12,9 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
+use std::{fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
+use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
@@ -566,8 +567,7 @@ where
     #[fastrace::trace(name = "foyer::memory::cache::remove")]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         match self {
             Cache::Fifo(cache) => cache.remove(key).map(CacheEntry::from),
@@ -581,8 +581,7 @@ where
     #[fastrace::trace(name = "foyer::memory::cache::get")]
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         match self {
             Cache::Fifo(cache) => cache.get(key).map(CacheEntry::from),
@@ -596,8 +595,7 @@ where
     #[fastrace::trace(name = "foyer::memory::cache::contains")]
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         match self {
             Cache::Fifo(cache) => cache.contains(key),
@@ -613,8 +611,7 @@ where
     #[fastrace::trace(name = "foyer::memory::cache::touch")]
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         match self {
             Cache::Fifo(cache) => cache.touch(key),
@@ -658,7 +655,6 @@ where
     /// Hash the given key with the hash builder of the cache.
     pub fn hash<Q>(&self, key: &Q) -> u64
     where
-        K: Borrow<Q>,
         Q: Hash + ?Sized,
     {
         self.hash_builder().hash_one(key)
