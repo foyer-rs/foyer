@@ -7,7 +7,10 @@ members = [
     "foyer-cli",
     "foyer-common",
     "foyer-intrusive",
+    "foyer-intrusive-v2",
     "foyer-memory",
+    "foyer-memory-v2",
+    "foyer-memory-v3",
     "foyer-storage",
     "foyer-util",
 ]

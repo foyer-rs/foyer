@@ -31,6 +31,7 @@ impl Token {
     }
 }
 
+/// Pre-allocated storage for a uniform data type.
 pub struct Slab<T> {
     entries: Vec<Entry<T>>,
     len: usize,

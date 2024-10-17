@@ -45,6 +45,8 @@ pub mod rate;
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
+/// Scoped functional programming extensions.
+pub mod scope;
 /// Tracing related components.
 pub mod tracing;
 /// An async wait group implementation.
