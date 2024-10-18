@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! micro benchmark for dynamic dispatch
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},

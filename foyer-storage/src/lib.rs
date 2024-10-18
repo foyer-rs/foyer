@@ -16,8 +16,6 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(feature = "nightly", feature(write_all_vectored))]
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
 
 mod compress;
 mod device;

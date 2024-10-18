@@ -45,3 +45,6 @@ tracing = [
     "foyer-memory/tracing",
     "foyer-storage/tracing",
 ]
+
+[lints]
+workspace = true

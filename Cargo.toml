@@ -56,7 +56,11 @@ foyer-storage = { version = "0.12.2", path = "foyer-storage" }
 foyer = { version = "0.12.2", path = "foyer" }
 
 [workspace.lints.rust]
+missing_docs = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+
+[workspace.lints.clippy]
+allow_attributes = "warn"
 
 [profile.release]
 debug = "full"

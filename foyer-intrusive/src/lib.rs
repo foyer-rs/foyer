@@ -13,8 +13,6 @@
 //  limitations under the License.
 
 #![expect(clippy::new_without_default)]
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
 
 //! Intrusive data structures and utils for foyer.
 

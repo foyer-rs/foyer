@@ -21,13 +21,13 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
-pub struct Cli {
+struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Command {
+enum Command {
     /// Automatic arguments detector.
     Args(ArgsArgs),
 }

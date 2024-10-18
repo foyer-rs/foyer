@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! micro benchmark for foyer in-memory cache hit ratio
+
 use std::sync::Arc;
 
 use csv::Reader;
