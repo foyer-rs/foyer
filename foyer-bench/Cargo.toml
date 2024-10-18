@@ -48,3 +48,6 @@ sanity = ["foyer/sanity"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
 tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+
+[lints]
+workspace = true

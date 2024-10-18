@@ -12,9 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
-
 //! Shared components and utils for foyer.
 
 /// Allow enable debug assertions in release profile with feature "strict_assertion".

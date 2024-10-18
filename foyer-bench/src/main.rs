@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! foyer benchmark tools.
+
 #![warn(clippy::allow_attributes)]
 
 mod analyze;
@@ -60,7 +62,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
 #[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir", "no_disk"]))]
-pub struct Args {
+struct Args {
     /// Run with in-memory cache compatible mode.
     ///
     /// One of `no_disk`, `file`, `dir` must be set.

@@ -62,9 +62,6 @@
 //! The handle that does not appear in either the indexer or the eviction container, and has no external owner, will be
 //! destroyed.
 
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
-
 mod cache;
 mod context;
 mod eviction;

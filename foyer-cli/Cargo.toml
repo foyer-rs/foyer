@@ -24,3 +24,6 @@ thiserror = "1"
 [[bin]]
 name = "foyer"
 path = "src/main.rs"
+
+[lints]
+workspace = true
