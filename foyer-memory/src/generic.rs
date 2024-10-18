@@ -129,7 +129,7 @@ where
         to_release: &mut Vec<(K, V, <E::Handle as Handle>::Context, usize)>,
     ) -> NonNull<E::Handle> {
         let mut handle = self.state.object_pool.acquire();
-        strict_assert!(!handle.base().has_refs());
+        strict_assert_eq!(handle.base().refs().load(Ordering::Relaxed), 0);
         strict_assert!(!handle.base().is_in_indexer());
         strict_assert!(!handle.base().is_in_eviction());
 
@@ -164,7 +164,7 @@ where
 
         self.usage.fetch_add(weight, Ordering::Relaxed);
         self.state.metrics.memory_usage.increment(weight as f64);
-        ptr.as_mut().base_mut().inc_refs();
+        ptr.as_ref().base().refs().fetch_add(1, Ordering::Relaxed);
 
         ptr
     }
@@ -187,7 +187,7 @@ where
         strict_assert!(base.is_in_indexer());
 
         base.set_deposit(false);
-        base.inc_refs();
+        base.refs().fetch_add(1, Ordering::Relaxed);
         self.eviction.acquire(ptr);
 
         Some(ptr)
@@ -230,7 +230,7 @@ where
         strict_assert!(!handle.base().is_in_indexer());
         strict_assert!(!handle.base().is_in_eviction());
 
-        handle.base_mut().inc_refs();
+        handle.base().refs().fetch_add(1, Ordering::Relaxed);
 
         Some(ptr)
     }

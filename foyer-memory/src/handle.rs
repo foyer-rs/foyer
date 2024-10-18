@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
 use bitflags::bitflags;
 use foyer_common::{
     assert::OptionExt,
@@ -23,10 +25,10 @@ use crate::context::Context;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    struct BaseHandleFlags: u8 {
+    struct BaseHandleFlags: u64 {
         const IN_INDEXER = 0b00000001;
         const IN_EVICTION = 0b00000010;
-        const IS_DEPOSIT= 0b00000100;
+        const DEPOSIT= 0b00000100;
     }
 }
 
@@ -73,9 +75,9 @@ pub struct BaseHandle<T, C> {
     /// entry weight
     weight: usize,
     /// external reference count
-    refs: usize,
+    refs: AtomicUsize,
     /// flags that used by the general cache abstraction
-    flags: BaseHandleFlags,
+    flags: AtomicU64,
 }
 
 impl<T, C> Default for BaseHandle<T, C> {
@@ -92,8 +94,8 @@ impl<T, C> BaseHandle<T, C> {
             entry: None,
             hash: 0,
             weight: 0,
-            refs: 0,
-            flags: BaseHandleFlags::empty(),
+            refs: AtomicUsize::new(0),
+            flags: AtomicU64::new(0),
         }
     }
 
@@ -105,8 +107,8 @@ impl<T, C> BaseHandle<T, C> {
         self.hash = hash;
         self.entry = Some((data, context));
         self.weight = weight;
-        self.refs = 0;
-        self.flags = BaseHandleFlags::empty();
+        self.refs = AtomicUsize::new(0);
+        self.flags = AtomicU64::new(0);
     }
 
     /// Take key and value from the handle and reset it to the uninitialized state.
@@ -165,78 +167,53 @@ impl<T, C> BaseHandle<T, C> {
         self.weight
     }
 
-    /// Increase the external reference count of the handle, returns the new reference count.
+    /// Get the atomic refs of the handle.
     #[inline(always)]
-    pub fn inc_refs(&mut self) -> usize {
-        self.inc_refs_by(1)
-    }
-
-    /// Increase the external reference count of the handle, returns the new reference count.
-    #[inline(always)]
-    pub fn inc_refs_by(&mut self, val: usize) -> usize {
-        self.refs += val;
-        self.refs
-    }
-
-    /// Decrease the external reference count of the handle, returns the new reference count.
-    #[inline(always)]
-    pub fn dec_refs(&mut self) -> usize {
-        self.refs -= 1;
-        self.refs
-    }
-
-    /// Get the external reference count of the handle.
-    #[inline(always)]
-    pub fn refs(&self) -> usize {
-        self.refs
-    }
-
-    /// Return `true` if there are external references.
-    #[inline(always)]
-    pub fn has_refs(&self) -> bool {
-        self.refs() > 0
+    pub fn refs(&self) -> &AtomicUsize {
+        &self.refs
     }
 
     #[inline(always)]
-    pub fn set_in_indexer(&mut self, in_cache: bool) {
-        if in_cache {
-            self.flags |= BaseHandleFlags::IN_INDEXER;
-        } else {
-            self.flags -= BaseHandleFlags::IN_INDEXER;
-        }
+    pub fn set_in_indexer(&mut self, val: bool) {
+        self.set_flags(BaseHandleFlags::IN_INDEXER, val, Ordering::Relaxed);
     }
 
     #[inline(always)]
     pub fn is_in_indexer(&self) -> bool {
-        self.flags.contains(BaseHandleFlags::IN_INDEXER)
+        self.get_flags(BaseHandleFlags::IN_INDEXER, Ordering::Relaxed)
     }
 
     #[inline(always)]
-    pub fn set_in_eviction(&mut self, in_eviction: bool) {
-        if in_eviction {
-            self.flags |= BaseHandleFlags::IN_EVICTION;
-        } else {
-            self.flags -= BaseHandleFlags::IN_EVICTION;
-        }
+    pub fn set_in_eviction(&mut self, val: bool) {
+        self.set_flags(BaseHandleFlags::IN_EVICTION, val, Ordering::Relaxed);
     }
 
     #[inline(always)]
     pub fn is_in_eviction(&self) -> bool {
-        self.flags.contains(BaseHandleFlags::IN_EVICTION)
+        self.get_flags(BaseHandleFlags::IN_EVICTION, Ordering::Relaxed)
     }
 
     #[inline(always)]
-    pub fn set_deposit(&mut self, deposit: bool) {
-        if deposit {
-            self.flags |= BaseHandleFlags::IS_DEPOSIT;
-        } else {
-            self.flags -= BaseHandleFlags::IS_DEPOSIT;
-        }
+    pub fn set_deposit(&mut self, val: bool) {
+        self.set_flags(BaseHandleFlags::DEPOSIT, val, Ordering::Relaxed);
     }
 
     #[inline(always)]
     pub fn is_deposit(&self) -> bool {
-        self.flags.contains(BaseHandleFlags::IS_DEPOSIT)
+        self.get_flags(BaseHandleFlags::DEPOSIT, Ordering::Relaxed)
+    }
+
+    #[inline(always)]
+    fn set_flags(&self, flags: BaseHandleFlags, val: bool, order: Ordering) {
+        match val {
+            true => self.flags.fetch_or(flags.bits(), order),
+            false => self.flags.fetch_add(!flags.bits(), order),
+        };
+    }
+
+    #[inline(always)]
+    fn get_flags(&self, flags: BaseHandleFlags, order: Ordering) -> bool {
+        flags.bits() & self.flags.load(order) == flags.bits()
     }
 }
 
