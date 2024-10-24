@@ -371,3 +371,117 @@ impl GhostQueue {
         self.counts.contains(&hash)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Range;
+
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::{eviction::test_utils::TestEviction, record::Data};
+
+    impl<K, V> TestEviction for S3Fifo<K, V>
+    where
+        K: Key + Clone,
+        V: Value + Clone,
+    {
+        fn dump(&self) -> Vec<NonNull<Record<Self>>> {
+            self.small_queue
+                .iter_ptr()
+                .chain(self.main_queue.iter_ptr())
+                .collect_vec()
+        }
+    }
+
+    type TestS3Fifo = S3Fifo<u64, u64>;
+
+    fn assert_test_s3fifo(
+        s3fifo: &TestS3Fifo,
+        small: Vec<NonNull<Record<TestS3Fifo>>>,
+        main: Vec<NonNull<Record<TestS3Fifo>>>,
+    ) {
+        let mut s = s3fifo.dump().into_iter().collect_vec();
+        assert_eq!(s.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
+        let m = s.split_off(s3fifo.small_queue.len());
+        assert_eq!((&s, &m), (&small, &main));
+        assert_eq!(s3fifo.small_weight, s.len());
+        assert_eq!(s3fifo.main_weight, m.len());
+        assert_eq!(s3fifo.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
+    }
+
+    fn assert_count(ptrs: &[NonNull<Record<TestS3Fifo>>], range: Range<usize>, count: u8) {
+        ptrs[range]
+            .iter()
+            .for_each(|ptr| assert_eq!(unsafe { ptr.as_ref() }.state.frequency(), count));
+    }
+
+    #[test]
+    fn test_s3fifo() {
+        unsafe {
+            let ptrs = (0..100)
+                .map(|i| {
+                    let mut handle = Box::new(Record::new(Data {
+                        key: i,
+                        value: i,
+                        hint: S3FifoHint,
+                        state: Default::default(),
+                        hash: i,
+                        weight: 1,
+                    }));
+                    NonNull::new_unchecked(Box::into_raw(handle))
+                })
+                .collect_vec();
+
+            // capacity: 8, small: 2, ghost: 80
+            let config = S3FifoConfig {
+                small_queue_capacity_ratio: 0.25,
+                ghost_queue_capacity_ratio: 10.0,
+                small_to_main_freq_threshold: 2,
+            };
+            let mut s3fifo = TestS3Fifo::new(8, &config);
+
+            let ps = |indices: &[usize]| indices.into_iter().map(|&i| ptrs[i]).collect_vec();
+
+            assert_eq!(s3fifo.small_weight_capacity, 2);
+
+            s3fifo.push(ptrs[0]);
+            s3fifo.push(ptrs[1]);
+            assert_test_s3fifo(&s3fifo, ps(&[0, 1]), vec![]);
+
+            s3fifo.push(ptrs[2]);
+            s3fifo.push(ptrs[3]);
+            assert_test_s3fifo(&s3fifo, ps(&[0, 1, 2, 3]), vec![]);
+
+            assert_count(&ptrs, 0..4, 0);
+
+            (0..4).for_each(|i| s3fifo.acquire_immutable(ptrs[i]));
+            s3fifo.acquire_immutable(ptrs[1]);
+            s3fifo.acquire_immutable(ptrs[2]);
+            assert_count(&ptrs, 0..1, 1);
+            assert_count(&ptrs, 1..3, 2);
+            assert_count(&ptrs, 3..4, 1);
+
+            let p0 = s3fifo.pop().unwrap();
+            let p3 = s3fifo.pop().unwrap();
+            assert_eq!(p0, ptrs[0]);
+            assert_eq!(p3, ptrs[3]);
+            assert_test_s3fifo(&s3fifo, vec![], ps(&[1, 2]));
+            assert_count(&ptrs, 0..1, 0);
+            assert_count(&ptrs, 1..3, 2);
+            assert_count(&ptrs, 3..4, 0);
+
+            let p1 = s3fifo.pop().unwrap();
+            assert_eq!(p1, ptrs[1]);
+            assert_test_s3fifo(&s3fifo, vec![], ps(&[2]));
+            assert_count(&ptrs, 0..4, 0);
+
+            s3fifo.clear();
+            assert_test_s3fifo(&s3fifo, vec![], vec![]);
+
+            for ptr in ptrs {
+                let _ = Box::from_raw(ptr.as_ptr());
+            }
+        }
+    }
+}

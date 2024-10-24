@@ -82,8 +82,8 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
 /// # Examples
 ///
 /// ```
-/// use foyer_intrusive::intrusive_adapter;
-/// use foyer_intrusive::adapter::Link;
+/// use foyer_intrusive_v2::intrusive_adapter;
+/// use foyer_intrusive_v2::adapter::Link;
 ///
 /// #[derive(Debug)]
 /// pub struct Item<L>
@@ -94,7 +94,7 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<L> = Item<L> { link: L } where L: Link }
+/// intrusive_adapter! { ItemAdapter<L> = Item<L> { link => L } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {

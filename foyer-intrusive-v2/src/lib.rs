@@ -22,7 +22,7 @@
 /// # Examples
 ///
 /// ```
-/// use foyer_intrusive::container_of;
+/// use foyer_intrusive_v2::container_of;
 ///
 /// struct S { x: u32, y: u32 };
 /// let mut container = S { x: 1, y: 2 };

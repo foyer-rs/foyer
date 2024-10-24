@@ -12,31 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-/// Scoped functional programming extensions.
-pub trait Scope {
-    /// Scoped with ownership.
-    fn with<F, R>(self, f: F) -> R
-    where
-        Self: Sized,
-        F: FnOnce(Self) -> R,
-    {
-        f(self)
-    }
+use std::ptr::NonNull;
 
-    /// Scoped with reference.
-    fn with_ref<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&Self) -> R,
-    {
-        f(self)
-    }
+use crate::Record;
 
-    /// Scoped with mutable reference.
-    fn with_mut<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut Self) -> R,
-    {
-        f(self)
-    }
+use super::Eviction;
+
+pub trait TestEviction: Eviction {
+    fn dump(&self) -> Vec<NonNull<Record<Self>>>;
 }
-impl<T> Scope for T {}

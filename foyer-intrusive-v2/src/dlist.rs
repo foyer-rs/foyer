@@ -508,10 +508,63 @@ where
     }
 }
 
+impl<A> Dlist<A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    /// Create a [`NonNull`] pointer iterator for test.
+    ///
+    /// Dereferencing the [`NonNull`] as mutable reference is an UB.
+    pub fn iter_ptr(&self) -> DlistPtrIter<'_, A> {
+        DlistPtrIter {
+            link: None,
+            dlist: self,
+        }
+    }
+
+    /// Create a [`NonNull`] pointer iterator for test.
+    pub fn iter_ptr_mut(&mut self) -> DlistPtrIter<'_, A> {
+        DlistPtrIter {
+            link: None,
+            dlist: self,
+        }
+    }
+}
+
+/// [`NonNull`] pointer iterator of [`Dlist`] for test usage.
+pub struct DlistPtrIter<'a, A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    link: Option<NonNull<A::Link>>,
+    dlist: &'a Dlist<A>,
+}
+
+unsafe impl<'a, A> Send for DlistPtrIter<'a, A> where A: Adapter<Link = DlistLink> {}
+
+unsafe impl<'a, A> Sync for DlistPtrIter<'a, A> where A: Adapter<Link = DlistLink> {}
+
+impl<'a, A> Iterator for DlistPtrIter<'a, A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    type Item = NonNull<A::Item>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe {
+            match self.link {
+                Some(link) => self.link = link.as_ref().next,
+                None => self.link = self.dlist.head,
+            }
+            self.link.map(|link| self.dlist.adapter.link2ptr(link))
+        }
+    }
+}
+
 // TODO(MrCroxx): Need more tests.
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
     use itertools::Itertools;
 
