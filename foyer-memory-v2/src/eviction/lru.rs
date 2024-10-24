@@ -65,7 +65,7 @@ impl Default for LruHint {
     }
 }
 
-/// Lru eviction algorithm hint.
+/// Lru eviction algorithm state.
 #[derive(Debug, Default)]
 pub struct LruState {
     link: DlistLink,

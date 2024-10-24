@@ -500,6 +500,11 @@ where
 
         let shard_capacity = config.capacity / config.shards;
 
+        match E::acquire_operator() {
+            Operator::Immutable => tracing::info!("[memory]: rwlock is used for foyer in-memory cache"),
+            Operator::Mutable => tracing::info!("[memory]: mutex is used for foyer in-memory cache"),
+        }
+
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
                 slab: SlabBuilder::new()
@@ -515,14 +520,8 @@ where
                 event_listener: config.event_listener.clone(),
             })
             .map(|shard| match E::acquire_operator() {
-                Operator::Immutable => {
-                    tracing::info!("[memory]: rwlock is used for foyer in-memory cache");
-                    Lock::rwlock(shard)
-                }
-                Operator::Mutable => {
-                    tracing::info!("[memory]: mutex is used for foyer in-memory cache");
-                    Lock::mutex(shard)
-                }
+                Operator::Immutable => Lock::rwlock(shard),
+                Operator::Mutable => Lock::mutex(shard),
             })
             .collect_vec();
 
@@ -681,7 +680,14 @@ where
     }
 
     pub fn usage(&self) -> usize {
-        self.inner.shards.iter().map(|shard| shard.read().usage).sum()
+        self.inner
+            .shards
+            .iter()
+            .map(|shard| match E::acquire_operator() {
+                Operator::Immutable => shard.read().usage,
+                Operator::Mutable => shard.write().usage,
+            })
+            .sum()
     }
 
     pub fn metrics(&self) -> &Metrics {
@@ -1008,6 +1014,7 @@ mod tests {
     use crate::{
         eviction::{
             fifo::{Fifo, FifoConfig, FifoHint},
+            lfu::{Lfu, LfuConfig, LfuHint},
             lru::{Lru, LruConfig, LruHint},
             s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
         },
@@ -1085,6 +1092,24 @@ mod tests {
                 event_listener: None,
             });
         let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
+        fuzzy(cache, hints);
+    }
+
+    #[test_log::test]
+    fn test_lfu_cache_fuzzy() {
+        let cache: RawCache<RandomState, Lfu<u64, u64>, HashTableIndexer<Lfu<u64, u64>>> =
+            RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: LfuConfig::default(),
+                slab_initial_capacity: 0,
+                slab_segment_size: 16 * 1024,
+                hash_builder: RandomState::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+        let hints = vec![LfuHint];
         fuzzy(cache, hints);
     }
 

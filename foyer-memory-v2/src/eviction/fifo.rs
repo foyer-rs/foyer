@@ -33,7 +33,7 @@ pub struct FifoConfig;
 #[derive(Debug, Clone, Default)]
 pub struct FifoHint;
 
-/// Fifo eviction algorithm hint.
+/// Fifo eviction algorithm state.
 #[derive(Debug, Default)]
 pub struct FifoState {
     link: DlistLink,
