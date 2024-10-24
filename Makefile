@@ -52,14 +52,14 @@ fast: check test example
 msrv:
 	shellcheck ./scripts/*
 	./scripts/minimize-dashboards.sh
-	cargo +1.81.0 sort -w
-	cargo +1.81.0 fmt --all
-	cargo +1.81.0 clippy --all-targets --features deadlock
-	cargo +1.81.0 clippy --all-targets --features tokio-console
-	cargo +1.81.0 clippy --all-targets
-	RUST_BACKTRACE=1 cargo +1.81.0 nextest run --all
-	RUST_BACKTRACE=1 cargo +1.81.0 test --doc
-	RUST_BACKTRACE=1 cargo +1.81.0 nextest run --run-ignored ignored-only --no-capture --workspace
+	cargo +1.82.0 sort -w
+	cargo +1.82.0 fmt --all
+	cargo +1.82.0 clippy --all-targets --features deadlock
+	cargo +1.82.0 clippy --all-targets --features tokio-console
+	cargo +1.82.0 clippy --all-targets
+	RUST_BACKTRACE=1 cargo +1.82.0 nextest run --all
+	RUST_BACKTRACE=1 cargo +1.82.0 test --doc
+	RUST_BACKTRACE=1 cargo +1.82.0 nextest run --run-ignored ignored-only --no-capture --workspace
 
 udeps:
 	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-07-19 udeps --all-targets
