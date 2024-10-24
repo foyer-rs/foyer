@@ -94,7 +94,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     eviction::Operator,
-    indexer::{sentry::Sentry, Indexer},
+    indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     record::Data,
     slab::{Slab, SlabBuilder},
     sync::Lock,
@@ -107,10 +107,10 @@ use crate::{
 pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
-pub struct RawCacheConfig<S, E>
+pub struct RawCacheConfig<E, S>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
 {
     pub name: String,
     pub capacity: usize,
@@ -123,7 +123,7 @@ where
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-struct RawCacheShard<S, E, I>
+struct RawCacheShard<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -137,13 +137,13 @@ where
     usage: usize,
     capacity: usize,
 
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<S, E, I>>>>>,
+    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, I, S>>>>>,
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-impl<S, E, I> RawCacheShard<S, E, I>
+impl<E, I, S> RawCacheShard<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -155,7 +155,7 @@ where
         data: Data<E>,
         ephemeral: bool,
         garbages: &mut Vec<Data<E>>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<S, E, I>>>,
+        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, I, S>>>,
     ) -> NonNull<Record<E>> {
         std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
 
@@ -372,7 +372,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")]
-    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<S, E, I>
+    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, I, S>
     where
         E::Key: Clone,
     {
@@ -384,7 +384,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")]
-    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<S, E, I>
+    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, I, S>
     where
         E::Key: Clone,
     {
@@ -396,7 +396,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")]
-    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<S, E, I> {
+    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, I, S> {
         match self.waiters.lock().entry(key) {
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
@@ -415,13 +415,13 @@ where
     }
 }
 
-struct RawCacheInner<S, E, I>
+struct RawCacheInner<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
-    shards: Vec<Lock<RawCacheShard<S, E, I>>>,
+    shards: Vec<Lock<RawCacheShard<E, I, S>>>,
 
     capacity: usize,
 
@@ -432,7 +432,7 @@ where
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-impl<S, E, I> RawCacheInner<S, E, I>
+impl<E, I, S> RawCacheInner<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -456,16 +456,16 @@ where
     }
 }
 
-struct RawCache<S, E, I>
+pub struct RawCache<E, I = HashTableIndexer<E>, S = ahash::RandomState>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
-    inner: Arc<RawCacheInner<S, E, I>>,
+    inner: Arc<RawCacheInner<E, I, S>>,
 }
 
-impl<S, E, I> Drop for RawCacheInner<S, E, I>
+impl<E, I, S> Drop for RawCacheInner<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -476,7 +476,7 @@ where
     }
 }
 
-impl<S, E, I> Clone for RawCache<S, E, I>
+impl<E, I, S> Clone for RawCache<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -489,13 +489,13 @@ where
     }
 }
 
-impl<S, E, I> RawCache<S, E, I>
+impl<E, I, S> RawCache<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
-    pub fn new(config: RawCacheConfig<S, E>) -> Self {
+    pub fn new(config: RawCacheConfig<E, S>) -> Self {
         let metrics = Arc::new(Metrics::new(&config.name));
 
         let shard_capacity = config.capacity / config.shards;
@@ -538,27 +538,27 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
-    pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<S, E, I> {
+    pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, I, S> {
         self.insert_with_hint(key, value, Default::default())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
-    pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<S, E, I> {
+    pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, I, S> {
         self.emplace(key, value, hint, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
-    pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<S, E, I> {
+    pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, I, S> {
         self.insert_ephemeral_with_hint(key, value, Default::default())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
-    pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<S, E, I> {
+    pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, I, S> {
         self.emplace(key, value, hint, true)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::emplace")]
-    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<S, E, I> {
+    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<E, I, S> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
 
@@ -603,7 +603,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::remove")]
-    pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<S, E, I>>
+    pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, I, S>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
@@ -618,7 +618,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::get")]
-    pub fn get<Q>(&self, key: &Q) -> Option<RawCacheEntry<S, E, I>>
+    pub fn get<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, I, S>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
@@ -707,17 +707,17 @@ where
     }
 }
 
-pub struct RawCacheEntry<S, E, I>
+pub struct RawCacheEntry<E, I = HashTableIndexer<E>, S = ahash::RandomState>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
-    inner: Arc<RawCacheInner<S, E, I>>,
+    inner: Arc<RawCacheInner<E, I, S>>,
     ptr: NonNull<Record<E>>,
 }
 
-impl<S, E, I> Debug for RawCacheEntry<S, E, I>
+impl<E, I, S> Debug for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -728,7 +728,7 @@ where
     }
 }
 
-impl<S, E, I> Drop for RawCacheEntry<S, E, I>
+impl<E, I, S> Drop for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -751,7 +751,7 @@ where
     }
 }
 
-impl<S, E, I> Clone for RawCacheEntry<S, E, I>
+impl<E, I, S> Clone for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -766,7 +766,7 @@ where
     }
 }
 
-impl<S, E, I> Deref for RawCacheEntry<S, E, I>
+impl<E, I, S> Deref for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -779,7 +779,7 @@ where
     }
 }
 
-unsafe impl<S, E, I> Send for RawCacheEntry<S, E, I>
+unsafe impl<E, I, S> Send for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -787,7 +787,7 @@ where
 {
 }
 
-unsafe impl<S, E, I> Sync for RawCacheEntry<S, E, I>
+unsafe impl<E, I, S> Sync for RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -795,7 +795,7 @@ where
 {
 }
 
-impl<S, E, I> RawCacheEntry<S, E, I>
+impl<E, I, S> RawCacheEntry<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -844,37 +844,37 @@ pub enum FetchState {
 /// A mark for fetch calls.
 pub struct FetchMark;
 
-enum RawShardFetch<S, E, I>
+enum RawShardFetch<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
     Hit(NonNull<Record<E>>),
-    Wait(InSpan<oneshot::Receiver<RawCacheEntry<S, E, I>>>),
+    Wait(InSpan<oneshot::Receiver<RawCacheEntry<E, I, S>>>),
     Miss,
 }
 
-pub type RawFetch<S, E, I, ER> =
-    DiversionFuture<RawFetchInner<S, E, I, ER>, std::result::Result<RawCacheEntry<S, E, I>, ER>, FetchMark>;
+pub type RawFetch<E, I, S, ER> =
+    DiversionFuture<RawFetchInner<E, I, S, ER>, std::result::Result<RawCacheEntry<E, I, S>, ER>, FetchMark>;
 
-type RawFetchHit<S, E, I> = Option<RawCacheEntry<S, E, I>>;
-type RawFetchWait<S, E, I> = InSpan<oneshot::Receiver<RawCacheEntry<S, E, I>>>;
-type RawFetchMiss<S, E, I, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<S, E, I>, ER>, DFS>>;
+type RawFetchHit<E, I, S> = Option<RawCacheEntry<E, I, S>>;
+type RawFetchWait<E, I, S> = InSpan<oneshot::Receiver<RawCacheEntry<E, I, S>>>;
+type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, I, S>, ER>, DFS>>;
 
 #[pin_project(project = RawFetchInnerProj)]
-pub enum RawFetchInner<S, E, I, ER>
+pub enum RawFetchInner<E, I, S, ER>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
 {
-    Hit(RawFetchHit<S, E, I>),
-    Wait(#[pin] RawFetchWait<S, E, I>),
-    Miss(#[pin] RawFetchMiss<S, E, I, ER, FetchMark>),
+    Hit(RawFetchHit<E, I, S>),
+    Wait(#[pin] RawFetchWait<E, I, S>),
+    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchMark>),
 }
 
-impl<S, E, I, ER> RawFetchInner<S, E, I, ER>
+impl<E, I, S, ER> RawFetchInner<E, I, S, ER>
 where
     S: HashBuilder,
     E: Eviction,
@@ -889,14 +889,14 @@ where
     }
 }
 
-impl<S, E, I, ER> Future for RawFetchInner<S, E, I, ER>
+impl<E, I, S, ER> Future for RawFetchInner<E, I, S, ER>
 where
     S: HashBuilder,
     E: Eviction,
     I: Indexer<Eviction = E>,
     ER: From<oneshot::error::RecvError>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<S, E, I>, ER>, FetchMark>;
+    type Output = Diversion<std::result::Result<RawCacheEntry<E, I, S>, ER>, FetchMark>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -908,7 +908,7 @@ where
 }
 
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
-impl<S, E, I> RawCache<S, E, I>
+impl<E, I, S> RawCache<E, I, S>
 where
     S: HashBuilder,
     E: Eviction,
@@ -916,7 +916,7 @@ where
     E::Key: Clone,
 {
     #[fastrace::trace(name = "foyer::memory::raw::fetch")]
-    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<S, E, I, ER>
+    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, I, S, ER>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
@@ -931,7 +931,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
-    pub fn fetch_with_hint<F, FU, ER>(&self, key: E::Key, hint: E::Hint, fetch: F) -> RawFetch<S, E, I, ER>
+    pub fn fetch_with_hint<F, FU, ER>(&self, key: E::Key, hint: E::Hint, fetch: F) -> RawFetch<E, I, S, ER>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
@@ -949,7 +949,7 @@ where
         hint: E::Hint,
         fetch: F,
         runtime: &SingletonHandle,
-    ) -> RawFetch<S, E, I, ER>
+    ) -> RawFetch<E, I, S, ER>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
@@ -1008,7 +1008,6 @@ where
 #[cfg(test)]
 mod tests {
 
-    use ahash::RandomState;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
 
     use crate::{
@@ -1027,10 +1026,13 @@ mod tests {
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<RawCache<RandomState, Fifo<(), ()>, HashTableIndexer<Fifo<(), ()>>>>();
+        is_send_sync_static::<RawCache<Fifo<(), ()>>>();
+        is_send_sync_static::<RawCache<S3Fifo<(), ()>>>();
+        is_send_sync_static::<RawCache<Lru<(), ()>>>();
+        is_send_sync_static::<RawCache<Lfu<(), ()>>>();
     }
 
-    fn fuzzy<E>(cache: RawCache<RandomState, E, HashTableIndexer<E>>, hints: Vec<E::Hint>)
+    fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)
     where
         E: Eviction<Key = u64, Value = u64>,
     {
@@ -1061,73 +1063,69 @@ mod tests {
 
     #[test_log::test]
     fn test_fifo_cache_fuzzy() {
-        let cache: RawCache<RandomState, Fifo<u64, u64>, HashTableIndexer<Fifo<u64, u64>>> =
-            RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
-                capacity: 256,
-                shards: 4,
-                eviction_config: FifoConfig::default(),
-                slab_initial_capacity: 0,
-                slab_segment_size: 16 * 1024,
-                hash_builder: RandomState::default(),
-                weighter: Arc::new(|_, _| 1),
-                event_listener: None,
-            });
+        let cache: RawCache<Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: FifoConfig::default(),
+            slab_initial_capacity: 0,
+            slab_segment_size: 16 * 1024,
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+        });
         let hints = vec![FifoHint];
         fuzzy(cache, hints);
     }
 
     #[test_log::test]
+    fn test_s3fifo_cache_fuzzy() {
+        let cache: RawCache<S3Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: S3FifoConfig::default(),
+            slab_initial_capacity: 0,
+            slab_segment_size: 16 * 1024,
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+        });
+        let hints = vec![S3FifoHint];
+        fuzzy(cache, hints);
+    }
+
+    #[test_log::test]
     fn test_lru_cache_fuzzy() {
-        let cache: RawCache<RandomState, Lru<u64, u64>, HashTableIndexer<Lru<u64, u64>>> =
-            RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
-                capacity: 256,
-                shards: 4,
-                eviction_config: LruConfig::default(),
-                slab_initial_capacity: 0,
-                slab_segment_size: 16 * 1024,
-                hash_builder: RandomState::default(),
-                weighter: Arc::new(|_, _| 1),
-                event_listener: None,
-            });
+        let cache: RawCache<Lru<u64, u64>> = RawCache::new(RawCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: LruConfig::default(),
+            slab_initial_capacity: 0,
+            slab_segment_size: 16 * 1024,
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+        });
         let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
         fuzzy(cache, hints);
     }
 
     #[test_log::test]
     fn test_lfu_cache_fuzzy() {
-        let cache: RawCache<RandomState, Lfu<u64, u64>, HashTableIndexer<Lfu<u64, u64>>> =
-            RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
-                capacity: 256,
-                shards: 4,
-                eviction_config: LfuConfig::default(),
-                slab_initial_capacity: 0,
-                slab_segment_size: 16 * 1024,
-                hash_builder: RandomState::default(),
-                weighter: Arc::new(|_, _| 1),
-                event_listener: None,
-            });
+        let cache: RawCache<Lfu<u64, u64>> = RawCache::new(RawCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: LfuConfig::default(),
+            slab_initial_capacity: 0,
+            slab_segment_size: 16 * 1024,
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+        });
         let hints = vec![LfuHint];
-        fuzzy(cache, hints);
-    }
-
-    #[test_log::test]
-    fn test_s3fifo_cache_fuzzy() {
-        let cache: RawCache<RandomState, S3Fifo<u64, u64>, HashTableIndexer<S3Fifo<u64, u64>>> =
-            RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
-                capacity: 256,
-                shards: 4,
-                eviction_config: S3FifoConfig::default(),
-                slab_initial_capacity: 0,
-                slab_segment_size: 16 * 1024,
-                hash_builder: RandomState::default(),
-                weighter: Arc::new(|_, _| 1),
-                event_listener: None,
-            });
-        let hints = vec![S3FifoHint];
         fuzzy(cache, hints);
     }
 }
