@@ -515,8 +515,14 @@ where
                 event_listener: config.event_listener.clone(),
             })
             .map(|shard| match E::acquire_operator() {
-                Operator::Immutable => Lock::rwlock(shard),
-                Operator::Mutable => Lock::mutex(shard),
+                Operator::Immutable => {
+                    tracing::info!("[memory]: rwlock is used for foyer in-memory cache");
+                    Lock::rwlock(shard)
+                }
+                Operator::Mutable => {
+                    tracing::info!("[memory]: mutex is used for foyer in-memory cache");
+                    Lock::mutex(shard)
+                }
             })
             .collect_vec();
 
