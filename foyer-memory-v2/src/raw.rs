@@ -165,6 +165,8 @@ where
         let token = self.slab.insert(Record::new(data));
         let mut ptr = self.slab.ptr(token);
         unsafe { ptr.as_mut().init(token) };
+        // FIXME: remove the comments.
+        // println!("set token {token:?} for ptr {ptr:?}");
 
         // Evict overflow records.
         while self.usage + weight > self.capacity {
@@ -175,9 +177,8 @@ where
             self.metrics.memory_evict.increment(1);
             strict_assert!(unsafe { evicted.as_ref().is_in_indexer() });
             strict_assert!(unsafe { !evicted.as_ref().is_in_eviction() });
-            unsafe { evicted.as_ref().set_ephemeral(true) };
             if unsafe { evicted.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(evicted) {
+                if let Some(garbage) = self.release(evicted, false) {
                     garbages.push(garbage);
                 }
             }
@@ -194,7 +195,7 @@ where
             strict_assert!(!unsafe { old.as_ref() }.is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
             if unsafe { old.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(old) {
+                if let Some(garbage) = self.release(old, false) {
                     garbages.push(garbage);
                 }
             }
@@ -218,37 +219,37 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::release")]
-    fn release(&mut self, mut ptr: NonNull<Record<E>>) -> Option<Data<E>> {
+    fn release(&mut self, mut ptr: NonNull<Record<E>>, reinsert: bool) -> Option<Data<E>> {
         let record = unsafe { ptr.as_mut() };
 
         if record.refs().load(Ordering::SeqCst) > 0 {
             return None;
         }
 
-        if record.is_in_indexer() {
-            if record.is_ephemeral() {
-                // The entry is ephemeral, remove it from indexer. Ignore reinsertion.
-                strict_assert!(!record.is_in_eviction());
-                self.indexer.remove(record.hash(), record.key());
-                strict_assert!(!record.is_in_indexer());
-            } else {
-                // The entry has no external refs, give it another chance by reinsertion if the cache is not busy
-                // and the algorithm allows.
+        if record.is_in_indexer() && record.is_ephemeral() {
+            // The entry is ephemeral, remove it from indexer. Ignore reinsertion.
+            strict_assert!(!record.is_in_eviction());
+            self.indexer.remove(record.hash(), record.key());
+            strict_assert!(!record.is_in_indexer());
+        }
 
-                // The usage is higher than the capacity means most handles are held externally,
-                // the cache shard cannot release enough weight for the new inserted entries.
-                // In this case, the reinsertion should be given up.
-                if self.usage <= self.capacity {
-                    let was_in_eviction = record.is_in_eviction();
-                    self.eviction.release(ptr);
-                    if record.is_in_eviction() {
-                        if !was_in_eviction {
-                            self.metrics.memory_reinsert.increment(1);
-                        }
-                        strict_assert!(record.is_in_indexer());
-                        strict_assert!(record.is_in_eviction());
-                        return None;
+        if record.is_in_indexer() {
+            // The entry has no external refs, give it another chance by reinsertion if the cache is not busy
+            // and the algorithm allows.
+
+            // The usage is higher than the capacity means most handles are held externally,
+            // the cache shard cannot release enough weight for the new inserted entries.
+            // In this case, the reinsertion should be given up.
+            if reinsert && self.usage <= self.capacity {
+                let was_in_eviction = record.is_in_eviction();
+                self.eviction.release(ptr);
+                if record.is_in_eviction() {
+                    if !was_in_eviction {
+                        self.metrics.memory_reinsert.increment(1);
                     }
+                    strict_assert!(record.is_in_indexer());
+                    strict_assert!(record.is_in_eviction());
+                    return None;
                 }
             }
 
@@ -270,6 +271,8 @@ where
 
         let token = record.token();
 
+        // FIXME: remove the comments.
+        // println!("remove token {token:?} for ptr {ptr:?}");
         let record = self.slab.remove(token);
         let data = record.into_data();
 
@@ -361,7 +364,7 @@ where
             strict_assert!(unsafe { !ptr.as_ref().is_in_indexer() });
             strict_assert!(unsafe { !ptr.as_ref().is_in_eviction() });
             if unsafe { ptr.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(ptr) {
+                if let Some(garbage) = self.release(ptr, false) {
                     garbages.push(garbage);
                 }
             }
@@ -739,7 +742,7 @@ where
             let shard = hash as usize % self.inner.shards.len();
             let garbage = self.inner.shards[shard]
                 .write()
-                .with(|mut shard| shard.release(self.ptr));
+                .with(|mut shard| shard.release(self.ptr, true));
             // Do not deallocate data within the lock section.
             if let Some(listener) = self.inner.event_listener.as_ref() {
                 if let Some(Data { key, value, .. }) = garbage {

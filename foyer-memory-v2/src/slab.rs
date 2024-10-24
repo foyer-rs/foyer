@@ -63,8 +63,14 @@ type RawToken = usize;
 /// [`Token`] can be used like an index. It will be stale if the entry is removed from the slab.
 ///
 /// Use a stale token to access the slab will lead to an UB.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Token(NonZeroUsize);
+
+impl Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Token").field(&self.into_raw()).finish()
+    }
+}
 
 impl Token {
     const HIGHEST_BIT: RawToken = 1 << (RawToken::BITS - 1);
