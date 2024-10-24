@@ -127,3 +127,4 @@ pub trait Eviction: Send + Sync + 'static + Sized {
 
 pub mod fifo;
 pub mod lru;
+pub mod s3fifo;

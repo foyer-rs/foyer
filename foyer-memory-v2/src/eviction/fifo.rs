@@ -81,7 +81,7 @@ where
     }
 
     fn remove(&mut self, ptr: NonNull<Record<Self>>) {
-        let p = unsafe { self.queue.remove(ptr) };
+        let p = self.queue.remove(ptr);
         assert_eq!(p, ptr);
         unsafe { ptr.as_ref().set_in_eviction(false) };
     }

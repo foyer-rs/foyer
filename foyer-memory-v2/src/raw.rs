@@ -1003,6 +1003,7 @@ mod tests {
         eviction::{
             fifo::{Fifo, FifoConfig, FifoHint},
             lru::{Lru, LruConfig, LruHint},
+            s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
         },
         indexer::hash_table::HashTableIndexer,
     };
@@ -1020,9 +1021,7 @@ mod tests {
     where
         E: Eviction<Key = u64, Value = u64>,
     {
-        // FIXME: restore this line
-        // let handles = (0..8)
-        let handles = (0..1)
+        let handles = (0..8)
             .map(|i| {
                 let c = cache.clone();
                 let hints = hints.clone();
@@ -1080,6 +1079,24 @@ mod tests {
                 event_listener: None,
             });
         let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
+        fuzzy(cache, hints);
+    }
+
+    #[test_log::test]
+    fn test_s3fifo_cache_fuzzy() {
+        let cache: RawCache<RandomState, S3Fifo<u64, u64>, HashTableIndexer<S3Fifo<u64, u64>>> =
+            RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: S3FifoConfig::default(),
+                slab_initial_capacity: 0,
+                slab_segment_size: 16 * 1024,
+                hash_builder: RandomState::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+        let hints = vec![S3FifoHint];
         fuzzy(cache, hints);
     }
 }
