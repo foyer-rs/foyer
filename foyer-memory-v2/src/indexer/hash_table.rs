@@ -16,9 +16,8 @@ use std::ptr::NonNull;
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
-use crate::{Eviction, Record};
-
 use super::Indexer;
+use crate::{eviction::Eviction, record::Record};
 
 pub struct HashTableIndexer<E>
 where

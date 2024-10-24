@@ -121,6 +121,7 @@ impl<T> Slab<T> {
     }
 
     /// The count of allocated entry count.
+    #[expect(unused)]
     pub fn len(&self) -> usize {
         self.len
     }
@@ -236,6 +237,7 @@ impl<T> SlabBuilder<T> {
     /// Set the capacity of the segment of [`Slab`] by entries.
     ///
     /// The capacity is the count of entries that the segment can hold without further allocation.
+    #[expect(unused)]
     pub fn with_segment_entries(mut self, val: usize) -> Self {
         self.segment_entries = val;
         self

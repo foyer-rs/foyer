@@ -12,4 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub use crate::{eviction::Eviction, raw::Weighter, record::Record};
+pub use ahash::RandomState;
+
+pub use crate::{
+    cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
+    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
+    raw::{FetchMark, FetchState, Weighter},
+    record::{CacheHint, Record},
+};

@@ -93,12 +93,11 @@ use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    eviction::Operator,
+    eviction::{Eviction, Operator},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
-    record::Data,
+    record::{Data, Record},
     slab::{Slab, SlabBuilder},
     sync::Lock,
-    Eviction, Record,
 };
 
 /// The weighter for the in-memory cache.
@@ -140,7 +139,7 @@ where
     waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
     metrics: Arc<Metrics>,
-    event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
+    _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
 impl<E, S, I> RawCacheShard<E, S, I>
@@ -517,7 +516,7 @@ where
                 capacity: shard_capacity,
                 waiters: Mutex::default(),
                 metrics: metrics.clone(),
-                event_listener: config.event_listener.clone(),
+                _event_listener: config.event_listener.clone(),
             })
             .map(|shard| match E::acquire_operator() {
                 Operator::Immutable => Lock::rwlock(shard),
@@ -1010,17 +1009,13 @@ mod tests {
 
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
 
-    use crate::{
-        eviction::{
-            fifo::{Fifo, FifoConfig, FifoHint},
-            lfu::{Lfu, LfuConfig, LfuHint},
-            lru::{Lru, LruConfig, LruHint},
-            s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
-        },
-        indexer::hash_table::HashTableIndexer,
-    };
-
     use super::*;
+    use crate::eviction::{
+        fifo::{Fifo, FifoConfig, FifoHint},
+        lfu::{Lfu, LfuConfig, LfuHint},
+        lru::{Lru, LruConfig, LruHint},
+        s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+    };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 

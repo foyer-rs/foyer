@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use bitflags::bitflags;
 
-use crate::{slab::Token, Eviction};
+use crate::{eviction::Eviction, slab::Token};
 
 /// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
 ///
@@ -113,6 +113,7 @@ where
         self.token.unwrap()
     }
 
+    /// Consume the record and unwrap the data only.
     pub fn into_data(self) -> Data<E> {
         Data {
             key: self.key,

@@ -27,9 +27,8 @@ use foyer_intrusive_v2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{record::CacheHint, Record};
-
 use super::{Eviction, Operator};
+use crate::record::{CacheHint, Record};
 
 /// w-TinyLFU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]

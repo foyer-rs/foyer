@@ -16,7 +16,7 @@ use std::{hash::Hash, ptr::NonNull};
 
 use equivalent::Equivalent;
 
-use crate::{Eviction, Record};
+use crate::{eviction::Eviction, record::Record};
 
 pub trait Indexer: Send + Sync + 'static + Default {
     type Eviction: Eviction;

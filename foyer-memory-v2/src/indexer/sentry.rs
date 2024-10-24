@@ -17,9 +17,8 @@ use std::{hash::Hash, ptr::NonNull};
 use equivalent::Equivalent;
 use foyer_common::strict_assert;
 
-use crate::{Eviction, Record};
-
 use super::Indexer;
+use crate::{eviction::Eviction, record::Record};
 
 /// [`Sentry`] is a guard for all [`Indexer`] implementations to set `IN_INDEXER` flag properly.
 pub struct Sentry<I>

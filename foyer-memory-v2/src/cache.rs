@@ -38,9 +38,8 @@ use crate::{
         lru::{Lru, LruConfig},
         s3fifo::{S3Fifo, S3FifoConfig},
     },
-    raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch},
+    raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
-    Weighter,
 };
 
 pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
@@ -59,6 +58,7 @@ pub type LfuCache<K, V, S = RandomState> = RawCache<Lfu<K, V>, S>;
 pub type LfuCacheEntry<K, V, S = RandomState> = RawCacheEntry<Lfu<K, V>, S>;
 pub type LfuFetch<K, V, ER, S = RandomState> = RawFetch<Lfu<K, V>, ER, S>;
 
+/// A cached entry holder of the in-memory cache.
 #[derive(Debug)]
 pub enum CacheEntry<K, V, S = RandomState>
 where

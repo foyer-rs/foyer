@@ -14,9 +14,8 @@
 
 use std::ptr::NonNull;
 
-use crate::Record;
-
 use super::Eviction;
+use crate::record::Record;
 
 pub trait TestEviction: Eviction {
     fn dump(&self) -> Vec<NonNull<Record<Self>>>;

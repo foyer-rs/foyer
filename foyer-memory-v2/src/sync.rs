@@ -47,6 +47,7 @@ impl<T> Lock<T> {
 
 pub enum LockReadGuard<'a, T> {
     RwLock(RwLockReadGuard<'a, T>),
+    #[expect(dead_code)]
     Mutex,
 }
 
