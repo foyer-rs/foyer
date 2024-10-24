@@ -307,6 +307,7 @@ pub mod tests {
         let _ = Box::from_raw(ptr.as_ptr());
     }
 
+    #[expect(clippy::type_complexity)]
     unsafe fn dump_test_lru(lru: &TestLru) -> (Vec<NonNull<Record<TestLru>>>, Vec<NonNull<Record<TestLru>>>) {
         (
             lru.list.iter_ptr().collect_vec(),

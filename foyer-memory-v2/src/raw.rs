@@ -136,6 +136,7 @@ where
     usage: usize,
     capacity: usize,
 
+    #[expect(clippy::type_complexity)]
     waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
     metrics: Arc<Metrics>,
@@ -268,7 +269,6 @@ where
         self.metrics.memory_usage.decrement(record.weight() as f64);
 
         let token = record.token();
-        drop((record, ptr));
 
         let record = self.slab.remove(token);
         let data = record.into_data();
@@ -584,7 +584,7 @@ where
         for waiter in waiters {
             let _ = waiter.send(RawCacheEntry {
                 inner: self.inner.clone(),
-                ptr: ptr,
+                ptr,
             });
         }
 
@@ -805,11 +805,11 @@ where
     }
 
     pub fn key(&self) -> &E::Key {
-        unsafe { &self.ptr.as_ref() }.key()
+        unsafe { self.ptr.as_ref() }.key()
     }
 
     pub fn value(&self) -> &E::Value {
-        unsafe { &self.ptr.as_ref() }.value()
+        unsafe { self.ptr.as_ref() }.value()
     }
 
     pub fn hint(&self) -> &E::Hint {
@@ -1062,7 +1062,7 @@ mod tests {
             name: "test".to_string(),
             capacity: 256,
             shards: 4,
-            eviction_config: FifoConfig::default(),
+            eviction_config: FifoConfig,
             slab_initial_capacity: 0,
             slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),

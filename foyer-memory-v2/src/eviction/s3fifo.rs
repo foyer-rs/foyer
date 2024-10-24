@@ -309,7 +309,7 @@ where
     }
 
     fn clear(&mut self) {
-        while let Some(_) = self.pop() {}
+        while self.pop().is_some() {}
     }
 
     fn len(&self) -> usize {
@@ -452,7 +452,7 @@ mod tests {
             };
             let mut s3fifo = TestS3Fifo::new(8, &config);
 
-            let ps = |indices: &[usize]| indices.into_iter().map(|&i| ptrs[i]).collect_vec();
+            let ps = |indices: &[usize]| indices.iter().map(|&i| ptrs[i]).collect_vec();
 
             assert_eq!(s3fifo.small_weight_capacity, 2);
 

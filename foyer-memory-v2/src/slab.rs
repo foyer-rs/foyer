@@ -188,12 +188,10 @@ impl<T> Slab<T> {
 
         tracing::trace!("access slab {self:?} at {}", index);
 
-        let ptr = match &self.segments[s][i] {
+        match &self.segments[s][i] {
             Entry::Occupied(cell) => unsafe { NonNull::new_unchecked(cell.get()) },
             _ => panic!("invalid index (unexpected vacant): {index}, segment: {s}, entry index: {i}"),
-        };
-
-        ptr
+        }
     }
 
     fn pos(&self, index: usize) -> (usize, usize) {

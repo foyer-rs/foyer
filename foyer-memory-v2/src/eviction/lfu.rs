@@ -490,7 +490,7 @@ mod tests {
             };
             let mut lfu = TestLfu::new(10, &config);
 
-            let ps = |indices: &[usize]| indices.into_iter().map(|&i| ptrs[i]).collect_vec();
+            let ps = |indices: &[usize]| indices.iter().map(|&i| ptrs[i]).collect_vec();
 
             assert_eq!(lfu.window_weight_capacity, 2);
             assert_eq!(lfu.protected_weight_capacity, 6);

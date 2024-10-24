@@ -98,7 +98,7 @@ where
     }
 
     fn clear(&mut self) {
-        while let Some(_) = self.pop() {}
+        while self.pop().is_some() {}
     }
 
     fn len(&self) -> usize {
