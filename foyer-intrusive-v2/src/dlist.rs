@@ -174,20 +174,20 @@ where
     ///
     /// # Safety
     ///
-    /// `ptr` MUST be in this [`Dlist`].
-    pub unsafe fn remove(&mut self, ptr: NonNull<A::Item>) -> NonNull<A::Item> {
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn remove(&mut self, ptr: NonNull<A::Item>) -> NonNull<A::Item> {
         let mut iter = self.iter_mut_with_ptr(ptr);
         strict_assert!(iter.is_valid());
-        iter.remove().strict_unwrap_unchecked()
+        unsafe { iter.remove().strict_unwrap_unchecked() }
     }
 
     /// Create mutable iterator directly on ptr.
     ///
     /// # Safety
     ///
-    /// `ptr` MUST be in this [`Dlist`].
-    pub unsafe fn iter_mut_with_ptr(&mut self, ptr: NonNull<A::Item>) -> DlistIterMut<'_, A> {
-        let link = self.adapter.ptr2link(ptr);
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn iter_mut_with_ptr(&mut self, ptr: NonNull<A::Item>) -> DlistIterMut<'_, A> {
+        let link = unsafe { self.adapter.ptr2link(ptr) };
         DlistIterMut {
             link: Some(link),
             dlist: self,
@@ -198,9 +198,9 @@ where
     ///
     /// # Safety
     ///
-    /// `ptr` MUST be in this [`Dlist`].
-    pub unsafe fn iter_from_with_ptr(&self, ptr: NonNull<A::Item>) -> DlistIter<'_, A> {
-        let link = self.adapter.ptr2link(ptr);
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn iter_from_with_ptr(&self, ptr: NonNull<A::Item>) -> DlistIter<'_, A> {
+        let link = unsafe { self.adapter.ptr2link(ptr) };
         DlistIter {
             link: Some(link),
             dlist: self,

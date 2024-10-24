@@ -1000,7 +1000,10 @@ mod tests {
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
 
     use crate::{
-        eviction::fifo::{Fifo, FifoConfig, FifoHint},
+        eviction::{
+            fifo::{Fifo, FifoConfig, FifoHint},
+            lru::{Lru, LruConfig, LruHint},
+        },
         indexer::hash_table::HashTableIndexer,
     };
 
@@ -1051,7 +1054,7 @@ mod tests {
                 name: "test".to_string(),
                 capacity: 256,
                 shards: 4,
-                eviction_config: FifoConfig,
+                eviction_config: FifoConfig::default(),
                 slab_initial_capacity: 0,
                 slab_segment_size: 16 * 1024,
                 hash_builder: RandomState::default(),
@@ -1059,6 +1062,24 @@ mod tests {
                 event_listener: None,
             });
         let hints = vec![FifoHint];
+        fuzzy(cache, hints);
+    }
+
+    #[test_log::test]
+    fn test_lru_cache_fuzzy() {
+        let cache: RawCache<RandomState, Lru<u64, u64>, HashTableIndexer<Lru<u64, u64>>> =
+            RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: LruConfig::default(),
+                slab_initial_capacity: 0,
+                slab_segment_size: 16 * 1024,
+                hash_builder: RandomState::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+        let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
         fuzzy(cache, hints);
     }
 }
