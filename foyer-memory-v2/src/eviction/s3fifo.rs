@@ -29,7 +29,7 @@ use foyer_intrusive_v2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::Record;
+use crate::{record::CacheHint, Record};
 
 use super::{Eviction, Operator};
 
@@ -57,6 +57,18 @@ impl Default for S3FifoConfig {
 /// S3Fifo eviction algorithm hint.
 #[derive(Debug, Clone, Default)]
 pub struct S3FifoHint;
+
+impl From<CacheHint> for S3FifoHint {
+    fn from(_: CacheHint) -> Self {
+        S3FifoHint
+    }
+}
+
+impl From<S3FifoHint> for CacheHint {
+    fn from(_: S3FifoHint) -> Self {
+        CacheHint::Normal
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Queue {
@@ -421,7 +433,7 @@ mod tests {
         unsafe {
             let ptrs = (0..100)
                 .map(|i| {
-                    let mut handle = Box::new(Record::new(Data {
+                    let handle = Box::new(Record::new(Data {
                         key: i,
                         value: i,
                         hint: S3FifoHint,

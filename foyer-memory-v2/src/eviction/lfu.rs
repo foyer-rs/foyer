@@ -27,7 +27,7 @@ use foyer_intrusive_v2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::Record;
+use crate::{record::CacheHint, Record};
 
 use super::{Eviction, Operator};
 
@@ -72,6 +72,18 @@ impl Default for LfuConfig {
 /// w-TinyLFU eviction algorithm hint.
 #[derive(Debug, Clone, Default)]
 pub struct LfuHint;
+
+impl From<CacheHint> for LfuHint {
+    fn from(_: CacheHint) -> Self {
+        LfuHint
+    }
+}
+
+impl From<LfuHint> for CacheHint {
+    fn from(_: LfuHint) -> Self {
+        CacheHint::Normal
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Queue {

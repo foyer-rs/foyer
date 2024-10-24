@@ -18,6 +18,24 @@ use bitflags::bitflags;
 
 use crate::{slab::Token, Eviction};
 
+/// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
+///
+/// The meaning of the hint differs in each cache eviction algorithm, and some of them can be ignore by specific
+/// algorithm.
+///
+/// If the given cache hint does not suitable for the cache eviction algorithm that is active, the algorithm may modify
+/// it to a proper one.
+///
+/// For more details, please refer to the document of each enum options.
+pub enum CacheHint {
+    /// The default hint shared by all cache eviction algorithms.
+    Normal,
+    /// Suggest the priority of the entry is low.
+    ///
+    /// Used by [`crate::eviction::lru::Lru`].
+    Low,
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Flags: u64 {
@@ -148,32 +166,32 @@ where
 
     /// Set in eviction flag with relaxed memory order.
     pub fn set_in_eviction(&self, val: bool) {
-        self.set_flags(Flags::IN_EVICTION, val, Ordering::Relaxed);
+        self.set_flags(Flags::IN_EVICTION, val, Ordering::Release);
     }
 
     /// Get in eviction flag with relaxed memory order.
     pub fn is_in_eviction(&self) -> bool {
-        self.get_flags(Flags::IN_EVICTION, Ordering::Relaxed)
+        self.get_flags(Flags::IN_EVICTION, Ordering::Acquire)
     }
 
     /// Set in indexer flag with relaxed memory order.
     pub fn set_in_indexer(&self, val: bool) {
-        self.set_flags(Flags::IN_INDEXER, val, Ordering::Relaxed);
+        self.set_flags(Flags::IN_INDEXER, val, Ordering::Release);
     }
 
     /// Get in indexer flag with relaxed memory order.
     pub fn is_in_indexer(&self) -> bool {
-        self.get_flags(Flags::IN_INDEXER, Ordering::Relaxed)
+        self.get_flags(Flags::IN_INDEXER, Ordering::Acquire)
     }
 
     /// Set ephemeral flag with relaxed memory order.
     pub fn set_ephemeral(&self, val: bool) {
-        self.set_flags(Flags::EPHEMERAL, val, Ordering::Relaxed);
+        self.set_flags(Flags::EPHEMERAL, val, Ordering::Release);
     }
 
     /// Get ephemeral flag with relaxed memory order.
     pub fn is_ephemeral(&self) -> bool {
-        self.get_flags(Flags::EPHEMERAL, Ordering::Relaxed)
+        self.get_flags(Flags::EPHEMERAL, Ordering::Acquire)
     }
 
     /// Set the record atomic flags.

@@ -46,7 +46,10 @@ where
 
     fn insert(&mut self, ptr: NonNull<Record<Self::Eviction>>) -> Option<NonNull<Record<Self::Eviction>>> {
         strict_assert!(!unsafe { ptr.as_ref() }.is_in_indexer());
-        let res = self.indexer.insert(ptr);
+        let res = self.indexer.insert(ptr).inspect(|old| {
+            strict_assert!(unsafe { old.as_ref() }.is_in_indexer());
+            unsafe { old.as_ref() }.set_in_indexer(false);
+        });
         unsafe { ptr.as_ref() }.set_in_indexer(true);
         res
     }

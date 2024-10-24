@@ -26,7 +26,7 @@ use foyer_intrusive_v2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::Record;
+use crate::{record::CacheHint, Record};
 
 use super::{Eviction, Operator};
 
@@ -62,6 +62,24 @@ pub enum LruHint {
 impl Default for LruHint {
     fn default() -> Self {
         Self::HighPriority
+    }
+}
+
+impl From<CacheHint> for LruHint {
+    fn from(hint: CacheHint) -> Self {
+        match hint {
+            CacheHint::Normal => LruHint::HighPriority,
+            CacheHint::Low => LruHint::LowPriority,
+        }
+    }
+}
+
+impl From<LruHint> for CacheHint {
+    fn from(hint: LruHint) -> Self {
+        match hint {
+            LruHint::HighPriority => CacheHint::Normal,
+            LruHint::LowPriority => CacheHint::Low,
+        }
     }
 }
 

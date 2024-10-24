@@ -17,10 +17,10 @@ use std::ptr::NonNull;
 use foyer_common::code::{Key, Value};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::Record;
+use crate::{record::CacheHint, Record};
 
-pub trait Hint: Send + Sync + 'static + Clone + Default {}
-impl<T> Hint for T where T: Send + Sync + 'static + Clone + Default {}
+pub trait Hint: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
+impl<T> Hint for T where T: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
 
 pub trait State: Send + Sync + 'static + Default {}
 impl<T> State for T where T: Send + Sync + 'static + Default {}

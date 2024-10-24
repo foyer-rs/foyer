@@ -21,7 +21,7 @@ use foyer_intrusive_v2::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::Record;
+use crate::{record::CacheHint, Record};
 
 use super::{Eviction, Operator};
 
@@ -32,6 +32,18 @@ pub struct FifoConfig;
 /// Fifo eviction algorithm hint.
 #[derive(Debug, Clone, Default)]
 pub struct FifoHint;
+
+impl From<CacheHint> for FifoHint {
+    fn from(_: CacheHint) -> Self {
+        FifoHint
+    }
+}
+
+impl From<FifoHint> for CacheHint {
+    fn from(_: FifoHint) -> Self {
+        CacheHint::Normal
+    }
+}
 
 /// Fifo eviction algorithm state.
 #[derive(Debug, Default)]

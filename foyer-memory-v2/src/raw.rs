@@ -123,10 +123,10 @@ where
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-struct RawCacheShard<E, I, S>
+struct RawCacheShard<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     slab: Slab<Record<E>>,
@@ -137,16 +137,16 @@ where
     usage: usize,
     capacity: usize,
 
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, I, S>>>>>,
+    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-impl<E, I, S> RawCacheShard<E, I, S>
+impl<E, S, I> RawCacheShard<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     #[fastrace::trace(name = "foyer::memory::raw::shard::emplace")]
@@ -155,7 +155,7 @@ where
         data: Data<E>,
         ephemeral: bool,
         garbages: &mut Vec<Data<E>>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, I, S>>>,
+        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
     ) -> NonNull<Record<E>> {
         std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
 
@@ -290,8 +290,8 @@ where
         }
         record.refs().fetch_add(1, Ordering::SeqCst);
 
-        strict_assert!(record.is_in_indexer());
-        strict_assert!(record.is_in_eviction());
+        strict_assert!(!record.is_in_indexer());
+        strict_assert!(!record.is_in_eviction());
 
         self.metrics.memory_remove.increment(1);
 
@@ -372,7 +372,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")]
-    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, I, S>
+    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
         E::Key: Clone,
     {
@@ -384,7 +384,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")]
-    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, I, S>
+    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
         E::Key: Clone,
     {
@@ -396,7 +396,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")]
-    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, I, S> {
+    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, S, I> {
         match self.waiters.lock().entry(key) {
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
@@ -415,13 +415,13 @@ where
     }
 }
 
-struct RawCacheInner<E, I, S>
+struct RawCacheInner<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    shards: Vec<Lock<RawCacheShard<E, I, S>>>,
+    shards: Vec<Lock<RawCacheShard<E, S, I>>>,
 
     capacity: usize,
 
@@ -432,10 +432,10 @@ where
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
 
-impl<E, I, S> RawCacheInner<E, I, S>
+impl<E, S, I> RawCacheInner<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     #[fastrace::trace(name = "foyer::memory::raw::inner::clear")]
@@ -456,19 +456,19 @@ where
     }
 }
 
-pub struct RawCache<E, I = HashTableIndexer<E>, S = ahash::RandomState>
+pub struct RawCache<E, S = ahash::RandomState, I = HashTableIndexer<E>>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    inner: Arc<RawCacheInner<E, I, S>>,
+    inner: Arc<RawCacheInner<E, S, I>>,
 }
 
-impl<E, I, S> Drop for RawCacheInner<E, I, S>
+impl<E, S, I> Drop for RawCacheInner<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     fn drop(&mut self) {
@@ -476,10 +476,10 @@ where
     }
 }
 
-impl<E, I, S> Clone for RawCache<E, I, S>
+impl<E, S, I> Clone for RawCache<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     fn clone(&self) -> Self {
@@ -489,10 +489,10 @@ where
     }
 }
 
-impl<E, I, S> RawCache<E, I, S>
+impl<E, S, I> RawCache<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
@@ -538,27 +538,27 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
-    pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, I, S> {
+    pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
         self.insert_with_hint(key, value, Default::default())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
-    pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, I, S> {
+    pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
         self.emplace(key, value, hint, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
-    pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, I, S> {
+    pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
         self.insert_ephemeral_with_hint(key, value, Default::default())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
-    pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, I, S> {
+    pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
         self.emplace(key, value, hint, true)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::emplace")]
-    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<E, I, S> {
+    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
 
@@ -603,7 +603,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::remove")]
-    pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, I, S>>
+    pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, S, I>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
@@ -618,7 +618,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::get")]
-    pub fn get<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, I, S>>
+    pub fn get<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, S, I>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
@@ -707,20 +707,20 @@ where
     }
 }
 
-pub struct RawCacheEntry<E, I = HashTableIndexer<E>, S = ahash::RandomState>
+pub struct RawCacheEntry<E, S = ahash::RandomState, I = HashTableIndexer<E>>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    inner: Arc<RawCacheInner<E, I, S>>,
+    inner: Arc<RawCacheInner<E, S, I>>,
     ptr: NonNull<Record<E>>,
 }
 
-impl<E, I, S> Debug for RawCacheEntry<E, I, S>
+impl<E, S, I> Debug for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -728,10 +728,10 @@ where
     }
 }
 
-impl<E, I, S> Drop for RawCacheEntry<E, I, S>
+impl<E, S, I> Drop for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     fn drop(&mut self) {
@@ -751,10 +751,10 @@ where
     }
 }
 
-impl<E, I, S> Clone for RawCacheEntry<E, I, S>
+impl<E, S, I> Clone for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     fn clone(&self) -> Self {
@@ -766,10 +766,10 @@ where
     }
 }
 
-impl<E, I, S> Deref for RawCacheEntry<E, I, S>
+impl<E, S, I> Deref for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     type Target = E::Value;
@@ -779,26 +779,26 @@ where
     }
 }
 
-unsafe impl<E, I, S> Send for RawCacheEntry<E, I, S>
+unsafe impl<E, S, I> Send for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
 }
 
-unsafe impl<E, I, S> Sync for RawCacheEntry<E, I, S>
+unsafe impl<E, S, I> Sync for RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
 }
 
-impl<E, I, S> RawCacheEntry<E, I, S>
+impl<E, S, I> RawCacheEntry<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     pub fn hash(&self) -> u64 {
@@ -844,40 +844,40 @@ pub enum FetchState {
 /// A mark for fetch calls.
 pub struct FetchMark;
 
-enum RawShardFetch<E, I, S>
+enum RawShardFetch<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     Hit(NonNull<Record<E>>),
-    Wait(InSpan<oneshot::Receiver<RawCacheEntry<E, I, S>>>),
+    Wait(InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>),
     Miss,
 }
 
-pub type RawFetch<E, I, S, ER> =
-    DiversionFuture<RawFetchInner<E, I, S, ER>, std::result::Result<RawCacheEntry<E, I, S>, ER>, FetchMark>;
+pub type RawFetch<E, ER, S = ahash::RandomState, I = HashTableIndexer<E>> =
+    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
 
-type RawFetchHit<E, I, S> = Option<RawCacheEntry<E, I, S>>;
-type RawFetchWait<E, I, S> = InSpan<oneshot::Receiver<RawCacheEntry<E, I, S>>>;
-type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, I, S>, ER>, DFS>>;
+type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
+type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
+type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
 
 #[pin_project(project = RawFetchInnerProj)]
-pub enum RawFetchInner<E, I, S, ER>
+pub enum RawFetchInner<E, ER, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    Hit(RawFetchHit<E, I, S>),
-    Wait(#[pin] RawFetchWait<E, I, S>),
+    Hit(RawFetchHit<E, S, I>),
+    Wait(#[pin] RawFetchWait<E, S, I>),
     Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchMark>),
 }
 
-impl<E, I, S, ER> RawFetchInner<E, I, S, ER>
+impl<E, ER, S, I> RawFetchInner<E, ER, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     pub fn state(&self) -> FetchState {
@@ -889,14 +889,14 @@ where
     }
 }
 
-impl<E, I, S, ER> Future for RawFetchInner<E, I, S, ER>
+impl<E, ER, S, I> Future for RawFetchInner<E, ER, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
-    I: Indexer<Eviction = E>,
     ER: From<oneshot::error::RecvError>,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, I, S>, ER>, FetchMark>;
+    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -908,15 +908,15 @@ where
 }
 
 // TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
-impl<E, I, S> RawCache<E, I, S>
+impl<E, S, I> RawCache<E, S, I>
 where
-    S: HashBuilder,
     E: Eviction,
+    S: HashBuilder,
     I: Indexer<Eviction = E>,
     E::Key: Clone,
 {
     #[fastrace::trace(name = "foyer::memory::raw::fetch")]
-    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, I, S, ER>
+    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
@@ -931,7 +931,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
-    pub fn fetch_with_hint<F, FU, ER>(&self, key: E::Key, hint: E::Hint, fetch: F) -> RawFetch<E, I, S, ER>
+    pub fn fetch_with_hint<F, FU, ER>(&self, key: E::Key, hint: E::Hint, fetch: F) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
@@ -949,7 +949,7 @@ where
         hint: E::Hint,
         fetch: F,
         runtime: &SingletonHandle,
-    ) -> RawFetch<E, I, S, ER>
+    ) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,

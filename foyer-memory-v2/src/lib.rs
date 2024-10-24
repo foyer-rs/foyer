@@ -14,6 +14,7 @@
 
 //! TODO(MrCroxx): Finish the crate level docs.
 
+mod cache;
 mod eviction;
 mod indexer;
 mod raw;
