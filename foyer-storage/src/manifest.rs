@@ -27,38 +27,40 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::{
     error::{Error, Result},
+    large::serde::Sequence,
     runtime::Runtime,
     serde::Checksummer,
 };
 
 /// Persistent metadata for the disk cache.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct Metadata {
-    watermark: u128,
-}
-
-impl Default for Metadata {
-    /// If the metadata is corrupted, the watermark is supposed to set as the current timestamp to prevent from
-    /// accessing stale data.
-    fn default() -> Self {
-        Self {
-            watermark: Self::timestamp(),
-        }
-    }
+pub struct Metadata {
+    /// watermark for large object disk cache.
+    pub sequence_watermark: Sequence,
+    /// watermark for small object disk cache
+    pub timestamp_watermark: u128,
 }
 
 impl Metadata {
-    /// | magic 8B | checksum 8B | watermark 16B |
-    const LENGTH: usize = 8 + 8 + 16;
+    /// | magic 8B | checksum 8B | sequence watermark 8B | timestamp watermark 16B |
+    pub const LENGTH: usize = 8 + 8 + 8 + 16;
     /// | magic 8B | checksum 8B |
-    const HEADER: usize = 16;
+    pub const HEADER: usize = 16;
     /// magic number for metadata
-    const MAGIC: u64 = 0x20230512deadbeef;
+    pub const MAGIC: u64 = 0x20230512deadbeef;
 
-    fn read(buf: &[u8]) -> Self {
+    pub fn new(sequence: Sequence, timestamp: u128) -> Self {
+        Self {
+            sequence_watermark: sequence,
+            timestamp_watermark: timestamp,
+        }
+    }
+
+    pub fn read(buf: &[u8], default: Self) -> Self {
         let magic = (&buf[0..8]).get_u64();
         let checksum = (&buf[8..16]).get_u64();
-        let watermark = (&buf[16..32]).get_u128();
+        let sequence_watermark = (&buf[16..24]).get_u64();
+        let timestamp_watermark = (&buf[24..40]).get_u128();
 
         let c = Checksummer::checksum64(&buf[Self::HEADER..Self::LENGTH]);
 
@@ -66,14 +68,18 @@ impl Metadata {
             tracing::warn!(
                 "[manifest]: manifest magic or checksum mismatch, update the watermark to the current timestamp."
             );
-            return Self::default();
+            return default;
         }
 
-        Self { watermark }
+        Self {
+            sequence_watermark,
+            timestamp_watermark,
+        }
     }
 
-    fn write(&self, buf: &mut [u8]) {
-        (&mut buf[16..32]).put_u128(self.watermark);
+    pub fn write(&self, buf: &mut [u8]) {
+        (&mut buf[16..24]).put_u64(self.sequence_watermark);
+        (&mut buf[24..40]).put_u128(self.timestamp_watermark);
 
         let checksum = Checksummer::checksum64(&buf[Self::HEADER..Self::LENGTH]);
 
@@ -81,7 +87,7 @@ impl Metadata {
         (&mut buf[8..16]).put_u64(checksum);
     }
 
-    fn timestamp() -> u128 {
+    pub fn timestamp() -> u128 {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
     }
 }
@@ -122,7 +128,9 @@ impl Manifest {
         let metadata = asyncify_with_runtime(runtime.read(), move || {
             let mut buf = [0; Metadata::LENGTH];
             let _ = f.read_exact_at(&mut buf[..], 0);
-            let metadata = Metadata::read(&buf[..]);
+            // If the metadata is corrupted, the watermark is supposed to set as the current timestamp to prevent from
+            // accessing stale data.
+            let metadata = Metadata::read(&buf[..], Metadata::new(u64::MAX, Metadata::timestamp()));
             Ok::<_, Error>(metadata)
         })
         .await?;
@@ -139,15 +147,19 @@ impl Manifest {
         })
     }
 
-    pub async fn watermark(&self) -> u128 {
-        self.inner.read().await.metadata.watermark
+    pub async fn sequence_watermark(&self) -> Sequence {
+        self.inner.read().await.metadata.sequence_watermark
+    }
+
+    pub async fn timestamp_watermark(&self) -> u128 {
+        self.inner.read().await.metadata.timestamp_watermark
     }
 
     /// Update watermark and flush.
-    pub async fn update_watermark(&self, watermark: u128) -> Result<()> {
+    pub async fn update_timestamp_watermark(&self, watermark: u128) -> Result<()> {
         let mut inner = self.inner.write().await;
 
-        inner.metadata.watermark = watermark;
+        inner.metadata.timestamp_watermark = watermark;
 
         let mut buf = [0; Metadata::LENGTH];
         inner.metadata.write(&mut buf[..]);
@@ -168,15 +180,11 @@ impl Manifest {
         Ok(())
     }
 
-    /// Update watermark to latest and flush.
-    pub async fn update(&self) -> Result<()> {
-        self.update_watermark(Metadata::timestamp()).await
-    }
+    /// Update watermark and flush.
+    pub async fn update_sequence_watermark(&self, watermark: Sequence) -> Result<()> {
+        let mut inner = self.inner.write().await;
 
-    /// Flush manifest for persistent.
-    #[expect(unused)]
-    pub async fn flush(&self) -> Result<()> {
-        let inner = self.inner.read().await;
+        inner.metadata.sequence_watermark = watermark;
 
         let mut buf = [0; Metadata::LENGTH];
         inner.metadata.write(&mut buf[..]);
@@ -192,6 +200,8 @@ impl Manifest {
         })
         .await?;
 
+        drop(inner);
+
         Ok(())
     }
 }
@@ -205,13 +215,14 @@ mod tests {
     #[test_log::test]
     fn test_metadata_serde() {
         let mut buf = [0; Metadata::LENGTH];
-        let mut metadata = Metadata::read(&buf[..]);
-        assert!(metadata.watermark > 0);
+        let mut metadata = Metadata::read(&buf[..], Metadata::new(114, 514));
+        assert_eq!(metadata.sequence_watermark, 114);
+        assert_eq!(metadata.timestamp_watermark, 514);
 
-        metadata.watermark = 0x0123456789abcdef;
+        metadata.timestamp_watermark = 0x0123456789abcdef;
         metadata.write(&mut buf[..]);
 
-        let m = Metadata::read(&buf[..]);
+        let m = Metadata::read(&buf[..], Metadata::new(114, 514));
         assert_eq!(metadata, m);
     }
 
@@ -225,13 +236,13 @@ mod tests {
 
         let w = Metadata::timestamp();
 
-        manifest.update_watermark(w).await.unwrap();
+        manifest.update_timestamp_watermark(w).await.unwrap();
 
         let manifest = Manifest::open(dir.path().join("manifest"), true, Runtime::current())
             .await
             .unwrap();
 
-        let watermark = manifest.watermark().await;
+        let watermark = manifest.timestamp_watermark().await;
 
         assert_eq!(watermark, w);
     }

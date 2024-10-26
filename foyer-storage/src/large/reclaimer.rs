@@ -31,6 +31,7 @@ use crate::{
         scanner::RegionScanner,
         serde::Sequence,
     },
+    manifest::Manifest,
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     runtime::Runtime,
@@ -46,6 +47,7 @@ pub struct Reclaimer {
 impl Reclaimer {
     #[expect(clippy::too_many_arguments)]
     pub fn open<K, V, S>(
+        manifest: Manifest,
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -64,6 +66,7 @@ impl Reclaimer {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
         let runner = ReclaimRunner {
+            manifest,
             region_manager,
             reclaim_semaphore,
             indexer,
@@ -99,7 +102,10 @@ where
 {
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
 
+    manifest: Manifest,
+
     region_manager: RegionManager,
+
     reclaim_semaphore: Arc<Semaphore>,
 
     indexer: Indexer,
@@ -171,6 +177,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
+        let watermark = self.manifest.sequence_watermark().await;
         let mut scanner = RegionScanner::new(region.clone(), self.metrics.clone());
         let mut picked_count = 0;
         let mut unpicked = vec![];
@@ -193,6 +200,10 @@ where
                 }
                 Ok(Some((info, key))) => (info, key),
             };
+            if info.sequence < watermark {
+                unpicked.push(info.hash);
+                continue;
+            }
             if self.reinsertion_picker.pick(&self.stats, &key) {
                 let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
                     Err(e) => {

@@ -83,6 +83,7 @@ impl RecoverRunner {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
         let mode = config.recover_mode;
+        let watermark = config.manifest.sequence_watermark().await;
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
@@ -145,6 +146,7 @@ impl RecoverRunner {
                 tracing::trace!("[recover runner]: hash {hash} has versions: {versions:?}");
                 match versions.pop() {
                     None => None,
+                    Some((sequence, _)) if sequence < watermark => None,
                     Some((_, EntryAddressOrTombstone::Tombstone)) => None,
                     Some((_, EntryAddressOrTombstone::EntryAddress(address))) => {
                         Some(HashedEntryAddress { hash, address })
@@ -167,8 +169,9 @@ impl RecoverRunner {
         );
 
         // Update components.
+        let seq = latest_sequence + 1;
         indexer.insert_batch(indices);
-        sequence.store(latest_sequence + 1, Ordering::Release);
+        sequence.store(seq, Ordering::Release);
         for region in clean_regions {
             region_manager.mark_clean(region).await;
         }
@@ -177,6 +180,12 @@ impl RecoverRunner {
         }
         region_manager.reclaim_semaphore().add_permits(permits);
         region_manager.reclaim_semaphore_countdown().reset(countdown);
+
+        if watermark == Sequence::MAX {
+            // Only manifest error may cause MAX sequence watermark.
+            // Set it to a normal value after recovery.
+            config.manifest.update_sequence_watermark(seq).await?;
+        }
 
         // Note: About reclaim semaphore permits and countdown:
         //

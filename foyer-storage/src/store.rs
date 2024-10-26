@@ -571,6 +571,7 @@ where
                             EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
                                 name: self.name,
                                 device,
+                                manifest,
                                 regions,
                                 compression: self.compression,
                                 flush: self.flush,
@@ -620,7 +621,7 @@ where
                                     set_cache_capacity: self.small.set_cache_capacity,
                                     set_cache_shards: self.small.set_cache_shards,
                                     device: device.clone(),
-                                    manifest,
+                                    manifest: manifest.clone(),
                                     regions: small_regions,
                                     flush: self.flush,
                                     flushers: self.small.flushers,
@@ -632,6 +633,7 @@ where
                                 right: GenericLargeStorageConfig {
                                     name: self.name,
                                     device,
+                                    manifest,
                                     regions: large_regions,
                                     compression: self.compression,
                                     flush: self.flush,

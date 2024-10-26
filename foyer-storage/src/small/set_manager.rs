@@ -29,7 +29,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    manifest::Manifest,
+    manifest::{Manifest, Metadata},
 };
 
 /// # Lock Order
@@ -202,7 +202,7 @@ impl SetManager {
     }
 
     pub async fn watermark(&self) -> u128 {
-        self.inner.manifest.watermark().await
+        self.inner.manifest.timestamp_watermark().await
     }
 
     pub async fn destroy(&self) -> Result<()> {
@@ -212,7 +212,10 @@ impl SetManager {
     }
 
     async fn update_watermark(&self) -> Result<()> {
-        self.inner.manifest.update().await
+        self.inner
+            .manifest
+            .update_timestamp_watermark(Metadata::timestamp())
+            .await
     }
 
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
