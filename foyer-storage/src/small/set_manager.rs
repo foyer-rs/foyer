@@ -14,7 +14,6 @@
 
 use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc};
 
-use bytes::{Buf, BufMut};
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -24,13 +23,13 @@ use super::{
     batch::Item,
     bloom_filter::BloomFilterU64,
     generic::GenericSmallStorageConfig,
-    set::{SetId, SetStorage, SetTimestamp},
+    set::{SetId, SetStorage},
     set_cache::SetCache,
 };
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    IoBytesMut,
+    manifest::Manifest,
 };
 
 /// # Lock Order
@@ -60,11 +59,12 @@ struct SetManagerInner {
     /// correctness.
     loose_bloom_filters: Vec<RwLock<BloomFilterU64<4>>>,
     set_cache: SetCache,
-    metadata: AsyncRwLock<Metadata>,
     set_picker: SetPicker,
-
     set_size: usize,
+
     device: MonitoredDevice,
+    manifest: Manifest,
+
     regions: Range<RegionId>,
     flush: bool,
 }
@@ -81,9 +81,9 @@ impl Debug for SetManager {
             .field("loose_bloom_filters", &self.inner.loose_bloom_filters)
             .field("set_picker", &self.inner.set_picker)
             .field("set_cache", &self.inner.set_cache)
-            .field("metadata", &self.inner.metadata)
             .field("set_size", &self.inner.set_size)
             .field("device", &self.inner.device)
+            .field("manifest", &self.inner.manifest)
             .field("regions", &self.inner.regions)
             .field("flush", &self.inner.flush)
             .finish()
@@ -105,11 +105,6 @@ impl SetManager {
 
         let set_picker = SetPicker::new(sets);
 
-        // load & flush metadata
-        let metadata = Metadata::load(&device).await?;
-        metadata.flush(&device).await?;
-        let metadata = AsyncRwLock::new(metadata);
-
         let set_cache = SetCache::new(config.set_cache_capacity, config.set_cache_shards);
         let loose_bloom_filters = (0..sets).map(|_| RwLock::new(BloomFilterU64::new())).collect_vec();
 
@@ -120,9 +115,9 @@ impl SetManager {
             loose_bloom_filters,
             set_cache,
             set_picker,
-            metadata,
             set_size: config.set_size,
             device,
+            manifest: config.manifest.clone(),
             regions,
             flush: config.flush,
         };
@@ -131,7 +126,7 @@ impl SetManager {
     }
 
     pub fn may_contains(&self, hash: u64) -> bool {
-        let sid = self.inner.set_picker.sid(hash);
+        let sid = self.inner.set_picker.pick(hash);
         self.inner.loose_bloom_filters[sid as usize].read().lookup(hash)
     }
 
@@ -140,7 +135,7 @@ impl SetManager {
         K: StorageKey,
         V: StorageValue,
     {
-        let sid = self.inner.set_picker.sid(hash);
+        let sid = self.inner.set_picker.pick(hash);
 
         // Query bloom filter.
         if !self.inner.loose_bloom_filters[sid as usize].read().lookup(hash) {
@@ -207,7 +202,7 @@ impl SetManager {
     }
 
     pub async fn watermark(&self) -> u128 {
-        self.inner.metadata.read().await.watermark
+        self.inner.manifest.watermark().await
     }
 
     pub async fn destroy(&self) -> Result<()> {
@@ -217,11 +212,7 @@ impl SetManager {
     }
 
     async fn update_watermark(&self) -> Result<()> {
-        let mut metadata = self.inner.metadata.write().await;
-
-        let watermark = SetTimestamp::current();
-        metadata.watermark = watermark;
-        metadata.flush(&self.inner.device).await
+        self.inner.manifest.update().await
     }
 
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
@@ -254,65 +245,13 @@ impl SetPicker {
     /// Create a [`SetPicker`] with a total size count.
     ///
     /// The `sets` should be the count of all sets.
-    ///
-    /// Note:
-    ///
-    /// The 0th set will be used as the meta set.
+
     pub fn new(sets: usize) -> Self {
         Self { sets }
     }
 
-    pub fn sid(&self, hash: u64) -> SetId {
+    pub fn pick(&self, hash: u64) -> SetId {
         // skip the meta set
-        hash % (self.sets as SetId - 1) + 1
-    }
-}
-
-#[derive(Debug)]
-struct Metadata {
-    /// watermark timestamp
-    watermark: u128,
-}
-
-impl Default for Metadata {
-    fn default() -> Self {
-        Self {
-            watermark: SetTimestamp::current(),
-        }
-    }
-}
-
-impl Metadata {
-    const MAGIC: u64 = 0x20230512deadbeef;
-    const SIZE: usize = 8 + 16;
-
-    fn write(&self, mut buf: impl BufMut) {
-        buf.put_u64(Self::MAGIC);
-        buf.put_u128(self.watermark);
-    }
-
-    fn read(mut buf: impl Buf) -> Self {
-        let magic = buf.get_u64();
-        let watermark = buf.get_u128();
-
-        if magic != Self::MAGIC || watermark > SetTimestamp::current() {
-            return Self::default();
-        }
-
-        Self { watermark }
-    }
-
-    async fn flush(&self, device: &MonitoredDevice) -> Result<()> {
-        let mut buf = IoBytesMut::with_capacity(Self::SIZE);
-        self.write(&mut buf);
-        let buf = buf.freeze();
-        device.write(buf, 0, 0).await?;
-        Ok(())
-    }
-
-    async fn load(device: &MonitoredDevice) -> Result<Self> {
-        let buf = device.read(0, 0, Metadata::SIZE).await?;
-        let metadata = Metadata::read(&buf[..Metadata::SIZE]);
-        Ok(metadata)
+        hash % (self.sets as SetId)
     }
 }

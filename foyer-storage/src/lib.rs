@@ -23,6 +23,7 @@ mod engine;
 mod error;
 mod io_buffer_pool;
 mod large;
+mod manifest;
 mod picker;
 mod region;
 mod runtime;

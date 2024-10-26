@@ -190,7 +190,7 @@ where
     }
 
     fn sid(&self, hash: u64) -> SetId {
-        self.set_picker.sid(hash)
+        self.set_picker.pick(hash)
     }
 
     pub fn is_empty(&self) -> bool {

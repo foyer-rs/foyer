@@ -39,6 +39,10 @@ pub struct DirectFsDeviceConfig {
 }
 
 impl DirectFsDeviceConfig {
+    pub fn dir(&self) -> &PathBuf {
+        &self.dir
+    }
+
     fn verify(&self) -> Result<()> {
         if self.file_size == 0 || self.file_size % ALIGN != 0 {
             return Err(anyhow::anyhow!(

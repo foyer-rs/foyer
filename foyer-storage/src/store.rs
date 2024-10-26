@@ -16,6 +16,7 @@ use std::{
     fmt::{Debug, Display},
     hash::Hash,
     marker::PhantomData,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
     time::Instant,
@@ -42,6 +43,7 @@ use crate::{
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
+    manifest::Manifest,
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
@@ -348,6 +350,8 @@ where
     engine: Engine,
     runtime_config: RuntimeOptions,
 
+    manifest_file_path: Option<PathBuf>,
+
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
     compression: Compression,
     recover_mode: RecoverMode,
@@ -377,6 +381,8 @@ where
             engine,
             runtime_config: RuntimeOptions::Disabled,
 
+            manifest_file_path: None,
+
             admission_picker: Arc::<AdmitAllPicker<K>>::default(),
             compression: Compression::None,
             recover_mode: RecoverMode::Quiet,
@@ -400,6 +406,18 @@ where
     /// Set device options for the disk cache store.
     pub fn with_device_options(mut self, device_options: impl Into<DeviceOptions>) -> Self {
         self.device_options = device_options.into();
+        self
+    }
+
+    /// Set the path for the manifest file.
+    ///
+    /// The manifest file is used to tracking the watermark for fast disk cache clearing.
+    ///
+    /// When creating a disk cache on a fs, it is not required to set the manifest file path.
+    ///
+    /// When creating a disk cache on a raw device, it is required to set the manifest file path.
+    pub fn with_manifest_file_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.manifest_file_path = Some(path.as_ref().into());
         self
     }
 
@@ -514,6 +532,17 @@ where
         };
         let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
+        let manifest_file_path = match &self.device_options {
+            DeviceOptions::None => "phantom".into(),
+            DeviceOptions::DeviceConfig(DeviceConfig::DirectFile(_)) => self
+                .manifest_file_path
+                .expect("manifest file path must be set when using a direct file device for disk cache"),
+            DeviceOptions::DeviceConfig(DeviceConfig::DirectFs(config)) => self
+                .manifest_file_path
+                .unwrap_or_else(|| config.dir().join(Manifest::DEFAULT_FILENAME)),
+        };
+        let manifest = Manifest::open(manifest_file_path, self.flush, runtime.clone()).await?;
+
         let engine = {
             let statistics = statistics.clone();
             let metrics = metrics.clone();
@@ -569,6 +598,7 @@ where
                                 set_cache_capacity: self.small.set_cache_capacity,
                                 set_cache_shards: self.small.set_cache_shards,
                                 device,
+                                manifest,
                                 regions,
                                 flush: self.flush,
                                 flushers: self.small.flushers,
@@ -590,6 +620,7 @@ where
                                     set_cache_capacity: self.small.set_cache_capacity,
                                     set_cache_shards: self.small.set_cache_shards,
                                     device: device.clone(),
+                                    manifest,
                                     regions: small_regions,
                                     flush: self.flush,
                                     flushers: self.small.flushers,
