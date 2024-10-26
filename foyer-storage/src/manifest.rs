@@ -14,7 +14,6 @@
 
 use std::{
     fs::{File, OpenOptions},
-    os::unix::fs::FileExt,
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -127,7 +126,19 @@ impl Manifest {
         let f = file.clone();
         let metadata = asyncify_with_runtime(runtime.read(), move || {
             let mut buf = [0; Metadata::LENGTH];
-            let _ = f.read_exact_at(&mut buf[..], 0);
+
+            #[cfg(target_family = "windows")]
+            {
+                use std::os::windows::fs::FileExt;
+                let _ = f.seek_read(&mut buf[..], 0);
+            };
+
+            #[cfg(target_family = "unix")]
+            {
+                use std::os::unix::fs::FileExt;
+                let _ = f.read_exact_at(&mut buf[..], 0);
+            };
+
             // If the metadata is corrupted, the watermark is supposed to set as the current timestamp to prevent from
             // accessing stale data.
             let metadata = Metadata::read(&buf[..], Metadata::new(u64::MAX, Metadata::timestamp()));
@@ -167,7 +178,18 @@ impl Manifest {
         let file = inner.file.clone();
         let flush = inner.flush;
         asyncify_with_runtime(inner.runtime.write(), move || {
-            file.write_all_at(&buf[..], 0)?;
+            #[cfg(target_family = "windows")]
+            {
+                use std::os::windows::fs::FileExt;
+                f.seek_write(&buf[..], 0)?;
+            };
+
+            #[cfg(target_family = "unix")]
+            {
+                use std::os::unix::fs::FileExt;
+                file.write_all_at(&buf[..], 0)?;
+            };
+
             if flush {
                 file.sync_data()?;
             }
@@ -192,7 +214,18 @@ impl Manifest {
         let file = inner.file.clone();
         let flush = inner.flush;
         asyncify_with_runtime(inner.runtime.write(), move || {
-            file.write_all_at(&buf[..], 0)?;
+            #[cfg(target_family = "windows")]
+            {
+                use std::os::windows::fs::FileExt;
+                file.seek_write(&buf[..], 0)?;
+            };
+
+            #[cfg(target_family = "unix")]
+            {
+                use std::os::unix::fs::FileExt;
+                file.write_all_at(&buf[..], 0)?;
+            };
+
             if flush {
                 file.sync_data()?;
             }
