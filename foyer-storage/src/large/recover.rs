@@ -180,12 +180,8 @@ impl RecoverRunner {
         }
         region_manager.reclaim_semaphore().add_permits(permits);
         region_manager.reclaim_semaphore_countdown().reset(countdown);
-
-        if watermark == Sequence::MAX {
-            // Only manifest error may cause MAX sequence watermark.
-            // Set it to a normal value after recovery.
-            config.manifest.update_sequence_watermark(seq).await?;
-        }
+        // Update the manifest sequence watermark with the smallest possible value.
+        config.manifest.update_sequence_watermark(seq).await?;
 
         // Note: About reclaim semaphore permits and countdown:
         //

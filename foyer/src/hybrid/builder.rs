@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, path::Path, sync::Arc};
 
 use ahash::RandomState;
 use foyer_common::{
@@ -207,6 +207,23 @@ where
     /// Set device options for the disk cache store.
     pub fn with_device_options(self, device_options: impl Into<DeviceOptions>) -> Self {
         let builder = self.builder.with_device_options(device_options);
+        Self {
+            name: self.name,
+            tracing_options: self.tracing_options,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set the path for the manifest file.
+    ///
+    /// The manifest file is used to tracking the watermark for fast disk cache clearing.
+    ///
+    /// When creating a disk cache on a fs, it is not required to set the manifest file path.
+    ///
+    /// When creating a disk cache on a raw device, it is required to set the manifest file path.
+    pub fn with_manifest_file_path(self, path: impl AsRef<Path>) -> Self {
+        let builder = self.builder.with_manifest_file_path(path);
         Self {
             name: self.name,
             tracing_options: self.tracing_options,

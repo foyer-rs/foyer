@@ -81,6 +81,12 @@ struct Args {
     #[arg(short, long)]
     dir: Option<String>,
 
+    /// Setup path for the manifest file.
+    ///
+    /// The manifest file is required with `DirectFile` device.
+    #[arg(short, long)]
+    manifest: Option<String>,
+
     /// In-memory cache capacity.
     #[arg(long, default_value_t = ByteSize::gib(1))]
     mem: ByteSize,
@@ -483,6 +489,10 @@ async fn benchmark(args: Args) {
         (None, None) => builder,
         _ => unreachable!(),
     };
+
+    if let Some(path) = &args.manifest {
+        builder = builder.with_manifest_file_path(path);
+    }
 
     builder = builder
         .with_flush(args.flush)
