@@ -180,8 +180,10 @@ impl RecoverRunner {
         }
         region_manager.reclaim_semaphore().add_permits(permits);
         region_manager.reclaim_semaphore_countdown().reset(countdown);
-        // Update the manifest sequence watermark with the smallest possible value.
-        config.manifest.update_sequence_watermark(seq).await?;
+        if watermark > seq {
+            // Update the manifest sequence watermark with the smallest possible value.
+            config.manifest.update_sequence_watermark(seq).await?;
+        }
 
         // Note: About reclaim semaphore permits and countdown:
         //
