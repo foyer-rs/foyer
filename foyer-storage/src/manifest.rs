@@ -181,7 +181,7 @@ impl Manifest {
             #[cfg(target_family = "windows")]
             {
                 use std::os::windows::fs::FileExt;
-                f.seek_write(&buf[..], 0)?;
+                file.seek_write(&buf[..], 0)?;
             };
 
             #[cfg(target_family = "unix")]
