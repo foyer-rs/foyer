@@ -211,6 +211,22 @@ where
         self.refs.load(Ordering::Acquire)
     }
 
+    /// Reset the atomic reference count to 0.
+    ///
+    /// Only valid when the reclaimer gives up reclamation.
+    pub fn reset(&self) {
+        let old = self
+            .refs
+            .compare_exchange(-1, 0, Ordering::SeqCst, Ordering::Acquire)
+            .unwrap();
+        tracing::trace!(
+            "[record]: reset record (hash: {}) refs from {} (must equals to -1)",
+            self.hash,
+            old,
+        );
+        assert_eq!(old, -1);
+    }
+
     /// Increase the atomic reference count.
     ///
     /// This function returns the new reference count after the op.

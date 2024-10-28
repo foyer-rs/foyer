@@ -165,8 +165,6 @@ where
         let token = self.slab.insert(Record::new(data));
         let mut ptr = self.slab.ptr(token);
         unsafe { ptr.as_mut().init(token) };
-        // FIXME: remove the comments.
-        // println!("set token {token:?} for ptr {ptr:?}");
 
         // Evict overflow records.
         while self.usage + weight > self.capacity {
@@ -254,6 +252,8 @@ where
                     }
                     strict_assert!(record.is_in_indexer());
                     strict_assert!(record.is_in_eviction());
+                    // Restore the reference count to exit the reclamation phase.
+                    record.reset();
                     return None;
                 }
             }
@@ -275,8 +275,6 @@ where
 
         let token = record.token();
 
-        // FIXME: remove the comments.
-        // println!("remove token {token:?} for ptr {ptr:?}");
         let record = self.slab.remove(token);
         let data = record.into_data();
 
