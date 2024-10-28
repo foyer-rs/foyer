@@ -12,11 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub use ahash::RandomState;
+use super::Eviction;
+use crate::handle::Handle;
 
-pub use crate::{
-    cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
-    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
-    raw::{FetchMark, FetchState, Weighter},
-    record::{CacheHint, Record},
-};
+pub trait TestEviction: Eviction
+where
+    Self::Handle: Handle,
+{
+    fn dump(&self) -> Vec<<Self::Handle as Handle>::Data>;
+}

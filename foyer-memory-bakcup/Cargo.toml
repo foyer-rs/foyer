@@ -1,5 +1,5 @@
 [package]
-name = "foyer-memory-v2"
+name = "foyer-memory-backup"
 description = "memory cache for foyer - Hybrid cache for Rust"
 version = { workspace = true }
 edition = { workspace = true }
@@ -19,7 +19,7 @@ cmsketch = "0.2.1"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
-foyer-intrusive-v2 = { workspace = true }
+foyer-intrusive = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }
 itertools = { workspace = true }
@@ -30,20 +30,29 @@ tokio = { workspace = true }
 tracing = "0.1"
 
 [dev-dependencies]
-# anyhow = "1"
-# csv = "1.3.0"
-# moka = { version = "0.12", features = ["sync"] }
+anyhow = "1"
+csv = "1.3.0"
+moka = { version = "0.12", features = ["sync"] }
 rand = { version = "0.8", features = ["small_rng"] }
 test-log = { workspace = true }
-# zipf = "7.0.1"
+zipf = "7.0.1"
 
 [features]
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
     "foyer-common/strict_assertions",
-    "foyer-intrusive-v2/strict_assertions",
+    "foyer-intrusive/strict_assertions",
 ]
+sanity = ["strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
+
+[[bench]]
+name = "bench_hit_ratio"
+harness = false
+
+[[bench]]
+name = "bench_dynamic_dispatch"
+harness = false
 
 [lints]
 workspace = true

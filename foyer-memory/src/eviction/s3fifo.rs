@@ -14,114 +14,25 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    fmt::Debug,
     ptr::NonNull,
+    sync::atomic::{AtomicU8, Ordering},
 };
 
-use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq};
+use foyer_common::{
+    assert::OptionExt,
+    code::{Key, Value},
+    strict_assert, strict_assert_eq,
+};
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    eviction::Eviction,
-    handle::{BaseHandle, Handle},
-    CacheContext,
-};
+use super::{Eviction, Operator};
+use crate::record::{CacheHint, Record};
 
-const MAX_FREQ: u8 = 3;
-
-#[derive(Debug, Clone)]
-pub struct S3FifoContext(CacheContext);
-
-impl From<CacheContext> for S3FifoContext {
-    fn from(context: CacheContext) -> Self {
-        Self(context)
-    }
-}
-
-impl From<S3FifoContext> for CacheContext {
-    fn from(context: S3FifoContext) -> Self {
-        context.0
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Queue {
-    None,
-    Main,
-    Small,
-}
-
-pub struct S3FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    link: DlistLink,
-    base: BaseHandle<T, S3FifoContext>,
-    freq: u8,
-    queue: Queue,
-}
-
-impl<T> Debug for S3FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("S3FifoHandle").finish()
-    }
-}
-
-intrusive_adapter! { S3FifoHandleDlistAdapter<T> = S3FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
-
-impl<T> S3FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    #[inline(always)]
-    pub fn freq_inc(&mut self) {
-        self.freq = std::cmp::min(self.freq + 1, MAX_FREQ);
-    }
-
-    #[inline(always)]
-    pub fn freq_dec(&mut self) {
-        self.freq = self.freq.saturating_sub(1);
-    }
-}
-
-impl<T> Default for S3FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self {
-            link: DlistLink::default(),
-            freq: 0,
-            base: BaseHandle::new(),
-            queue: Queue::None,
-        }
-    }
-}
-
-impl<T> Handle for S3FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    type Data = T;
-    type Context = S3FifoContext;
-
-    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
-        &mut self.base
-    }
-}
-
-/// S3FIFO eviction algorithm config.
+/// S3Fifo eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3FifoConfig {
     /// Capacity ratio of the small S3FIFO queue.
@@ -142,13 +53,79 @@ impl Default for S3FifoConfig {
     }
 }
 
-pub struct S3Fifo<T>
+/// S3Fifo eviction algorithm hint.
+#[derive(Debug, Clone, Default)]
+pub struct S3FifoHint;
+
+impl From<CacheHint> for S3FifoHint {
+    fn from(_: CacheHint) -> Self {
+        S3FifoHint
+    }
+}
+
+impl From<S3FifoHint> for CacheHint {
+    fn from(_: S3FifoHint) -> Self {
+        CacheHint::Normal
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Queue {
+    None,
+    Main,
+    Small,
+}
+
+impl Default for Queue {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// S3Fifo eviction algorithm hint.
+#[derive(Debug, Default)]
+pub struct S3FifoState {
+    link: DlistLink,
+    frequency: AtomicU8,
+    queue: Queue,
+}
+
+impl S3FifoState {
+    const MAX_FREQUENCY: u8 = 3;
+
+    fn frequency(&self) -> u8 {
+        self.frequency.load(Ordering::Acquire)
+    }
+
+    fn set_frequency(&self, val: u8) {
+        self.frequency.store(val, Ordering::Release)
+    }
+
+    fn inc_frequency(&self) -> u8 {
+        self.frequency
+            .fetch_update(Ordering::Release, Ordering::Acquire, |v| {
+                Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
+            })
+            .unwrap()
+    }
+
+    fn dec_frequency(&self) -> u8 {
+        self.frequency
+            .fetch_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
+            .unwrap()
+    }
+}
+
+intrusive_adapter! { Adapter<K, V> = Record<S3Fifo<K, V>> { state.link => DlistLink } where K: Key, V: Value }
+
+pub struct S3Fifo<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
     ghost_queue: GhostQueue,
-    small_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
-    main_queue: Dlist<S3FifoHandleDlistAdapter<T>>,
+    small_queue: Dlist<Adapter<K, V>>,
+    main_queue: Dlist<Adapter<K, V>>,
 
     small_weight_capacity: usize,
 
@@ -158,11 +135,12 @@ where
     small_to_main_freq_threshold: u8,
 }
 
-impl<T> S3Fifo<T>
+impl<K, V> S3Fifo<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
-    unsafe fn evict(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
+    fn evict(&mut self) -> Option<NonNull<Record<S3Fifo<K, V>>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if self.small_weight > self.small_weight_capacity {
             if let Some(ptr) = self.evict_small() {
@@ -176,31 +154,31 @@ where
     }
 
     #[expect(clippy::never_loop)]
-    unsafe fn evict_small_force(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
+    fn evict_small_force(&mut self) -> Option<NonNull<Record<S3Fifo<K, V>>>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
-            let handle = ptr.as_mut();
-            handle.queue = Queue::None;
-            handle.freq = 0;
-            self.small_weight -= handle.base().weight();
+            let record = unsafe { ptr.as_mut() };
+            record.state.queue = Queue::None;
+            record.state.set_frequency(0);
+            self.small_weight -= record.weight();
             return Some(ptr);
         }
         None
     }
 
-    unsafe fn evict_small(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
+    fn evict_small(&mut self) -> Option<NonNull<Record<S3Fifo<K, V>>>> {
         while let Some(mut ptr) = self.small_queue.pop_front() {
-            let handle = ptr.as_mut();
-            if handle.freq >= self.small_to_main_freq_threshold {
-                handle.queue = Queue::Main;
+            let record = unsafe { ptr.as_mut() };
+            if record.state.frequency() >= self.small_to_main_freq_threshold {
+                record.state.queue = Queue::Main;
                 self.main_queue.push_back(ptr);
-                self.small_weight -= handle.base().weight();
-                self.main_weight += handle.base().weight();
+                self.small_weight -= record.weight();
+                self.main_weight += record.weight();
             } else {
-                handle.queue = Queue::None;
-                handle.freq = 0;
-                self.small_weight -= handle.base().weight();
+                record.state.queue = Queue::None;
+                record.state.set_frequency(0);
+                self.small_weight -= record.weight();
 
-                self.ghost_queue.push(handle.base().hash(), handle.base().weight());
+                self.ghost_queue.push(record.hash(), record.weight());
 
                 return Some(ptr);
             }
@@ -208,15 +186,15 @@ where
         None
     }
 
-    unsafe fn evict_main(&mut self) -> Option<NonNull<S3FifoHandle<T>>> {
+    fn evict_main(&mut self) -> Option<NonNull<Record<S3Fifo<K, V>>>> {
         while let Some(mut ptr) = self.main_queue.pop_front() {
-            let handle = ptr.as_mut();
-            if handle.freq > 0 {
-                handle.freq_dec();
+            let record = unsafe { ptr.as_mut() };
+
+            if record.state.dec_frequency() > 0 {
                 self.main_queue.push_back(ptr);
             } else {
-                handle.queue = Queue::None;
-                self.main_weight -= handle.base.weight();
+                record.state.queue = Queue::None;
+                self.main_weight -= record.weight();
                 return Some(ptr);
             }
         }
@@ -224,18 +202,23 @@ where
     }
 }
 
-impl<T> Eviction for S3Fifo<T>
+impl<K, V> Eviction for S3Fifo<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
-    type Handle = S3FifoHandle<T>;
     type Config = S3FifoConfig;
+    type Key = K;
+    type Value = V;
+    type Hint = S3FifoHint;
+    type State = S3FifoState;
 
-    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
-        let ghost_queue = GhostQueue::new((capacity as f64 * config.ghost_queue_capacity_ratio) as usize);
+        let ghost_queue_capacity = (capacity as f64 * config.ghost_queue_capacity_ratio) as usize;
+        let ghost_queue = GhostQueue::new(ghost_queue_capacity);
         let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
         Self {
             ghost_queue,
@@ -244,33 +227,40 @@ where
             small_weight_capacity,
             small_weight: 0,
             main_weight: 0,
-            small_to_main_freq_threshold: config.small_to_main_freq_threshold.min(MAX_FREQ),
+            small_to_main_freq_threshold: config.small_to_main_freq_threshold.min(S3FifoState::MAX_FREQUENCY),
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let handle = ptr.as_mut();
-        strict_assert_eq!(handle.freq, 0);
-        strict_assert_eq!(handle.queue, Queue::None);
+    fn update(&mut self, capacity: usize, config: &Self::Config) {
+        let ghost_queue_capacity = (capacity as f64 * config.ghost_queue_capacity_ratio) as usize;
+        let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
+        self.ghost_queue.update(ghost_queue_capacity);
+        self.small_weight_capacity = small_weight_capacity;
+    }
 
-        if self.ghost_queue.contains(handle.base().hash()) {
-            handle.queue = Queue::Main;
+    fn push(&mut self, mut ptr: NonNull<Record<Self>>) {
+        let record = unsafe { ptr.as_mut() };
+        strict_assert_eq!(record.state.frequency(), 0);
+        strict_assert_eq!(record.state.queue, Queue::None);
+
+        if self.ghost_queue.contains(record.hash()) {
+            record.state.queue = Queue::Main;
             self.main_queue.push_back(ptr);
-            self.main_weight += handle.base().weight();
+            self.main_weight += record.weight();
         } else {
-            handle.queue = Queue::Small;
+            record.state.queue = Queue::Small;
             self.small_queue.push_back(ptr);
-            self.small_weight += handle.base().weight();
+            self.small_weight += record.weight();
         }
 
-        handle.base_mut().set_in_eviction(true);
+        record.set_in_eviction(true);
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    fn pop(&mut self) -> Option<NonNull<Record<Self>>> {
         if let Some(mut ptr) = self.evict() {
-            let handle = ptr.as_mut();
+            let record = unsafe { ptr.as_mut() };
             // `handle.queue` has already been set with `evict()`
-            handle.base_mut().set_in_eviction(false);
+            record.set_in_eviction(false);
             Some(ptr)
         } else {
             strict_assert!(self.small_queue.is_empty());
@@ -279,69 +269,69 @@ where
         }
     }
 
-    unsafe fn release(&mut self, _: NonNull<Self::Handle>) {}
+    fn remove(&mut self, mut ptr: NonNull<Record<Self>>) {
+        let record = unsafe { ptr.as_mut() };
 
-    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>) {
-        let mut ptr = ptr;
-        ptr.as_mut().freq_inc();
-    }
-
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let handle = ptr.as_mut();
-
-        match handle.queue {
+        match record.state.queue {
             Queue::None => unreachable!(),
             Queue::Main => {
-                let p = self
-                    .main_queue
-                    .iter_mut_from_raw(ptr.as_mut().link.raw())
-                    .remove()
-                    .strict_unwrap_unchecked();
+                let p = unsafe {
+                    self.main_queue
+                        .iter_mut_with_ptr(ptr)
+                        .remove()
+                        .strict_unwrap_unchecked()
+                };
+
                 strict_assert_eq!(p, ptr);
 
-                handle.queue = Queue::None;
-                handle.freq = 0;
-                handle.base_mut().set_in_eviction(false);
+                record.state.queue = Queue::None;
+                record.state.set_frequency(0);
+                record.set_in_eviction(false);
 
-                self.main_weight -= handle.base().weight();
+                self.main_weight -= record.weight();
             }
             Queue::Small => {
-                let p = self
-                    .small_queue
-                    .iter_mut_from_raw(ptr.as_mut().link.raw())
-                    .remove()
-                    .strict_unwrap_unchecked();
+                let p = unsafe {
+                    self.small_queue
+                        .iter_mut_with_ptr(ptr)
+                        .remove()
+                        .strict_unwrap_unchecked()
+                };
                 strict_assert_eq!(p, ptr);
 
-                handle.queue = Queue::None;
-                handle.freq = 0;
-                handle.base_mut().set_in_eviction(false);
+                record.state.queue = Queue::None;
+                record.state.set_frequency(0);
+                record.set_in_eviction(false);
 
-                self.small_weight -= handle.base().weight();
+                self.small_weight -= record.weight();
             }
         }
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
-        let mut res = Vec::with_capacity(self.len());
-        while let Some(ptr) = self.pop() {
-            res.push(ptr);
-        }
-        res
+    fn clear(&mut self) {
+        while self.pop().is_some() {}
     }
 
     fn len(&self) -> usize {
         self.small_queue.len() + self.main_queue.len()
     }
 
-    fn is_empty(&self) -> bool {
-        self.small_queue.is_empty() && self.main_queue.is_empty()
+    fn acquire_operator() -> super::Operator {
+        Operator::Immutable
     }
+
+    fn acquire_immutable(&self, ptr: NonNull<Record<Self>>) {
+        unsafe { ptr.as_ref() }.state.inc_frequency();
+    }
+
+    fn acquire_mutable(&mut self, _ptr: NonNull<Record<Self>>) {
+        unreachable!()
+    }
+
+    fn release(&mut self, _ptr: NonNull<Record<Self>>) {}
 }
 
-unsafe impl<T> Send for S3Fifo<T> where T: Send + Sync + 'static {}
-unsafe impl<T> Sync for S3Fifo<T> where T: Send + Sync + 'static {}
-
+// TODO(MrCroxx): use ordered hash map?
 struct GhostQueue {
     counts: HashSet<u64>,
     queue: VecDeque<(u64, usize)>,
@@ -356,6 +346,16 @@ impl GhostQueue {
             queue: VecDeque::new(),
             capacity,
             weight: 0,
+        }
+    }
+
+    fn update(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        if self.capacity == 0 {
+            return;
+        }
+        while self.weight > self.capacity && self.weight > 0 {
+            self.pop();
         }
     }
 
@@ -390,25 +390,28 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
+    use crate::{eviction::test_utils::TestEviction, record::Data};
 
-    impl<T> TestEviction for S3Fifo<T>
+    impl<K, V> TestEviction for S3Fifo<K, V>
     where
-        T: Send + Sync + 'static + Clone,
+        K: Key + Clone,
+        V: Value + Clone,
     {
-        fn dump(&self) -> Vec<T> {
+        fn dump(&self) -> Vec<NonNull<Record<Self>>> {
             self.small_queue
-                .iter()
-                .chain(self.main_queue.iter())
-                .map(|handle| handle.base().data_unwrap_unchecked().clone())
+                .iter_ptr()
+                .chain(self.main_queue.iter_ptr())
                 .collect_vec()
         }
     }
 
-    type TestS3Fifo = S3Fifo<u64>;
-    type TestS3FifoHandle = S3FifoHandle<u64>;
+    type TestS3Fifo = S3Fifo<u64, u64>;
 
-    fn assert_test_s3fifo(s3fifo: &TestS3Fifo, small: Vec<u64>, main: Vec<u64>) {
+    fn assert_test_s3fifo(
+        s3fifo: &TestS3Fifo,
+        small: Vec<NonNull<Record<TestS3Fifo>>>,
+        main: Vec<NonNull<Record<TestS3Fifo>>>,
+    ) {
         let mut s = s3fifo.dump().into_iter().collect_vec();
         assert_eq!(s.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
         let m = s.split_off(s3fifo.small_queue.len());
@@ -418,10 +421,10 @@ mod tests {
         assert_eq!(s3fifo.len(), s3fifo.small_queue.len() + s3fifo.main_queue.len());
     }
 
-    fn assert_count(ptrs: &[NonNull<TestS3FifoHandle>], range: Range<usize>, count: u8) {
-        unsafe {
-            ptrs[range].iter().for_each(|ptr| assert_eq!(ptr.as_ref().freq, count));
-        }
+    fn assert_count(ptrs: &[NonNull<Record<TestS3Fifo>>], range: Range<usize>, count: u8) {
+        ptrs[range]
+            .iter()
+            .for_each(|ptr| assert_eq!(unsafe { ptr.as_ref() }.state.frequency(), count));
     }
 
     #[test]
@@ -429,8 +432,14 @@ mod tests {
         unsafe {
             let ptrs = (0..100)
                 .map(|i| {
-                    let mut handle = Box::<TestS3FifoHandle>::default();
-                    handle.init(i, i, 1, S3FifoContext(CacheContext::Default));
+                    let handle = Box::new(Record::new(Data {
+                        key: i,
+                        value: i,
+                        hint: S3FifoHint,
+                        state: Default::default(),
+                        hash: i,
+                        weight: 1,
+                    }));
                     NonNull::new_unchecked(Box::into_raw(handle))
                 })
                 .collect_vec();
@@ -443,21 +452,23 @@ mod tests {
             };
             let mut s3fifo = TestS3Fifo::new(8, &config);
 
+            let ps = |indices: &[usize]| indices.iter().map(|&i| ptrs[i]).collect_vec();
+
             assert_eq!(s3fifo.small_weight_capacity, 2);
 
             s3fifo.push(ptrs[0]);
             s3fifo.push(ptrs[1]);
-            assert_test_s3fifo(&s3fifo, vec![0, 1], vec![]);
+            assert_test_s3fifo(&s3fifo, ps(&[0, 1]), vec![]);
 
             s3fifo.push(ptrs[2]);
             s3fifo.push(ptrs[3]);
-            assert_test_s3fifo(&s3fifo, vec![0, 1, 2, 3], vec![]);
+            assert_test_s3fifo(&s3fifo, ps(&[0, 1, 2, 3]), vec![]);
 
             assert_count(&ptrs, 0..4, 0);
 
-            (0..4).for_each(|i| s3fifo.acquire(ptrs[i]));
-            s3fifo.acquire(ptrs[1]);
-            s3fifo.acquire(ptrs[2]);
+            (0..4).for_each(|i| s3fifo.acquire_immutable(ptrs[i]));
+            s3fifo.acquire_immutable(ptrs[1]);
+            s3fifo.acquire_immutable(ptrs[2]);
             assert_count(&ptrs, 0..1, 1);
             assert_count(&ptrs, 1..3, 2);
             assert_count(&ptrs, 3..4, 1);
@@ -466,17 +477,18 @@ mod tests {
             let p3 = s3fifo.pop().unwrap();
             assert_eq!(p0, ptrs[0]);
             assert_eq!(p3, ptrs[3]);
-            assert_test_s3fifo(&s3fifo, vec![], vec![1, 2]);
+            assert_test_s3fifo(&s3fifo, vec![], ps(&[1, 2]));
             assert_count(&ptrs, 0..1, 0);
             assert_count(&ptrs, 1..3, 2);
             assert_count(&ptrs, 3..4, 0);
 
             let p1 = s3fifo.pop().unwrap();
             assert_eq!(p1, ptrs[1]);
-            assert_test_s3fifo(&s3fifo, vec![], vec![2]);
+            assert_test_s3fifo(&s3fifo, vec![], ps(&[2]));
             assert_count(&ptrs, 0..4, 0);
 
-            assert_eq!(s3fifo.clear(), [2].into_iter().map(|i| ptrs[i]).collect_vec());
+            s3fifo.clear();
+            assert_test_s3fifo(&s3fifo, vec![], vec![]);
 
             for ptr in ptrs {
                 let _ = Box::from_raw(ptr.as_ptr());

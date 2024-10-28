@@ -12,149 +12,111 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, ptr::NonNull};
+use std::ptr::NonNull;
 
+use foyer_common::code::{Key, Value};
 use foyer_intrusive::{
     dlist::{Dlist, DlistLink},
     intrusive_adapter,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    eviction::Eviction,
-    handle::{BaseHandle, Handle},
-    CacheContext,
-};
-
-#[derive(Debug, Clone)]
-pub struct FifoContext(CacheContext);
-
-impl From<CacheContext> for FifoContext {
-    fn from(context: CacheContext) -> Self {
-        Self(context)
-    }
-}
-
-impl From<FifoContext> for CacheContext {
-    fn from(context: FifoContext) -> Self {
-        context.0
-    }
-}
-
-pub struct FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    link: DlistLink,
-    base: BaseHandle<T, FifoContext>,
-}
-
-impl<T> Debug for FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FifoHandle").finish()
-    }
-}
-
-intrusive_adapter! { FifoHandleDlistAdapter<T> = FifoHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
-
-impl<T> Default for FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self {
-            link: DlistLink::default(),
-            base: BaseHandle::new(),
-        }
-    }
-}
-
-impl<T> Handle for FifoHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    type Data = T;
-    type Context = FifoContext;
-
-    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
-        &mut self.base
-    }
-}
+use super::{Eviction, Operator};
+use crate::record::{CacheHint, Record};
 
 /// Fifo eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FifoConfig {}
 
-pub struct Fifo<T>
-where
-    T: Send + Sync + 'static,
-{
-    queue: Dlist<FifoHandleDlistAdapter<T>>,
+/// Fifo eviction algorithm hint.
+#[derive(Debug, Clone, Default)]
+pub struct FifoHint;
+
+impl From<CacheHint> for FifoHint {
+    fn from(_: CacheHint) -> Self {
+        FifoHint
+    }
 }
 
-impl<T> Eviction for Fifo<T>
-where
-    T: Send + Sync + 'static,
-{
-    type Handle = FifoHandle<T>;
-    type Config = FifoConfig;
+impl From<FifoHint> for CacheHint {
+    fn from(_: FifoHint) -> Self {
+        CacheHint::Normal
+    }
+}
 
-    unsafe fn new(_capacity: usize, _config: &Self::Config) -> Self
+/// Fifo eviction algorithm state.
+#[derive(Debug, Default)]
+pub struct FifoState {
+    link: DlistLink,
+}
+
+intrusive_adapter! { Adapter<K, V> = Record<Fifo<K, V>> { state.link => DlistLink } where K: Key, V: Value }
+
+pub struct Fifo<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    queue: Dlist<Adapter<K, V>>,
+}
+
+impl<K, V> Eviction for Fifo<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Config = FifoConfig;
+    type Key = K;
+    type Value = V;
+    type Hint = FifoHint;
+    type State = FifoState;
+
+    fn new(_capacity: usize, _config: &Self::Config) -> Self
     where
         Self: Sized,
     {
         Self { queue: Dlist::new() }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
+    fn update(&mut self, _: usize, _: &Self::Config) {}
+
+    fn push(&mut self, ptr: NonNull<Record<Self>>) {
         self.queue.push_back(ptr);
-        ptr.as_mut().base_mut().set_in_eviction(true);
+        unsafe { ptr.as_ref().set_in_eviction(true) };
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
-        self.queue.pop_front().map(|mut ptr| {
-            ptr.as_mut().base_mut().set_in_eviction(false);
-            ptr
-        })
+    fn pop(&mut self) -> Option<NonNull<Record<Self>>> {
+        self.queue
+            .pop_front()
+            .inspect(|ptr| unsafe { ptr.as_ref().set_in_eviction(false) })
     }
 
-    unsafe fn release(&mut self, _: NonNull<Self::Handle>) {}
-
-    unsafe fn acquire(&mut self, _: NonNull<Self::Handle>) {}
-
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let p = self.queue.iter_mut_from_raw(ptr.as_mut().link.raw()).remove().unwrap();
+    fn remove(&mut self, ptr: NonNull<Record<Self>>) {
+        let p = self.queue.remove(ptr);
         assert_eq!(p, ptr);
-        ptr.as_mut().base_mut().set_in_eviction(false);
+        unsafe { ptr.as_ref().set_in_eviction(false) };
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
-        let mut res = Vec::with_capacity(self.len());
-        while let Some(mut ptr) = self.queue.pop_front() {
-            ptr.as_mut().base_mut().set_in_eviction(false);
-            res.push(ptr);
-        }
-        res
+    fn clear(&mut self) {
+        while self.pop().is_some() {}
     }
 
     fn len(&self) -> usize {
         self.queue.len()
     }
 
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn acquire_operator() -> super::Operator {
+        Operator::Immutable
     }
-}
 
-unsafe impl<T> Send for Fifo<T> where T: Send + Sync + 'static {}
-unsafe impl<T> Sync for Fifo<T> where T: Send + Sync + 'static {}
+    fn acquire_immutable(&self, _ptr: NonNull<Record<Self>>) {}
+
+    fn acquire_mutable(&mut self, _ptr: NonNull<Record<Self>>) {
+        unreachable!()
+    }
+
+    fn release(&mut self, _ptr: NonNull<Record<Self>>) {}
+}
 
 #[cfg(test)]
 pub mod tests {
@@ -162,30 +124,33 @@ pub mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
+    use crate::{eviction::test_utils::TestEviction, record::Data};
 
-    impl<T> TestEviction for Fifo<T>
+    impl<K, V> TestEviction for Fifo<K, V>
     where
-        T: Send + Sync + 'static + Clone,
+        K: Key + Clone,
+        V: Value + Clone,
     {
-        fn dump(&self) -> Vec<T> {
-            self.queue
-                .iter()
-                .map(|handle| handle.base().data_unwrap_unchecked().clone())
-                .collect_vec()
+        fn dump(&self) -> Vec<NonNull<Record<Self>>> {
+            self.queue.iter_ptr().collect_vec()
         }
     }
 
-    type TestFifoHandle = FifoHandle<u64>;
-    type TestFifo = Fifo<u64>;
+    type TestFifo = Fifo<u64, u64>;
 
-    unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<TestFifoHandle> {
-        let mut handle = Box::<TestFifoHandle>::default();
-        handle.init(0, data, 1, FifoContext(CacheContext::Default));
+    unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<Record<TestFifo>> {
+        let handle = Box::new(Record::new(Data {
+            key: data,
+            value: data,
+            hint: FifoHint,
+            state: Default::default(),
+            hash: 0,
+            weight: 1,
+        }));
         NonNull::new_unchecked(Box::into_raw(handle))
     }
 
-    unsafe fn del_test_fifo_handle_ptr(ptr: NonNull<TestFifoHandle>) {
+    unsafe fn del_test_fifo_handle_ptr(ptr: NonNull<Record<TestFifo>>) {
         let _ = Box::from_raw(ptr.as_ptr());
     }
 
@@ -218,7 +183,11 @@ pub mod tests {
             fifo.remove(ptrs[4]);
             fifo.remove(ptrs[5]);
 
-            assert_eq!(fifo.clear(), vec![ptrs[2], ptrs[6]]);
+            assert_eq!(fifo.dump(), vec![ptrs[2], ptrs[6]]);
+
+            fifo.clear();
+
+            assert_eq!(fifo.dump(), vec![]);
 
             for ptr in ptrs {
                 del_test_fifo_handle_ptr(ptr);

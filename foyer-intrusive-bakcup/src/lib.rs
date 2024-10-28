@@ -22,7 +22,7 @@
 /// # Examples
 ///
 /// ```
-/// use foyer_intrusive_v2::container_of;
+/// use foyer_intrusive::container_of;
 ///
 /// struct S { x: u32, y: u32 };
 /// let mut container = S { x: 1, y: 2 };
@@ -37,8 +37,8 @@
 /// pointer to the specified field of some container type.
 #[macro_export]
 macro_rules! container_of {
-    ($ptr:expr, $container:path, $($fields:expr)+) => {
-        ($ptr as *mut _ as *const u8).sub(std::mem::offset_of!($container, $($fields)+)) as *mut $container
+    ($ptr:expr, $container:path, $field:ident) => {
+        ($ptr as *mut _ as *const u8).sub(std::mem::offset_of!($container, $field)) as *mut $container
     };
 }
 

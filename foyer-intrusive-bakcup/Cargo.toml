@@ -1,5 +1,5 @@
 [package]
-name = "foyer-intrusive-v2"
+name = "foyer-intrusive-backup"
 description = "intrusive data structures for foyer - Hybrid cache for Rust"
 version = { workspace = true }
 edition = { workspace = true }

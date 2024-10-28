@@ -829,8 +829,9 @@ where
         unsafe { self.ptr.as_ref() }.weight()
     }
 
-    pub fn refs(&self) -> isize {
-        unsafe { self.ptr.as_ref() }.refs()
+    pub fn refs(&self) -> usize {
+        // External entry ALWAYS get a non-negative ref count.
+        unsafe { self.ptr.as_ref() }.refs() as usize
     }
 
     pub fn is_outdated(&self) -> bool {
@@ -1071,7 +1072,7 @@ mod tests {
             name: "test".to_string(),
             capacity: 256,
             shards: 4,
-            eviction_config: FifoConfig,
+            eviction_config: FifoConfig::default(),
             slab_initial_capacity: 0,
             slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),

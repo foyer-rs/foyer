@@ -136,13 +136,23 @@ where
         }
     }
 
-    /// Set object pool for handles. The object pool is used to reduce handle allocation.
+    /// Set slab initial capacity for each shard.
     ///
-    /// The optimized value is supposed to be equal to the max cache entry count.
+    /// The default value is 64 KiB.
+    pub fn with_slab_initial_capacity(self, slab_initial_capacity: usize) -> Self {
+        let builder = self.builder.with_slab_initial_capacity(slab_initial_capacity);
+        HybridCacheBuilderPhaseMemory {
+            name: self.name,
+            tracing_options: self.tracing_options,
+            builder,
+        }
+    }
+
+    /// Set slab segment size for each shard.
     ///
-    /// The default value is 1024.
-    pub fn with_object_pool_capacity(self, object_pool_capacity: usize) -> Self {
-        let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
+    /// The default value is 16 KiB.
+    pub fn with_slab_segment_size(self, slab_segment_size: usize) -> Self {
+        let builder = self.builder.with_slab_segment_size(slab_segment_size);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,

@@ -15,21 +15,24 @@
 use std::{hash::Hash, ptr::NonNull};
 
 use equivalent::Equivalent;
+use foyer_common::code::Key;
 
-use crate::{eviction::Eviction, record::Record};
+use crate::handle::KeyedHandle;
 
-pub trait Indexer: Send + Sync + 'static + Default {
-    type Eviction: Eviction;
+pub trait Indexer: Send + Sync + 'static {
+    type Key: Key;
+    type Handle: KeyedHandle<Key = Self::Key>;
 
-    fn insert(&mut self, ptr: NonNull<Record<Self::Eviction>>) -> Option<NonNull<Record<Self::Eviction>>>;
-    fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+    fn new() -> Self;
+    unsafe fn insert(&mut self, ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
+    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
-    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+        Q: Hash + Equivalent<Self::Key> + ?Sized;
+    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
     where
-        Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
-    fn drain(&mut self) -> impl Iterator<Item = NonNull<Record<Self::Eviction>>>;
+        Q: Hash + Equivalent<Self::Key> + ?Sized;
+    unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
 }
 
 pub mod hash_table;
-pub mod sentry;
+pub mod sanity;

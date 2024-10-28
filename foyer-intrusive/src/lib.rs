@@ -37,8 +37,8 @@
 /// pointer to the specified field of some container type.
 #[macro_export]
 macro_rules! container_of {
-    ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *mut _ as *const u8).sub(std::mem::offset_of!($container, $field)) as *mut $container
+    ($ptr:expr, $container:path, $($fields:expr)+) => {
+        ($ptr as *mut _ as *const u8).sub(std::mem::offset_of!($container, $($fields)+)) as *mut $container
     };
 }
 

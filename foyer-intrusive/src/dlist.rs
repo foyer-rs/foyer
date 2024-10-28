@@ -68,6 +68,9 @@ where
     adapter: A,
 }
 
+unsafe impl<A> Send for Dlist<A> where A: Adapter<Link = DlistLink> {}
+unsafe impl<A> Sync for Dlist<A> where A: Adapter<Link = DlistLink> {}
+
 impl<A> Drop for Dlist<A>
 where
     A: Adapter<Link = DlistLink>,
@@ -167,35 +170,37 @@ where
         self.len() == 0
     }
 
-    /// Remove an node that holds the given raw link.
+    /// Remove an ptr.
     ///
     /// # Safety
     ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn remove_raw(&mut self, link: NonNull<DlistLink>) -> NonNull<A::Item> {
-        let mut iter = self.iter_mut_from_raw(link);
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn remove(&mut self, ptr: NonNull<A::Item>) -> NonNull<A::Item> {
+        let mut iter = self.iter_mut_with_ptr(ptr);
         strict_assert!(iter.is_valid());
-        iter.remove().strict_unwrap_unchecked()
+        unsafe { iter.remove().strict_unwrap_unchecked() }
     }
 
-    /// Create mutable iterator directly on raw link.
+    /// Create mutable iterator directly on ptr.
     ///
     /// # Safety
     ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn iter_mut_from_raw(&mut self, link: NonNull<DlistLink>) -> DlistIterMut<'_, A> {
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn iter_mut_with_ptr(&mut self, ptr: NonNull<A::Item>) -> DlistIterMut<'_, A> {
+        let link = unsafe { self.adapter.ptr2link(ptr) };
         DlistIterMut {
             link: Some(link),
             dlist: self,
         }
     }
 
-    /// Create immutable iterator directly on raw link.
+    /// Create immutable iterator directly on ptr.
     ///
     /// # Safety
     ///
-    /// `link` MUST be in this [`Dlist`].
-    pub unsafe fn iter_from_raw(&self, link: NonNull<DlistLink>) -> DlistIter<'_, A> {
+    /// `ptr` MUST be in this [`Dlist`], otherwise it is a UB.
+    pub fn iter_from_with_ptr(&self, ptr: NonNull<A::Item>) -> DlistIter<'_, A> {
+        let link = unsafe { self.adapter.ptr2link(ptr) };
         DlistIter {
             link: Some(link),
             dlist: self,
@@ -227,7 +232,7 @@ where
     }
 
     /// Get the item of the current position.
-    pub fn get(&self) -> Option<&A::Item> {
+    pub fn item(&self) -> Option<&A::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_ref() })
     }
@@ -298,13 +303,13 @@ where
     }
 
     /// Get the item reference of the current position.
-    pub fn get(&self) -> Option<&A::Item> {
+    pub fn item(&self) -> Option<&A::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_ref() })
     }
 
     /// Get the item mutable reference of the current position.
-    pub fn get_mut(&mut self) -> Option<&mut A::Item> {
+    pub fn item_mut(&mut self) -> Option<&mut A::Item> {
         self.link
             .map(|link| unsafe { self.dlist.adapter.link2ptr(link).as_mut() })
     }
@@ -503,10 +508,63 @@ where
     }
 }
 
+impl<A> Dlist<A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    /// Create a [`NonNull`] pointer iterator for test.
+    ///
+    /// Dereferencing the [`NonNull`] as mutable reference is an UB.
+    pub fn iter_ptr(&self) -> DlistPtrIter<'_, A> {
+        DlistPtrIter {
+            link: None,
+            dlist: self,
+        }
+    }
+
+    /// Create a [`NonNull`] pointer iterator for test.
+    pub fn iter_ptr_mut(&mut self) -> DlistPtrIter<'_, A> {
+        DlistPtrIter {
+            link: None,
+            dlist: self,
+        }
+    }
+}
+
+/// [`NonNull`] pointer iterator of [`Dlist`] for test usage.
+pub struct DlistPtrIter<'a, A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    link: Option<NonNull<A::Link>>,
+    dlist: &'a Dlist<A>,
+}
+
+unsafe impl<'a, A> Send for DlistPtrIter<'a, A> where A: Adapter<Link = DlistLink> {}
+
+unsafe impl<'a, A> Sync for DlistPtrIter<'a, A> where A: Adapter<Link = DlistLink> {}
+
+impl<'a, A> Iterator for DlistPtrIter<'a, A>
+where
+    A: Adapter<Link = DlistLink>,
+{
+    type Item = NonNull<A::Item>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe {
+            match self.link {
+                Some(link) => self.link = link.as_ref().next,
+                None => self.link = self.dlist.head,
+            }
+            self.link.map(|link| self.dlist.adapter.link2ptr(link))
+        }
+    }
+}
+
 // TODO(MrCroxx): Need more tests.
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
     use itertools::Itertools;
 
@@ -548,7 +606,7 @@ mod tests {
         }
     }
 
-    intrusive_adapter! { DlistArcAdapter = DlistItem { link: DlistLink } }
+    intrusive_adapter! { DlistArcAdapter = DlistItem { link => DlistLink } }
 
     #[test]
     fn test_dlist_simple() {
@@ -565,11 +623,11 @@ mod tests {
         let mut iter = l.iter_mut();
         iter.next();
         iter.next();
-        assert_eq!(DlistIterMut::get(&iter).unwrap().val, 2);
+        assert_eq!(iter.item().unwrap().val, 2);
         let p2 = iter.remove();
         let i2 = unsafe { Box::from_raw(p2.unwrap().as_ptr()) };
         assert_eq!(i2.val, 2);
-        assert_eq!(DlistIterMut::get(&iter).unwrap().val, 3);
+        assert_eq!(iter.item().unwrap().val, 3);
         let v = l.iter_mut().map(|item| item.val).collect_vec();
         assert_eq!(v, vec![1, 3]);
         assert_eq!(l.len(), 2);

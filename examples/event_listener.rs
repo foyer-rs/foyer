@@ -47,7 +47,7 @@ fn main() {
         .build();
 
     cache.insert(1, "Second".to_string());
-    cache.deposit(2, "First".to_string());
+    cache.insert_ephemeral(2, "First".to_string());
     cache.insert(3, "Third".to_string());
     cache.insert(3, "Forth".to_string());
 }

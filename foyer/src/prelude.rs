@@ -26,7 +26,7 @@ pub use crate::{
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
-        Cache, CacheBuilder, CacheContext, CacheEntry, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
+        Cache, CacheBuilder, CacheEntry, CacheHint, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
         S3FifoConfig, Weighter,
     },
     storage::{

@@ -60,7 +60,7 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
     /// # Safety
     ///
     /// Pointer operations MUST be valid.
-    unsafe fn ptr2link(&self, ptr: std::ptr::NonNull<Self::Item>) -> std::ptr::NonNull<Self::Link>;
+    unsafe fn ptr2link(&self, item: std::ptr::NonNull<Self::Item>) -> std::ptr::NonNull<Self::Link>;
 }
 
 /// Macro to generate an implementation of [`Adapter`] for intrusive container and items.
@@ -82,8 +82,8 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
 /// # Examples
 ///
 /// ```
-/// use foyer_intrusive_v2::intrusive_adapter;
-/// use foyer_intrusive_v2::adapter::Link;
+/// use foyer_intrusive::intrusive_adapter;
+/// use foyer_intrusive::adapter::Link;
 ///
 /// #[derive(Debug)]
 /// pub struct Item<L>
@@ -94,12 +94,12 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
 ///     key: u64,
 /// }
 ///
-/// intrusive_adapter! { ItemAdapter<L> = Item<L> { link => L } where L: Link }
+/// intrusive_adapter! { ItemAdapter<L> = Item<L> { link: L } where L: Link }
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
     (@impl
-        $vis:vis $name:ident ($($args:tt),*) = $item:ty { $($fields:expr)+ => $link:ty } $($where_:tt)*
+        $vis:vis $name:ident ($($args:tt),*) = $item:ty { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         $vis struct $name<$($args),*> $($where_)* {
             _marker: std::marker::PhantomData<($($args),*)>
@@ -119,11 +119,11 @@ macro_rules! intrusive_adapter {
             }
 
             unsafe fn link2ptr(&self, link: std::ptr::NonNull<Self::Link>) -> std::ptr::NonNull<Self::Item> {
-                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $($fields)+))
+                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $field))
             }
 
             unsafe fn ptr2link(&self, item: std::ptr::NonNull<Self::Item>) -> std::ptr::NonNull<Self::Link> {
-                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add(std::mem::offset_of!($item, $($fields)+)) as *mut Self::Link)
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add(std::mem::offset_of!($item, $field)) as *mut Self::Link)
             }
         }
 
@@ -173,7 +173,7 @@ mod tests {
         }
     }
 
-    intrusive_adapter! { DlistItemAdapter = DlistItem { link => DlistLink }}
+    intrusive_adapter! { DlistItemAdapter = DlistItem { link: DlistLink }}
 
     #[test]
     fn test_adapter_macro() {

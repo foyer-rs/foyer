@@ -12,12 +12,11 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use super::Eviction;
-use crate::handle::Handle;
+use std::ptr::NonNull;
 
-pub trait TestEviction: Eviction
-where
-    Self::Handle: Handle,
-{
-    fn dump(&self) -> Vec<<Self::Handle as Handle>::Data>;
+use super::Eviction;
+use crate::record::Record;
+
+pub trait TestEviction: Eviction {
+    fn dump(&self) -> Vec<NonNull<Record<Self>>>;
 }
