@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 
 use bitflags::bitflags;
 
@@ -69,7 +69,7 @@ where
     pub(crate) state: E::State,
     hash: u64,
     weight: usize,
-    refs: AtomicUsize,
+    refs: AtomicIsize,
     flags: AtomicU64,
     token: Option<Token>,
 }
@@ -87,7 +87,7 @@ where
             state: data.state,
             hash: data.hash,
             weight: data.weight,
-            refs: AtomicUsize::new(0),
+            refs: AtomicIsize::new(0),
             flags: AtomicU64::new(0),
             // Temporarily set to None, update after inserted into slab.
             token: None,
@@ -160,11 +160,6 @@ where
         self.weight
     }
 
-    /// Get the record atomic refs.
-    pub fn refs(&self) -> &AtomicUsize {
-        &self.refs
-    }
-
     /// Set in eviction flag with relaxed memory order.
     pub fn set_in_eviction(&self, val: bool) {
         self.set_flags(Flags::IN_EVICTION, val, Ordering::Release);
@@ -206,5 +201,141 @@ where
     /// Get the record atomic flags.
     pub fn get_flags(&self, flags: Flags, order: Ordering) -> bool {
         self.flags.load(order) & flags.bits() == flags.bits()
+    }
+
+    /// Get the atomic reference count.
+    ///
+    /// Return a non-negative value when the record is alive,
+    /// otherwise, return -1 that implies the record is in the reclamation phase.
+    pub fn refs(&self) -> isize {
+        self.refs.load(Ordering::Acquire)
+    }
+
+    /// Increase the atomic reference count.
+    ///
+    /// This function returns the new reference count after the op.
+    pub fn inc_refs(&self, val: isize) -> isize {
+        let old = self.refs.fetch_add(val, Ordering::SeqCst);
+        tracing::trace!(
+            "[record]: inc record (hash: {}) refs: {} => {}",
+            self.hash,
+            old,
+            old + val
+        );
+        old + val
+    }
+
+    // /// Decrease the atomic reference count.
+    // ///
+    // /// This function returns the new reference count after the op.
+    // pub fn dec_refs(&self, val: isize) -> isize {
+    //     let old = self.refs.fetch_sub(val, Ordering::SeqCst);
+    //     tracing::trace!(
+    //         "[record]: dec record (hash: {}) refs: {} => {}",
+    //         self.hash,
+    //         old,
+    //         old - val
+    //     );
+    //     old - val
+    // }
+
+    /// Increase the atomic reference count with a cas operation,
+    /// to prevent from increasing the record in the reclamation phase.
+    ///
+    /// This function returns the new reference count after the op if the record is not in the reclamation phase.
+    pub fn inc_refs_cas(&self, val: isize) -> Option<isize> {
+        let mut current = self.refs.load(Ordering::Relaxed);
+        loop {
+            if current == -1 {
+                tracing::trace!(
+                    "[record]: inc record (hash: {}) refs (cas) skipped for it is in reclamation phase",
+                    self.hash
+                );
+                return None;
+            }
+            match self
+                .refs
+                .compare_exchange(current, current + val, Ordering::SeqCst, Ordering::Acquire)
+            {
+                Err(cur) => current = cur,
+                Ok(_) => {
+                    tracing::trace!(
+                        "[record]: inc record (hash: {}) refs (cas): {} => {}",
+                        self.hash,
+                        current,
+                        current + val
+                    );
+                    return Some(current + val);
+                }
+            }
+        }
+    }
+
+    /// Decrease the atomic reference count by 1 with a cas operation.
+    ///
+    /// If the refs hits 0 after decreasing, get the permission to reclaim the record.
+    ///
+    /// This function returns the new reference count after the op if the record is not in the reclamation phase.
+    pub fn dec_ref_cas(&self) -> isize {
+        let mut current = self.refs.load(Ordering::Relaxed);
+        loop {
+            match current {
+                1 => match self.refs.compare_exchange(1, -1, Ordering::SeqCst, Ordering::Acquire) {
+                    Ok(_) => {
+                        tracing::trace!(
+                            "[record]: dec record (hash: {}) refs from 1 and got reclamation permission",
+                            self.hash
+                        );
+                        return -1;
+                    }
+                    Err(cur) => current = cur,
+                },
+                c => match self
+                    .refs
+                    .compare_exchange(c, c - 1, Ordering::SeqCst, Ordering::Acquire)
+                {
+                    Ok(_) => {
+                        tracing::trace!("[record]: dec record (hash: {}) refs: {} => {}", self.hash, c, c - 1);
+                        return c - 1;
+                    }
+                    Err(cur) => current = cur,
+                },
+            }
+        }
+    }
+
+    /// Try to acquire the permission to reclaim the record.
+    ///
+    /// If `true` is returned, the caller MUST reclaim the record.
+    pub fn need_reclaim(&self) -> bool {
+        let current = self.refs.load(Ordering::Acquire);
+        if current != 0 {
+            tracing::trace!(
+                "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
+                self.hash,
+                false,
+                current
+            );
+            return false;
+        }
+        self.refs
+            .compare_exchange(0, -1, Ordering::SeqCst, Ordering::Acquire)
+            .inspect(|refs| {
+                tracing::trace!(
+                    "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
+                    self.hash,
+                    true,
+                    refs
+                )
+            })
+            .inspect_err(|refs| {
+                tracing::trace!(
+                    "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
+                    self.hash,
+                    false,
+                    refs
+                )
+            })
+            .is_ok()
     }
 }

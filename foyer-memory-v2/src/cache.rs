@@ -211,7 +211,7 @@ where
     }
 
     /// External reference count of the cached entry.
-    pub fn refs(&self) -> usize {
+    pub fn refs(&self) -> isize {
         match self {
             CacheEntry::Fifo(entry) => entry.refs(),
             CacheEntry::Lru(entry) => entry.refs(),

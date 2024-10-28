@@ -69,7 +69,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     ptr::NonNull,
-    sync::{atomic::Ordering, Arc},
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -85,7 +85,7 @@ use foyer_common::{
     metrics::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
-    strict_assert, strict_assert_eq,
+    strict_assert,
 };
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -177,8 +177,10 @@ where
             self.metrics.memory_evict.increment(1);
             strict_assert!(unsafe { evicted.as_ref().is_in_indexer() });
             strict_assert!(unsafe { !evicted.as_ref().is_in_eviction() });
-            if unsafe { evicted.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(evicted, false) {
+
+            // Try to free the record if this thread get the permission.
+            if unsafe { evicted.as_ref() }.need_reclaim() {
+                if let Some(garbage) = self.reclaim(evicted, false) {
                     garbages.push(garbage);
                 }
             }
@@ -194,8 +196,9 @@ where
             }
             strict_assert!(!unsafe { old.as_ref() }.is_in_eviction());
             // Because the `old` handle is removed from the indexer, it will not be reinserted again.
-            if unsafe { old.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(old, false) {
+            // Try to free the record if this thread get the permission.
+            if unsafe { old.as_ref() }.need_reclaim() {
+                if let Some(garbage) = self.reclaim(old, false) {
                     garbages.push(garbage);
                 }
             }
@@ -213,18 +216,20 @@ where
         self.usage += weight;
         self.metrics.memory_usage.increment(weight as f64);
         // Increase the reference count within the lock section.
-        unsafe { ptr.as_ref().refs().fetch_add(waiters.len() + 1, Ordering::SeqCst) };
+        // The reference count of the new record must be at the moment.
+        let refs = waiters.len() as isize + 1;
+        let inc = unsafe { ptr.as_ref() }.inc_refs(refs);
+        assert_eq!(refs, inc);
 
         ptr
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::release")]
-    fn release(&mut self, mut ptr: NonNull<Record<E>>, reinsert: bool) -> Option<Data<E>> {
+    fn reclaim(&mut self, mut ptr: NonNull<Record<E>>, reinsert: bool) -> Option<Data<E>> {
         let record = unsafe { ptr.as_mut() };
 
-        if record.refs().load(Ordering::SeqCst) > 0 {
-            return None;
-        }
+        // Assert the record is in the reclamation phase.
+        assert_eq!(record.refs(), -1);
 
         if record.is_in_indexer() && record.is_ephemeral() {
             // The entry is ephemeral, remove it from indexer. Ignore reinsertion.
@@ -263,7 +268,6 @@ where
         // Here the handle is neither in the indexer nor in the eviction container.
         strict_assert!(!record.is_in_indexer());
         strict_assert!(!record.is_in_eviction());
-        strict_assert_eq!(record.refs().load(Ordering::SeqCst), 0);
 
         self.metrics.memory_release.increment(1);
         self.usage -= record.weight();
@@ -290,12 +294,12 @@ where
         if record.is_in_eviction() {
             self.eviction.remove(ptr);
         }
-        record.refs().fetch_add(1, Ordering::SeqCst);
-
         strict_assert!(!record.is_in_indexer());
         strict_assert!(!record.is_in_eviction());
 
         self.metrics.memory_remove.increment(1);
+
+        record.inc_refs_cas(1)?;
 
         Some(ptr)
     }
@@ -337,7 +341,8 @@ where
         strict_assert!(record.is_in_indexer());
 
         record.set_ephemeral(false);
-        record.refs().fetch_add(1, Ordering::SeqCst);
+
+        record.inc_refs_cas(1)?;
 
         Some(ptr)
     }
@@ -363,8 +368,8 @@ where
             count += 1;
             strict_assert!(unsafe { !ptr.as_ref().is_in_indexer() });
             strict_assert!(unsafe { !ptr.as_ref().is_in_eviction() });
-            if unsafe { ptr.as_ref().refs().load(Ordering::SeqCst) } == 0 {
-                if let Some(garbage) = self.release(ptr, false) {
+            if unsafe { ptr.as_ref() }.need_reclaim() {
+                if let Some(garbage) = self.reclaim(ptr, false) {
                     garbages.push(garbage);
                 }
             }
@@ -737,12 +742,14 @@ where
     I: Indexer<Eviction = E>,
 {
     fn drop(&mut self) {
-        if unsafe { self.ptr.as_ref() }.refs().fetch_sub(1, Ordering::SeqCst) == 1 {
-            let hash = unsafe { self.ptr.as_ref() }.hash();
+        let record = unsafe { self.ptr.as_ref() };
+
+        if record.dec_ref_cas() == -1 {
+            let hash = record.hash();
             let shard = hash as usize % self.inner.shards.len();
             let garbage = self.inner.shards[shard]
                 .write()
-                .with(|mut shard| shard.release(self.ptr, true));
+                .with(|mut shard| shard.reclaim(self.ptr, true));
             // Do not deallocate data within the lock section.
             if let Some(listener) = self.inner.event_listener.as_ref() {
                 if let Some(Data { key, value, .. }) = garbage {
@@ -760,7 +767,8 @@ where
     I: Indexer<Eviction = E>,
 {
     fn clone(&self) -> Self {
-        unsafe { self.ptr.as_ref() }.refs().fetch_add(1, Ordering::SeqCst);
+        let old = unsafe { self.ptr.as_ref() }.inc_refs(1);
+        assert!(old > 0);
         Self {
             inner: self.inner.clone(),
             ptr: self.ptr,
@@ -823,8 +831,8 @@ where
         unsafe { self.ptr.as_ref() }.weight()
     }
 
-    pub fn refs(&self) -> usize {
-        unsafe { self.ptr.as_ref() }.refs().load(Ordering::SeqCst)
+    pub fn refs(&self) -> isize {
+        unsafe { self.ptr.as_ref() }.refs()
     }
 
     pub fn is_outdated(&self) -> bool {
