@@ -22,10 +22,10 @@ fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true }
-opentelemetry = { version = "0.25", optional = true }
-opentelemetry-otlp = { version = "0.25", optional = true }
-opentelemetry-semantic-conventions = { version = "0.25", optional = true }
-opentelemetry_sdk = { version = "0.25", features = [
+opentelemetry = { version = "0.26", optional = true }
+opentelemetry-otlp = { version = "0.26", optional = true }
+opentelemetry-semantic-conventions = { version = "0.26", optional = true }
+opentelemetry_sdk = { version = "0.26", features = [
     "rt-tokio",
     "trace",
 ], optional = true }
