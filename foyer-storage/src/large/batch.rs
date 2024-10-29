@@ -111,17 +111,19 @@ where
     }
 
     pub fn entry(&mut self, entry: CacheEntry<K, V, S>, compression: &Compression, sequence: Sequence) -> bool {
-        tracing::trace!("[batch]: append entry with sequence: {sequence}");
+        tracing::trace!("[lodc batch]: append entry with sequence: {sequence}");
 
         self.may_init();
 
         if entry.is_outdated() {
+            tracing::trace!("[lodc batch]: skip outdated entry");
             return false;
         }
 
         let pos = self.len;
 
         if pos + EntryHeader::serialized_len() >= self.buffer.len() {
+            tracing::trace!("[lodc batch]: entry out of buffer capacity, skip");
             // Only handle start position overflow. End position overflow will be handled by serde.
             return false;
         }
@@ -157,7 +159,7 @@ where
         self.advance(aligned);
 
         let group = self.groups.last_mut().unwrap();
-        group.indices.push(HashedEntryAddress {
+        let addr = HashedEntryAddress {
             hash: entry.hash(),
             address: EntryAddress {
                 region: RegionId::MAX,
@@ -165,7 +167,9 @@ where
                 len: header.entry_len() as _,
                 sequence,
             },
-        });
+        };
+        tracing::trace!("[lodc batch]: entry addr: {addr:?}");
+        group.indices.push(addr);
         group.entries.push(entry);
         group.region.len += aligned;
         group.range.end += aligned;
@@ -225,6 +229,8 @@ where
     }
 
     pub fn rotate(&mut self) -> Option<Batch<K, V, S>> {
+        tracing::trace!("[lodc batch]: rotate");
+
         if self.is_empty() {
             return None;
         }
@@ -351,7 +357,7 @@ impl Debug for RegionHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RegionHandle")
             .field("offset", &self.offset)
-            .field("size", &self.len)
+            .field("len", &self.len)
             .field("is_full", &self.is_full)
             .finish()
     }

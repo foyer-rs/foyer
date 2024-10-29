@@ -284,16 +284,17 @@ impl RegionManager {
         )
     }
 
+    #[expect(unused)]
     pub fn regions(&self) -> usize {
         self.inner.regions.len()
     }
 
-    #[expect(dead_code)]
+    #[expect(unused)]
     pub fn evictable_regions(&self) -> usize {
         self.inner.eviction.lock().evictable.len()
     }
 
-    #[expect(dead_code)]
+    #[expect(unused)]
     pub fn clean_regions(&self) -> usize {
         self.inner.clean_region_rx.len()
     }

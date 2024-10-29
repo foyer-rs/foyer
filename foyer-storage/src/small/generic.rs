@@ -30,6 +30,7 @@ use itertools::Itertools;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
+    manifest::Manifest,
     small::{
         flusher::{Flusher, Submission},
         set_manager::SetManager,
@@ -48,6 +49,7 @@ where
     pub set_cache_capacity: usize,
     pub set_cache_shards: usize,
     pub device: MonitoredDevice,
+    pub manifest: Manifest,
     pub regions: Range<RegionId>,
     pub flush: bool,
     pub flushers: usize,
@@ -69,6 +71,7 @@ where
             .field("set_cache_capacity", &self.set_cache_capacity)
             .field("set_cache_shards", &self.set_cache_shards)
             .field("device", &self.device)
+            .field("manifest", &self.manifest)
             .field("regions", &self.regions)
             .field("flush", &self.flush)
             .field("flushers", &self.flushers)
@@ -319,19 +322,25 @@ mod tests {
     }
 
     async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, RandomState> {
+        let runtime = Runtime::new(None, None, Handle::current());
+        let dir = dir.as_ref();
         let device = device_for_test(dir).await;
+        let manifest = Manifest::open(dir.join(Manifest::DEFAULT_FILENAME), true, runtime.clone())
+            .await
+            .unwrap();
         let regions = 0..device.regions() as RegionId;
         let config = GenericSmallStorageConfig {
             set_size: ByteSize::kib(4).as_u64() as _,
             set_cache_capacity: 4,
             set_cache_shards: 1,
             device,
+            manifest,
             regions,
             flush: false,
             flushers: 1,
             buffer_pool_size: ByteSize::kib(64).as_u64() as _,
             statistics: Arc::<Statistics>::default(),
-            runtime: Runtime::new(None, None, Handle::current()),
+            runtime,
             marker: PhantomData,
         };
         GenericSmallStorage::open(config).await.unwrap()

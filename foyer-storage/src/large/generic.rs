@@ -46,10 +46,10 @@ use crate::{
     device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
     large::{
-        reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
         tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     },
+    manifest::Manifest,
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
     runtime::Runtime,
@@ -66,6 +66,7 @@ where
 {
     pub name: String,
     pub device: MonitoredDevice,
+    pub manifest: Manifest,
     pub regions: Range<RegionId>,
     pub compression: Compression,
     pub flush: bool,
@@ -95,6 +96,7 @@ where
         f.debug_struct("GenericStoreConfig")
             .field("name", &self.name)
             .field("device", &self.device)
+            .field("manifest", &self.manifest)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
             .field("indexer_shards", &self.indexer_shards)
@@ -142,7 +144,8 @@ where
 {
     indexer: Indexer,
     device: MonitoredDevice,
-    region_manager: RegionManager,
+    manifest: Manifest,
+    _region_manager: RegionManager,
 
     flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
@@ -151,8 +154,6 @@ where
     submit_queue_size_threshold: usize,
 
     statistics: Arc<Statistics>,
-
-    flush: bool,
 
     sequence: AtomicSequence,
 
@@ -249,6 +250,7 @@ where
 
         let reclaimers = join_all((0..config.reclaimers).map(|_| async {
             Reclaimer::open(
+                config.manifest.clone(),
                 region_manager.clone(),
                 reclaim_semaphore.clone(),
                 config.reinsertion_picker.clone(),
@@ -266,13 +268,13 @@ where
             inner: Arc::new(GenericStoreInner {
                 indexer,
                 device,
-                region_manager,
+                manifest: config.manifest,
+                _region_manager: region_manager,
                 flushers,
                 reclaimers,
                 submit_queue_size,
                 submit_queue_size_threshold: config.submit_queue_size_threshold,
                 statistics: stats,
-                flush: config.flush,
                 sequence,
                 runtime: config.runtime,
                 active: AtomicBool::new(true),
@@ -430,6 +432,8 @@ where
             tombstone: Tombstone { hash: 0, sequence },
             stats: None,
         });
+
+        // Wait all inflight data to finish.
         self.wait().await;
 
         // Clear indices.
@@ -438,16 +442,11 @@ where
         // otherwise the indices of the latest batch cannot be cleared.
         self.inner.indexer.clear();
 
-        // Clean regions.
-        try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {
-            let region = self.inner.region_manager.region(id).clone();
-            async move {
-                let res = RegionCleaner::clean(&region, self.inner.flush).await;
-                region.stats().reset();
-                res
-            }
-        }))
-        .await?;
+        // Update manifest watermark to prevent stale regions to be read in future.
+        self.inner
+            .manifest
+            .update_sequence_watermark(self.inner.sequence.fetch_add(1, Ordering::Relaxed))
+            .await?;
 
         Ok(())
     }
@@ -534,8 +533,8 @@ mod tests {
         Monitored::open(
             MonitoredConfig {
                 config: DirectFsDeviceOptions::new(dir)
-                    .with_capacity(ByteSize::kib(64).as_u64() as _)
-                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .with_capacity(ByteSize::kib(80).as_u64() as _)
+                    .with_file_size(ByteSize::kib(20).as_u64() as _)
                     .into(),
                 metrics: Arc::new(Metrics::new("test")),
             },
@@ -554,11 +553,18 @@ mod tests {
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        let dir = dir.as_ref();
+        let runtime = Runtime::new(None, None, Handle::current());
         let device = device_for_test(dir).await;
+        let manifest = Manifest::open(dir.join(Manifest::DEFAULT_FILENAME), true, runtime.clone())
+            .await
+            .unwrap();
+
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             device,
+            manifest,
             regions,
             compression: Compression::None,
             flush: true,
@@ -574,7 +580,7 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
-            runtime: Runtime::new(None, None, Handle::current()),
+            runtime,
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
@@ -584,11 +590,18 @@ mod tests {
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
     ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+        let dir = dir.as_ref();
+        let runtime = Runtime::new(None, None, Handle::current());
         let device = device_for_test(dir).await;
+        let manifest = Manifest::open(dir.join(Manifest::DEFAULT_FILENAME), true, runtime.clone())
+            .await
+            .unwrap();
+
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
             name: "test".to_string(),
             device,
+            manifest,
             regions,
             compression: Compression::None,
             flush: true,
