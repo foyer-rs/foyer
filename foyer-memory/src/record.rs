@@ -28,7 +28,7 @@ use crate::{eviction::Eviction, slab::Token};
 /// it to a proper one.
 ///
 /// For more details, please refer to the document of each enum options.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CacheHint {
     /// The default hint shared by all cache eviction algorithms.
     Normal,
