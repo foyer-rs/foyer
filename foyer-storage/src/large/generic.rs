@@ -183,6 +183,14 @@ where
     S: HashBuilder + Debug,
 {
     async fn open(mut config: GenericLargeStorageConfig<K, V, S>) -> Result<Self> {
+        if config.flushers + config.clean_region_threshold > config.device.regions() / 2 {
+            tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
+                flushers = config.flushers,
+                clean_region_threshold = config.clean_region_threshold,
+                regions = config.device.regions()
+            );
+        }
+
         let stats = config.statistics.clone();
 
         let device = config.device.clone();
