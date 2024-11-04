@@ -26,6 +26,7 @@ readme = "README.md"
 [workspace.dependencies]
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
+crossbeam = "0.8"
 equivalent = "1"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
@@ -33,6 +34,7 @@ fastrace-opentelemetry = "0.7"
 hashbrown = "0.14"
 itertools = "0.13"
 metrics = "0.24"
+parking_lot = { version = "0.12" }
 serde = { version = "1", features = ["derive", "rc"] }
 test-log = { version = "0.2", default-features = false, features = [
     "trace",

@@ -22,7 +22,7 @@ foyer-common = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }
 itertools = { workspace = true }
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+parking_lot = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 
