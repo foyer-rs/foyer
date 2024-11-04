@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-use crate::{eviction::Eviction, slab::Token};
+use crate::eviction::Eviction;
 
 /// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
 ///
@@ -73,7 +73,6 @@ where
     weight: usize,
     refs: AtomicIsize,
     flags: AtomicU64,
-    token: Option<Token>,
 }
 
 impl<E> Record<E>
@@ -91,28 +90,7 @@ where
             weight: data.weight,
             refs: AtomicIsize::new(0),
             flags: AtomicU64::new(0),
-            // Temporarily set to None, update after inserted into slab.
-            token: None,
         }
-    }
-
-    /// Set the token of the record.
-    ///
-    /// # Safety
-    ///
-    /// Panics if the token is already set.
-    pub fn init(&mut self, token: Token) {
-        let old = self.token.replace(token);
-        assert!(old.is_none());
-    }
-
-    /// Get the token of the record.
-    ///
-    /// # Safety
-    ///
-    /// Panics if the token is not set.
-    pub fn token(&self) -> Token {
-        self.token.unwrap()
     }
 
     /// Consume the record and unwrap the data only.

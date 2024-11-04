@@ -96,7 +96,6 @@ use crate::{
     eviction::{Eviction, Operator},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     record::{Data, Record},
-    slab::{Slab, SlabBuilder},
     sync::Lock,
 };
 
@@ -115,8 +114,6 @@ where
     pub capacity: usize,
     pub shards: usize,
     pub eviction_config: E::Config,
-    pub slab_initial_capacity: usize,
-    pub slab_segment_size: usize,
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -128,8 +125,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    slab: Slab<Record<E>>,
-
+    // slab: Slab<Record<E>>,
     eviction: E,
     indexer: Sentry<I>,
 
@@ -161,10 +157,8 @@ where
 
         let weight = data.weight;
 
-        // Allocate and setup new record.
-        let token = self.slab.insert(Record::new(data));
-        let mut ptr = self.slab.ptr(token);
-        unsafe { ptr.as_mut().init(token) };
+        let ptr = Box::into_raw(Box::new(Record::new(data)));
+        let mut ptr = unsafe { NonNull::new_unchecked(ptr) };
 
         // Evict overflow records.
         while self.usage + weight > self.capacity {
@@ -273,9 +267,7 @@ where
         self.usage -= record.weight();
         self.metrics.memory_usage.decrement(record.weight() as f64);
 
-        let token = record.token();
-
-        let record = self.slab.remove(token);
+        let record = unsafe { Box::from_raw(ptr.as_ptr()) };
         let data = record.into_data();
 
         Some(data)
@@ -512,10 +504,6 @@ where
 
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
-                slab: SlabBuilder::new()
-                    .with_capacity(config.slab_initial_capacity)
-                    .with_segment_size(config.slab_segment_size)
-                    .build(),
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
@@ -1073,8 +1061,6 @@ mod tests {
             capacity: 256,
             shards: 4,
             eviction_config: FifoConfig::default(),
-            slab_initial_capacity: 0,
-            slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
@@ -1090,8 +1076,6 @@ mod tests {
             capacity: 256,
             shards: 4,
             eviction_config: S3FifoConfig::default(),
-            slab_initial_capacity: 0,
-            slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
@@ -1107,8 +1091,6 @@ mod tests {
             capacity: 256,
             shards: 4,
             eviction_config: LruConfig::default(),
-            slab_initial_capacity: 0,
-            slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
@@ -1124,8 +1106,6 @@ mod tests {
             capacity: 256,
             shards: 4,
             eviction_config: LfuConfig::default(),
-            slab_initial_capacity: 0,
-            slab_segment_size: 16 * 1024,
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,

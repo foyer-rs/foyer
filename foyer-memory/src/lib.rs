@@ -19,7 +19,6 @@ mod eviction;
 mod indexer;
 mod raw;
 mod record;
-mod slab;
 mod sync;
 
 mod prelude;

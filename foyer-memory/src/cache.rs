@@ -276,9 +276,6 @@ where
     shards: usize,
     eviction_config: EvictionConfig,
 
-    slab_initial_capacity: usize,
-    slab_segment_size: usize,
-
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
 
@@ -298,9 +295,6 @@ where
             capacity,
             shards: 8,
             eviction_config: LruConfig::default().into(),
-
-            slab_initial_capacity: 64 * 1024,
-            slab_segment_size: 16 * 1024,
 
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
@@ -340,22 +334,6 @@ where
         self
     }
 
-    /// Set slab initial capacity for each shard.
-    ///
-    /// The default value is 64 KiB.
-    pub fn with_slab_initial_capacity(mut self, slab_initial_capacity: usize) -> Self {
-        self.slab_initial_capacity = slab_initial_capacity;
-        self
-    }
-
-    /// Set slab segment size for each shard.
-    ///
-    /// The default value is 16 KiB.
-    pub fn with_slab_segment_size(mut self, slab_segment_size: usize) -> Self {
-        self.slab_segment_size = slab_segment_size;
-        self
-    }
-
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
@@ -366,8 +344,6 @@ where
             capacity: self.capacity,
             shards: self.shards,
             eviction_config: self.eviction_config,
-            slab_initial_capacity: self.slab_initial_capacity,
-            slab_segment_size: self.slab_segment_size,
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
@@ -402,8 +378,6 @@ where
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                slab_initial_capacity: self.slab_initial_capacity,
-                slab_segment_size: self.slab_segment_size,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
@@ -413,8 +387,6 @@ where
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                slab_initial_capacity: self.slab_initial_capacity,
-                slab_segment_size: self.slab_segment_size,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
@@ -424,8 +396,6 @@ where
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                slab_initial_capacity: self.slab_initial_capacity,
-                slab_segment_size: self.slab_segment_size,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
@@ -435,8 +405,6 @@ where
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                slab_initial_capacity: self.slab_initial_capacity,
-                slab_segment_size: self.slab_segment_size,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
@@ -989,10 +957,5 @@ mod tests {
     #[tokio::test]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
-    }
-
-    #[tokio::test]
-    async fn test_cache_with_empty_initial_slab() {
-        case(CacheBuilder::new(8).with_slab_initial_capacity(0).build()).await
     }
 }

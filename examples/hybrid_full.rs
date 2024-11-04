@@ -32,8 +32,6 @@ async fn main() -> Result<()> {
         .with_eviction_config(LruConfig {
             high_priority_pool_ratio: 0.1,
         })
-        .with_slab_initial_capacity(64 * 1024)
-        .with_slab_segment_size(16 * 1024)
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
         .storage(Engine::Mixed(0.1))

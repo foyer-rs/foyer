@@ -136,30 +136,6 @@ where
         }
     }
 
-    /// Set slab initial capacity for each shard.
-    ///
-    /// The default value is 64 KiB.
-    pub fn with_slab_initial_capacity(self, slab_initial_capacity: usize) -> Self {
-        let builder = self.builder.with_slab_initial_capacity(slab_initial_capacity);
-        HybridCacheBuilderPhaseMemory {
-            name: self.name,
-            tracing_options: self.tracing_options,
-            builder,
-        }
-    }
-
-    /// Set slab segment size for each shard.
-    ///
-    /// The default value is 16 KiB.
-    pub fn with_slab_segment_size(self, slab_segment_size: usize) -> Self {
-        let builder = self.builder.with_slab_segment_size(slab_segment_size);
-        HybridCacheBuilderPhaseMemory {
-            name: self.name,
-            tracing_options: self.tracing_options,
-            builder,
-        }
-    }
-
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> HybridCacheBuilderPhaseMemory<K, V, OS>
     where
