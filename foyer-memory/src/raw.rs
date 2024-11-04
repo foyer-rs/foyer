@@ -574,7 +574,7 @@ where
             )
         });
 
-        // Notify waiters out of the lock critical sectwion.
+        // Notify waiters out of the lock critical section.
         for waiter in waiters {
             let _ = waiter.send(RawCacheEntry {
                 inner: self.inner.clone(),
