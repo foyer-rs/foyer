@@ -95,7 +95,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use crate::{
     eviction::{Eviction, Operator},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
-    record::{Data, Record},
+    record::{Data, Record, WriteGuardOrRefs},
     sync::Lock,
 };
 
@@ -730,17 +730,18 @@ where
     fn drop(&mut self) {
         let record = unsafe { self.ptr.as_ref() };
 
-        if record.dec_ref_cas() == -1 {
-            let hash = record.hash();
-            let shard = hash as usize % self.inner.shards.len();
-            let garbage = self.inner.shards[shard]
-                .write()
-                .with(|mut shard| shard.reclaim(self.ptr, true));
-            // Do not deallocate data within the lock section.
-            if let Some(listener) = self.inner.event_listener.as_ref() {
-                if let Some(Data { key, value, .. }) = garbage {
-                    listener.on_memory_release(key, value);
-                }
+        let hash = record.hash();
+        let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
+
+        let garbage = match record.dec_ref_cas(shard) {
+            WriteGuardOrRefs::Guard(mut guard) => guard.reclaim(self.ptr, true),
+            WriteGuardOrRefs::Refs(_) => None,
+        };
+
+        // Do not deallocate data within the lock section.
+        if let Some(listener) = self.inner.event_listener.as_ref() {
+            if let Some(Data { key, value, .. }) = garbage {
+                listener.on_memory_release(key, value);
             }
         }
     }

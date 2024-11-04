@@ -17,7 +17,10 @@ use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-use crate::eviction::Eviction;
+use crate::{
+    eviction::Eviction,
+    sync::{Lock, LockWriteGuard},
+};
 
 /// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
 ///
@@ -272,19 +275,13 @@ where
     /// If the refs hits 0 after decreasing, get the permission to reclaim the record.
     ///
     /// This function returns the new reference count after the op if the record is not in the reclamation phase.
-    pub fn dec_ref_cas(&self) -> isize {
+    pub fn dec_ref_cas<'a, T>(&self, lock: &'a Lock<T>) -> WriteGuardOrRefs<'a, T> {
         let mut current = self.refs.load(Ordering::Relaxed);
         loop {
             match current {
-                1 => match self.refs.compare_exchange(1, -1, Ordering::SeqCst, Ordering::Acquire) {
-                    Ok(_) => {
-                        tracing::trace!(
-                            "[record]: dec record (hash: {}) refs from 1 and got reclamation permission",
-                            self.hash
-                        );
-                        return -1;
-                    }
-                    Err(cur) => current = cur,
+                1 => match self.dec_ref_case_slow(lock) {
+                    WriteGuardOrRefs::Guard(guard) => return WriteGuardOrRefs::Guard(guard),
+                    WriteGuardOrRefs::Refs(cur) => current = cur,
                 },
                 c => match self
                     .refs
@@ -292,11 +289,26 @@ where
                 {
                     Ok(_) => {
                         tracing::trace!("[record]: dec record (hash: {}) refs: {} => {}", self.hash, c, c - 1);
-                        return c - 1;
+                        return WriteGuardOrRefs::Refs(c - 1);
                     }
                     Err(cur) => current = cur,
                 },
             }
+        }
+    }
+
+    fn dec_ref_case_slow<'a, T>(&self, lock: &'a Lock<T>) -> WriteGuardOrRefs<'a, T> {
+        let guard = lock.write();
+
+        match self.refs.compare_exchange(1, -1, Ordering::SeqCst, Ordering::Acquire) {
+            Ok(_) => {
+                tracing::trace!(
+                    "[record]: dec record (hash: {}) refs from 1 and got reclamation permission",
+                    self.hash
+                );
+                WriteGuardOrRefs::Guard(guard)
+            }
+            Err(cur) => WriteGuardOrRefs::Refs(cur),
         }
     }
 
@@ -334,4 +346,9 @@ where
             })
             .is_ok()
     }
+}
+
+pub enum WriteGuardOrRefs<'a, T> {
+    Guard(LockWriteGuard<'a, T>),
+    Refs(isize),
 }
