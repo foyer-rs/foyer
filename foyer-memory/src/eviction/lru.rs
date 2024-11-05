@@ -296,7 +296,6 @@ pub mod tests {
             key: data,
             value: data,
             hint,
-            state: Default::default(),
             hash: 0,
             weight: 1,
         }));

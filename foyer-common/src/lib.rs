@@ -32,8 +32,6 @@ pub mod event;
 pub mod future;
 /// The shared metrics for foyer.
 pub mod metrics;
-/// A concurrent object pool.
-pub mod object_pool;
 /// The range extensions.
 pub mod range;
 /// A rate limiter that returns the wait duration for limitation.

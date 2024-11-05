@@ -280,6 +280,8 @@ where
     weighter: Arc<dyn Weighter<K, V>>,
 
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+
+    object_pool_capacity: usize,
 }
 
 impl<K, V> CacheBuilder<K, V, RandomState>
@@ -299,6 +301,8 @@ where
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+
+            object_pool_capacity: 4096,
         }
     }
 }
@@ -334,6 +338,18 @@ where
         self
     }
 
+    /// Set object pool capacity.
+    ///
+    /// The object pool is used for avoiding frequent memory allocation.
+    ///
+    /// Each shard gets `object_pool_capacity / shards` slots.
+    ///
+    /// Default: 4096
+    pub fn with_object_pool_capacity(mut self, object_pool_capacity: usize) -> Self {
+        self.object_pool_capacity = object_pool_capacity;
+        self
+    }
+
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
@@ -347,6 +363,7 @@ where
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
+            object_pool_capacity: self.object_pool_capacity,
         }
     }
 
@@ -381,6 +398,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -390,6 +408,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -399,6 +418,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -408,6 +428,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                object_pool_capacity: self.object_pool_capacity,
             }))),
         }
     }

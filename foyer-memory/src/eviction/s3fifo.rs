@@ -436,7 +436,6 @@ mod tests {
                         key: i,
                         value: i,
                         hint: S3FifoHint,
-                        state: Default::default(),
                         hash: i,
                         weight: 1,
                     }));

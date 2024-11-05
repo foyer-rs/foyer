@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
         })
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
+        .with_object_pool_capacity(4096)
         .storage(Engine::Mixed(0.1))
         .with_device_options(
             DirectFsDeviceOptions::new(dir.path())

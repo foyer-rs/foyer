@@ -57,7 +57,6 @@ where
     pub key: E::Key,
     pub value: E::Value,
     pub hint: E::Hint,
-    pub state: E::State,
     pub hash: u64,
     pub weight: usize,
 }
@@ -67,13 +66,9 @@ pub struct Record<E>
 where
     E: Eviction,
 {
-    key: E::Key,
-    value: E::Value,
-    hint: E::Hint,
+    data: Option<Data<E>>,
     /// Make `state` visible to make intrusive data structure macro works.
     pub(crate) state: E::State,
-    hash: u64,
-    weight: usize,
     refs: AtomicIsize,
     flags: AtomicU64,
 }
@@ -82,45 +77,70 @@ impl<E> Record<E>
 where
     E: Eviction,
 {
-    /// Create a new heap allocated record with data.
+    /// Create a record with data.
     pub fn new(data: Data<E>) -> Self {
         Record {
-            key: data.key,
-            value: data.value,
-            hint: data.hint,
-            state: data.state,
-            hash: data.hash,
-            weight: data.weight,
+            data: Some(data),
+            state: Default::default(),
             refs: AtomicIsize::new(0),
             flags: AtomicU64::new(0),
         }
     }
 
-    /// Consume the record and unwrap the data only.
-    pub fn into_data(self) -> Data<E> {
-        Data {
-            key: self.key,
-            value: self.value,
-            hint: self.hint,
-            state: self.state,
-            hash: self.hash,
-            weight: self.weight,
+    /// Create a record without data.
+    pub fn empty() -> Self {
+        Record {
+            data: None,
+            state: Default::default(),
+            refs: AtomicIsize::new(0),
+            flags: AtomicU64::new(0),
         }
+    }
+
+    /// Wrap the data in the record.
+    ///
+    /// # Safety
+    ///
+    /// Panics if the record is already wrapping data.
+    pub fn insert(&mut self, data: Data<E>) {
+        assert!(self.data.replace(data).is_none());
+    }
+
+    /// Unwrap the inner data.
+    ///
+    /// # Safety
+    ///
+    /// Panics if the record is not wrapping data.
+    pub fn take(&mut self) -> Data<E> {
+        self.state = Default::default();
+        self.refs.store(0, Ordering::SeqCst);
+        self.flags.store(0, Ordering::SeqCst);
+        self.data.take().unwrap()
     }
 
     /// Get the immutable reference of the record key.
     pub fn key(&self) -> &E::Key {
-        &self.key
+        &self.data.as_ref().unwrap().key
     }
 
     /// Get the immutable reference of the record value.
     pub fn value(&self) -> &E::Value {
-        &self.value
+        &self.data.as_ref().unwrap().value
     }
 
     /// Get the immutable reference of the record hint.
     pub fn hint(&self) -> &E::Hint {
-        &self.hint
+        &self.data.as_ref().unwrap().hint
+    }
+
+    /// Get the record hash.
+    pub fn hash(&self) -> u64 {
+        self.data.as_ref().unwrap().hash
+    }
+
+    /// Get the record weight.
+    pub fn weight(&self) -> usize {
+        self.data.as_ref().unwrap().weight
     }
 
     /// Get the immutable reference of the record state.
@@ -131,16 +151,6 @@ where
     /// Get the mutable reference of the record state.
     pub fn state_mut(&mut self) -> &mut E::State {
         &mut self.state
-    }
-
-    /// Get the record hash.
-    pub fn hash(&self) -> u64 {
-        self.hash
-    }
-
-    /// Get the record weight.
-    pub fn weight(&self) -> usize {
-        self.weight
     }
 
     /// Set in eviction flag with relaxed memory order.
@@ -204,7 +214,7 @@ where
             .unwrap();
         tracing::trace!(
             "[record]: reset record (hash: {}) refs from {} (must equals to -1)",
-            self.hash,
+            self.hash(),
             old,
         );
         assert_eq!(old, -1);
@@ -217,7 +227,7 @@ where
         let old = self.refs.fetch_add(val, Ordering::SeqCst);
         tracing::trace!(
             "[record]: inc record (hash: {}) refs: {} => {}",
-            self.hash,
+            self.hash(),
             old,
             old + val
         );
@@ -248,7 +258,7 @@ where
             if current == -1 {
                 tracing::trace!(
                     "[record]: inc record (hash: {}) refs (cas) skipped for it is in reclamation phase",
-                    self.hash
+                    self.hash(),
                 );
                 return None;
             }
@@ -260,7 +270,7 @@ where
                 Ok(_) => {
                     tracing::trace!(
                         "[record]: inc record (hash: {}) refs (cas): {} => {}",
-                        self.hash,
+                        self.hash(),
                         current,
                         current + val
                     );
@@ -288,7 +298,7 @@ where
                     .compare_exchange(c, c - 1, Ordering::SeqCst, Ordering::Acquire)
                 {
                     Ok(_) => {
-                        tracing::trace!("[record]: dec record (hash: {}) refs: {} => {}", self.hash, c, c - 1);
+                        tracing::trace!("[record]: dec record (hash: {}) refs: {} => {}", self.hash(), c, c - 1);
                         return WriteGuardOrRefs::Refs(c - 1);
                     }
                     Err(cur) => current = cur,
@@ -304,7 +314,7 @@ where
             Ok(_) => {
                 tracing::trace!(
                     "[record]: dec record (hash: {}) refs from 1 and got reclamation permission",
-                    self.hash
+                    self.hash(),
                 );
                 WriteGuardOrRefs::Guard(guard)
             }
@@ -320,7 +330,7 @@ where
         if current != 0 {
             tracing::trace!(
                 "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                self.hash,
+                self.hash(),
                 false,
                 current
             );
@@ -331,7 +341,7 @@ where
             .inspect(|refs| {
                 tracing::trace!(
                     "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                    self.hash,
+                    self.hash(),
                     true,
                     refs
                 )
@@ -339,7 +349,7 @@ where
             .inspect_err(|refs| {
                 tracing::trace!(
                     "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                    self.hash,
+                    self.hash(),
                     false,
                     refs
                 )

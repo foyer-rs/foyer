@@ -473,7 +473,6 @@ mod tests {
                         key: i,
                         value: i,
                         hint: LfuHint,
-                        state: Default::default(),
                         hash: i,
                         weight: 1,
                     }));

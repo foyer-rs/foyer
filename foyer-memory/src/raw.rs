@@ -62,7 +62,10 @@
 //! the atomic reference count drops to zero again.
 
 use std::{
-    collections::hash_map::{Entry as HashMapEntry, HashMap},
+    collections::{
+        hash_map::{Entry as HashMapEntry, HashMap},
+        VecDeque,
+    },
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -117,6 +120,7 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
+    pub object_pool_capacity: usize,
 }
 
 struct RawCacheShard<E, S, I>
@@ -125,7 +129,8 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    // slab: Slab<Record<E>>,
+    object_pool: VecDeque<Box<Record<E>>>,
+
     eviction: E,
     indexer: Sentry<I>,
 
@@ -157,7 +162,14 @@ where
 
         let weight = data.weight;
 
-        let ptr = Box::into_raw(Box::new(Record::new(data)));
+        let record = match self.object_pool.pop_front() {
+            Some(mut record) => {
+                record.insert(data);
+                record
+            }
+            None => Box::new(Record::new(data)),
+        };
+        let ptr = Box::into_raw(record);
         let mut ptr = unsafe { NonNull::new_unchecked(ptr) };
 
         // Evict overflow records.
@@ -267,8 +279,9 @@ where
         self.usage -= record.weight();
         self.metrics.memory_usage.decrement(record.weight() as f64);
 
-        let record = unsafe { Box::from_raw(ptr.as_ptr()) };
-        let data = record.into_data();
+        let mut record = unsafe { Box::from_raw(ptr.as_ptr()) };
+        let data = record.take();
+        self.object_pool.push_back(record);
 
         Some(data)
     }
@@ -502,8 +515,13 @@ where
             Operator::Mutable => tracing::info!("[memory]: mutex is used for foyer in-memory cache"),
         }
 
+        let shard_object_pool_capacity = config.object_pool_capacity / config.shards;
+
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
+                object_pool: (0..shard_object_pool_capacity)
+                    .map(|_| Box::new(Record::empty()))
+                    .collect(),
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
@@ -564,7 +582,6 @@ where
                     key,
                     value,
                     hint,
-                    state: Default::default(),
                     hash,
                     weight,
                 },
@@ -1065,6 +1082,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            object_pool_capacity: 4,
         });
         let hints = vec![FifoHint];
         fuzzy(cache, hints);
@@ -1080,6 +1098,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            object_pool_capacity: 4,
         });
         let hints = vec![S3FifoHint];
         fuzzy(cache, hints);
@@ -1095,6 +1114,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            object_pool_capacity: 4,
         });
         let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
         fuzzy(cache, hints);
@@ -1110,6 +1130,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            object_pool_capacity: 4,
         });
         let hints = vec![LfuHint];
         fuzzy(cache, hints);

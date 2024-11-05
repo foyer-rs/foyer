@@ -143,7 +143,6 @@ pub mod tests {
             key: data,
             value: data,
             hint: FifoHint,
-            state: Default::default(),
             hash: 0,
             weight: 1,
         }));
