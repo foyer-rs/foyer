@@ -32,6 +32,8 @@ pub mod event;
 pub mod future;
 /// The shared metrics for foyer.
 pub mod metrics;
+/// Extensions for [`std::option::Option`].
+pub mod option;
 /// The range extensions.
 pub mod range;
 /// A rate limiter that returns the wait duration for limitation.

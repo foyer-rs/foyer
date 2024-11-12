@@ -18,7 +18,7 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     fmt::Debug,
-    hash::Hash,
+    hash::{BuildHasher, Hash, Hasher},
     sync::{Arc, OnceLock},
 };
 
@@ -167,5 +167,31 @@ where
     fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
         self.records.lock().push(Record::Evict(key.clone()));
         false
+    }
+}
+
+/// A hasher return u64 mod result.
+#[derive(Debug, Default)]
+pub struct ModHasher {
+    state: u64,
+}
+
+impl Hasher for ModHasher {
+    fn finish(&self) -> u64 {
+        self.state
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.state = (self.state << 8) + *byte as u64;
+        }
+    }
+}
+
+impl BuildHasher for ModHasher {
+    type Hasher = Self;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        Self::default()
     }
 }

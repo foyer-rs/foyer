@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::sync::Arc;
 
 use foyer_common::code::{Key, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -29,6 +29,7 @@ pub trait Config: Send + Sync + 'static + Clone + Serialize + DeserializeOwned +
 impl<T> Config for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 
 pub enum Operator {
+    Noop,
     Immutable,
     Mutable,
 }
@@ -70,31 +71,25 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     /// The caller guarantees that the record is NOT in the cache eviction algorithm instance.
     ///
     /// The cache eviction algorithm instance MUST hold the record and set its `IN_EVICTION` flag to true.
-    fn push(&mut self, ptr: NonNull<Record<Self>>);
+    fn push(&mut self, record: Arc<Record<Self>>);
 
     /// Push a record from the cache eviction algorithm instance.
     ///
     /// The cache eviction algorithm instance MUST remove the record and set its `IN_EVICTION` flag to false.
-    fn pop(&mut self) -> Option<NonNull<Record<Self>>>;
+    fn pop(&mut self) -> Option<Arc<Record<Self>>>;
 
     /// Remove a record from the cache eviction algorithm instance.
     ///
     /// The caller guarantees that the record is in the cache eviction algorithm instance.
     ///
     /// The cache eviction algorithm instance MUST remove the record and set its `IN_EVICTION` flag to false.
-    fn remove(&mut self, ptr: NonNull<Record<Self>>);
+    fn remove(&mut self, record: &Arc<Record<Self>>);
 
     /// Remove all records from the cache eviction algorithm instance.
     ///
     /// The cache eviction algorithm instance MUST remove the records and set its `IN_EVICTION` flag to false.
-    fn clear(&mut self);
-
-    /// Return the count of the records that in the cache eviction algorithm instance.
-    fn len(&self) -> usize;
-
-    /// Return if the cache eviction algorithm instance is empty.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn clear(&mut self) {
+        while self.pop().is_some() {}
     }
 
     /// Determine if the immutable version or the mutable version to use for the `acquire` operation.
@@ -107,22 +102,34 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     /// `acquire` is called when an external caller acquire a cache entry from the cache.
     ///
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn acquire_immutable(&self, ptr: NonNull<Record<Self>>);
+    fn acquire_immutable(&self, record: &Arc<Record<Self>>);
 
     /// Mutable version of the `acquire` operation.
     ///
     /// `acquire` is called when an external caller acquire a cache entry from the cache.
     ///
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn acquire_mutable(&mut self, ptr: NonNull<Record<Self>>);
+    fn acquire_mutable(&mut self, records: &Arc<Record<Self>>);
 
+    /// Determine if the immutable version or the mutable version to use for the `release` operation.
+    ///
+    /// Only the chosen version needs to be implemented. The other version is recommend to be left as `unreachable!()`.
+    fn release_operator() -> Operator;
+
+    /// Immutable version of the `release` operation.
+    ///
+    ///
     /// `release` is called when the last external caller drops the cache entry.
     ///
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
+    fn release_immutable(&self, record: &Arc<Record<Self>>);
+
+    /// Mutable version of the `release` operation.
     ///
-    /// `release` operation can either make the cache eviction algorithm instance hold or not hold the record, but the
-    /// `IN_EVICTION` flags must be set properly according to it.
-    fn release(&mut self, ptr: NonNull<Record<Self>>);
+    /// `release` is called when the last external caller drops the cache entry.
+    ///
+    /// The entry can be EITHER in the cache eviction algorithm instance or not.
+    fn release_mutable(&mut self, record: &Arc<Record<Self>>);
 }
 
 pub mod fifo;

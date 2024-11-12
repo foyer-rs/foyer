@@ -12,13 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::{mem::offset_of, sync::Arc};
 
 use foyer_common::code::{Key, Value};
-use foyer_intrusive::{
-    dlist::{Dlist, DlistLink},
-    intrusive_adapter,
-};
+use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Operator};
@@ -47,17 +44,17 @@ impl From<FifoHint> for CacheHint {
 /// Fifo eviction algorithm state.
 #[derive(Debug, Default)]
 pub struct FifoState {
-    link: DlistLink,
+    link: LinkedListAtomicLink,
 }
 
-intrusive_adapter! { Adapter<K, V> = Record<Fifo<K, V>> { state.link => DlistLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V> = Arc<Record<Fifo<K, V>>>: Record<Fifo<K, V>> { ?offset = Record::<Fifo<K, V>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
 pub struct Fifo<K, V>
 where
     K: Key,
     V: Value,
 {
-    queue: Dlist<Adapter<K, V>>,
+    queue: LinkedList<Adapter<K, V>>,
 }
 
 impl<K, V> Eviction for Fifo<K, V>
@@ -75,47 +72,50 @@ where
     where
         Self: Sized,
     {
-        Self { queue: Dlist::new() }
+        Self {
+            queue: LinkedList::new(Adapter::new()),
+        }
     }
 
     fn update(&mut self, _: usize, _: &Self::Config) {}
 
-    fn push(&mut self, ptr: NonNull<Record<Self>>) {
-        self.queue.push_back(ptr);
-        unsafe { ptr.as_ref().set_in_eviction(true) };
+    fn push(&mut self, record: Arc<Record<Self>>) {
+        record.set_in_eviction(true);
+        self.queue.push_back(record);
     }
 
-    fn pop(&mut self) -> Option<NonNull<Record<Self>>> {
-        self.queue
-            .pop_front()
-            .inspect(|ptr| unsafe { ptr.as_ref().set_in_eviction(false) })
+    fn pop(&mut self) -> Option<Arc<Record<Self>>> {
+        self.queue.pop_front().inspect(|record| record.set_in_eviction(false))
     }
 
-    fn remove(&mut self, ptr: NonNull<Record<Self>>) {
-        let p = self.queue.remove(ptr);
-        assert_eq!(p, ptr);
-        unsafe { ptr.as_ref().set_in_eviction(false) };
-    }
-
-    fn clear(&mut self) {
-        while self.pop().is_some() {}
-    }
-
-    fn len(&self) -> usize {
-        self.queue.len()
+    fn remove(&mut self, record: &Arc<Record<Self>>) {
+        unsafe { self.queue.remove_from_ptr(Arc::as_ptr(record)) };
+        record.set_in_eviction(false);
     }
 
     fn acquire_operator() -> super::Operator {
-        Operator::Immutable
+        Operator::Noop
     }
 
-    fn acquire_immutable(&self, _ptr: NonNull<Record<Self>>) {}
-
-    fn acquire_mutable(&mut self, _ptr: NonNull<Record<Self>>) {
+    fn acquire_immutable(&self, _record: &Arc<Record<Self>>) {
         unreachable!()
     }
 
-    fn release(&mut self, _ptr: NonNull<Record<Self>>) {}
+    fn acquire_mutable(&mut self, _record: &Arc<Record<Self>>) {
+        unreachable!()
+    }
+
+    fn release_operator() -> super::Operator {
+        Operator::Noop
+    }
+
+    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
+        unreachable!()
+    }
+
+    fn release_mutable(&mut self, _record: &Arc<Record<Self>>) {
+        unreachable!()
+    }
 }
 
 #[cfg(test)]
@@ -124,73 +124,76 @@ pub mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{eviction::test_utils::TestEviction, record::Data};
+    use crate::{
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, TestEviction},
+        record::Data,
+    };
 
     impl<K, V> TestEviction for Fifo<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<NonNull<Record<Self>>> {
-            self.queue.iter_ptr().collect_vec()
+        type Dump = Vec<Arc<Record<Self>>>;
+        fn dump(&self) -> Self::Dump {
+            let mut res = vec![];
+            let mut cursor = self.queue.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => res.push(record),
+                    None => break,
+                }
+            }
+            res
         }
     }
 
     type TestFifo = Fifo<u64, u64>;
 
-    unsafe fn new_test_fifo_handle_ptr(data: u64) -> NonNull<Record<TestFifo>> {
-        let handle = Box::new(Record::new(Data {
-            key: data,
-            value: data,
-            hint: FifoHint,
-            hash: 0,
-            weight: 1,
-        }));
-        NonNull::new_unchecked(Box::into_raw(handle))
-    }
-
-    unsafe fn del_test_fifo_handle_ptr(ptr: NonNull<Record<TestFifo>>) {
-        let _ = Box::from_raw(ptr.as_ptr());
-    }
-
     #[test]
     fn test_fifo() {
-        unsafe {
-            let ptrs = (0..8).map(|i| new_test_fifo_handle_ptr(i)).collect_vec();
+        let rs = (0..8)
+            .map(|i| {
+                Arc::new(Record::new(Data {
+                    key: i,
+                    value: i,
+                    hint: FifoHint,
+                    hash: i,
+                    weight: 1,
+                }))
+            })
+            .collect_vec();
+        let r = |i: usize| rs[i].clone();
 
-            let mut fifo = TestFifo::new(100, &FifoConfig {});
+        let mut fifo = TestFifo::new(100, &FifoConfig {});
 
-            // 0, 1, 2, 3
-            fifo.push(ptrs[0]);
-            fifo.push(ptrs[1]);
-            fifo.push(ptrs[2]);
-            fifo.push(ptrs[3]);
+        // 0, 1, 2, 3
+        fifo.push(r(0));
+        fifo.push(r(1));
+        fifo.push(r(2));
+        fifo.push(r(3));
 
-            // 2, 3
-            let p0 = fifo.pop().unwrap();
-            let p1 = fifo.pop().unwrap();
-            assert_eq!(ptrs[0], p0);
-            assert_eq!(ptrs[1], p1);
+        // 2, 3
+        let r0 = fifo.pop().unwrap();
+        let r1 = fifo.pop().unwrap();
+        assert_ptr_eq(&rs[0], &r0);
+        assert_ptr_eq(&rs[1], &r1);
 
-            // 2, 3, 4, 5, 6
-            fifo.push(ptrs[4]);
-            fifo.push(ptrs[5]);
-            fifo.push(ptrs[6]);
+        // 2, 3, 4, 5, 6
+        fifo.push(r(4));
+        fifo.push(r(5));
+        fifo.push(r(6));
 
-            // 2, 6
-            fifo.remove(ptrs[3]);
-            fifo.remove(ptrs[4]);
-            fifo.remove(ptrs[5]);
+        // 2, 6
+        fifo.remove(&rs[3]);
+        fifo.remove(&rs[4]);
+        fifo.remove(&rs[5]);
 
-            assert_eq!(fifo.dump(), vec![ptrs[2], ptrs[6]]);
+        assert_ptr_vec_eq(fifo.dump(), vec![r(2), r(6)]);
 
-            fifo.clear();
+        fifo.clear();
 
-            assert_eq!(fifo.dump(), vec![]);
-
-            for ptr in ptrs {
-                del_test_fifo_handle_ptr(ptr);
-            }
-        }
+        assert_ptr_vec_eq(fifo.dump(), vec![]);
     }
 }

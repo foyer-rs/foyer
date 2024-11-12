@@ -16,7 +16,7 @@ pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
         code::{Key, StorageKey, StorageValue, Value},
-        event::EventListener,
+        event::{Event, EventListener},
         range::RangeBoundsExt,
         tracing::TracingOptions,
     },

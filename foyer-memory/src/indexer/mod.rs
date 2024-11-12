@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{hash::Hash, ptr::NonNull};
+use std::{hash::Hash, sync::Arc};
 
 use equivalent::Equivalent;
 
@@ -21,14 +21,14 @@ use crate::{eviction::Eviction, record::Record};
 pub trait Indexer: Send + Sync + 'static + Default {
     type Eviction: Eviction;
 
-    fn insert(&mut self, ptr: NonNull<Record<Self::Eviction>>) -> Option<NonNull<Record<Self::Eviction>>>;
-    fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+    fn insert(&mut self, record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>>;
+    fn get<Q>(&self, hash: u64, key: &Q) -> Option<&Arc<Record<Self::Eviction>>>
     where
         Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
-    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<Self::Eviction>>>
     where
         Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
-    fn drain(&mut self) -> impl Iterator<Item = NonNull<Record<Self::Eviction>>>;
+    fn drain(&mut self) -> impl Iterator<Item = Arc<Record<Self::Eviction>>>;
 }
 
 pub mod hash_table;

@@ -398,7 +398,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
-                object_pool_capacity: self.object_pool_capacity,
+                // object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -408,7 +408,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
-                object_pool_capacity: self.object_pool_capacity,
+                // object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -418,7 +418,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
-                object_pool_capacity: self.object_pool_capacity,
+                // object_pool_capacity: self.object_pool_capacity,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
@@ -428,7 +428,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
-                object_pool_capacity: self.object_pool_capacity,
+                // object_pool_capacity: self.object_pool_capacity,
             }))),
         }
     }

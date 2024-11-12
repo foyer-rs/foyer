@@ -12,20 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
-
 use cmsketch::CMSketchU16;
 use foyer_common::{
-    assert::OptionExt,
     code::{Key, Value},
     strict_assert, strict_assert_eq, strict_assert_ne,
 };
-use foyer_intrusive::{
-    adapter::Link,
-    dlist::{Dlist, DlistLink},
-    intrusive_adapter,
-};
+use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
+use std::{mem::offset_of, sync::Arc};
 
 use super::{Eviction, Operator};
 use crate::record::{CacheHint, Record};
@@ -84,7 +78,7 @@ impl From<LfuHint> for CacheHint {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Queue {
     None,
     Window,
@@ -101,11 +95,11 @@ impl Default for Queue {
 /// w-TinyLFU eviction algorithm hint.
 #[derive(Debug, Default)]
 pub struct LfuState {
-    link: DlistLink,
+    link: LinkedListAtomicLink,
     queue: Queue,
 }
 
-intrusive_adapter! { Adapter<K, V> = Record<Lfu<K, V>> { state.link => DlistLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
@@ -124,9 +118,9 @@ where
     K: Key,
     V: Value,
 {
-    window: Dlist<Adapter<K, V>>,
-    probation: Dlist<Adapter<K, V>>,
-    protected: Dlist<Adapter<K, V>>,
+    window: LinkedList<Adapter<K, V>>,
+    probation: LinkedList<Adapter<K, V>>,
+    protected: LinkedList<Adapter<K, V>>,
 
     window_weight: usize,
     probation_weight: usize,
@@ -147,9 +141,8 @@ where
     K: Key,
     V: Value,
 {
-    fn increase_queue_weight(&mut self, record: &Record<Lfu<K, V>>) {
-        let weight = record.weight();
-        match record.state.queue {
+    fn increase_queue_weight(&mut self, queue: Queue, weight: usize) {
+        match queue {
             Queue::None => unreachable!(),
             Queue::Window => self.window_weight += weight,
             Queue::Probation => self.probation_weight += weight,
@@ -157,9 +150,8 @@ where
         }
     }
 
-    fn decrease_queue_weight(&mut self, record: &Record<Lfu<K, V>>) {
-        let weight = record.weight();
-        match record.state.queue {
+    fn decrease_queue_weight(&mut self, queue: Queue, weight: usize) {
+        match queue {
             Queue::None => unreachable!(),
             Queue::Window => self.window_weight -= weight,
             Queue::Probation => self.probation_weight -= weight,
@@ -216,9 +208,9 @@ where
         let decay = frequencies.width();
 
         Self {
-            window: Dlist::new(),
-            probation: Dlist::new(),
-            protected: Dlist::new(),
+            window: LinkedList::new(Adapter::new()),
+            probation: LinkedList::new(Adapter::new()),
+            protected: LinkedList::new(Adapter::new()),
             window_weight: 0,
             probation_weight: 0,
             protected_weight: 0,
@@ -261,96 +253,97 @@ where
         self.protected_weight_capacity = protected_weight_capacity;
     }
 
-    fn push(&mut self, mut ptr: NonNull<Record<Self>>) {
-        let record = unsafe { ptr.as_mut() };
+    /// Push a new record to `window`.
+    ///
+    /// Overflow record from `window` to `probation` if needed.
+    fn push(&mut self, record: Arc<Record<Self>>) {
+        let state = unsafe { &mut *record.state().get() };
 
-        strict_assert!(!record.state.link.is_linked());
+        strict_assert!(!state.link.is_linked());
         strict_assert!(!record.is_in_eviction());
-        strict_assert_eq!(record.state.queue, Queue::None);
+        strict_assert_eq!(state.queue, Queue::None);
 
-        self.window.push_back(ptr);
         record.set_in_eviction(true);
-        record.state.queue = Queue::Window;
-
-        self.increase_queue_weight(record);
+        state.queue = Queue::Window;
+        self.increase_queue_weight(Queue::Window, record.weight());
         self.update_frequencies(record.hash());
+        self.window.push_back(record);
 
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_weight > self.window_weight_capacity {
             strict_assert!(!self.window.is_empty());
-            let mut p = unsafe { self.window.pop_front().strict_unwrap_unchecked() };
-            let r = unsafe { p.as_mut() };
-            self.decrease_queue_weight(r);
-            r.state.queue = Queue::Probation;
-            self.increase_queue_weight(r);
-            self.probation.push_back(p);
+            let r = self.window.pop_front().unwrap();
+            let s = unsafe { &mut *r.state().get() };
+            self.decrease_queue_weight(Queue::Window, r.weight());
+            s.queue = Queue::Probation;
+            self.increase_queue_weight(Queue::Probation, r.weight());
+            self.probation.push_back(r);
         }
     }
 
-    fn pop(&mut self) -> Option<NonNull<Record<Self>>> {
+    fn pop(&mut self) -> Option<Arc<Record<Self>>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
         // If both `window` and `probation` are empty, try evict from `protected`.
-        let mut ptr = match (self.window.front(), self.probation.front()) {
+        let mut cw = self.window.front_mut();
+        let mut cp = self.probation.front_mut();
+        let record = match (cw.get(), cp.get()) {
             (None, None) => None,
-            (None, Some(_)) => self.probation.pop_front(),
-            (Some(_), None) => self.window.pop_front(),
-            (Some(window), Some(probation)) => {
-                if self.frequencies.estimate(window.hash()) < self.frequencies.estimate(probation.hash()) {
-                    self.window.pop_front()
+            (None, Some(_)) => cp.remove(),
+            (Some(_), None) => cw.remove(),
+            (Some(w), Some(p)) => {
+                if self.frequencies.estimate(w.hash()) < self.frequencies.estimate(p.hash()) {
+                    cw.remove()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
                     // too long like CacheLib does?
                 } else {
-                    self.probation.pop_front()
+                    cp.remove()
                 }
             }
         }
         .or_else(|| self.protected.pop_front())?;
 
-        let record = unsafe { ptr.as_mut() };
+        let state = unsafe { &mut *record.state().get() };
 
-        strict_assert!(!record.state.link.is_linked());
+        strict_assert!(!state.link.is_linked());
         strict_assert!(record.is_in_eviction());
-        strict_assert_ne!(record.state.queue, Queue::None);
+        strict_assert_ne!(state.queue, Queue::None);
 
-        self.decrease_queue_weight(record);
-        record.state.queue = Queue::None;
+        self.decrease_queue_weight(state.queue, record.weight());
+        state.queue = Queue::None;
         record.set_in_eviction(false);
 
-        Some(ptr)
+        Some(record)
     }
 
-    fn remove(&mut self, mut ptr: NonNull<Record<Self>>) {
-        let record = unsafe { ptr.as_mut() };
+    fn remove(&mut self, record: &Arc<Record<Self>>) {
+        let state = unsafe { &mut *record.state().get() };
 
-        strict_assert!(record.state.link.is_linked());
+        strict_assert!(state.link.is_linked());
         strict_assert!(record.is_in_eviction());
-        strict_assert_ne!(record.state.queue, Queue::None);
+        strict_assert_ne!(state.queue, Queue::None);
 
-        match record.state.queue {
+        match state.queue {
             Queue::None => unreachable!(),
-            Queue::Window => self.window.remove(ptr),
-            Queue::Probation => self.probation.remove(ptr),
-            Queue::Protected => self.protected.remove(ptr),
+            Queue::Window => unsafe { self.window.remove_from_ptr(Arc::as_ptr(record)) },
+            Queue::Probation => unsafe { self.probation.remove_from_ptr(Arc::as_ptr(record)) },
+            Queue::Protected => unsafe { self.protected.remove_from_ptr(Arc::as_ptr(record)) },
         };
 
-        strict_assert!(!record.state.link.is_linked());
+        strict_assert!(!state.link.is_linked());
 
-        self.decrease_queue_weight(record);
-        record.state.queue = Queue::None;
+        self.decrease_queue_weight(state.queue, record.weight());
+        state.queue = Queue::None;
         record.set_in_eviction(false);
     }
 
     fn clear(&mut self) {
-        while let Some(ptr) = self.pop() {
-            strict_assert!(!unsafe { ptr.as_ref() }.is_in_eviction());
-            strict_assert!(!unsafe { ptr.as_ref() }.state.link.is_linked());
-            strict_assert_eq!(unsafe { ptr.as_ref() }.state.queue, Queue::None);
+        while let Some(record) = self.pop() {
+            let state = unsafe { &*record.state().get() };
+            strict_assert!(!record.is_in_eviction());
+            strict_assert!(!state.link.is_linked());
+            strict_assert_eq!(state.queue, Queue::None);
         }
-    }
-
-    fn len(&self) -> usize {
-        self.window.len() + self.probation.len() + self.protected.len()
     }
 
     fn acquire_operator() -> super::Operator {
@@ -358,61 +351,66 @@ where
         Operator::Mutable
     }
 
-    fn acquire_immutable(&self, _ptr: NonNull<Record<Self>>) {
+    fn acquire_immutable(&self, _record: &Arc<Record<Self>>) {
         unreachable!()
     }
 
-    fn acquire_mutable(&mut self, ptr: NonNull<Record<Self>>) {
-        self.update_frequencies(unsafe { ptr.as_ref() }.hash());
-    }
+    fn acquire_mutable(&mut self, record: &Arc<Record<Self>>) {
+        // Update frequency by access.
+        self.update_frequencies(record.hash());
 
-    fn release(&mut self, mut ptr: NonNull<Record<Self>>) {
-        let record = unsafe { ptr.as_mut() };
+        if !record.is_in_eviction() {
+            return;
+        }
 
-        match record.state.queue {
-            Queue::None => {
-                strict_assert!(!record.state.link.is_linked());
-                strict_assert!(!record.is_in_eviction());
-                self.push(ptr);
-                strict_assert!(record.state.link.is_linked());
-                strict_assert!(record.is_in_eviction());
-            }
+        let state = unsafe { &mut *record.state().get() };
+
+        strict_assert!(state.link.is_linked());
+
+        match state.queue {
+            Queue::None => unreachable!(),
             Queue::Window => {
                 // Move to MRU position of `window`.
-                strict_assert!(record.state.link.is_linked());
-                strict_assert!(record.is_in_eviction());
-                self.window.remove(ptr);
-                self.window.push_back(ptr);
+                let r = unsafe { self.window.remove_from_ptr(Arc::as_ptr(record)) };
+                self.window.push_back(r);
             }
             Queue::Probation => {
                 // Promote to MRU position of `protected`.
-                strict_assert!(record.state.link.is_linked());
-                strict_assert!(record.is_in_eviction());
-                self.probation.remove(ptr);
-                self.decrease_queue_weight(record);
-                record.state.queue = Queue::Protected;
-                self.increase_queue_weight(record);
-                self.protected.push_back(ptr);
+                let r = unsafe { self.probation.remove_from_ptr(Arc::as_ptr(record)) };
+                self.decrease_queue_weight(Queue::Probation, record.weight());
+                state.queue = Queue::Protected;
+                self.increase_queue_weight(Queue::Protected, record.weight());
+                self.protected.push_back(r);
 
                 // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
                 while self.protected_weight > self.protected_weight_capacity {
                     strict_assert!(!self.protected.is_empty());
-                    let mut p = unsafe { self.protected.pop_front().strict_unwrap_unchecked() };
-                    let r = unsafe { p.as_mut() };
-                    self.decrease_queue_weight(r);
-                    r.state.queue = Queue::Probation;
-                    self.increase_queue_weight(r);
-                    self.probation.push_back(p);
+                    let r = self.protected.pop_front().unwrap();
+                    let s = unsafe { &mut *r.state().get() };
+                    self.decrease_queue_weight(Queue::Protected, r.weight());
+                    s.queue = Queue::Probation;
+                    self.increase_queue_weight(Queue::Probation, r.weight());
+                    self.probation.push_back(r);
                 }
             }
             Queue::Protected => {
                 // Move to MRU position of `protected`.
-                strict_assert!(record.state.link.is_linked());
-                strict_assert!(record.is_in_eviction());
-                self.protected.remove(ptr);
-                self.protected.push_back(ptr);
+                let r = unsafe { self.protected.remove_from_ptr(Arc::as_ptr(record)) };
+                self.protected.push_back(r);
             }
         }
+    }
+
+    fn release_operator() -> Operator {
+        Operator::Noop
+    }
+
+    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
+        unreachable!()
+    }
+
+    fn release_mutable(&mut self, _record: &Arc<Record<Self>>) {
+        unreachable!()
     }
 }
 
@@ -422,142 +420,241 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{eviction::test_utils::TestEviction, record::Data};
+    use crate::{
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, TestEviction},
+        record::Data,
+    };
 
     impl<K, V> TestEviction for Lfu<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        fn dump(&self) -> Vec<NonNull<Record<Self>>> {
-            self.window
-                .iter_ptr()
-                .chain(self.probation.iter_ptr())
-                .chain(self.protected.iter_ptr())
-                .collect_vec()
+        type Dump = Vec<Vec<Arc<Record<Self>>>>;
+        fn dump(&self) -> Self::Dump {
+            let mut window = vec![];
+            let mut probation = vec![];
+            let mut protected = vec![];
+
+            let mut cursor = self.window.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => window.push(record),
+                    None => break,
+                }
+            }
+
+            let mut cursor = self.probation.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => probation.push(record),
+                    None => break,
+                }
+            }
+
+            let mut cursor = self.protected.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => protected.push(record),
+                    None => break,
+                }
+            }
+
+            vec![window, probation, protected]
         }
     }
 
     type TestLfu = Lfu<u64, u64>;
 
-    unsafe fn assert_test_lfu(
-        lfu: &TestLfu,
-        len: usize,
-        window: usize,
-        probation: usize,
-        protected: usize,
-        entries: Vec<NonNull<Record<TestLfu>>>,
-    ) {
-        assert_eq!(lfu.len(), len);
-        assert_eq!(lfu.window.len(), window);
-        assert_eq!(lfu.probation.len(), probation);
-        assert_eq!(lfu.protected.len(), protected);
-        assert_eq!(lfu.window_weight, window);
-        assert_eq!(lfu.probation_weight, probation);
-        assert_eq!(lfu.protected_weight, protected);
-        let es = lfu.dump().into_iter().collect_vec();
-        assert_eq!(es, entries);
-    }
-
-    fn assert_min_frequency(lfu: &TestLfu, hash: u64, count: usize) {
-        let freq = lfu.frequencies.estimate(hash);
-        assert!(freq >= count as u16, "assert {freq} >= {count} failed for {hash}");
-    }
-
     #[test]
     fn test_lfu() {
-        unsafe {
-            let ptrs = (0..100)
-                .map(|i| {
-                    let handle = Box::new(Record::new(Data {
-                        key: i,
-                        value: i,
-                        hint: LfuHint,
-                        hash: i,
-                        weight: 1,
-                    }));
-                    NonNull::new_unchecked(Box::into_raw(handle))
-                })
-                .collect_vec();
+        let rs = (0..100)
+            .map(|i| {
+                Arc::new(Record::new(Data {
+                    key: i,
+                    value: i,
+                    hint: LfuHint,
+                    hash: i,
+                    weight: 1,
+                }))
+            })
+            .collect_vec();
+        let r = |i: usize| rs[i].clone();
 
-            // window: 2, probation: 2, protected: 6
-            let config = LfuConfig {
-                window_capacity_ratio: 0.2,
-                protected_capacity_ratio: 0.6,
-                cmsketch_eps: 0.01,
-                cmsketch_confidence: 0.95,
-            };
-            let mut lfu = TestLfu::new(10, &config);
+        // window: 2, probation: 2, protected: 6
+        let config = LfuConfig {
+            window_capacity_ratio: 0.2,
+            protected_capacity_ratio: 0.6,
+            cmsketch_eps: 0.01,
+            cmsketch_confidence: 0.95,
+        };
+        let mut lfu = TestLfu::new(10, &config);
 
-            let ps = |indices: &[usize]| indices.iter().map(|&i| ptrs[i]).collect_vec();
+        assert_eq!(lfu.window_weight_capacity, 2);
+        assert_eq!(lfu.protected_weight_capacity, 6);
 
-            assert_eq!(lfu.window_weight_capacity, 2);
-            assert_eq!(lfu.protected_weight_capacity, 6);
+        lfu.push(r(0));
+        lfu.push(r(1));
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![r(0), r(1)], vec![], vec![]]);
 
-            lfu.push(ptrs[0]);
-            lfu.push(ptrs[1]);
-            assert_test_lfu(&lfu, 2, 2, 0, 0, ps(&[0, 1]));
+        lfu.push(r(2));
+        lfu.push(r(3));
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![r(2), r(3)], vec![r(0), r(1)], vec![]]);
 
-            lfu.push(ptrs[2]);
-            lfu.push(ptrs[3]);
-            assert_test_lfu(&lfu, 4, 2, 2, 0, ps(&[2, 3, 0, 1]));
+        (4..10).for_each(|i| lfu.push(r(i)));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(8), r(9)],
+                vec![r(0), r(1), r(2), r(3), r(4), r(5), r(6), r(7)],
+                vec![],
+            ],
+        );
 
-            (4..10).for_each(|i| lfu.push(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 8, 0, ps(&[8, 9, 0, 1, 2, 3, 4, 5, 6, 7]));
+        // [8, 9] [1, 2, 3, 4, 5, 6, 7]
+        let r0 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[0], &r0);
 
-            (0..10).for_each(|i| assert_min_frequency(&lfu, i, 1));
+        // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
+        lfu.push(r(0));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(9), r(0)],
+                vec![r(1), r(2), r(3), r(4), r(5), r(6), r(7), r(8)],
+                vec![],
+            ],
+        );
 
-            // [8, 9] [1, 2, 3, 4, 5, 6, 7]
-            let p0 = lfu.pop().unwrap();
-            assert_eq!(p0, ptrs[0]);
+        // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
+        lfu.acquire_mutable(&rs[9]);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(3), r(4), r(5), r(6), r(7), r(8)],
+                vec![],
+            ],
+        );
 
-            // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.release(p0);
-            assert_test_lfu(&lfu, 10, 2, 8, 0, ps(&[9, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
+        // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
+        (3..7).for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(7), r(8)],
+                vec![r(3), r(4), r(5), r(6)],
+            ],
+        );
 
-            // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.release(ptrs[9]);
-            assert_test_lfu(&lfu, 10, 2, 8, 0, ps(&[0, 9, 1, 2, 3, 4, 5, 6, 7, 8]));
+        // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
+        (3..5).for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(7), r(8)],
+                vec![r(5), r(6), r(3), r(4)],
+            ],
+        );
 
-            // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
-            (3..7).for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 4, 4, ps(&[0, 9, 1, 2, 7, 8, 3, 4, 5, 6]));
+        // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
+        [1, 2, 7, 8].into_iter().for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(5), r(6)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
-            (3..5).for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 4, 4, ps(&[0, 9, 1, 2, 7, 8, 5, 6, 3, 4]));
+        // [0, 9] [6] [3, 4, 1, 2, 7, 8]
+        let r5 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[5], &r5);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![vec![r(0), r(9)], vec![r(6)], vec![r(3), r(4), r(1), r(2), r(7), r(8)]],
+        );
 
-            // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
-            [1, 2, 7, 8].into_iter().for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 2, 6, ps(&[0, 9, 5, 6, 3, 4, 1, 2, 7, 8]));
+        // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
+        (10..13).for_each(|i| lfu.push(r(i)));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(6), r(0), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // [0, 9] [6] [3, 4, 1, 2, 7, 8]
-            let p5 = lfu.pop().unwrap();
-            assert_eq!(p5, ptrs[5]);
-            assert_test_lfu(&lfu, 9, 2, 1, 6, ps(&[0, 9, 6, 3, 4, 1, 2, 7, 8]));
+        // 0: high freq
+        // [11, 12] [6, 9, 10, 3] [4, 1, 2, 7, 8, 0]
+        (0..10).for_each(|_| lfu.acquire_mutable(&rs[0]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(6), r(9), r(10), r(3)],
+                vec![r(4), r(1), r(2), r(7), r(8), r(0)],
+            ],
+        );
 
-            (10..13).for_each(|i| lfu.push(ptrs[i]));
+        // 0: high freq
+        // [11, 12] [0, 6, 9, 10] [3, 4, 1, 2, 7, 8]
+        lfu.acquire_mutable(&rs[6]);
+        lfu.acquire_mutable(&rs[9]);
+        lfu.acquire_mutable(&rs[10]);
+        lfu.acquire_mutable(&rs[3]);
+        lfu.acquire_mutable(&rs[4]);
+        lfu.acquire_mutable(&rs[1]);
+        lfu.acquire_mutable(&rs[2]);
+        lfu.acquire_mutable(&rs[7]);
+        lfu.acquire_mutable(&rs[8]);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(0), r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
-            assert_test_lfu(&lfu, 12, 2, 4, 6, ps(&[11, 12, 6, 0, 9, 10, 3, 4, 1, 2, 7, 8]));
-            (1..13).for_each(|i| assert_min_frequency(&lfu, i, 0));
-            lfu.acquire_mutable(ptrs[0]);
-            assert_min_frequency(&lfu, 0, 2);
+        // evict 11, 12 because freq(11) < freq(0), freq(12) < freq(0)
+        // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
+        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(11));
+        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(12));
+        let r11 = lfu.pop().unwrap();
+        let r12 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[11], &r11);
+        assert_ptr_eq(&rs[12], &r12);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![],
+                vec![r(0), r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // evict 11 because freq(11) < freq(0)
-            // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
-            let p6 = lfu.pop().unwrap();
-            let p11 = lfu.pop().unwrap();
-            assert_eq!(p6, ptrs[6]);
-            assert_eq!(p11, ptrs[11]);
-            assert_test_lfu(&lfu, 10, 1, 3, 6, ps(&[12, 0, 9, 10, 3, 4, 1, 2, 7, 8]));
+        // evict 0, high freq but cold
+        // [] [6, 9, 10] [3, 4, 1, 2, 7, 8]
+        let r0 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[0], &r0);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![],
+                vec![r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            lfu.clear();
-            assert_test_lfu(&lfu, 0, 0, 0, 0, vec![]);
-
-            for ptr in ptrs {
-                let _ = Box::from_raw(ptr.as_ptr());
-            }
-        }
+        lfu.clear();
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![], vec![], vec![]]);
     }
 }

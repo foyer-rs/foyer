@@ -14,8 +14,20 @@
 
 use crate::code::{Key, Value};
 
-/// Trait for the customized event listener.
+/// Event identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Event {
+    /// Cache eviction on insertion.
+    Evict,
+    /// Cache replacement on insertion.
+    Replace,
+    /// Cache remove.
+    Remove,
+    /// Cache clear.
+    Clear,
+}
 
+/// Trait for the customized event listener.
 pub trait EventListener: Send + Sync + 'static {
     /// Associated key type.
     type Key;
@@ -25,6 +37,15 @@ pub trait EventListener: Send + Sync + 'static {
     /// Called when a cache entry is released from the in-memory cache.
     #[expect(unused_variables)]
     fn on_memory_release(&self, key: Self::Key, value: Self::Value)
+    where
+        Self::Key: Key,
+        Self::Value: Value,
+    {
+    }
+
+    /// Called when a cache entry leaves the in-memory cache with the reason.
+    #[expect(unused_variables)]
+    fn on_leave(&self, reason: Event, key: &Self::Key, value: &Self::Value)
     where
         Self::Key: Key,
         Self::Value: Value,

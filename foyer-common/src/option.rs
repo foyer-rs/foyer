@@ -12,13 +12,26 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//! TODO(MrCroxx): Finish the crate level docs.
+/// Extension for [`std::option::Option`].
+pub trait OptionExt {
+    /// Wrapped type by [`Option`].
+    type Val;
 
-mod cache;
-mod eviction;
-mod indexer;
-mod raw;
-mod record;
+    /// Consume the wrapped value with the given function if there is.
+    fn then<F>(self, f: F)
+    where
+        F: FnOnce(Self::Val);
+}
 
-mod prelude;
-pub use prelude::*;
+impl<T> OptionExt for Option<T> {
+    type Val = T;
+
+    fn then<F>(self, f: F)
+    where
+        F: FnOnce(Self::Val),
+    {
+        if let Some(val) = self {
+            f(val)
+        }
+    }
+}

@@ -62,16 +62,12 @@
 //! the atomic reference count drops to zero again.
 
 use std::{
-    collections::{
-        hash_map::{Entry as HashMapEntry, HashMap},
-        VecDeque,
-    },
+    collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
     future::Future,
     hash::Hash,
     ops::Deref,
     pin::Pin,
-    ptr::NonNull,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -83,7 +79,7 @@ use fastrace::{
 };
 use foyer_common::{
     code::HashBuilder,
-    event::EventListener,
+    event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
     metrics::Metrics,
     runtime::SingletonHandle,
@@ -91,15 +87,14 @@ use foyer_common::{
     strict_assert,
 };
 use itertools::Itertools;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     eviction::{Eviction, Operator},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
-    record::{Data, Record, WriteGuardOrRefs},
-    sync::Lock,
+    record::{Data, Record},
 };
 
 /// The weighter for the in-memory cache.
@@ -120,7 +115,7 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pub object_pool_capacity: usize,
+    // pub object_pool_capacity: usize,
 }
 
 struct RawCacheShard<E, S, I>
@@ -129,8 +124,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    object_pool: VecDeque<Box<Record<E>>>,
-
+    // object_pool: VecDeque<Box<Record<E>>>,
     eviction: E,
     indexer: Sentry<I>,
 
@@ -150,27 +144,18 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    #[fastrace::trace(name = "foyer::memory::raw::shard::emplace")]
     fn emplace(
         &mut self,
         data: Data<E>,
         ephemeral: bool,
-        garbages: &mut Vec<Data<E>>,
+        garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
-    ) -> NonNull<Record<E>> {
+    ) -> Arc<Record<E>> {
         std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
 
         let weight = data.weight;
 
-        let record = match self.object_pool.pop_front() {
-            Some(mut record) => {
-                record.insert(data);
-                record
-            }
-            None => Box::new(Record::new(data)),
-        };
-        let ptr = Box::into_raw(record);
-        let mut ptr = unsafe { NonNull::new_unchecked(ptr) };
+        let record = Arc::new(Record::new(data));
 
         // Evict overflow records.
         while self.usage + weight > self.capacity {
@@ -179,42 +164,43 @@ where
                 None => break,
             };
             self.metrics.memory_evict.increment(1);
-            strict_assert!(unsafe { evicted.as_ref().is_in_indexer() });
-            strict_assert!(unsafe { !evicted.as_ref().is_in_eviction() });
 
-            // Try to free the record if this thread get the permission.
-            if unsafe { evicted.as_ref() }.need_reclaim() {
-                if let Some(garbage) = self.reclaim(evicted, false) {
-                    garbages.push(garbage);
-                }
-            }
+            let e = self.indexer.remove(evicted.hash(), evicted.key()).unwrap();
+            assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
+
+            strict_assert!(!evicted.as_ref().is_in_indexer());
+            strict_assert!(!evicted.as_ref().is_in_eviction());
+
+            // FIXME(MrCroxx): remove evicted entry from indexer?
+
+            self.usage -= evicted.weight();
+
+            garbages.push((Event::Evict, evicted));
         }
 
         // Insert new record
-        if let Some(old) = self.indexer.insert(ptr) {
+        if let Some(old) = self.indexer.insert(record.clone()) {
             self.metrics.memory_replace.increment(1);
 
-            strict_assert!(!unsafe { old.as_ref() }.is_in_indexer());
-            if unsafe { old.as_ref() }.is_in_eviction() {
-                self.eviction.remove(old);
+            strict_assert!(!old.is_in_indexer());
+
+            if old.is_in_eviction() {
+                self.eviction.remove(&old);
             }
-            strict_assert!(!unsafe { old.as_ref() }.is_in_eviction());
-            // Because the `old` handle is removed from the indexer, it will not be reinserted again.
-            // Try to free the record if this thread get the permission.
-            if unsafe { old.as_ref() }.need_reclaim() {
-                if let Some(garbage) = self.reclaim(old, false) {
-                    garbages.push(garbage);
-                }
-            }
+            strict_assert!(!old.is_in_eviction());
+
+            self.usage -= old.weight();
+
+            garbages.push((Event::Replace, old));
         } else {
             self.metrics.memory_insert.increment(1);
         }
-        strict_assert!(unsafe { ptr.as_ref() }.is_in_indexer());
+        strict_assert!(record.is_in_indexer());
 
-        unsafe { ptr.as_mut().set_ephemeral(ephemeral) };
+        record.set_ephemeral(ephemeral);
         if !ephemeral {
-            self.eviction.push(ptr);
-            strict_assert!(unsafe { ptr.as_ref() }.is_in_eviction());
+            self.eviction.push(record.clone());
+            strict_assert!(record.is_in_eviction());
         }
 
         self.usage += weight;
@@ -222,116 +208,68 @@ where
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
         let refs = waiters.len() as isize + 1;
-        let inc = unsafe { ptr.as_ref() }.inc_refs(refs);
+        let inc = record.inc_refs(refs);
         assert_eq!(refs, inc);
 
-        ptr
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::release")]
-    fn reclaim(&mut self, mut ptr: NonNull<Record<E>>, reinsert: bool) -> Option<Data<E>> {
-        let record = unsafe { ptr.as_mut() };
-
-        // Assert the record is in the reclamation phase.
-        assert_eq!(record.refs(), -1);
-
-        if record.is_in_indexer() && record.is_ephemeral() {
-            // The entry is ephemeral, remove it from indexer. Ignore reinsertion.
-            strict_assert!(!record.is_in_eviction());
-            self.indexer.remove(record.hash(), record.key());
-            strict_assert!(!record.is_in_indexer());
-        }
-
-        if record.is_in_indexer() {
-            // The entry has no external refs, give it another chance by reinsertion if the cache is not busy
-            // and the algorithm allows.
-
-            // The usage is higher than the capacity means most handles are held externally,
-            // the cache shard cannot release enough weight for the new inserted entries.
-            // In this case, the reinsertion should be given up.
-            if reinsert && self.usage <= self.capacity {
-                let was_in_eviction = record.is_in_eviction();
-                self.eviction.release(ptr);
-                if record.is_in_eviction() {
-                    if !was_in_eviction {
-                        self.metrics.memory_reinsert.increment(1);
-                    }
-                    strict_assert!(record.is_in_indexer());
-                    strict_assert!(record.is_in_eviction());
-                    // Restore the reference count to exit the reclamation phase.
-                    record.reset();
-                    return None;
-                }
-            }
-
-            // If the entry has not been reinserted, remove it from the indexer and the eviction container (if needed).
-            self.indexer.remove(record.hash(), record.key());
-            if record.is_in_eviction() {
-                self.eviction.remove(ptr);
-            }
-        }
-
-        // Here the handle is neither in the indexer nor in the eviction container.
-        strict_assert!(!record.is_in_indexer());
-        strict_assert!(!record.is_in_eviction());
-
-        self.metrics.memory_release.increment(1);
-        self.usage -= record.weight();
-        self.metrics.memory_usage.decrement(record.weight() as f64);
-
-        let mut record = unsafe { Box::from_raw(ptr.as_ptr()) };
-        let data = record.take();
-        self.object_pool.push_back(record);
-
-        Some(data)
+        record
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::remove")]
-    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Record<E>>>
+    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        let mut ptr = self.indexer.remove(hash, key)?;
+        let record = self.indexer.remove(hash, key)?;
 
-        let record = unsafe { ptr.as_mut() };
         if record.is_in_eviction() {
-            self.eviction.remove(ptr);
+            self.eviction.remove(&record);
         }
         strict_assert!(!record.is_in_indexer());
         strict_assert!(!record.is_in_eviction());
+
+        self.usage -= record.weight();
 
         self.metrics.memory_remove.increment(1);
 
         record.inc_refs_cas(1)?;
 
-        Some(ptr)
+        Some(record)
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::get_noop")]
+    fn get_noop<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+    {
+        self.get_inner(hash, key)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::get_immutable")]
-    fn get_immutable<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Record<E>>>
+    fn get_immutable<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        self.get_inner(hash, key).inspect(|&ptr| self.acquire_immutable(ptr))
+        self.get_inner(hash, key)
+            .inspect(|record| self.acquire_immutable(record))
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::get_mutable")]
-    fn get_mutable<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Record<E>>>
+    fn get_mutable<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        self.get_inner(hash, key).inspect(|&ptr| self.acquire_mutable(ptr))
+        self.get_inner(hash, key).inspect(|record| self.acquire_mutable(record))
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::get_inner")]
-    fn get_inner<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Record<E>>>
+    fn get_inner<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        let ptr = match self.indexer.get(hash, key) {
-            Some(ptr) => {
+        let record = match self.indexer.get(hash, key).cloned() {
+            Some(record) => {
                 self.metrics.memory_hit.increment(1);
-                ptr
+                record
             }
             None => {
                 self.metrics.memory_miss.increment(1);
@@ -339,46 +277,63 @@ where
             }
         };
 
-        let record = unsafe { ptr.as_ref() };
-
         strict_assert!(record.is_in_indexer());
 
         record.set_ephemeral(false);
 
         record.inc_refs_cas(1)?;
 
-        Some(ptr)
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
-    fn acquire_immutable(&self, ptr: NonNull<Record<E>>) {
-        self.eviction.acquire_immutable(ptr);
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")]
-    fn acquire_mutable(&mut self, ptr: NonNull<Record<E>>) {
-        self.eviction.acquire_mutable(ptr);
+        Some(record)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::clear")]
-    fn clear(&mut self, garbages: &mut Vec<Data<E>>) {
-        let ptrs = self.indexer.drain().collect_vec();
+    fn clear(&mut self, garbages: &mut Vec<Arc<Record<E>>>) {
+        let records = self.indexer.drain().collect_vec();
         self.eviction.clear();
 
         let mut count = 0;
 
-        for ptr in ptrs {
+        for record in records {
             count += 1;
-            strict_assert!(unsafe { !ptr.as_ref().is_in_indexer() });
-            strict_assert!(unsafe { !ptr.as_ref().is_in_eviction() });
-            if unsafe { ptr.as_ref() }.need_reclaim() {
-                if let Some(garbage) = self.reclaim(ptr, false) {
-                    garbages.push(garbage);
-                }
-            }
+            strict_assert!(!record.is_in_indexer());
+            strict_assert!(!record.is_in_eviction());
+
+            garbages.push(record);
         }
 
         self.metrics.memory_remove.increment(count);
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
+    fn acquire_immutable(&self, record: &Arc<Record<E>>) {
+        self.eviction.acquire_immutable(record);
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")]
+    fn acquire_mutable(&mut self, record: &Arc<Record<E>>) {
+        self.eviction.acquire_mutable(record);
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::release_immutable")]
+    fn release_immutable(&self, record: &Arc<Record<E>>) {
+        self.eviction.release_immutable(record);
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::release_mutable")]
+    fn release_mutable(&mut self, record: &Arc<Record<E>>) {
+        self.eviction.release_mutable(record);
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop")]
+    fn fetch_noop(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    where
+        E::Key: Clone,
+    {
+        if let Some(record) = self.get_noop(hash, key) {
+            return RawShardFetch::Hit(record);
+        }
+
+        self.fetch_queue(key.clone())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")]
@@ -386,8 +341,8 @@ where
     where
         E::Key: Clone,
     {
-        if let Some(ptr) = self.get_immutable(hash, key) {
-            return RawShardFetch::Hit(ptr);
+        if let Some(record) = self.get_immutable(hash, key) {
+            return RawShardFetch::Hit(record);
         }
 
         self.fetch_queue(key.clone())
@@ -398,8 +353,8 @@ where
     where
         E::Key: Clone,
     {
-        if let Some(ptr) = self.get_mutable(hash, key) {
-            return RawShardFetch::Hit(ptr);
+        if let Some(record) = self.get_mutable(hash, key) {
+            return RawShardFetch::Hit(record);
         }
 
         self.fetch_queue(key.clone())
@@ -431,7 +386,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    shards: Vec<Lock<RawCacheShard<E, S, I>>>,
+    shards: Vec<RwLock<RawCacheShard<E, S, I>>>,
 
     capacity: usize,
 
@@ -459,8 +414,8 @@ where
 
         // Do not deallocate data within the lock section.
         if let Some(listener) = self.event_listener.as_ref() {
-            for Data { key, value, .. } in garbages {
-                listener.on_memory_release(key, value);
+            for record in garbages {
+                listener.on_leave(Event::Clear, record.key(), record.value());
             }
         }
     }
@@ -510,18 +465,13 @@ where
 
         let shard_capacity = config.capacity / config.shards;
 
-        match E::acquire_operator() {
-            Operator::Immutable => tracing::info!("[memory]: rwlock is used for foyer in-memory cache"),
-            Operator::Mutable => tracing::info!("[memory]: mutex is used for foyer in-memory cache"),
-        }
-
-        let shard_object_pool_capacity = config.object_pool_capacity / config.shards;
+        // let shard_object_pool_capacity = config.object_pool_capacity / config.shards;
 
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
-                object_pool: (0..shard_object_pool_capacity)
-                    .map(|_| Box::new(Record::empty()))
-                    .collect(),
+                // object_pool: (0..shard_object_pool_capacity)
+                //     .map(|_| Box::new(Record::empty()))
+                //     .collect(),
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
@@ -530,10 +480,7 @@ where
                 metrics: metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
-            .map(|shard| match E::acquire_operator() {
-                Operator::Immutable => Lock::rwlock(shard),
-                Operator::Mutable => Lock::mutex(shard),
-            })
+            .map(RwLock::new)
             .collect_vec();
 
         let inner = RawCacheInner {
@@ -576,7 +523,7 @@ where
         let mut garbages = vec![];
         let mut waiters = vec![];
 
-        let ptr = self.inner.shards[self.shard(hash)].write().with(|mut shard| {
+        let record = self.inner.shards[self.shard(hash)].write().with(|mut shard| {
             shard.emplace(
                 Data {
                     key,
@@ -594,21 +541,21 @@ where
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
             let _ = waiter.send(RawCacheEntry {
+                record: record.clone(),
                 inner: self.inner.clone(),
-                ptr,
             });
         }
 
         // Deallocate data out of the lock critical section.
         if let Some(listener) = self.inner.event_listener.as_ref() {
-            for Data { key, value, .. } in garbages {
-                listener.on_memory_release(key, value);
+            for (event, record) in garbages {
+                listener.on_leave(event, record.key(), record.value());
             }
         }
 
         RawCacheEntry {
+            record,
             inner: self.inner.clone(),
-            ptr,
         }
     }
 
@@ -619,12 +566,20 @@ where
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
-        self.inner.shards[self.shard(hash)].write().with(|mut shard| {
-            shard.remove(hash, key).map(|ptr| RawCacheEntry {
-                inner: self.inner.clone(),
-                ptr,
+        self.inner.shards[self.shard(hash)]
+            .write()
+            .with(|mut shard| {
+                shard.remove(hash, key).map(|record| RawCacheEntry {
+                    inner: self.inner.clone(),
+                    record,
+                })
             })
-        })
+            .inspect(|record| {
+                // Deallocate data out of the lock critical section.
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(Event::Remove, record.key(), record.value());
+                }
+            })
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::get")]
@@ -634,7 +589,8 @@ where
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
-        let ptr = match E::acquire_operator() {
+        let record = match E::acquire_operator() {
+            Operator::Noop => self.inner.shards[self.shard(hash)].read().get_noop(hash, key),
             Operator::Immutable => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| shard.get_immutable(hash, key)),
@@ -645,7 +601,7 @@ where
 
         Some(RawCacheEntry {
             inner: self.inner.clone(),
-            ptr,
+            record,
         })
     }
 
@@ -658,8 +614,7 @@ where
 
         self.inner.shards[self.shard(hash)]
             .read()
-            .with(|shard| shard.indexer.get(hash, key))
-            .is_some()
+            .with(|shard| shard.indexer.get(hash, key).is_some())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::touch")]
@@ -670,6 +625,9 @@ where
         let hash = self.inner.hash_builder.hash_one(key);
 
         match E::acquire_operator() {
+            Operator::Noop => self.inner.shards[self.shard(hash)]
+                .read()
+                .with(|shard| shard.get_noop(hash, key)),
             Operator::Immutable => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| shard.get_immutable(hash, key)),
@@ -690,14 +648,7 @@ where
     }
 
     pub fn usage(&self) -> usize {
-        self.inner
-            .shards
-            .iter()
-            .map(|shard| match E::acquire_operator() {
-                Operator::Immutable => shard.read().usage,
-                Operator::Mutable => shard.write().usage,
-            })
-            .sum()
+        self.inner.shards.iter().map(|shard| shard.read().usage).sum()
     }
 
     pub fn metrics(&self) -> &Metrics {
@@ -724,7 +675,7 @@ where
     I: Indexer<Eviction = E>,
 {
     inner: Arc<RawCacheInner<E, S, I>>,
-    ptr: NonNull<Record<E>>,
+    record: Arc<Record<E>>,
 }
 
 impl<E, S, I> Debug for RawCacheEntry<E, S, I>
@@ -734,7 +685,7 @@ where
     I: Indexer<Eviction = E>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RawCacheEntry").field("ptr", &self.ptr).finish()
+        f.debug_struct("RawCacheEntry").field("record", &self.record).finish()
     }
 }
 
@@ -745,20 +696,14 @@ where
     I: Indexer<Eviction = E>,
 {
     fn drop(&mut self) {
-        let record = unsafe { self.ptr.as_ref() };
-
-        let hash = record.hash();
+        let hash = self.record.hash();
         let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
 
-        let garbage = match record.dec_ref_cas(shard) {
-            WriteGuardOrRefs::Guard(mut guard) => guard.reclaim(self.ptr, true),
-            WriteGuardOrRefs::Refs(_) => None,
-        };
-
-        // Do not deallocate data within the lock section.
-        if let Some(listener) = self.inner.event_listener.as_ref() {
-            if let Some(Data { key, value, .. }) = garbage {
-                listener.on_memory_release(key, value);
+        if self.record.dec_refs(1) == 0 {
+            match E::release_operator() {
+                Operator::Noop => {}
+                Operator::Immutable => shard.read().with(|shard| shard.release_immutable(&self.record)),
+                Operator::Mutable => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
             }
         }
     }
@@ -771,11 +716,10 @@ where
     I: Indexer<Eviction = E>,
 {
     fn clone(&self) -> Self {
-        let old = unsafe { self.ptr.as_ref() }.inc_refs(1);
-        assert!(old > 0);
+        self.record.inc_refs(1);
         Self {
             inner: self.inner.clone(),
-            ptr: self.ptr,
+            record: self.record.clone(),
         }
     }
 }
@@ -816,32 +760,32 @@ where
     I: Indexer<Eviction = E>,
 {
     pub fn hash(&self) -> u64 {
-        unsafe { self.ptr.as_ref() }.hash()
+        self.record.hash()
     }
 
     pub fn key(&self) -> &E::Key {
-        unsafe { self.ptr.as_ref() }.key()
+        self.record.key()
     }
 
     pub fn value(&self) -> &E::Value {
-        unsafe { self.ptr.as_ref() }.value()
+        self.record.value()
     }
 
     pub fn hint(&self) -> &E::Hint {
-        unsafe { self.ptr.as_ref() }.hint()
+        self.record.hint()
     }
 
     pub fn weight(&self) -> usize {
-        unsafe { self.ptr.as_ref() }.weight()
+        self.record.weight()
     }
 
     pub fn refs(&self) -> usize {
         // External entry ALWAYS get a non-negative ref count.
-        unsafe { self.ptr.as_ref() }.refs() as usize
+        self.record.refs() as usize
     }
 
     pub fn is_outdated(&self) -> bool {
-        !unsafe { self.ptr.as_ref() }.is_in_indexer()
+        !self.record.is_in_indexer()
     }
 }
 
@@ -865,7 +809,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    Hit(NonNull<Record<E>>),
+    Hit(Arc<Record<E>>),
     Wait(InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>),
     Miss,
 }
@@ -974,15 +918,16 @@ where
         let hash = self.inner.hash_builder.hash_one(&key);
 
         let raw = match E::acquire_operator() {
+            Operator::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
             Operator::Immutable => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
             Operator::Mutable => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
         };
 
         match raw {
-            RawShardFetch::Hit(ptr) => {
+            RawShardFetch::Hit(record) => {
                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
+                    record,
                     inner: self.inner.clone(),
-                    ptr,
                 })))
             }
             RawShardFetch::Wait(future) => return RawFetch::new(RawFetchInner::Wait(future)),
@@ -1039,8 +984,8 @@ mod tests {
     fn test_send_sync_static() {
         is_send_sync_static::<RawCache<Fifo<(), ()>>>();
         is_send_sync_static::<RawCache<S3Fifo<(), ()>>>();
-        is_send_sync_static::<RawCache<Lru<(), ()>>>();
         is_send_sync_static::<RawCache<Lfu<(), ()>>>();
+        is_send_sync_static::<RawCache<Lru<(), ()>>>();
     }
 
     fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)
@@ -1082,7 +1027,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            object_pool_capacity: 4,
         });
         let hints = vec![FifoHint];
         fuzzy(cache, hints);
@@ -1098,7 +1042,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            object_pool_capacity: 4,
         });
         let hints = vec![S3FifoHint];
         fuzzy(cache, hints);
@@ -1114,7 +1057,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            object_pool_capacity: 4,
         });
         let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
         fuzzy(cache, hints);
@@ -1130,7 +1072,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            object_pool_capacity: 4,
         });
         let hints = vec![LfuHint];
         fuzzy(cache, hints);

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer::{Cache, CacheBuilder, EventListener, FifoConfig};
+use foyer::{Cache, CacheBuilder, Event, EventListener, FifoConfig};
 
 struct EchoEventListener;
 
@@ -22,11 +22,7 @@ impl EventListener for EchoEventListener {
     type Key = u64;
     type Value = String;
 
-    fn on_memory_release(&self, key: Self::Key, value: Self::Value)
-    where
-        Self::Key: foyer::Key,
-        Self::Value: foyer::Value,
-    {
+    fn on_leave(&self, _reason: Event, key: &Self::Key, value: &Self::Value) {
         println!("Entry [key = {key}] [value = {value}] is released.")
     }
 }

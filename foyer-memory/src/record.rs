@@ -12,15 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
+use std::{
+    cell::UnsafeCell,
+    fmt::Debug,
+    sync::atomic::{AtomicIsize, AtomicU64, Ordering},
+};
 
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    eviction::Eviction,
-    sync::{Lock, LockWriteGuard},
-};
+use crate::eviction::Eviction;
 
 /// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
 ///
@@ -67,16 +68,34 @@ where
     E: Eviction,
 {
     data: Option<Data<E>>,
-    /// Make `state` visible to make intrusive data structure macro works.
-    pub(crate) state: E::State,
+    state: UnsafeCell<E::State>,
     refs: AtomicIsize,
     flags: AtomicU64,
+}
+
+unsafe impl<E> Send for Record<E> where E: Eviction {}
+unsafe impl<E> Sync for Record<E> where E: Eviction {}
+
+impl<E> Debug for Record<E>
+where
+    E: Eviction,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Record");
+        if let Some(data) = self.data.as_ref() {
+            s.field("hash", &data.hash);
+        }
+        s.finish()
+    }
 }
 
 impl<E> Record<E>
 where
     E: Eviction,
 {
+    /// `state` field memory layout offset of the [`Record`].
+    pub const STATE_OFFSET: usize = std::mem::offset_of!(Self, state);
+
     /// Create a record with data.
     pub fn new(data: Data<E>) -> Self {
         Record {
@@ -143,14 +162,13 @@ where
         self.data.as_ref().unwrap().weight
     }
 
-    /// Get the immutable reference of the record state.
-    pub fn state(&self) -> &E::State {
+    /// Get the record state wrapped with [`UnsafeCell`].
+    ///
+    /// # Safety
+    ///
+    ///
+    pub fn state(&self) -> &UnsafeCell<E::State> {
         &self.state
-    }
-
-    /// Get the mutable reference of the record state.
-    pub fn state_mut(&mut self) -> &mut E::State {
-        &mut self.state
     }
 
     /// Set in eviction flag with relaxed memory order.
@@ -234,19 +252,19 @@ where
         old + val
     }
 
-    // /// Decrease the atomic reference count.
-    // ///
-    // /// This function returns the new reference count after the op.
-    // pub fn dec_refs(&self, val: isize) -> isize {
-    //     let old = self.refs.fetch_sub(val, Ordering::SeqCst);
-    //     tracing::trace!(
-    //         "[record]: dec record (hash: {}) refs: {} => {}",
-    //         self.hash,
-    //         old,
-    //         old - val
-    //     );
-    //     old - val
-    // }
+    /// Decrease the atomic reference count.
+    ///
+    /// This function returns the new reference count after the op.
+    pub fn dec_refs(&self, val: isize) -> isize {
+        let old = self.refs.fetch_sub(val, Ordering::SeqCst);
+        tracing::trace!(
+            "[record]: dec record (hash: {}) refs: {} => {}",
+            self.hash(),
+            old,
+            old - val
+        );
+        old - val
+    }
 
     /// Increase the atomic reference count with a cas operation,
     /// to prevent from increasing the record in the reclamation phase.
@@ -277,48 +295,6 @@ where
                     return Some(current + val);
                 }
             }
-        }
-    }
-
-    /// Decrease the atomic reference count by 1 with a cas operation.
-    ///
-    /// If the refs hits 0 after decreasing, get the permission to reclaim the record.
-    ///
-    /// This function returns the new reference count after the op if the record is not in the reclamation phase.
-    pub fn dec_ref_cas<'a, T>(&self, lock: &'a Lock<T>) -> WriteGuardOrRefs<'a, T> {
-        let mut current = self.refs.load(Ordering::Relaxed);
-        loop {
-            match current {
-                1 => match self.dec_ref_case_slow(lock) {
-                    WriteGuardOrRefs::Guard(guard) => return WriteGuardOrRefs::Guard(guard),
-                    WriteGuardOrRefs::Refs(cur) => current = cur,
-                },
-                c => match self
-                    .refs
-                    .compare_exchange(c, c - 1, Ordering::SeqCst, Ordering::Acquire)
-                {
-                    Ok(_) => {
-                        tracing::trace!("[record]: dec record (hash: {}) refs: {} => {}", self.hash(), c, c - 1);
-                        return WriteGuardOrRefs::Refs(c - 1);
-                    }
-                    Err(cur) => current = cur,
-                },
-            }
-        }
-    }
-
-    fn dec_ref_case_slow<'a, T>(&self, lock: &'a Lock<T>) -> WriteGuardOrRefs<'a, T> {
-        let guard = lock.write();
-
-        match self.refs.compare_exchange(1, -1, Ordering::SeqCst, Ordering::Acquire) {
-            Ok(_) => {
-                tracing::trace!(
-                    "[record]: dec record (hash: {}) refs from 1 and got reclamation permission",
-                    self.hash(),
-                );
-                WriteGuardOrRefs::Guard(guard)
-            }
-            Err(cur) => WriteGuardOrRefs::Refs(cur),
         }
     }
 
@@ -356,9 +332,4 @@ where
             })
             .is_ok()
     }
-}
-
-pub enum WriteGuardOrRefs<'a, T> {
-    Guard(LockWriteGuard<'a, T>),
-    Refs(isize),
 }

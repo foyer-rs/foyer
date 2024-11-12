@@ -98,8 +98,15 @@ pub unsafe trait Adapter: Send + Sync + Debug + 'static {
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
-    (@impl
+    (@field
         $vis:vis $name:ident ($($args:tt),*) = $item:ty { $($fields:expr)+ => $link:ty } $($where_:tt)*
+    ) => {
+        intrusive_adapter! {@offset
+            $vis $name ($($args),*) = $item { ?std::mem::offset_of!($item, $($fields)+) => $link } $($where_)*
+        }
+    };
+    (@offset
+        $vis:vis $name:ident ($($args:tt),*) = $item:ty { ?$offset:expr => $link:ty } $($where_:tt)*
     ) => {
         $vis struct $name<$($args),*> $($where_)* {
             _marker: std::marker::PhantomData<($($args),*)>
@@ -119,11 +126,11 @@ macro_rules! intrusive_adapter {
             }
 
             unsafe fn link2ptr(&self, link: std::ptr::NonNull<Self::Link>) -> std::ptr::NonNull<Self::Item> {
-                std::ptr::NonNull::new_unchecked($crate::container_of!(link.as_ptr(), $item, $($fields)+))
+                std::ptr::NonNull::new_unchecked((link.as_ptr() as *mut u8).sub($offset) as *mut Self::Item)
             }
 
             unsafe fn ptr2link(&self, item: std::ptr::NonNull<Self::Item>) -> std::ptr::NonNull<Self::Link> {
-                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add(std::mem::offset_of!($item, $($fields)+)) as *mut Self::Link)
+                std::ptr::NonNull::new_unchecked((item.as_ptr() as *mut u8).add($offset) as *mut Self::Link)
             }
         }
 
@@ -134,17 +141,31 @@ macro_rules! intrusive_adapter {
         }
     };
     (
-        $vis:vis $name:ident = $($rest:tt)*
+        $vis:vis $name:ident = $item:ty { $($fields:expr)+ => $link:ty } $($rest:tt)*
     ) => {
-        intrusive_adapter! {@impl
-            $vis $name () = $($rest)*
+        intrusive_adapter! {@field
+            $vis $name () = $item { $($fields)* => $link } $($rest)*
         }
     };
     (
-        $vis:vis $name:ident<$($args:tt),*> = $($rest:tt)*
+        $vis:vis $name:ident = $item:ty { ?$offset:expr => $link:ty } $($rest:tt)*
     ) => {
-        intrusive_adapter! {@impl
-            $vis $name ($($args),*) = $($rest)*
+        intrusive_adapter! {@offset
+            $vis $name () = $item { ?$offset => $link } $($rest)*
+        }
+    };
+    (
+        $vis:vis $name:ident<$($args:tt),*> = $item:ty { $($fields:expr)+ => $link:ty } $($rest:tt)*
+    ) => {
+        intrusive_adapter! {@field
+            $vis $name ($($args),*) = $item { $($fields)* => $link } $($rest)*
+        }
+    };
+    (
+        $vis:vis $name:ident<$($args:tt),*> = $item:ty { ?$offset:expr => $link:ty } $($rest:tt)*
+    ) => {
+        intrusive_adapter! {@offset
+            $vis $name ($($args),*) = $item { ?$offset => $link } $($rest)*
         }
     };
 }

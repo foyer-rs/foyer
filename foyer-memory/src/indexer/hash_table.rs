@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::sync::Arc;
 
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
@@ -23,7 +23,7 @@ pub struct HashTableIndexer<E>
 where
     E: Eviction,
 {
-    table: HashTable<NonNull<Record<E>>>,
+    table: HashTable<Arc<Record<E>>>,
 }
 
 unsafe impl<E> Send for HashTableIndexer<E> where E: Eviction {}
@@ -46,52 +46,43 @@ where
 {
     type Eviction = E;
 
-    fn insert(&mut self, mut ptr: NonNull<Record<Self::Eviction>>) -> Option<NonNull<Record<Self::Eviction>>> {
-        let record = unsafe { ptr.as_ref() };
-
-        match self.table.entry(
-            record.hash(),
-            |p| unsafe { p.as_ref() }.key() == record.key(),
-            |p| unsafe { p.as_ref() }.hash(),
-        ) {
+    fn insert(&mut self, mut record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>> {
+        match self
+            .table
+            .entry(record.hash(), |r| r.key() == record.key(), |r| r.hash())
+        {
             HashTableEntry::Occupied(mut o) => {
-                std::mem::swap(o.get_mut(), &mut ptr);
-                Some(ptr)
+                std::mem::swap(o.get_mut(), &mut record);
+                Some(record)
             }
             HashTableEntry::Vacant(v) => {
-                v.insert(ptr);
+                v.insert(record);
                 None
             }
         }
     }
 
-    fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+    fn get<Q>(&self, hash: u64, key: &Q) -> Option<&Arc<Record<Self::Eviction>>>
     where
         Q: std::hash::Hash + equivalent::Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized,
     {
-        self.table
-            .find(hash, |p| key.equivalent(unsafe { p.as_ref() }.key()))
-            .copied()
+        self.table.find(hash, |r| key.equivalent(r.key()))
     }
 
-    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Record<Self::Eviction>>>
+    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<Self::Eviction>>>
     where
         Q: std::hash::Hash + equivalent::Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized,
     {
-        match self.table.entry(
-            hash,
-            |p| key.equivalent(unsafe { p.as_ref() }.key()),
-            |p| unsafe { p.as_ref() }.hash(),
-        ) {
+        match self.table.entry(hash, |r| key.equivalent(r.key()), |r| r.hash()) {
             HashTableEntry::Occupied(o) => {
-                let (p, _) = o.remove();
-                Some(p)
+                let (r, _) = o.remove();
+                Some(r)
             }
             HashTableEntry::Vacant(_) => None,
         }
     }
 
-    fn drain(&mut self) -> impl Iterator<Item = NonNull<Record<Self::Eviction>>> {
+    fn drain(&mut self) -> impl Iterator<Item = Arc<Record<Self::Eviction>>> {
         self.table.drain()
     }
 }
