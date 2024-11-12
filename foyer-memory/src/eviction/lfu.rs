@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{mem::offset_of, sync::Arc};
+
 use cmsketch::CMSketchU16;
 use foyer_common::{
     code::{Key, Value},
@@ -19,7 +21,6 @@ use foyer_common::{
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
-use std::{mem::offset_of, sync::Arc};
 
 use super::{Eviction, Operator};
 use crate::record::{CacheHint, Record};

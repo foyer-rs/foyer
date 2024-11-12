@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::{mem::offset_of, sync::Arc};
+
 use foyer_common::{
     code::{Key, Value},
     strict_assert,
@@ -21,8 +23,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Operator};
 use crate::record::{CacheHint, Record};
-
-use std::{mem::offset_of, sync::Arc};
 
 /// Lru eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]

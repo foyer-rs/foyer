@@ -166,7 +166,6 @@ where
     ///
     /// # Safety
     ///
-    ///
     pub fn state(&self) -> &UnsafeCell<E::State> {
         &self.state
     }
