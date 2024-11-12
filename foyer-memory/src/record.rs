@@ -165,7 +165,6 @@ where
     /// Get the record state wrapped with [`UnsafeCell`].
     ///
     /// # Safety
-    ///
     pub fn state(&self) -> &UnsafeCell<E::State> {
         &self.state
     }
