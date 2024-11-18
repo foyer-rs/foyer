@@ -21,5 +21,4 @@ coverage:
         informational: true
         only_pulls: true
 ignore:
-  - "foyer-util"
   - "foyer-cli"
