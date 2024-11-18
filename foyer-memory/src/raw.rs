@@ -115,7 +115,6 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    // pub object_pool_capacity: usize,
 }
 
 struct RawCacheShard<E, S, I>
@@ -124,7 +123,6 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    // object_pool: VecDeque<Box<Record<E>>>,
     eviction: E,
     indexer: Sentry<I>,
 
@@ -170,8 +168,6 @@ where
 
             strict_assert!(!evicted.as_ref().is_in_indexer());
             strict_assert!(!evicted.as_ref().is_in_eviction());
-
-            // FIXME(MrCroxx): remove evicted entry from indexer?
 
             self.usage -= evicted.weight();
 
@@ -465,13 +461,8 @@ where
 
         let shard_capacity = config.capacity / config.shards;
 
-        // let shard_object_pool_capacity = config.object_pool_capacity / config.shards;
-
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
-                // object_pool: (0..shard_object_pool_capacity)
-                //     .map(|_| Box::new(Record::empty()))
-                //     .collect(),
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,

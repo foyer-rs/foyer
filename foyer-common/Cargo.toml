@@ -15,7 +15,6 @@ readme = { workspace = true }
 [dependencies]
 bytes = "1"
 cfg-if = "1"
-crossbeam = { workspace = true }
 fastrace = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }

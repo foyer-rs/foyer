@@ -19,7 +19,6 @@ cmsketch = "0.2.1"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
-foyer-intrusive = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }
 intrusive-collections = { git = "https://github.com/foyer-rs/intrusive-rs", rev = "94cfac4701dbc0033b7bc27e31c46bf3a12d96d7" }
@@ -42,10 +41,7 @@ zipf = "7.0.1"
 deadlock = ["parking_lot/deadlock_detection"]
 # FIXME: remove sanity feature
 sanity = []
-strict_assertions = [
-    "foyer-common/strict_assertions",
-    "foyer-intrusive/strict_assertions",
-]
+strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
 
 [[bench]]

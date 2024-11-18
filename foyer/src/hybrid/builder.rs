@@ -159,22 +159,6 @@ where
         }
     }
 
-    /// Set object pool capacity.
-    ///
-    /// The object pool is used for avoiding frequent memory allocation.
-    ///
-    /// Each shard gets `object_pool_capacity / shards` slots.
-    ///
-    /// Default: 4096
-    pub fn with_object_pool_capacity(self, object_pool_capacity: usize) -> Self {
-        let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
-        HybridCacheBuilderPhaseMemory {
-            name: self.name,
-            tracing_options: self.tracing_options,
-            builder,
-        }
-    }
-
     /// Continue to modify the disk cache configurations.
     pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();

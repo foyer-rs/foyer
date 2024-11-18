@@ -34,15 +34,6 @@ pub trait EventListener: Send + Sync + 'static {
     /// Associated value type.
     type Value;
 
-    /// Called when a cache entry is released from the in-memory cache.
-    #[expect(unused_variables)]
-    fn on_memory_release(&self, key: Self::Key, value: Self::Value)
-    where
-        Self::Key: Key,
-        Self::Value: Value,
-    {
-    }
-
     /// Called when a cache entry leaves the in-memory cache with the reason.
     #[expect(unused_variables)]
     fn on_leave(&self, reason: Event, key: &Self::Key, value: &Self::Value)
