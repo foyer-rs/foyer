@@ -203,7 +203,7 @@ where
         self.metrics.memory_usage.increment(weight as f64);
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
-        let refs = waiters.len() as isize + 1;
+        let refs = waiters.len() + 1;
         let inc = record.inc_refs(refs);
         assert_eq!(refs, inc);
 
@@ -227,7 +227,7 @@ where
 
         self.metrics.memory_remove.increment(1);
 
-        record.inc_refs_cas(1)?;
+        record.inc_refs(1);
 
         Some(record)
     }
@@ -277,7 +277,7 @@ where
 
         record.set_ephemeral(false);
 
-        record.inc_refs_cas(1)?;
+        record.inc_refs(1);
 
         Some(record)
     }
@@ -771,8 +771,7 @@ where
     }
 
     pub fn refs(&self) -> usize {
-        // External entry ALWAYS get a non-negative ref count.
-        self.record.refs() as usize
+        self.record.refs()
     }
 
     pub fn is_outdated(&self) -> bool {

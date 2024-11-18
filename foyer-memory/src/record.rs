@@ -15,7 +15,7 @@
 use std::{
     cell::UnsafeCell,
     fmt::Debug,
-    sync::atomic::{AtomicIsize, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use bitflags::bitflags;
@@ -69,7 +69,7 @@ where
 {
     data: Option<Data<E>>,
     state: UnsafeCell<E::State>,
-    refs: AtomicIsize,
+    refs: AtomicUsize,
     flags: AtomicU64,
 }
 
@@ -101,7 +101,7 @@ where
         Record {
             data: Some(data),
             state: Default::default(),
-            refs: AtomicIsize::new(0),
+            refs: AtomicUsize::new(0),
             flags: AtomicU64::new(0),
         }
     }
@@ -111,7 +111,7 @@ where
         Record {
             data: None,
             state: Default::default(),
-            refs: AtomicIsize::new(0),
+            refs: AtomicUsize::new(0),
             flags: AtomicU64::new(0),
         }
     }
@@ -213,33 +213,14 @@ where
     }
 
     /// Get the atomic reference count.
-    ///
-    /// Return a non-negative value when the record is alive,
-    /// otherwise, return -1 that implies the record is in the reclamation phase.
-    pub fn refs(&self) -> isize {
+    pub fn refs(&self) -> usize {
         self.refs.load(Ordering::Acquire)
-    }
-
-    /// Reset the atomic reference count to 0.
-    ///
-    /// Only valid when the reclaimer gives up reclamation.
-    pub fn reset(&self) {
-        let old = self
-            .refs
-            .compare_exchange(-1, 0, Ordering::SeqCst, Ordering::Acquire)
-            .unwrap();
-        tracing::trace!(
-            "[record]: reset record (hash: {}) refs from {} (must equals to -1)",
-            self.hash(),
-            old,
-        );
-        assert_eq!(old, -1);
     }
 
     /// Increase the atomic reference count.
     ///
     /// This function returns the new reference count after the op.
-    pub fn inc_refs(&self, val: isize) -> isize {
+    pub fn inc_refs(&self, val: usize) -> usize {
         let old = self.refs.fetch_add(val, Ordering::SeqCst);
         tracing::trace!(
             "[record]: inc record (hash: {}) refs: {} => {}",
@@ -253,7 +234,7 @@ where
     /// Decrease the atomic reference count.
     ///
     /// This function returns the new reference count after the op.
-    pub fn dec_refs(&self, val: isize) -> isize {
+    pub fn dec_refs(&self, val: usize) -> usize {
         let old = self.refs.fetch_sub(val, Ordering::SeqCst);
         tracing::trace!(
             "[record]: dec record (hash: {}) refs: {} => {}",
@@ -262,72 +243,5 @@ where
             old - val
         );
         old - val
-    }
-
-    /// Increase the atomic reference count with a cas operation,
-    /// to prevent from increasing the record in the reclamation phase.
-    ///
-    /// This function returns the new reference count after the op if the record is not in the reclamation phase.
-    pub fn inc_refs_cas(&self, val: isize) -> Option<isize> {
-        let mut current = self.refs.load(Ordering::Relaxed);
-        loop {
-            if current == -1 {
-                tracing::trace!(
-                    "[record]: inc record (hash: {}) refs (cas) skipped for it is in reclamation phase",
-                    self.hash(),
-                );
-                return None;
-            }
-            match self
-                .refs
-                .compare_exchange(current, current + val, Ordering::SeqCst, Ordering::Acquire)
-            {
-                Err(cur) => current = cur,
-                Ok(_) => {
-                    tracing::trace!(
-                        "[record]: inc record (hash: {}) refs (cas): {} => {}",
-                        self.hash(),
-                        current,
-                        current + val
-                    );
-                    return Some(current + val);
-                }
-            }
-        }
-    }
-
-    /// Try to acquire the permission to reclaim the record.
-    ///
-    /// If `true` is returned, the caller MUST reclaim the record.
-    pub fn need_reclaim(&self) -> bool {
-        let current = self.refs.load(Ordering::Acquire);
-        if current != 0 {
-            tracing::trace!(
-                "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                self.hash(),
-                false,
-                current
-            );
-            return false;
-        }
-        self.refs
-            .compare_exchange(0, -1, Ordering::SeqCst, Ordering::Acquire)
-            .inspect(|refs| {
-                tracing::trace!(
-                    "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                    self.hash(),
-                    true,
-                    refs
-                )
-            })
-            .inspect_err(|refs| {
-                tracing::trace!(
-                    "[record]: check if record (hash: {}) needs reclamation: {} with refs {}",
-                    self.hash(),
-                    false,
-                    refs
-                )
-            })
-            .is_ok()
     }
 }
