@@ -21,7 +21,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Operator};
+use super::{Eviction, Op};
 use crate::record::{CacheHint, Record};
 
 /// Lru eviction algorithm config.
@@ -248,70 +248,58 @@ where
         assert_eq!(self.high_priority_weight, 0);
     }
 
-    fn acquire_operator() -> super::Operator {
-        Operator::Mutable
+    fn acquire() -> Op<Self> {
+        Op::mutable(|this: &mut Self, record| {
+            if !record.is_in_eviction() {
+                return;
+            }
+
+            let state = unsafe { &mut *record.state().get() };
+            assert!(state.link.is_linked());
+
+            if state.is_pinned {
+                return;
+            }
+
+            // Pin the record by moving it to the pin list.
+
+            let r = if state.in_high_priority_pool {
+                unsafe { this.high_priority_list.remove_from_ptr(Arc::as_ptr(record)) }
+            } else {
+                unsafe { this.list.remove_from_ptr(Arc::as_ptr(record)) }
+            };
+
+            this.pin_list.push_back(r);
+
+            state.is_pinned = true;
+        })
     }
 
-    fn acquire_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
+    fn release() -> Op<Self> {
+        Op::mutable(|this: &mut Self, record| {
+            if !record.is_in_eviction() {
+                return;
+            }
 
-    fn acquire_mutable(&mut self, record: &Arc<Record<Self>>) {
-        if !record.is_in_eviction() {
-            return;
-        }
+            let state = unsafe { &mut *record.state().get() };
+            assert!(state.link.is_linked());
 
-        let state = unsafe { &mut *record.state().get() };
-        assert!(state.link.is_linked());
+            if !state.is_pinned {
+                return;
+            }
 
-        if state.is_pinned {
-            return;
-        }
+            // Unpin the record by moving it from the pin list.
 
-        // Pin the record by moving it to the pin list.
+            unsafe { this.pin_list.remove_from_ptr(Arc::as_ptr(record)) };
 
-        let r = if state.in_high_priority_pool {
-            unsafe { self.high_priority_list.remove_from_ptr(Arc::as_ptr(record)) }
-        } else {
-            unsafe { self.list.remove_from_ptr(Arc::as_ptr(record)) }
-        };
+            if state.in_high_priority_pool {
+                this.high_priority_list.push_back(record.clone());
+            } else {
+                this.list.push_back(record.clone());
+            }
 
-        self.pin_list.push_back(r);
-
-        state.is_pinned = true;
-    }
-
-    fn release_operator() -> Operator {
-        Operator::Mutable
-    }
-
-    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_mutable(&mut self, record: &Arc<Record<Self>>) {
-        if !record.is_in_eviction() {
-            return;
-        }
-
-        let state = unsafe { &mut *record.state().get() };
-        assert!(state.link.is_linked());
-
-        if !state.is_pinned {
-            return;
-        }
-
-        // Unpin the record by moving it from the pin list.
-
-        unsafe { self.pin_list.remove_from_ptr(Arc::as_ptr(record)) };
-
-        if state.in_high_priority_pool {
-            self.high_priority_list.push_back(record.clone());
-        } else {
-            self.list.push_back(record.clone());
-        }
-
-        state.is_pinned = false;
+            state.is_pinned = false;
+        })
     }
 }
 
@@ -322,17 +310,17 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, TestEviction},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
         record::Data,
     };
 
-    impl<K, V> TestEviction for Lru<K, V>
+    impl<K, V> Dump for Lru<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        type Dump = Vec<Vec<Arc<Record<Self>>>>;
-        fn dump(&self) -> Self::Dump {
+        type Output = Vec<Vec<Arc<Record<Self>>>>;
+        fn dump(&self) -> Self::Output {
             let mut low = vec![];
             let mut high = vec![];
             let mut pin = vec![];
