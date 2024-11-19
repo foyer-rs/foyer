@@ -647,6 +647,18 @@ where
                 Operator::Immutable => shard.read().with(|shard| shard.release_immutable(&self.record)),
                 Operator::Mutable => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
             }
+
+            if self.record.is_ephemeral() {
+                shard
+                    .write()
+                    .with(|mut shard| shard.remove(hash, self.key()))
+                    .inspect(|record| {
+                        // Deallocate data out of the lock critical section.
+                        if let Some(listener) = self.inner.event_listener.as_ref() {
+                            listener.on_leave(Event::Remove, record.key(), record.value());
+                        }
+                    });
+            }
         }
     }
 }
@@ -921,6 +933,18 @@ mod tests {
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
+    fn fifo_cache_for_test() -> RawCache<Fifo<u64, u64>> {
+        RawCache::new(RawCacheConfig {
+            name: "test".to_string(),
+            capacity: 256,
+            shards: 4,
+            eviction_config: FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+        })
+    }
+
     #[test]
     fn test_send_sync_static() {
         is_send_sync_static::<RawCache<Fifo<(), ()>>>();
@@ -929,92 +953,114 @@ mod tests {
         is_send_sync_static::<RawCache<Lru<(), ()>>>();
     }
 
-    fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)
-    where
-        E: Eviction<Key = u64, Value = u64>,
-    {
-        let handles = (0..8)
-            .map(|i| {
-                let c = cache.clone();
-                let hints = hints.clone();
-                std::thread::spawn(move || {
-                    let mut rng = SmallRng::seed_from_u64(i);
-                    for _ in 0..100000 {
-                        let key = rng.next_u64();
-                        if let Some(entry) = c.get(&key) {
-                            assert_eq!(key, *entry);
-                            drop(entry);
-                            continue;
+    #[test]
+    fn test_insert_ephemeral() {
+        let fifo = fifo_cache_for_test();
+
+        let e1 = fifo.insert_ephemeral(1, 1);
+        assert_eq!(fifo.usage(), 1);
+        drop(e1);
+        assert_eq!(fifo.usage(), 0);
+
+        let e2a = fifo.insert_ephemeral(2, 2);
+        assert_eq!(fifo.usage(), 1);
+        let e2b = fifo.get(&2).expect("entry 2 should exist");
+        drop(e2a);
+        assert_eq!(fifo.usage(), 1);
+        drop(e2b);
+        assert_eq!(fifo.usage(), 1);
+    }
+
+    mod fuzzy {
+        use super::*;
+
+        fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)
+        where
+            E: Eviction<Key = u64, Value = u64>,
+        {
+            let handles = (0..8)
+                .map(|i| {
+                    let c = cache.clone();
+                    let hints = hints.clone();
+                    std::thread::spawn(move || {
+                        let mut rng = SmallRng::seed_from_u64(i);
+                        for _ in 0..100000 {
+                            let key = rng.next_u64();
+                            if let Some(entry) = c.get(&key) {
+                                assert_eq!(key, *entry);
+                                drop(entry);
+                                continue;
+                            }
+                            let hint = hints.choose(&mut rng).cloned().unwrap();
+                            c.insert_with_hint(key, key, hint);
                         }
-                        let hint = hints.choose(&mut rng).cloned().unwrap();
-                        c.insert_with_hint(key, key, hint);
-                    }
+                    })
                 })
-            })
-            .collect_vec();
+                .collect_vec();
 
-        handles.into_iter().for_each(|handle| handle.join().unwrap());
+            handles.into_iter().for_each(|handle| handle.join().unwrap());
 
-        assert_eq!(cache.usage(), cache.capacity());
-    }
+            assert_eq!(cache.usage(), cache.capacity());
+        }
 
-    #[test_log::test]
-    fn test_fifo_cache_fuzzy() {
-        let cache: RawCache<Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
-            name: "test".to_string(),
-            capacity: 256,
-            shards: 4,
-            eviction_config: FifoConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            event_listener: None,
-        });
-        let hints = vec![FifoHint];
-        fuzzy(cache, hints);
-    }
+        #[test_log::test]
+        fn test_fifo_cache_fuzzy() {
+            let cache: RawCache<Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: FifoConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+            let hints = vec![FifoHint];
+            fuzzy(cache, hints);
+        }
 
-    #[test_log::test]
-    fn test_s3fifo_cache_fuzzy() {
-        let cache: RawCache<S3Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
-            name: "test".to_string(),
-            capacity: 256,
-            shards: 4,
-            eviction_config: S3FifoConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            event_listener: None,
-        });
-        let hints = vec![S3FifoHint];
-        fuzzy(cache, hints);
-    }
+        #[test_log::test]
+        fn test_s3fifo_cache_fuzzy() {
+            let cache: RawCache<S3Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: S3FifoConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+            let hints = vec![S3FifoHint];
+            fuzzy(cache, hints);
+        }
 
-    #[test_log::test]
-    fn test_lru_cache_fuzzy() {
-        let cache: RawCache<Lru<u64, u64>> = RawCache::new(RawCacheConfig {
-            name: "test".to_string(),
-            capacity: 256,
-            shards: 4,
-            eviction_config: LruConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            event_listener: None,
-        });
-        let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
-        fuzzy(cache, hints);
-    }
+        #[test_log::test]
+        fn test_lru_cache_fuzzy() {
+            let cache: RawCache<Lru<u64, u64>> = RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: LruConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+            let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
+            fuzzy(cache, hints);
+        }
 
-    #[test_log::test]
-    fn test_lfu_cache_fuzzy() {
-        let cache: RawCache<Lfu<u64, u64>> = RawCache::new(RawCacheConfig {
-            name: "test".to_string(),
-            capacity: 256,
-            shards: 4,
-            eviction_config: LfuConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            event_listener: None,
-        });
-        let hints = vec![LfuHint];
-        fuzzy(cache, hints);
+        #[test_log::test]
+        fn test_lfu_cache_fuzzy() {
+            let cache: RawCache<Lfu<u64, u64>> = RawCache::new(RawCacheConfig {
+                name: "test".to_string(),
+                capacity: 256,
+                shards: 4,
+                eviction_config: LfuConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+            });
+            let hints = vec![LfuHint];
+            fuzzy(cache, hints);
+        }
     }
 }
