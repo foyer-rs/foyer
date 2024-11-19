@@ -16,11 +16,45 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
-use super::Eviction;
+use super::{Eviction, Op};
+use crate::Record;
 
-pub trait TestEviction: Eviction {
-    type Dump;
-    fn dump(&self) -> Self::Dump;
+#[expect(dead_code)]
+pub trait OpExt: Eviction {
+    fn acquire_immutable(&self, record: &Arc<Record<Self>>) {
+        match Self::acquire() {
+            Op::Immutable(f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn acquire_mutable(&mut self, record: &Arc<Record<Self>>) {
+        match Self::acquire() {
+            Op::Mutable(mut f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn release_immutable(&self, record: &Arc<Record<Self>>) {
+        match Self::release() {
+            Op::Immutable(f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn release_mutable(&mut self, record: &Arc<Record<Self>>) {
+        match Self::release() {
+            Op::Mutable(mut f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<E> OpExt for E where E: Eviction {}
+
+pub trait Dump: Eviction {
+    type Output;
+    fn dump(&self) -> Self::Output;
 }
 
 pub fn assert_ptr_eq<T>(a: &Arc<T>, b: &Arc<T>) {

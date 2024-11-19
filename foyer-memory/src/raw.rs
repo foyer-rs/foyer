@@ -43,7 +43,7 @@ use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    eviction::{Eviction, Operator},
+    eviction::{Eviction, Op},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     record::{Data, Record},
 };
@@ -253,22 +253,34 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
     fn acquire_immutable(&self, record: &Arc<Record<E>>) {
-        self.eviction.acquire_immutable(record);
+        match E::acquire() {
+            Op::Immutable(f) => f(&self.eviction, record),
+            _ => unreachable!(),
+        }
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")]
     fn acquire_mutable(&mut self, record: &Arc<Record<E>>) {
-        self.eviction.acquire_mutable(record);
+        match E::acquire() {
+            Op::Mutable(mut f) => f(&mut self.eviction, record),
+            _ => unreachable!(),
+        }
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::release_immutable")]
     fn release_immutable(&self, record: &Arc<Record<E>>) {
-        self.eviction.release_immutable(record);
+        match E::release() {
+            Op::Immutable(f) => f(&self.eviction, record),
+            _ => unreachable!(),
+        }
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::release_mutable")]
     fn release_mutable(&mut self, record: &Arc<Record<E>>) {
-        self.eviction.release_mutable(record);
+        match E::release() {
+            Op::Mutable(mut f) => f(&mut self.eviction, record),
+            _ => unreachable!(),
+        }
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop")]
@@ -531,12 +543,12 @@ where
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
-        let record = match E::acquire_operator() {
-            Operator::Noop => self.inner.shards[self.shard(hash)].read().get_noop(hash, key),
-            Operator::Immutable => self.inner.shards[self.shard(hash)]
+        let record = match E::acquire() {
+            Op::Noop => self.inner.shards[self.shard(hash)].read().get_noop(hash, key),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| shard.get_immutable(hash, key)),
-            Operator::Mutable => self.inner.shards[self.shard(hash)]
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| shard.get_mutable(hash, key)),
         }?;
@@ -566,14 +578,12 @@ where
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
-        match E::acquire_operator() {
-            Operator::Noop => self.inner.shards[self.shard(hash)]
-                .read()
-                .with(|shard| shard.get_noop(hash, key)),
-            Operator::Immutable => self.inner.shards[self.shard(hash)]
+        match E::acquire() {
+            Op::Noop => self.inner.shards[self.shard(hash)].read().get_noop(hash, key),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| shard.get_immutable(hash, key)),
-            Operator::Mutable => self.inner.shards[self.shard(hash)]
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| shard.get_mutable(hash, key)),
         }
@@ -642,10 +652,10 @@ where
         let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
 
         if self.record.dec_refs(1) == 0 {
-            match E::release_operator() {
-                Operator::Noop => {}
-                Operator::Immutable => shard.read().with(|shard| shard.release_immutable(&self.record)),
-                Operator::Mutable => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
+            match E::release() {
+                Op::Noop => {}
+                Op::Immutable(_) => shard.read().with(|shard| shard.release_immutable(&self.record)),
+                Op::Mutable(_) => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
             }
 
             if self.record.is_ephemeral() {
@@ -870,10 +880,10 @@ where
     {
         let hash = self.inner.hash_builder.hash_one(&key);
 
-        let raw = match E::acquire_operator() {
-            Operator::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
-            Operator::Immutable => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
-            Operator::Mutable => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
+        let raw = match E::acquire() {
+            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
         };
 
         match raw {

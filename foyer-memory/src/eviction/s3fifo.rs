@@ -28,7 +28,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Operator};
+use super::{Eviction, Op};
 use crate::record::{CacheHint, Record};
 
 /// S3Fifo eviction algorithm config.
@@ -293,29 +293,15 @@ where
         }
     }
 
-    fn acquire_operator() -> super::Operator {
-        Operator::Immutable
+    fn acquire() -> Op<Self> {
+        Op::immutable(|_: &Self, record| {
+            let state = unsafe { &mut *record.state().get() };
+            state.inc_frequency();
+        })
     }
 
-    fn acquire_immutable(&self, record: &Arc<Record<Self>>) {
-        let state = unsafe { &mut *record.state().get() };
-        state.inc_frequency();
-    }
-
-    fn acquire_mutable(&mut self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_operator() -> Operator {
-        Operator::Noop
-    }
-
-    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_mutable(&mut self, _record: &Arc<Record<Self>>) {
-        unreachable!()
+    fn release() -> Op<Self> {
+        Op::noop()
     }
 }
 
@@ -379,18 +365,18 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, TestEviction},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
         record::Data,
     };
 
-    impl<K, V> TestEviction for S3Fifo<K, V>
+    impl<K, V> Dump for S3Fifo<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        type Dump = Vec<Vec<Arc<Record<Self>>>>;
+        type Output = Vec<Vec<Arc<Record<Self>>>>;
 
-        fn dump(&self) -> Self::Dump {
+        fn dump(&self) -> Self::Output {
             let mut small = vec![];
             let mut main = vec![];
 

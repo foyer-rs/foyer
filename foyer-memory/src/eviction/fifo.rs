@@ -18,7 +18,7 @@ use foyer_common::code::{Key, Value};
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Operator};
+use super::{Eviction, Op};
 use crate::record::{CacheHint, Record};
 
 /// Fifo eviction algorithm config.
@@ -93,28 +93,12 @@ where
         record.set_in_eviction(false);
     }
 
-    fn acquire_operator() -> super::Operator {
-        Operator::Noop
+    fn acquire() -> Op<Self> {
+        Op::noop()
     }
 
-    fn acquire_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn acquire_mutable(&mut self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_operator() -> super::Operator {
-        Operator::Noop
-    }
-
-    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_mutable(&mut self, _record: &Arc<Record<Self>>) {
-        unreachable!()
+    fn release() -> Op<Self> {
+        Op::noop()
     }
 }
 
@@ -125,17 +109,17 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, TestEviction},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, Dump},
         record::Data,
     };
 
-    impl<K, V> TestEviction for Fifo<K, V>
+    impl<K, V> Dump for Fifo<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        type Dump = Vec<Arc<Record<Self>>>;
-        fn dump(&self) -> Self::Dump {
+        type Output = Vec<Arc<Record<Self>>>;
+        fn dump(&self) -> Self::Output {
             let mut res = vec![];
             let mut cursor = self.queue.cursor();
             loop {

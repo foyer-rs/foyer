@@ -22,7 +22,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Operator};
+use super::{Eviction, Op};
 use crate::record::{CacheHint, Record};
 
 /// w-TinyLFU eviction algorithm config.
@@ -347,71 +347,56 @@ where
         }
     }
 
-    fn acquire_operator() -> super::Operator {
-        // TODO(MrCroxx): use a count-min-sketch with atomic u16 impl.
-        Operator::Mutable
-    }
+    fn acquire() -> Op<Self> {
+        Op::mutable(|this: &mut Self, record| {
+            // Update frequency by access.
+            this.update_frequencies(record.hash());
 
-    fn acquire_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn acquire_mutable(&mut self, record: &Arc<Record<Self>>) {
-        // Update frequency by access.
-        self.update_frequencies(record.hash());
-
-        if !record.is_in_eviction() {
-            return;
-        }
-
-        let state = unsafe { &mut *record.state().get() };
-
-        strict_assert!(state.link.is_linked());
-
-        match state.queue {
-            Queue::None => unreachable!(),
-            Queue::Window => {
-                // Move to MRU position of `window`.
-                let r = unsafe { self.window.remove_from_ptr(Arc::as_ptr(record)) };
-                self.window.push_back(r);
+            if !record.is_in_eviction() {
+                return;
             }
-            Queue::Probation => {
-                // Promote to MRU position of `protected`.
-                let r = unsafe { self.probation.remove_from_ptr(Arc::as_ptr(record)) };
-                self.decrease_queue_weight(Queue::Probation, record.weight());
-                state.queue = Queue::Protected;
-                self.increase_queue_weight(Queue::Protected, record.weight());
-                self.protected.push_back(r);
 
-                // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
-                while self.protected_weight > self.protected_weight_capacity {
-                    strict_assert!(!self.protected.is_empty());
-                    let r = self.protected.pop_front().unwrap();
-                    let s = unsafe { &mut *r.state().get() };
-                    self.decrease_queue_weight(Queue::Protected, r.weight());
-                    s.queue = Queue::Probation;
-                    self.increase_queue_weight(Queue::Probation, r.weight());
-                    self.probation.push_back(r);
+            let state = unsafe { &mut *record.state().get() };
+
+            strict_assert!(state.link.is_linked());
+
+            match state.queue {
+                Queue::None => unreachable!(),
+                Queue::Window => {
+                    // Move to MRU position of `window`.
+                    let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.window.push_back(r);
+                }
+                Queue::Probation => {
+                    // Promote to MRU position of `protected`.
+                    let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.decrease_queue_weight(Queue::Probation, record.weight());
+                    state.queue = Queue::Protected;
+                    this.increase_queue_weight(Queue::Protected, record.weight());
+                    this.protected.push_back(r);
+
+                    // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
+                    while this.protected_weight > this.protected_weight_capacity {
+                        strict_assert!(!this.protected.is_empty());
+                        let r = this.protected.pop_front().unwrap();
+                        let s = unsafe { &mut *r.state().get() };
+                        this.decrease_queue_weight(Queue::Protected, r.weight());
+                        s.queue = Queue::Probation;
+                        this.increase_queue_weight(Queue::Probation, r.weight());
+                        this.probation.push_back(r);
+                    }
+                }
+                Queue::Protected => {
+                    // Move to MRU position of `protected`.
+                    let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.protected.push_back(r);
                 }
             }
-            Queue::Protected => {
-                // Move to MRU position of `protected`.
-                let r = unsafe { self.protected.remove_from_ptr(Arc::as_ptr(record)) };
-                self.protected.push_back(r);
-            }
-        }
+        })
     }
 
-    fn release_operator() -> Operator {
-        Operator::Noop
-    }
-
-    fn release_immutable(&self, _record: &Arc<Record<Self>>) {
-        unreachable!()
-    }
-
-    fn release_mutable(&mut self, _record: &Arc<Record<Self>>) {
-        unreachable!()
+    fn release() -> Op<Self> {
+        Op::noop()
     }
 }
 
@@ -422,17 +407,17 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, TestEviction},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
         record::Data,
     };
 
-    impl<K, V> TestEviction for Lfu<K, V>
+    impl<K, V> Dump for Lfu<K, V>
     where
         K: Key + Clone,
         V: Value + Clone,
     {
-        type Dump = Vec<Vec<Arc<Record<Self>>>>;
-        fn dump(&self) -> Self::Dump {
+        type Output = Vec<Vec<Arc<Record<Self>>>>;
+        fn dump(&self) -> Self::Output {
             let mut window = vec![];
             let mut probation = vec![];
             let mut protected = vec![];

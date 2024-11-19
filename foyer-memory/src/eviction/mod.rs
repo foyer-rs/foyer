@@ -28,10 +28,48 @@ impl<T> State for T where T: Send + Sync + 'static + Default {}
 pub trait Config: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 impl<T> Config for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 
-pub enum Operator {
+/// Wrapper for one of the three kind of operations for the eviction container:
+///
+/// 1. no operation
+/// 2. immutable operation
+/// 3. mutable operation
+#[expect(clippy::type_complexity)]
+pub enum Op<E>
+where
+    E: Eviction,
+{
+    /// no operation
     Noop,
-    Immutable,
-    Mutable,
+    /// immutable operation
+    Immutable(Box<dyn Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static>),
+    /// mutable operation
+    Mutable(Box<dyn FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static>),
+}
+
+impl<E> Op<E>
+where
+    E: Eviction,
+{
+    /// no operation
+    pub fn noop() -> Self {
+        Self::Noop
+    }
+
+    /// immutable operation
+    pub fn immutable<F>(f: F) -> Self
+    where
+        F: Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static,
+    {
+        Self::Immutable(Box::new(f))
+    }
+
+    /// mutable operation
+    pub fn mutable<F>(f: F) -> Self
+    where
+        F: FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static,
+    {
+        Self::Mutable(Box::new(f))
+    }
 }
 
 /// Cache eviction algorithm abstraction.
@@ -92,44 +130,15 @@ pub trait Eviction: Send + Sync + 'static + Sized {
         while self.pop().is_some() {}
     }
 
-    /// Determine if the immutable version or the mutable version to use for the `acquire` operation.
-    ///
-    /// Only the chosen version needs to be implemented. The other version is recommend to be left as `unreachable!()`.
-    fn acquire_operator() -> Operator;
-
-    /// Immutable version of the `acquire` operation.
-    ///
     /// `acquire` is called when an external caller acquire a cache entry from the cache.
     ///
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn acquire_immutable(&self, record: &Arc<Record<Self>>);
+    fn acquire() -> Op<Self>;
 
-    /// Mutable version of the `acquire` operation.
-    ///
-    /// `acquire` is called when an external caller acquire a cache entry from the cache.
-    ///
-    /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn acquire_mutable(&mut self, records: &Arc<Record<Self>>);
-
-    /// Determine if the immutable version or the mutable version to use for the `release` operation.
-    ///
-    /// Only the chosen version needs to be implemented. The other version is recommend to be left as `unreachable!()`.
-    fn release_operator() -> Operator;
-
-    /// Immutable version of the `release` operation.
-    ///
-    ///
     /// `release` is called when the last external caller drops the cache entry.
     ///
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn release_immutable(&self, record: &Arc<Record<Self>>);
-
-    /// Mutable version of the `release` operation.
-    ///
-    /// `release` is called when the last external caller drops the cache entry.
-    ///
-    /// The entry can be EITHER in the cache eviction algorithm instance or not.
-    fn release_mutable(&mut self, record: &Arc<Record<Self>>);
+    fn release() -> Op<Self>;
 }
 
 pub mod fifo;
