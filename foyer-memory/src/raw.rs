@@ -12,55 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//! # Atomic Reference Count Management
-//!
-//! [`RawCache`] uses an atomic reference count to management the release of an entry.
-//!
-//! The atomic reference count represents the *external* references of a cache record.
-//!
-//! When the reference count drops to zero, the related cache shard is locked to release to cache record.
-//!
-//! It is important to guarantee the correctness of the usage of the atomic reference count. Especially when triggering
-//! the release of a record. Without any other synchronize mechanism, there would be dangling pointers or double frees:
-//!
-//! ```plain
-//! Thread 1: [ decrease ARC to 0 ] ============> [ release record ]
-//! Thread 2:                         [ increase ARC to 1 ] =======> dangling!! ==> double free!!
-//! ```
-//!
-//! Thankfully, we can prevent it from happening with the usage of the shard lock:
-//!
-//! The only ops that will increase the atomic reference count are:
-//! 1. Insert/get/fetch the [`RawCache`] and get external entries. (locked)
-//! 2. Clone an external entry. (lock-free)
-//!
-//! The op 1 is always guarded by a mutex/rwlock, which means it is impossible to happen while releasing a record with
-//! the shard is locked.
-//!
-//! The op 2 is lock-free, but only happens when there is at least 1 external reference. So, it cannot happen while
-//! releasing a record. Because when releasing is happening, there must be no external reference.
-//!
-//! So, this case will never happen:
-//!
-//! ```plain
-//! Thread 1: [ decrease ARC to 0 ] ================> [ release record ]
-//! Thread 2:                           [ (op2) increase ARC to 1 ] ==> dangling!! ==> double free!!
-//! ```
-//!
-//! When starting to release a record, after locking the shard, it's still required to check the atomic reference count.
-//! Because this cause still exist:
-//!
-//! ```plain
-//! Thread 1: [ decrease ARC to 0 ] ====================================> [ release record ]
-//! Thread 2:                           [ (op1) increase ARC to 1 ] =======> dangling!! ==> double free!!
-//! ```
-//!
-//! Although the op1 requires to be locked, but the release operation can be delayed after that. So the release
-//! operation can be ignored after checking the atomic reference count is not zero.
-//!
-//! There is no need to be afraid of leaking, there is always to be a release operation following the increasing when
-//! the atomic reference count drops to zero again.
-
 use std::{
     collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
