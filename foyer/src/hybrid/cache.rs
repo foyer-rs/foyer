@@ -35,7 +35,7 @@ use foyer_common::{
     metrics::Metrics,
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
-use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
+use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState};
 use foyer_storage::{DeviceStats, Store};
 use futures::FutureExt;
 use pin_project::pin_project;
@@ -189,15 +189,15 @@ where
         entry
     }
 
-    /// Insert cache entry with cache context to the hybrid cache.
-    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+    /// Insert cache entry with cache hint to the hybrid cache.
+    pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
         root_span!(self, mut span, "foyer::hybrid::cache::insert_with_context");
 
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
 
-        let entry = self.memory.insert_with_context(key, value, context);
+        let entry = self.memory.insert_with_hint(key, value, hint);
         self.storage.enqueue(entry.clone(), false);
 
         self.metrics.hybrid_insert.increment(1);
@@ -457,14 +457,14 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
-        self.fetch_with_context(key, CacheContext::default(), fetch)
+        self.fetch_with_hint(key, CacheHint::Normal, fetch)
     }
 
-    /// Fetch and insert a cache entry with the given key, context, and method if there is a cache miss.
+    /// Fetch and insert a cache entry with the given key, hint, and method if there is a cache miss.
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_context<F, FU>(&self, key: K, context: CacheContext, fetch: F) -> HybridFetch<K, V, S>
+    pub fn fetch_with_hint<F, FU>(&self, key: K, hint: CacheHint, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
@@ -480,7 +480,7 @@ where
         let future = fetch();
         let inner = self.memory.fetch_inner(
             key.clone(),
-            context,
+            hint,
             || {
                 let metrics = self.metrics.clone();
                 let runtime = self.storage().runtime().clone();
@@ -586,14 +586,14 @@ mod tests {
         let hybrid = open(dir.path()).await;
 
         let e1 = hybrid.insert(1, vec![1; 7 * KB]);
-        let e2 = hybrid.insert_with_context(2, vec![2; 7 * KB], CacheContext::default());
+        let e2 = hybrid.insert_with_hint(2, vec![2; 7 * KB], CacheHint::Normal);
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.storage_writer(3).insert(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
             .storage_writer(4)
-            .insert_with_context(vec![4; 7 * KB], CacheContext::default())
+            .insert_with_context(vec![4; 7 * KB], CacheHint::Normal)
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -622,17 +622,13 @@ mod tests {
         let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
 
         let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
-        let e2 = hybrid
-            .writer(2)
-            .insert_with_context(vec![2; 7 * KB], CacheContext::default());
+        let e2 = hybrid.writer(2).insert_with_hint(vec![2; 7 * KB], CacheHint::Normal);
 
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.writer(3).storage().insert(vec![3; 7 * KB]).unwrap();
-        let e4 = hybrid
-            .writer(4)
-            .insert_with_context(vec![4; 7 * KB], CacheContext::default());
+        let e4 = hybrid.writer(4).insert_with_hint(vec![4; 7 * KB], CacheHint::Normal);
 
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);

@@ -12,106 +12,77 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{hash::Hash, ptr::NonNull};
+use std::sync::Arc;
 
-use equivalent::Equivalent;
-use foyer_common::{code::Key, strict_assert};
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 
 use super::Indexer;
-use crate::handle::KeyedHandle;
+use crate::{eviction::Eviction, record::Record};
 
-pub struct HashTableIndexer<K, H>
+pub struct HashTableIndexer<E>
 where
-    K: Key,
-    H: KeyedHandle<Key = K>,
+    E: Eviction,
 {
-    table: HashTable<NonNull<H>>,
+    table: HashTable<Arc<Record<E>>>,
 }
 
-unsafe impl<K, H> Send for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: KeyedHandle<Key = K>,
-{
-}
+unsafe impl<E> Send for HashTableIndexer<E> where E: Eviction {}
+unsafe impl<E> Sync for HashTableIndexer<E> where E: Eviction {}
 
-unsafe impl<K, H> Sync for HashTableIndexer<K, H>
+impl<E> Default for HashTableIndexer<E>
 where
-    K: Key,
-    H: KeyedHandle<Key = K>,
+    E: Eviction,
 {
-}
-
-impl<K, H> Indexer for HashTableIndexer<K, H>
-where
-    K: Key,
-    H: KeyedHandle<Key = K>,
-{
-    type Key = K;
-    type Handle = H;
-
-    fn new() -> Self {
+    fn default() -> Self {
         Self {
-            table: HashTable::new(),
+            table: Default::default(),
         }
     }
+}
 
-    unsafe fn insert(&mut self, mut ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>> {
-        let handle = ptr.as_mut();
+impl<E> Indexer for HashTableIndexer<E>
+where
+    E: Eviction,
+{
+    type Eviction = E;
 
-        strict_assert!(!handle.base().is_in_indexer());
-        handle.base_mut().set_in_indexer(true);
-
-        match self.table.entry(
-            handle.base().hash(),
-            |p| p.as_ref().key() == handle.key(),
-            |p| p.as_ref().base().hash(),
-        ) {
+    fn insert(&mut self, mut record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>> {
+        match self
+            .table
+            .entry(record.hash(), |r| r.key() == record.key(), |r| r.hash())
+        {
             HashTableEntry::Occupied(mut o) => {
-                std::mem::swap(o.get_mut(), &mut ptr);
-                let b = ptr.as_mut().base_mut();
-                strict_assert!(b.is_in_indexer());
-                b.set_in_indexer(false);
-                Some(ptr)
+                std::mem::swap(o.get_mut(), &mut record);
+                Some(record)
             }
             HashTableEntry::Vacant(v) => {
-                v.insert(ptr);
+                v.insert(record);
                 None
             }
         }
     }
 
-    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    fn get<Q>(&self, hash: u64, key: &Q) -> Option<&Arc<Record<Self::Eviction>>>
     where
-        Q: Hash + Equivalent<Self::Key> + ?Sized,
+        Q: std::hash::Hash + equivalent::Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized,
     {
-        self.table.find(hash, |p| key.equivalent(p.as_ref().key())).copied()
+        self.table.find(hash, |r| key.equivalent(r.key()))
     }
 
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<Self::Eviction>>>
     where
-        Q: Hash + Equivalent<Self::Key> + ?Sized,
+        Q: std::hash::Hash + equivalent::Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized,
     {
-        match self
-            .table
-            .entry(hash, |p| key.equivalent(p.as_ref().key()), |p| p.as_ref().base().hash())
-        {
+        match self.table.entry(hash, |r| key.equivalent(r.key()), |r| r.hash()) {
             HashTableEntry::Occupied(o) => {
-                let (mut p, _) = o.remove();
-                let b = p.as_mut().base_mut();
-                strict_assert!(b.is_in_indexer());
-                b.set_in_indexer(false);
-                Some(p)
+                let (r, _) = o.remove();
+                Some(r)
             }
             HashTableEntry::Vacant(_) => None,
         }
     }
 
-    unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>> {
-        self.table.drain().map(|mut ptr| {
-            ptr.as_mut().base_mut().set_in_indexer(false);
-            ptr
-        })
+    fn drain(&mut self) -> impl Iterator<Item = Arc<Record<Self::Eviction>>> {
+        self.table.drain()
     }
 }

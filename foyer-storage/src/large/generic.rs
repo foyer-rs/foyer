@@ -533,6 +533,7 @@ mod tests {
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
         CacheBuilder::new(10)
+            .with_shards(1)
             .with_eviction_config(FifoConfig::default())
             .build()
     }

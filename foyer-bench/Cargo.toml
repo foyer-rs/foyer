@@ -26,7 +26,7 @@ humantime = "2"
 itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = "0.16"
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.15"

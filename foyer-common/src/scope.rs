@@ -12,11 +12,31 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-pub use ahash::RandomState;
+/// Scoped functional programming extensions.
+pub trait Scope {
+    /// Scoped with ownership.
+    fn with<F, R>(self, f: F) -> R
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> R,
+    {
+        f(self)
+    }
 
-pub use crate::{
-    cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
-    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
-    raw::{FetchMark, FetchState, Weighter},
-    record::{CacheHint, Record},
-};
+    /// Scoped with reference.
+    fn with_ref<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Self) -> R,
+    {
+        f(self)
+    }
+
+    /// Scoped with mutable reference.
+    fn with_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        f(self)
+    }
+}
+impl<T> Scope for T {}

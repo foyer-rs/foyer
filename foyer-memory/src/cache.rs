@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
+use std::{fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
 use equivalent::Equivalent;
@@ -22,57 +22,36 @@ use foyer_common::{
     future::Diversion,
     runtime::SingletonHandle,
 };
-use futures::Future;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
-    context::CacheContext,
     eviction::{
-        fifo::{Fifo, FifoHandle},
-        lfu::{Lfu, LfuHandle},
-        lru::{Lru, LruHandle},
-        s3fifo::{S3Fifo, S3FifoHandle},
-        sanity::SanityEviction,
+        fifo::{Fifo, FifoConfig},
+        lfu::{Lfu, LfuConfig},
+        lru::{Lru, LruConfig},
+        s3fifo::{S3Fifo, S3FifoConfig},
     },
-    generic::{FetchMark, FetchState, GenericCache, GenericCacheConfig, GenericCacheEntry, GenericFetch, Weighter},
-    indexer::{hash_table::HashTableIndexer, sanity::SanityIndexer},
-    FifoConfig, LfuConfig, LruConfig, S3FifoConfig,
+    raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
+    record::CacheHint,
 };
 
-pub type FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
-pub type FifoCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S>;
-pub type FifoFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, SanityEviction<Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, FifoHandle<(K, V)>>>, S, ER>;
+pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
+pub type FifoCacheEntry<K, V, S = RandomState> = RawCacheEntry<Fifo<K, V>, S>;
+pub type FifoFetch<K, V, ER, S = RandomState> = RawFetch<Fifo<K, V>, ER, S>;
 
-pub type LruCache<K, V, S = RandomState> =
-    GenericCache<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
-pub type LruCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S>;
-pub type LruFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, SanityEviction<Lru<(K, V)>>, SanityIndexer<HashTableIndexer<K, LruHandle<(K, V)>>>, S, ER>;
+pub type S3FifoCache<K, V, S = RandomState> = RawCache<S3Fifo<K, V>, S>;
+pub type S3FifoCacheEntry<K, V, S = RandomState> = RawCacheEntry<S3Fifo<K, V>, S>;
+pub type S3FifoFetch<K, V, ER, S = RandomState> = RawFetch<S3Fifo<K, V>, ER, S>;
 
-pub type LfuCache<K, V, S = RandomState> =
-    GenericCache<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
-pub type LfuCacheEntry<K, V, S = RandomState> =
-    GenericCacheEntry<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S>;
-pub type LfuFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, SanityEviction<Lfu<(K, V)>>, SanityIndexer<HashTableIndexer<K, LfuHandle<(K, V)>>>, S, ER>;
+pub type LruCache<K, V, S = RandomState> = RawCache<Lru<K, V>, S>;
+pub type LruCacheEntry<K, V, S = RandomState> = RawCacheEntry<Lru<K, V>, S>;
+pub type LruFetch<K, V, ER, S = RandomState> = RawFetch<Lru<K, V>, ER, S>;
 
-pub type S3FifoCache<K, V, S = RandomState> =
-    GenericCache<K, V, SanityEviction<S3Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>, S>;
-pub type S3FifoCacheEntry<K, V, S = RandomState> = GenericCacheEntry<
-    K,
-    V,
-    SanityEviction<S3Fifo<(K, V)>>,
-    SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>,
-    S,
->;
-pub type S3FifoFetch<K, V, ER, S = RandomState> =
-    GenericFetch<K, V, SanityEviction<S3Fifo<(K, V)>>, SanityIndexer<HashTableIndexer<K, S3FifoHandle<(K, V)>>>, S, ER>;
+pub type LfuCache<K, V, S = RandomState> = RawCache<Lfu<K, V>, S>;
+pub type LfuCacheEntry<K, V, S = RandomState> = RawCacheEntry<Lfu<K, V>, S>;
+pub type LfuFetch<K, V, ER, S = RandomState> = RawFetch<Lfu<K, V>, ER, S>;
 
 /// A cached entry holder of the in-memory cache.
 #[derive(Debug)]
@@ -84,12 +63,12 @@ where
 {
     /// A cached entry holder of the in-memory FIFO cache.
     Fifo(FifoCacheEntry<K, V, S>),
+    /// A cached entry holder of the in-memory S3FIFO cache.
+    S3Fifo(S3FifoCacheEntry<K, V, S>),
     /// A cached entry holder of the in-memory LRU cache.
     Lru(LruCacheEntry<K, V, S>),
     /// A cached entry holder of the in-memory LFU cache.
     Lfu(LfuCacheEntry<K, V, S>),
-    /// A cached entry holder of the in-memory S3FIFO cache.
-    S3Fifo(S3FifoCacheEntry<K, V, S>),
 }
 
 impl<K, V, S> Clone for CacheEntry<K, V, S>
@@ -206,13 +185,13 @@ where
         }
     }
 
-    /// Context of the cached entry.
-    pub fn context(&self) -> CacheContext {
+    /// Hint of the cached entry.
+    pub fn hint(&self) -> CacheHint {
         match self {
-            CacheEntry::Fifo(entry) => entry.context().clone().into(),
-            CacheEntry::Lru(entry) => entry.context().clone().into(),
-            CacheEntry::Lfu(entry) => entry.context().clone().into(),
-            CacheEntry::S3Fifo(entry) => entry.context().clone().into(),
+            CacheEntry::Fifo(entry) => entry.hint().clone().into(),
+            CacheEntry::Lru(entry) => entry.hint().clone().into(),
+            CacheEntry::Lfu(entry) => entry.hint().clone().into(),
+            CacheEntry::S3Fifo(entry) => entry.hint().clone().into(),
         }
     }
 
@@ -252,17 +231,23 @@ where
 pub enum EvictionConfig {
     /// FIFO eviction algorithm config.
     Fifo(FifoConfig),
+    /// S3FIFO eviction algorithm config.
+    S3Fifo(S3FifoConfig),
     /// LRU eviction algorithm config.
     Lru(LruConfig),
     /// LFU eviction algorithm config.
     Lfu(LfuConfig),
-    /// S3FIFO eviction algorithm config.
-    S3Fifo(S3FifoConfig),
 }
 
 impl From<FifoConfig> for EvictionConfig {
     fn from(value: FifoConfig) -> EvictionConfig {
         EvictionConfig::Fifo(value)
+    }
+}
+
+impl From<S3FifoConfig> for EvictionConfig {
+    fn from(value: S3FifoConfig) -> EvictionConfig {
+        EvictionConfig::S3Fifo(value)
     }
 }
 
@@ -278,12 +263,6 @@ impl From<LfuConfig> for EvictionConfig {
     }
 }
 
-impl From<S3FifoConfig> for EvictionConfig {
-    fn from(value: S3FifoConfig) -> EvictionConfig {
-        EvictionConfig::S3Fifo(value)
-    }
-}
-
 /// In-memory cache builder.
 pub struct CacheBuilder<K, V, S>
 where
@@ -296,7 +275,6 @@ where
     capacity: usize,
     shards: usize,
     eviction_config: EvictionConfig,
-    object_pool_capacity: usize,
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
@@ -316,14 +294,8 @@ where
 
             capacity,
             shards: 8,
-            eviction_config: LfuConfig {
-                window_capacity_ratio: 0.1,
-                protected_capacity_ratio: 0.8,
-                cmsketch_eps: 0.001,
-                cmsketch_confidence: 0.9,
-            }
-            .into(),
-            object_pool_capacity: 1024,
+            eviction_config: LruConfig::default().into(),
+
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
@@ -362,16 +334,6 @@ where
         self
     }
 
-    /// Set object pool for handles. The object pool is used to reduce handle allocation.
-    ///
-    /// The optimized value is supposed to be equal to the max cache entry count.
-    ///
-    /// The default value is 1024.
-    pub fn with_object_pool_capacity(mut self, object_pool_capacity: usize) -> Self {
-        self.object_pool_capacity = object_pool_capacity;
-        self
-    }
-
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
@@ -382,7 +344,6 @@ where
             capacity: self.capacity,
             shards: self.shards,
             eviction_config: self.eviction_config,
-            object_pool_capacity: self.object_pool_capacity,
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
@@ -412,42 +373,38 @@ where
         }
 
         match self.eviction_config {
-            EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+            EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
             }))),
-            EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(GenericCache::new(GenericCacheConfig {
+            EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
             }))),
-            EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(GenericCache::new(GenericCacheConfig {
+            EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
             }))),
-            EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(GenericCache::new(GenericCacheConfig {
+            EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
                 name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
-                object_pool_capacity: self.object_pool_capacity,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
@@ -482,9 +439,9 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Fifo(_) => f.debug_tuple("Cache::FifoCache").finish(),
+            Self::S3Fifo(_) => f.debug_tuple("Cache::S3FifoCache").finish(),
             Self::Lru(_) => f.debug_tuple("Cache::LruCache").finish(),
             Self::Lfu(_) => f.debug_tuple("Cache::LfuCache").finish(),
-            Self::S3Fifo(_) => f.debug_tuple("Cache::S3FifoCache").finish(),
         }
     }
 }
@@ -498,9 +455,9 @@ where
     fn clone(&self) -> Self {
         match self {
             Self::Fifo(cache) => Self::Fifo(cache.clone()),
+            Self::S3Fifo(cache) => Self::S3Fifo(cache.clone()),
             Self::Lru(cache) => Self::Lru(cache.clone()),
             Self::Lfu(cache) => Self::Lfu(cache.clone()),
-            Self::S3Fifo(cache) => Self::S3Fifo(cache.clone()),
         }
     }
 }
@@ -516,20 +473,20 @@ where
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
+            Cache::S3Fifo(cache) => cache.insert(key, value).into(),
             Cache::Lru(cache) => cache.insert(key, value).into(),
             Cache::Lfu(cache) => cache.insert(key, value).into(),
-            Cache::S3Fifo(cache) => cache.insert(key, value).into(),
         }
     }
 
-    /// Insert cache entry with cache context to the in-memory cache.
-    #[fastrace::trace(name = "foyer::memory::cache::insert_with_context")]
-    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
+    /// Insert cache entry with cache hint to the in-memory cache.
+    #[fastrace::trace(name = "foyer::memory::cache::insert_with_hint")]
+    pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> CacheEntry<K, V, S> {
         match self {
-            Cache::Fifo(cache) => cache.insert_with_context(key, value, context).into(),
-            Cache::Lru(cache) => cache.insert_with_context(key, value, context).into(),
-            Cache::Lfu(cache) => cache.insert_with_context(key, value, context).into(),
-            Cache::S3Fifo(cache) => cache.insert_with_context(key, value, context).into(),
+            Cache::Fifo(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
+            Cache::S3Fifo(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
+            Cache::Lru(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
+            Cache::Lfu(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
         }
     }
 
@@ -538,28 +495,28 @@ where
     /// The entry will be removed as soon as the returned entry is dropped.
     ///
     /// The entry will become a normal entry after it is accessed.
-    #[fastrace::trace(name = "foyer::memory::cache::deposit")]
-    pub fn deposit(&self, key: K, value: V) -> CacheEntry<K, V, S> {
+    #[fastrace::trace(name = "foyer::memory::cache::insert_ephemeral")]
+    pub fn insert_ephemeral(&self, key: K, value: V) -> CacheEntry<K, V, S> {
         match self {
-            Cache::Fifo(cache) => cache.deposit(key, value).into(),
-            Cache::Lru(cache) => cache.deposit(key, value).into(),
-            Cache::Lfu(cache) => cache.deposit(key, value).into(),
-            Cache::S3Fifo(cache) => cache.deposit(key, value).into(),
+            Cache::Fifo(cache) => cache.insert_ephemeral(key, value).into(),
+            Cache::S3Fifo(cache) => cache.insert_ephemeral(key, value).into(),
+            Cache::Lru(cache) => cache.insert_ephemeral(key, value).into(),
+            Cache::Lfu(cache) => cache.insert_ephemeral(key, value).into(),
         }
     }
 
-    /// Temporarily insert cache entry with cache context to the in-memory cache.
+    /// Temporarily insert cache entry with cache hint to the in-memory cache.
     ///
     /// The entry will be removed as soon as the returned entry is dropped.
     ///
     /// The entry will become a normal entry after it is accessed.
-    #[fastrace::trace(name = "foyer::memory::cache::deposit_with_context")]
-    pub fn deposit_with_context(&self, key: K, value: V, context: CacheContext) -> CacheEntry<K, V, S> {
+    #[fastrace::trace(name = "foyer::memory::cache::insert_ephemeral_with_hint")]
+    pub fn insert_ephemeral_with_hint(&self, key: K, value: V, hint: CacheHint) -> CacheEntry<K, V, S> {
         match self {
-            Cache::Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
-            Cache::Lru(cache) => cache.deposit_with_context(key, value, context).into(),
-            Cache::Lfu(cache) => cache.deposit_with_context(key, value, context).into(),
-            Cache::S3Fifo(cache) => cache.deposit_with_context(key, value, context).into(),
+            Cache::Fifo(cache) => cache.insert_ephemeral_with_hint(key, value, hint.into()).into(),
+            Cache::Lru(cache) => cache.insert_ephemeral_with_hint(key, value, hint.into()).into(),
+            Cache::Lfu(cache) => cache.insert_ephemeral_with_hint(key, value, hint.into()).into(),
+            Cache::S3Fifo(cache) => cache.insert_ephemeral_with_hint(key, value, hint.into()).into(),
         }
     }
 
@@ -571,9 +528,9 @@ where
     {
         match self {
             Cache::Fifo(cache) => cache.remove(key).map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.remove(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.remove(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.remove(key).map(CacheEntry::from),
-            Cache::S3Fifo(cache) => cache.remove(key).map(CacheEntry::from),
         }
     }
 
@@ -585,9 +542,9 @@ where
     {
         match self {
             Cache::Fifo(cache) => cache.get(key).map(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.get(key).map(CacheEntry::from),
-            Cache::S3Fifo(cache) => cache.get(key).map(CacheEntry::from),
         }
     }
 
@@ -599,9 +556,9 @@ where
     {
         match self {
             Cache::Fifo(cache) => cache.contains(key),
+            Cache::S3Fifo(cache) => cache.contains(key),
             Cache::Lru(cache) => cache.contains(key),
             Cache::Lfu(cache) => cache.contains(key),
-            Cache::S3Fifo(cache) => cache.contains(key),
         }
     }
 
@@ -615,9 +572,9 @@ where
     {
         match self {
             Cache::Fifo(cache) => cache.touch(key),
+            Cache::S3Fifo(cache) => cache.touch(key),
             Cache::Lru(cache) => cache.touch(key),
             Cache::Lfu(cache) => cache.touch(key),
-            Cache::S3Fifo(cache) => cache.touch(key),
         }
     }
 
@@ -626,9 +583,9 @@ where
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),
+            Cache::S3Fifo(cache) => cache.clear(),
             Cache::Lru(cache) => cache.clear(),
             Cache::Lfu(cache) => cache.clear(),
-            Cache::S3Fifo(cache) => cache.clear(),
         }
     }
 
@@ -636,9 +593,9 @@ where
     pub fn capacity(&self) -> usize {
         match self {
             Cache::Fifo(cache) => cache.capacity(),
+            Cache::S3Fifo(cache) => cache.capacity(),
             Cache::Lru(cache) => cache.capacity(),
             Cache::Lfu(cache) => cache.capacity(),
-            Cache::S3Fifo(cache) => cache.capacity(),
         }
     }
 
@@ -646,9 +603,9 @@ where
     pub fn usage(&self) -> usize {
         match self {
             Cache::Fifo(cache) => cache.usage(),
+            Cache::S3Fifo(cache) => cache.usage(),
             Cache::Lru(cache) => cache.usage(),
             Cache::Lfu(cache) => cache.usage(),
-            Cache::S3Fifo(cache) => cache.usage(),
         }
     }
 
@@ -664,9 +621,9 @@ where
     pub fn hash_builder(&self) -> &S {
         match self {
             Cache::Fifo(cache) => cache.hash_builder(),
+            Cache::S3Fifo(cache) => cache.hash_builder(),
             Cache::Lru(cache) => cache.hash_builder(),
             Cache::Lfu(cache) => cache.hash_builder(),
-            Cache::S3Fifo(cache) => cache.hash_builder(),
         }
     }
 
@@ -674,9 +631,9 @@ where
     pub fn shards(&self) -> usize {
         match self {
             Cache::Fifo(cache) => cache.shards(),
+            Cache::S3Fifo(cache) => cache.shards(),
             Cache::Lru(cache) => cache.shards(),
             Cache::Lfu(cache) => cache.shards(),
-            Cache::S3Fifo(cache) => cache.shards(),
         }
     }
 }
@@ -691,12 +648,12 @@ where
 {
     /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
     Fifo(#[pin] FifoFetch<K, V, ER, S>),
+    /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
+    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S>),
     /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
     Lru(#[pin] LruFetch<K, V, ER, S>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
     Lfu(#[pin] LfuFetch<K, V, ER, S>),
-    /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S>),
 }
 
 impl<K, V, ER, S> From<FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
@@ -707,6 +664,17 @@ where
 {
     fn from(entry: FifoFetch<K, V, ER, S>) -> Self {
         Self::Fifo(entry)
+    }
+}
+
+impl<K, V, ER, S> From<S3FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
+where
+    K: Key,
+    V: Value,
+    S: HashBuilder,
+{
+    fn from(entry: S3FifoFetch<K, V, ER, S>) -> Self {
+        Self::S3Fifo(entry)
     }
 }
 
@@ -732,17 +700,6 @@ where
     }
 }
 
-impl<K, V, ER, S> From<S3FifoFetch<K, V, ER, S>> for Fetch<K, V, ER, S>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-{
-    fn from(entry: S3FifoFetch<K, V, ER, S>) -> Self {
-        Self::S3Fifo(entry)
-    }
-}
-
 impl<K, V, ER, S> Future for Fetch<K, V, ER, S>
 where
     K: Key,
@@ -755,9 +712,9 @@ where
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match self.project() {
             FetchProj::Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
             FetchProj::Lru(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
             FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-            FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
         }
     }
 }
@@ -772,9 +729,9 @@ where
     pub fn state(&self) -> FetchState {
         match self {
             Fetch::Fifo(fetch) => fetch.state(),
+            Fetch::S3Fifo(fetch) => fetch.state(),
             Fetch::Lru(fetch) => fetch.state(),
             Fetch::Lfu(fetch) => fetch.state(),
-            Fetch::S3Fifo(fetch) => fetch.state(),
         }
     }
 
@@ -783,9 +740,9 @@ where
     pub fn store(&self) -> &Option<FetchMark> {
         match self {
             Fetch::Fifo(fetch) => fetch.store(),
+            Fetch::S3Fifo(fetch) => fetch.store(),
             Fetch::Lru(fetch) => fetch.store(),
             Fetch::Lfu(fetch) => fetch.store(),
-            Fetch::S3Fifo(fetch) => fetch.store(),
         }
     }
 }
@@ -810,29 +767,29 @@ where
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
             Cache::Lru(cache) => Fetch::from(cache.fetch(key, fetch)),
             Cache::Lfu(cache) => Fetch::from(cache.fetch(key, fetch)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
         }
     }
 
-    /// Get the cached entry with the given key and context from the in-memory cache.
+    /// Get the cached entry with the given key and hint from the in-memory cache.
     ///
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    #[fastrace::trace(name = "foyer::memory::cache::fetch_with_context")]
-    pub fn fetch_with_context<F, FU, ER>(&self, key: K, context: CacheContext, fetch: F) -> Fetch<K, V, ER, S>
+    #[fastrace::trace(name = "foyer::memory::cache::fetch_with_hint")]
+    pub fn fetch_with_hint<F, FU, ER>(&self, key: K, hint: CacheHint, fetch: F) -> Fetch<K, V, ER, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_context(key, context, fetch)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_hint(key, hint.into(), fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_hint(key, hint.into(), fetch)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_with_hint(key, hint.into(), fetch)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_hint(key, hint.into(), fetch)),
         }
     }
 
@@ -847,7 +804,7 @@ where
     pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: K,
-        context: CacheContext,
+        hint: CacheHint,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> Fetch<K, V, ER, S>
@@ -858,10 +815,10 @@ where
         ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, context, fetch, runtime)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
         }
     }
 }
@@ -875,11 +832,10 @@ mod tests {
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     use super::*;
-    use crate::{eviction::s3fifo::S3FifoConfig, FifoConfig, LfuConfig, LruConfig};
+    use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};
 
     const CAPACITY: usize = 100;
     const SHARDS: usize = 4;
-    const OBJECT_POOL_CAPACITY: usize = 64;
     const RANGE: Range<u64> = 0..1000;
     const OPS: usize = 10000;
     const CONCURRENCY: usize = 8;
@@ -888,7 +844,6 @@ mod tests {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
             .with_eviction_config(FifoConfig {})
-            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
 
@@ -898,7 +853,6 @@ mod tests {
             .with_eviction_config(LruConfig {
                 high_priority_pool_ratio: 0.1,
             })
-            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
 
@@ -911,7 +865,6 @@ mod tests {
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
             })
-            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
 
@@ -923,7 +876,6 @@ mod tests {
                 ghost_queue_capacity_ratio: 10.0,
                 small_to_main_freq_threshold: 2,
             })
-            .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
             .build()
     }
 
@@ -1005,10 +957,5 @@ mod tests {
     #[tokio::test]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
-    }
-
-    #[tokio::test]
-    async fn test_cache_with_zero_object_pool() {
-        case(CacheBuilder::new(8).with_object_pool_capacity(0).build()).await
     }
 }

@@ -19,7 +19,7 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheContext;
+use foyer_memory::CacheHint;
 
 use crate::{HybridCache, HybridCacheEntry};
 
@@ -49,9 +49,9 @@ where
         self.hybrid.insert(self.key, value)
     }
 
-    /// Insert the entry with context to the hybrid cache.
-    pub fn insert_with_context(self, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
-        self.hybrid.insert_with_context(self.key, value, context)
+    /// Insert the entry with hint to the hybrid cache.
+    pub fn insert_with_hint(self, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
+        self.hybrid.insert_with_hint(self.key, value, hint)
     }
 
     /// Convert [`HybridCacheWriter`] to [`HybridCacheStorageWriter`].
@@ -113,16 +113,16 @@ where
         self
     }
 
-    fn insert_inner(mut self, value: V, context: Option<CacheContext>) -> Option<HybridCacheEntry<K, V, S>> {
+    fn insert_inner(mut self, value: V, hint: Option<CacheHint>) -> Option<HybridCacheEntry<K, V, S>> {
         let now = Instant::now();
 
         if !self.pick() {
             return None;
         }
 
-        let entry = match context {
-            Some(context) => self.hybrid.memory().deposit_with_context(self.key, value, context),
-            None => self.hybrid.memory().deposit(self.key, value),
+        let entry = match hint {
+            Some(hint) => self.hybrid.memory().insert_ephemeral_with_hint(self.key, value, hint),
+            None => self.hybrid.memory().insert_ephemeral(self.key, value),
         };
         self.hybrid.storage().enqueue(entry.clone(), true);
 
@@ -141,7 +141,7 @@ where
     }
 
     /// Insert the entry with context to the disk cache only.
-    pub fn insert_with_context(self, value: V, context: CacheContext) -> Option<HybridCacheEntry<K, V, S>> {
+    pub fn insert_with_context(self, value: V, context: CacheHint) -> Option<HybridCacheEntry<K, V, S>> {
         self.insert_inner(value, Some(context))
     }
 }

@@ -136,20 +136,6 @@ where
         }
     }
 
-    /// Set object pool for handles. The object pool is used to reduce handle allocation.
-    ///
-    /// The optimized value is supposed to be equal to the max cache entry count.
-    ///
-    /// The default value is 1024.
-    pub fn with_object_pool_capacity(self, object_pool_capacity: usize) -> Self {
-        let builder = self.builder.with_object_pool_capacity(object_pool_capacity);
-        HybridCacheBuilderPhaseMemory {
-            name: self.name,
-            tracing_options: self.tracing_options,
-            builder,
-        }
-    }
-
     /// Set in-memory cache hash builder.
     pub fn with_hash_builder<OS>(self, hash_builder: OS) -> HybridCacheBuilderPhaseMemory<K, V, OS>
     where
