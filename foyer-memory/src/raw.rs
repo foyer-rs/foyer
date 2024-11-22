@@ -103,6 +103,7 @@ where
         std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
 
         let weight = data.weight;
+        let old_usage = self.usage;
 
         let record = Arc::new(Record::new(data));
 
@@ -151,12 +152,17 @@ where
         }
 
         self.usage += weight;
-        self.metrics.memory_usage.increase(weight as _);
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
         let refs = waiters.len() + 1;
         let inc = record.inc_refs(refs);
         assert_eq!(refs, inc);
+
+        if self.usage > old_usage {
+            self.metrics.memory_usage.increase((self.usage - old_usage) as _);
+        } else if self.usage < old_usage {
+            self.metrics.memory_usage.decrease((old_usage - self.usage) as _);
+        }
 
         record
     }
@@ -175,9 +181,9 @@ where
         strict_assert!(!record.is_in_eviction());
 
         self.usage -= record.weight();
-        self.metrics.memory_usage.decrease(record.weight() as _);
 
         self.metrics.memory_remove.increase(1);
+        self.metrics.memory_usage.decrease(record.weight() as _);
 
         record.inc_refs(1);
 
