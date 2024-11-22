@@ -20,12 +20,12 @@ futures = "0.3"
 hashbrown = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project = "1"
+prometheus = { workspace = true, optional = true }
 serde = { workspace = true }
 tokio = { workspace = true }
-prometheus = { workspace = true, optional = true }
-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures = "0.3"

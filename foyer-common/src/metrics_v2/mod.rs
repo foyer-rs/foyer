@@ -12,14 +12,16 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::fmt::Debug;
+
 /// Counter metric operations.
-pub trait CounterOps: Send + Sync + 'static {
+pub trait CounterOps: Send + Sync + 'static + Debug {
     /// Increase record by `val`.
     fn increase(&self, val: u64);
 }
 
 /// Gauge metric operations.
-pub trait GaugeOps: Send + Sync + 'static {
+pub trait GaugeOps: Send + Sync + 'static + Debug {
     /// Increase record by `val`.
     fn increase(&self, val: u64);
     /// Decrease record by `val`.
@@ -29,31 +31,31 @@ pub trait GaugeOps: Send + Sync + 'static {
 }
 
 /// Histogram metric operations.
-pub trait HistogramOps: Send + Sync + 'static {
+pub trait HistogramOps: Send + Sync + 'static + Debug {
     /// Record a value.
     fn record(&self, val: f64);
 }
 
 /// A vector of counters.
-pub trait CounterVecOps: Send + Sync + 'static {
+pub trait CounterVecOps: Send + Sync + 'static + Debug {
     /// Get a counter within the vector of counters.
     fn counter(&self, labels: &[&str]) -> impl CounterOps;
 }
 
 /// A vector of gauges.
-pub trait GaugeVecOps: Send + Sync + 'static {
+pub trait GaugeVecOps: Send + Sync + 'static + Debug {
     /// Get a gauge within the vector of gauges.
     fn gauge(&self, labels: &[&str]) -> impl GaugeOps;
 }
 
 /// A vector of histograms.
-pub trait HistogramVecOps: Send + Sync + 'static {
+pub trait HistogramVecOps: Send + Sync + 'static + Debug {
     /// Get a histogram within the vector of histograms.
     fn histogram(&self, labels: &[&str]) -> impl HistogramOps;
 }
 
 /// Metrics registry.
-pub trait RegistryOps {
+pub trait RegistryOps: Send + Sync + 'static + Debug {
     /// Register a vector of counters to the registry.
     fn register_counter_vec(
         &self,
@@ -79,11 +81,14 @@ pub trait RegistryOps {
     ) -> impl HistogramVecOps;
 }
 
-/// Some phantom metrics components that do nothing.
-pub mod noop;
-/// OpenTelemetry metrics components.
-#[cfg(feature = "opentelemetry")]
-pub mod opentelemetry;
-/// Prometheus metrics components.
-#[cfg(feature = "prometheus")]
-pub mod prometheus;
+/// Boxed generic counter.
+pub type BoxedCounter = Box<dyn CounterOps>;
+/// Boxed generic gauge.
+pub type BoxedGauge = Box<dyn GaugeOps>;
+/// Boxed generic histogram.
+pub type BoxedHistogram = Box<dyn HistogramOps>;
+
+/// Shared metrics model.
+pub mod model;
+/// Provisioned metrics registries.
+pub mod registry;

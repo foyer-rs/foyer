@@ -20,9 +20,10 @@ use opentelemetry::{
     KeyValue,
 };
 
-use super::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics_v2::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 /// OpenTelemetry counter metric.
+#[derive(Debug)]
 pub struct Counter {
     counter: OtCounter<u64>,
     labels: Vec<KeyValue>,
@@ -35,6 +36,7 @@ impl CounterOps for Counter {
 }
 
 /// OpenTelemetry gauge metric.
+#[derive(Debug)]
 pub struct Gauge {
     val: AtomicU64,
     gauge: OtGauge<u64>,
@@ -59,6 +61,7 @@ impl GaugeOps for Gauge {
 }
 
 /// OpenTelemetry histogram metric.
+#[derive(Debug)]
 pub struct Histogram {
     histogram: OtHistogram<f64>,
     labels: Vec<KeyValue>,
@@ -71,6 +74,7 @@ impl HistogramOps for Histogram {
 }
 
 /// OpenTelemetry metric vector.
+#[derive(Debug)]
 pub struct MetricVec {
     meter: Meter,
     name: &'static str,
@@ -119,6 +123,7 @@ impl HistogramVecOps for MetricVec {
 }
 
 /// OpenTelemetry metrics registry.
+#[derive(Debug)]
 pub struct OpenTelemetry {
     meter: Meter,
 }
@@ -198,6 +203,6 @@ mod tests {
 
         let hv = ot.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
         let h = hv.histogram(&["l1", "l2"]);
-        h.record(3.1415926);
+        h.record(114.514);
     }
 }

@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use super::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics_v2::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 /// Noop metrics placeholder.
 #[derive(Debug)]
@@ -91,6 +91,6 @@ mod tests {
 
         let hv = noop.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
         let h = hv.histogram(&["l1", "l2"]);
-        h.record(3.1415926);
+        h.record(114.514);
     }
 }
