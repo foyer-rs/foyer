@@ -12,23 +12,23 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::metrics_v2::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 /// Noop metrics placeholder.
 #[derive(Debug)]
-pub struct Noop;
+pub struct NoopMetricsRegistry;
 
-impl CounterOps for Noop {
+impl CounterOps for NoopMetricsRegistry {
     fn increase(&self, _: u64) {}
 }
 
-impl CounterVecOps for Noop {
+impl CounterVecOps for NoopMetricsRegistry {
     fn counter(&self, _: &[&str]) -> impl CounterOps {
-        Noop
+        NoopMetricsRegistry
     }
 }
 
-impl GaugeOps for Noop {
+impl GaugeOps for NoopMetricsRegistry {
     fn increase(&self, _: u64) {}
 
     fn decrease(&self, _: u64) {}
@@ -36,29 +36,29 @@ impl GaugeOps for Noop {
     fn absolute(&self, _: u64) {}
 }
 
-impl GaugeVecOps for Noop {
+impl GaugeVecOps for NoopMetricsRegistry {
     fn gauge(&self, _: &[&str]) -> impl GaugeOps {
-        Noop
+        NoopMetricsRegistry
     }
 }
 
-impl HistogramOps for Noop {
+impl HistogramOps for NoopMetricsRegistry {
     fn record(&self, _: f64) {}
 }
 
-impl HistogramVecOps for Noop {
+impl HistogramVecOps for NoopMetricsRegistry {
     fn histogram(&self, _: &[&str]) -> impl HistogramOps {
-        Noop
+        NoopMetricsRegistry
     }
 }
 
-impl RegistryOps for Noop {
+impl RegistryOps for NoopMetricsRegistry {
     fn register_counter_vec(&self, _: &'static str, _: &'static str, _: &'static [&'static str]) -> impl CounterVecOps {
-        Noop
+        NoopMetricsRegistry
     }
 
     fn register_gauge_vec(&self, _: &'static str, _: &'static str, _: &'static [&'static str]) -> impl GaugeVecOps {
-        Noop
+        NoopMetricsRegistry
     }
 
     fn register_histogram_vec(
@@ -67,7 +67,7 @@ impl RegistryOps for Noop {
         _: &'static str,
         _: &'static [&'static str],
     ) -> impl HistogramVecOps {
-        Noop
+        NoopMetricsRegistry
     }
 }
 
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let noop = Noop;
+        let noop = NoopMetricsRegistry;
 
         let cv = noop.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
         let c = cv.counter(&["l1", "l2"]);

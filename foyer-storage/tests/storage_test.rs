@@ -17,6 +17,7 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use ahash::RandomState;
+use foyer_common::metrics::model::Metrics;
 use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
@@ -109,7 +110,7 @@ fn basic(
     recorder: &Arc<Recorder<u64>>,
 ) -> StoreBuilder<u64, Vec<u8>> {
     // TODO(MrCroxx): Test mixed engine here.
-    StoreBuilder::new(memory.clone(), Engine::Large)
+    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()), Engine::Large)
         .with_device_options(
             DirectFsDeviceOptions::new(path)
                 .with_capacity(4 * MB)

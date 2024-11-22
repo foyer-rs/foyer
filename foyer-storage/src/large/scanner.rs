@@ -17,7 +17,7 @@ use std::sync::Arc;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
     strict_assert,
 };
 
@@ -261,7 +261,7 @@ mod tests {
                     .with_capacity(ByteSize::kib(64).as_u64() as _)
                     .with_file_size(ByteSize::kib(16).as_u64() as _)
                     .into(),
-                metrics: Arc::new(Metrics::new("test")),
+                metrics: Arc::new(Metrics::noop()),
             },
             runtime,
         )

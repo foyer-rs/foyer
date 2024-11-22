@@ -32,7 +32,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
-    metrics::Metrics,
+    metrics::model::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
     strict_assert,
@@ -59,13 +59,13 @@ where
     E: Eviction,
     S: HashBuilder,
 {
-    pub name: String,
     pub capacity: usize,
     pub shards: usize,
     pub eviction_config: E::Config,
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
+    pub metrics: Arc<Metrics>,
 }
 
 struct RawCacheShard<E, S, I>
@@ -112,7 +112,7 @@ where
                 Some(evicted) => evicted,
                 None => break,
             };
-            self.metrics.memory_evict.increment(1);
+            self.metrics.memory_evict.increase(1);
 
             let e = self.indexer.remove(evicted.hash(), evicted.key()).unwrap();
             assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
@@ -127,7 +127,7 @@ where
 
         // Insert new record
         if let Some(old) = self.indexer.insert(record.clone()) {
-            self.metrics.memory_replace.increment(1);
+            self.metrics.memory_replace.increase(1);
 
             strict_assert!(!old.is_in_indexer());
 
@@ -140,7 +140,7 @@ where
 
             garbages.push((Event::Replace, old));
         } else {
-            self.metrics.memory_insert.increment(1);
+            self.metrics.memory_insert.increase(1);
         }
         strict_assert!(record.is_in_indexer());
 
@@ -151,7 +151,7 @@ where
         }
 
         self.usage += weight;
-        self.metrics.memory_usage.increment(weight as f64);
+        self.metrics.memory_usage.increase(weight as _);
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
         let refs = waiters.len() + 1;
@@ -175,8 +175,9 @@ where
         strict_assert!(!record.is_in_eviction());
 
         self.usage -= record.weight();
+        self.metrics.memory_usage.decrease(record.weight() as _);
 
-        self.metrics.memory_remove.increment(1);
+        self.metrics.memory_remove.increase(1);
 
         record.inc_refs(1);
 
@@ -215,11 +216,11 @@ where
     {
         let record = match self.indexer.get(hash, key).cloned() {
             Some(record) => {
-                self.metrics.memory_hit.increment(1);
+                self.metrics.memory_hit.increase(1);
                 record
             }
             None => {
-                self.metrics.memory_miss.increment(1);
+                self.metrics.memory_miss.increase(1);
                 return None;
             }
         };
@@ -248,7 +249,7 @@ where
             garbages.push(record);
         }
 
-        self.metrics.memory_remove.increment(count);
+        self.metrics.memory_remove.increase(count);
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
@@ -325,14 +326,14 @@ where
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
                 o.get_mut().push(tx);
-                self.metrics.memory_queue.increment(1);
+                self.metrics.memory_queue.increase(1);
                 RawShardFetch::Wait(rx.in_span(Span::enter_with_local_parent(
                     "foyer::memory::raw::fetch_with_runtime::wait",
                 )))
             }
             HashMapEntry::Vacant(v) => {
                 v.insert(vec![]);
-                self.metrics.memory_fetch.increment(1);
+                self.metrics.memory_fetch.increase(1);
                 RawShardFetch::Miss
             }
         }
@@ -420,8 +421,6 @@ where
     I: Indexer<Eviction = E>,
 {
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
-        let metrics = Arc::new(Metrics::new(&config.name));
-
         let shard_capacity = config.capacity / config.shards;
 
         let shards = (0..config.shards)
@@ -431,7 +430,7 @@ where
                 usage: 0,
                 capacity: shard_capacity,
                 waiters: Mutex::default(),
-                metrics: metrics.clone(),
+                metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
             .map(RwLock::new)
@@ -442,7 +441,7 @@ where
             capacity: config.capacity,
             hash_builder: config.hash_builder,
             weighter: config.weighter,
-            metrics,
+            metrics: config.metrics,
             event_listener: config.event_listener,
         };
 
@@ -945,13 +944,13 @@ mod tests {
 
     fn fifo_cache_for_test() -> RawCache<Fifo<u64, u64>> {
         RawCache::new(RawCacheConfig {
-            name: "test".to_string(),
             capacity: 256,
             shards: 4,
             eviction_config: FifoConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
         })
     }
 
@@ -1016,13 +1015,13 @@ mod tests {
         #[test_log::test]
         fn test_fifo_cache_fuzzy() {
             let cache: RawCache<Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
                 capacity: 256,
                 shards: 4,
                 eviction_config: FifoConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![FifoHint];
             fuzzy(cache, hints);
@@ -1031,13 +1030,13 @@ mod tests {
         #[test_log::test]
         fn test_s3fifo_cache_fuzzy() {
             let cache: RawCache<S3Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
                 capacity: 256,
                 shards: 4,
                 eviction_config: S3FifoConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![S3FifoHint];
             fuzzy(cache, hints);
@@ -1046,13 +1045,13 @@ mod tests {
         #[test_log::test]
         fn test_lru_cache_fuzzy() {
             let cache: RawCache<Lru<u64, u64>> = RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
                 capacity: 256,
                 shards: 4,
                 eviction_config: LruConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
             fuzzy(cache, hints);
@@ -1061,13 +1060,13 @@ mod tests {
         #[test_log::test]
         fn test_lfu_cache_fuzzy() {
             let cache: RawCache<Lfu<u64, u64>> = RawCache::new(RawCacheConfig {
-                name: "test".to_string(),
                 capacity: 256,
                 shards: 4,
                 eviction_config: LfuConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LfuHint];
             fuzzy(cache, hints);

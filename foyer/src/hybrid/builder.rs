@@ -18,6 +18,7 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
+    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, RegistryOps},
     tracing::TracingOptions,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
@@ -29,35 +30,39 @@ use foyer_storage::{
 use crate::HybridCache;
 
 /// Hybrid cache builder.
-pub struct HybridCacheBuilder<K, V> {
-    name: String,
+pub struct HybridCacheBuilder<K, V, M> {
+    name: &'static str,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     tracing_options: TracingOptions,
+    registry: M,
 }
 
-impl<K, V> Default for HybridCacheBuilder<K, V> {
+impl<K, V> Default for HybridCacheBuilder<K, V, NoopMetricsRegistry> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V> HybridCacheBuilder<K, V> {
+impl<K, V> HybridCacheBuilder<K, V, NoopMetricsRegistry> {
     /// Create a new hybrid cache builder.
     pub fn new() -> Self {
         Self {
-            name: "foyer".to_string(),
+            name: "foyer",
             event_listener: None,
             tracing_options: TracingOptions::default(),
+            registry: NoopMetricsRegistry,
         }
     }
+}
 
+impl<K, V, M> HybridCacheBuilder<K, V, M> {
     /// Set the name of the foyer hybrid cache instance.
     ///
     /// foyer will use the name as the prefix of the metric names.
     ///
     /// Default: `foyer`.
-    pub fn with_name(mut self, name: &str) -> Self {
-        self.name = name.to_string();
+    pub fn with_name(mut self, name: &'static str) -> Self {
+        self.name = name;
         self
     }
 
@@ -77,19 +82,39 @@ impl<K, V> HybridCacheBuilder<K, V> {
         self
     }
 
+    /// Set metrics registry.
+    ///
+    /// Default: [`NoopMetricsRegistry`].
+    pub fn with_metrics_registry<OM>(self, registry: OM) -> HybridCacheBuilder<K, V, OM>
+    where
+        OM: RegistryOps,
+    {
+        HybridCacheBuilder {
+            name: self.name,
+            event_listener: self.event_listener,
+            tracing_options: self.tracing_options,
+            registry,
+        }
+    }
+
     /// Continue to modify the in-memory cache configurations.
     pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, RandomState>
     where
         K: StorageKey,
         V: StorageValue,
+        M: RegistryOps,
     {
-        let mut builder = CacheBuilder::new(capacity).with_name(&self.name);
+        let metrics = Arc::new(Metrics::new(self.name, &self.registry));
+        let mut builder = CacheBuilder::new(capacity)
+            .with_name(self.name)
+            .with_metrics(metrics.clone());
         if let Some(event_listener) = self.event_listener {
             builder = builder.with_event_listener(event_listener);
         }
         HybridCacheBuilderPhaseMemory {
             builder,
             name: self.name,
+            metrics,
             tracing_options: self.tracing_options,
         }
     }
@@ -102,9 +127,11 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: String,
+    name: &'static str,
     tracing_options: TracingOptions,
-    builder: CacheBuilder<K, V, S>,
+    metrics: Arc<Metrics>,
+    // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
+    builder: CacheBuilder<K, V, S, NoopMetricsRegistry>,
 }
 
 impl<K, V, S> HybridCacheBuilderPhaseMemory<K, V, S>
@@ -120,6 +147,7 @@ where
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             builder,
         }
     }
@@ -132,6 +160,7 @@ where
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             builder,
         }
     }
@@ -145,6 +174,7 @@ where
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             builder,
         }
     }
@@ -155,6 +185,7 @@ where
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             builder,
         }
     }
@@ -163,9 +194,10 @@ where
     pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
-            builder: StoreBuilder::new(memory.clone(), engine).with_name(&self.name),
+            builder: StoreBuilder::new(self.name, memory.clone(), self.metrics.clone(), engine),
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory,
         }
     }
@@ -178,8 +210,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: String,
+    name: &'static str,
     tracing_options: TracingOptions,
+    metrics: Arc<Metrics>,
     memory: Cache<K, V, S>,
     builder: StoreBuilder<K, V, S>,
 }
@@ -196,6 +229,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -209,6 +243,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -224,6 +259,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -239,6 +275,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -252,6 +289,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -263,6 +301,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -276,6 +315,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -289,6 +329,7 @@ where
         Self {
             name: self.name,
             tracing_options: self.tracing_options,
+            metrics: self.metrics,
             memory: self.memory,
             builder,
         }
@@ -297,6 +338,11 @@ where
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let storage = self.builder.build().await?;
-        Ok(HybridCache::new(self.name, self.memory, storage, self.tracing_options))
+        Ok(HybridCache::new(
+            self.memory,
+            storage,
+            self.tracing_options,
+            self.metrics,
+        ))
     }
 }

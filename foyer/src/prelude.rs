@@ -12,11 +12,19 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#[cfg(feature = "opentelemetry")]
+pub use crate::common::metrics::registry::opentelemetry::OpenTelemetryMetricsRegistry;
+#[cfg(feature = "prometheus")]
+pub use crate::common::metrics::registry::prometheus::PrometheusMetricsRegistry;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
         code::{Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
+        metrics::{
+            registry::noop::NoopMetricsRegistry, CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps,
+            HistogramVecOps, RegistryOps,
+        },
         range::RangeBoundsExt,
         tracing::TracingOptions,
     },

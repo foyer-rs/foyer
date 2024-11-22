@@ -17,7 +17,7 @@ use prometheus::{
     Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 
-use crate::metrics_v2::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 impl CounterOps for IntCounter {
     fn increase(&self, val: u64) {
@@ -65,18 +65,18 @@ impl HistogramVecOps for HistogramVec {
 
 /// Prometheus metrics registry.
 #[derive(Debug)]
-pub struct Prometheus {
+pub struct PrometheusMetricsRegistry {
     registry: Registry,
 }
 
-impl Prometheus {
+impl PrometheusMetricsRegistry {
     /// Create an Prometheus metrics registry.
     pub fn new(registry: Registry) -> Self {
         Self { registry }
     }
 }
 
-impl RegistryOps for Prometheus {
+impl RegistryOps for PrometheusMetricsRegistry {
     fn register_counter_vec(
         &self,
         name: &'static str,
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test() {
         let registry = Registry::new();
-        let p8s = Prometheus::new(registry);
+        let p8s = PrometheusMetricsRegistry::new(registry);
 
         let cv = p8s.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
         let c = cv.counter(&["l1", "l2"]);

@@ -23,7 +23,7 @@ use std::{
 
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
@@ -253,7 +253,7 @@ where
     fn submit(&mut self, submission: Submission<K, V, S>) {
         let report = |enqueued: bool| {
             if !enqueued {
-                self.metrics.storage_queue_drop.increment(1);
+                self.metrics.storage_queue_drop.increase(1);
             }
         };
 
@@ -345,8 +345,10 @@ where
         }
 
         if let Some(init) = batch.init.as_ref() {
-            self.metrics.storage_queue_rotate.increment(1);
-            self.metrics.storage_queue_rotate_duration.record(init.elapsed());
+            self.metrics.storage_queue_rotate.increase(1);
+            self.metrics
+                .storage_queue_rotate_duration
+                .record(init.elapsed().as_secs_f64());
         }
 
         drop(permit);

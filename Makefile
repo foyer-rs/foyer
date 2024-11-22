@@ -10,7 +10,7 @@ check:
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	cargo fmt --all
-	cargo clippy --all-targets
+	cargo clippy --all-targets --features prometheus,opentelemetry
 
 check-all:
 	shellcheck ./scripts/*
@@ -21,10 +21,11 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features sanity
 	cargo clippy --all-targets --features tracing
+	cargo clippy --all-targets --features prometheus,opentelemetry
 	cargo clippy --all-targets
 
 test:
-	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity"
+	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity,prometheus,opentelemetry"
 	RUST_BACKTRACE=1 cargo test --doc
 
 test-ignored:

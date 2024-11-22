@@ -19,18 +19,23 @@ clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { workspace = true }
+foyer = { workspace = true, features = ["prometheus"] }
 futures = "0.3"
 hdrhistogram = "7"
+http-body-util = "0.1"
 humantime = "2"
+hyper = { version = "1", default-features = false, features = [
+    "server",
+    "http1",
+] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 itertools = { workspace = true }
-metrics = { workspace = true }
-metrics-exporter-prometheus = "0.16"
 parking_lot = { workspace = true }
+prometheus = { workspace = true }
 rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.15"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.27", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

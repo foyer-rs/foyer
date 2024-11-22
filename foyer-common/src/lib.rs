@@ -32,8 +32,6 @@ pub mod event;
 pub mod future;
 /// The shared metrics for foyer.
 pub mod metrics;
-/// The shared metrics for foyer.
-pub mod metrics_v2;
 /// Extensions for [`std::option::Option`].
 pub mod option;
 /// The range extensions.

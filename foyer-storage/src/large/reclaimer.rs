@@ -16,7 +16,7 @@ use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use futures::future::join_all;
 use itertools::Itertools;

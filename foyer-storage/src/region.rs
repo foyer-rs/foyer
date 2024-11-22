@@ -25,7 +25,7 @@ use std::{
 };
 
 use async_channel::{Receiver, Sender};
-use foyer_common::{countdown::Countdown, metrics::Metrics};
+use foyer_common::{countdown::Countdown, metrics::model::Metrics};
 use futures::{
     future::{BoxFuture, Shared},
     FutureExt,
@@ -158,8 +158,8 @@ impl RegionManager {
             .collect_vec();
         let (clean_region_tx, clean_region_rx) = async_channel::unbounded();
 
-        metrics.storage_region_total.set(device.regions() as f64);
-        metrics.storage_region_size_bytes.set(device.region_size() as f64);
+        metrics.storage_region_total.absolute(device.regions() as _);
+        metrics.storage_region_size_bytes.absolute(device.region_size() as _);
 
         Self {
             inner: Arc::new(RegionManagerInner {
@@ -199,7 +199,7 @@ impl RegionManager {
         std::mem::swap(&mut eviction.eviction_pickers, &mut pickers);
         assert!(pickers.is_empty());
 
-        self.inner.metrics.storage_region_evictable.increment(1);
+        self.inner.metrics.storage_region_evictable.increase(1);
 
         tracing::debug!("[region manager]: Region {region} is marked evictable.");
     }
@@ -237,7 +237,7 @@ impl RegionManager {
 
         // Update evictable map.
         eviction.evictable.remove(&picked).unwrap();
-        self.inner.metrics.storage_region_evictable.decrement(1);
+        self.inner.metrics.storage_region_evictable.decrease(1);
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
@@ -260,7 +260,7 @@ impl RegionManager {
             .send(self.region(region).clone())
             .await
             .unwrap();
-        self.inner.metrics.storage_region_clean.increment(1);
+        self.inner.metrics.storage_region_clean.increase(1);
     }
 
     pub fn get_clean_region(&self) -> GetCleanRegionHandle {
@@ -277,7 +277,7 @@ impl RegionManager {
                 if reclaim_semaphore_countdown.countdown() {
                     reclaim_semaphore.add_permits(1);
                 }
-                metrics.storage_region_clean.decrement(1);
+                metrics.storage_region_clean.decrease(1);
                 region
             }
             .boxed(),

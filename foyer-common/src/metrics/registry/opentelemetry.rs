@@ -20,7 +20,7 @@ use opentelemetry::{
     KeyValue,
 };
 
-use crate::metrics_v2::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 /// OpenTelemetry counter metric.
 #[derive(Debug)]
@@ -124,18 +124,18 @@ impl HistogramVecOps for MetricVec {
 
 /// OpenTelemetry metrics registry.
 #[derive(Debug)]
-pub struct OpenTelemetry {
+pub struct OpenTelemetryMetricsRegistry {
     meter: Meter,
 }
 
-impl OpenTelemetry {
+impl OpenTelemetryMetricsRegistry {
     /// Create an OpenTelemetry metrics registry.
     pub fn new(meter: Meter) -> Self {
         Self { meter }
     }
 }
 
-impl RegistryOps for OpenTelemetry {
+impl RegistryOps for OpenTelemetryMetricsRegistry {
     fn register_counter_vec(
         &self,
         name: &'static str,
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn test() {
         let meter = opentelemetry::global::meter("test");
-        let ot = OpenTelemetry::new(meter);
+        let ot = OpenTelemetryMetricsRegistry::new(meter);
 
         let cv = ot.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
         let c = cv.counter(&["l1", "l2"]);

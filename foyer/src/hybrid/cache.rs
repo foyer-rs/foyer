@@ -32,7 +32,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
-    metrics::Metrics,
+    metrics::model::Metrics,
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState};
@@ -127,12 +127,11 @@ where
     S: HashBuilder + Debug,
 {
     pub(crate) fn new(
-        name: String,
         memory: Cache<K, V, S>,
         storage: Store<K, V, S>,
         tracing_options: TracingOptions,
+        metrics: Arc<Metrics>,
     ) -> Self {
-        let metrics = Arc::new(Metrics::new(&name));
         let tracing_config = Arc::<TracingConfig>::default();
         tracing_config.update(tracing_options);
         let tracing = Arc::new(AtomicBool::new(false));
@@ -181,8 +180,8 @@ where
         let entry = self.memory.insert(key, value);
         self.storage.enqueue(entry.clone(), false);
 
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
+        self.metrics.hybrid_insert.increase(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
@@ -200,8 +199,8 @@ where
         let entry = self.memory.insert_with_hint(key, value, hint);
         self.storage.enqueue(entry.clone(), false);
 
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
+        self.metrics.hybrid_insert.increase(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
@@ -218,12 +217,12 @@ where
         let now = Instant::now();
 
         let record_hit = || {
-            self.metrics.hybrid_hit.increment(1);
-            self.metrics.hybrid_hit_duration.record(now.elapsed());
+            self.metrics.hybrid_hit.increase(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
         };
         let record_miss = || {
-            self.metrics.hybrid_miss.increment(1);
-            self.metrics.hybrid_miss_duration.record(now.elapsed());
+            self.metrics.hybrid_miss.increase(1);
+            self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
         };
 
         let guard = span.set_local_parent();
@@ -286,14 +285,14 @@ where
 
         match res {
             Ok(entry) => {
-                self.metrics.hybrid_hit.increment(1);
-                self.metrics.hybrid_hit_duration.record(now.elapsed());
+                self.metrics.hybrid_hit.increase(1);
+                self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
-                self.metrics.hybrid_miss.increment(1);
-                self.metrics.hybrid_miss_duration.record(now.elapsed());
+                self.metrics.hybrid_miss.increase(1);
+                self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
@@ -322,8 +321,8 @@ where
         self.memory.remove(key);
         self.storage.delete(key);
 
-        self.metrics.hybrid_remove.increment(1);
-        self.metrics.hybrid_remove_duration.record(now.elapsed());
+        self.metrics.hybrid_remove.increase(1);
+        self.metrics.hybrid_remove_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_remove_threshold);
     }
@@ -488,8 +487,8 @@ where
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
                         Ok(Some((_k, v))) => {
-                            metrics.hybrid_hit.increment(1);
-                            metrics.hybrid_hit_duration.record(now.elapsed());
+                            metrics.hybrid_hit.increase(1);
+                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
 
                             return Ok(v).into();
                         }
@@ -497,8 +496,8 @@ where
                         Err(e) => return Err(e).into(),
                     };
 
-                    metrics.hybrid_miss.increment(1);
-                    metrics.hybrid_miss_duration.record(now.elapsed());
+                    metrics.hybrid_miss.increase(1);
+                    metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
 
                     runtime
                         .user()
@@ -518,8 +517,8 @@ where
         );
 
         if inner.state() == FetchState::Hit {
-            self.metrics.hybrid_hit.increment(1);
-            self.metrics.hybrid_hit_duration.record(now.elapsed());
+            self.metrics.hybrid_hit.increase(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
         }
 
         let inner = HybridFetchInner {

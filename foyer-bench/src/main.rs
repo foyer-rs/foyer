@@ -17,6 +17,7 @@
 #![warn(clippy::allow_attributes)]
 
 mod analyze;
+mod exporter;
 mod rate;
 mod text;
 
@@ -35,14 +36,16 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
+use exporter::PrometheusExporter;
 use foyer::{
     Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
+    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, PrometheusMetricsRegistry,
+    RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
+    TracingOptions,
 };
 use futures::future::join_all;
 use itertools::Itertools;
-use metrics_exporter_prometheus::PrometheusBuilder;
+use prometheus::Registry;
 use rand::{
     distributions::Distribution,
     rngs::{OsRng, StdRng},
@@ -431,16 +434,6 @@ async fn benchmark(args: Args) {
 
     assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
-    if args.metrics {
-        let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
-        PrometheusBuilder::new()
-            .with_http_listener(addr)
-            .set_buckets(&[0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 1.0])
-            .unwrap()
-            .install()
-            .unwrap();
-    }
-
     let tracing_options = TracingOptions::new()
         .with_record_hybrid_insert_threshold(args.trace_insert.into())
         .with_record_hybrid_get_threshold(args.trace_get.into())
@@ -448,10 +441,19 @@ async fn benchmark(args: Args) {
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
         .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
-    let builder = HybridCacheBuilder::new()
-        .with_tracing_options(tracing_options)
-        .memory(args.mem.as_u64() as _)
-        .with_shards(args.shards);
+    let builder = HybridCacheBuilder::new().with_tracing_options(tracing_options);
+
+    let builder = if args.metrics {
+        let registry = Registry::new();
+        let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
+        PrometheusExporter::new(registry.clone(), addr).run();
+        builder
+            .with_metrics_registry(PrometheusMetricsRegistry::new(registry))
+            .memory(args.mem.as_u64() as _)
+            .with_shards(args.shards)
+    } else {
+        builder.memory(args.mem.as_u64() as _).with_shards(args.shards)
+    };
 
     let builder = match args.eviction.as_str() {
         "lru" => builder.with_eviction_config(LruConfig::default()),

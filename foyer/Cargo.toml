@@ -45,6 +45,8 @@ tracing = [
     "foyer-memory/tracing",
     "foyer-storage/tracing",
 ]
+prometheus = ["foyer-common/prometheus"]
+opentelemetry = ["foyer-common/opentelemetry"]
 
 [lints]
 workspace = true

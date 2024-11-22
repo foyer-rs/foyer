@@ -12,9 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use crate::metrics_v2::CounterVecOps;
-
 use super::{BoxedCounter, BoxedGauge, BoxedHistogram, GaugeVecOps, HistogramVecOps, RegistryOps};
+use crate::metrics::CounterVecOps;
 
 trait Boxer {
     fn boxed(self) -> Box<Self>
@@ -140,7 +139,10 @@ pub struct Metrics {
 
 impl Metrics {
     /// Create a new metric with the given name.
-    pub fn new(name: &'static str, registry: &impl RegistryOps) -> Self {
+    pub fn new<R>(name: &'static str, registry: &R) -> Self
+    where
+        R: RegistryOps,
+    {
         /* in-memory cache metrics */
 
         let foyer_memory_op_total = registry.register_counter_vec(
@@ -330,13 +332,22 @@ impl Metrics {
             hybrid_fetch_duration,
         }
     }
+
+    /// Build noop metrics.
+    ///
+    /// Note: `noop` is only supposed to be called by other foyer components.
+    #[doc(hidden)]
+    pub fn noop() -> Self {
+        use super::registry::noop::NoopMetricsRegistry;
+
+        Self::new("test", &NoopMetricsRegistry)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::metrics_v2::registry::noop::Noop;
-
     use super::*;
+    use crate::metrics::registry::noop::NoopMetricsRegistry;
 
     fn case(registry: &impl RegistryOps) {
         let _ = Metrics::new("test", registry);
@@ -344,22 +355,22 @@ mod tests {
 
     #[test]
     fn test_metrics_noop() {
-        case(&Noop);
+        case(&NoopMetricsRegistry);
     }
 
     #[cfg(feature = "prometheus")]
     #[test]
     fn test_metrics_prometheus() {
-        use crate::metrics_v2::registry::prometheus::Prometheus;
+        use crate::metrics::registry::prometheus::PrometheusMetricsRegistry;
 
-        case(&Prometheus::new(prometheus::Registry::new()));
+        case(&PrometheusMetricsRegistry::new(prometheus::Registry::new()));
     }
 
     #[cfg(feature = "opentelemetry")]
     #[test]
     fn test_metrics_opentelemetry() {
-        use crate::metrics_v2::registry::opentelemetry::OpenTelemetry;
+        use crate::metrics::registry::opentelemetry::OpenTelemetryMetricsRegistry;
 
-        case(&OpenTelemetry::new(opentelemetry::global::meter("test")));
+        case(&OpenTelemetryMetricsRegistry::new(opentelemetry::global::meter("test")));
     }
 }

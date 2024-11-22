@@ -16,7 +16,7 @@ use std::{fmt::Debug, hash::Hasher, io::Write, time::Instant};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use twox_hash::{XxHash32, XxHash64};
 
@@ -145,7 +145,9 @@ impl EntrySerializer {
         bincode::serialize_into(&mut writer, &key).map_err(Error::from)?;
         let key_len = writer.written();
 
-        metrics.storage_entry_serialize_duration.record(now.elapsed());
+        metrics
+            .storage_entry_serialize_duration
+            .record(now.elapsed().as_secs_f64());
 
         Ok(KvInfo { key_len, value_len })
     }
@@ -195,7 +197,9 @@ impl EntryDeserializer {
             }
         }
 
-        metrics.storage_entry_deserialize_duration.record(now.elapsed());
+        metrics
+            .storage_entry_deserialize_duration
+            .record(now.elapsed().as_secs_f64());
 
         Ok((key, value))
     }
