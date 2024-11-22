@@ -158,10 +158,10 @@ where
         let inc = record.inc_refs(refs);
         assert_eq!(refs, inc);
 
-        if self.usage > old_usage {
-            self.metrics.memory_usage.increase((self.usage - old_usage) as _);
-        } else if self.usage < old_usage {
-            self.metrics.memory_usage.decrease((old_usage - self.usage) as _);
+        match self.usage.cmp(&old_usage) {
+            std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
+            std::cmp::Ordering::Less => self.metrics.memory_usage.decrease((old_usage - self.usage) as _),
+            std::cmp::Ordering::Equal => {}
         }
 
         record
