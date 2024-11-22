@@ -137,7 +137,13 @@ where
 
         set.deletes.insert(entry.hash(), self.sequence);
 
-        if entry.is_outdated() || self.len + len > self.buffer.len() {
+        if entry.is_outdated() {
+            tracing::trace!("[sodc batch]: insert {} ignored, reason: outdated", entry.hash());
+            return false;
+        }
+
+        if self.len + len > self.buffer.len() {
+            tracing::trace!("[sodc batch]: insert {} ignored, reason: buffer overflow", entry.hash());
             return false;
         }
 

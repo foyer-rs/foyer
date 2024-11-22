@@ -12,15 +12,26 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-#![warn(clippy::allow_attributes)]
+/// Extension for [`std::option::Option`].
+pub trait OptionExt {
+    /// Wrapped type by [`Option`].
+    type Val;
 
-pub mod batch;
-pub mod compact_bloom_filter;
-pub mod continuum;
-pub mod erwlock;
-pub mod iostat;
-pub mod judge;
-pub mod slab;
+    /// Consume the wrapped value with the given function if there is.
+    fn then<F>(self, f: F)
+    where
+        F: FnOnce(Self::Val);
+}
 
-/// A structured async batch pipeline.
-pub mod async_batch_pipeline;
+impl<T> OptionExt for Option<T> {
+    type Val = T;
+
+    fn then<F>(self, f: F)
+    where
+        F: FnOnce(Self::Val),
+    {
+        if let Some(val) = self {
+            f(val)
+        }
+    }
+}

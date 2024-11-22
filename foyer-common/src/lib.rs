@@ -32,8 +32,8 @@ pub mod event;
 pub mod future;
 /// The shared metrics for foyer.
 pub mod metrics;
-/// A concurrent object pool.
-pub mod object_pool;
+/// Extensions for [`std::option::Option`].
+pub mod option;
 /// The range extensions.
 pub mod range;
 /// A rate limiter that returns the wait duration for limitation.
@@ -42,6 +42,8 @@ pub mod rate;
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
+/// A kotlin like functional programming helper.
+pub mod scope;
 /// Tracing related components.
 pub mod tracing;
 /// An async wait group implementation.

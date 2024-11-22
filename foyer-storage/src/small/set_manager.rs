@@ -142,8 +142,11 @@ impl SetManager {
     {
         let sid = self.inner.set_picker.sid(hash);
 
+        tracing::trace!("[sodc set manager]: load {hash} from set {sid}");
+
         // Query bloom filter.
         if !self.inner.loose_bloom_filters[sid as usize].read().lookup(hash) {
+            tracing::trace!("[sodc set manager]: set {sid} bloom filter miss for {hash}");
             return Ok(None);
         }
 

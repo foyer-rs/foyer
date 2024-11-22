@@ -12,22 +12,18 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, ptr::NonNull};
+use std::{mem::offset_of, sync::Arc};
 
 use cmsketch::CMSketchU16;
-use foyer_common::{assert::OptionExt, strict_assert, strict_assert_eq, strict_assert_ne};
-use foyer_intrusive::{
-    adapter::Link,
-    dlist::{Dlist, DlistLink},
-    intrusive_adapter,
+use foyer_common::{
+    code::{Key, Value},
+    strict_assert, strict_assert_eq, strict_assert_ne,
 };
+use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    eviction::Eviction,
-    handle::{BaseHandle, Handle},
-    CacheContext,
-};
+use super::{Eviction, Op};
+use crate::record::{CacheHint, Record};
 
 /// w-TinyLFU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,22 +63,23 @@ impl Default for LfuConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct LfuContext(CacheContext);
+/// w-TinyLFU eviction algorithm hint.
+#[derive(Debug, Clone, Default)]
+pub struct LfuHint;
 
-impl From<CacheContext> for LfuContext {
-    fn from(context: CacheContext) -> Self {
-        Self(context)
+impl From<CacheHint> for LfuHint {
+    fn from(_: CacheHint) -> Self {
+        LfuHint
     }
 }
 
-impl From<LfuContext> for CacheContext {
-    fn from(context: LfuContext) -> Self {
-        context.0
+impl From<LfuHint> for CacheHint {
+    fn from(_: LfuHint) -> Self {
+        CacheHint::Normal
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Queue {
     None,
     Window,
@@ -90,57 +87,20 @@ enum Queue {
     Protected,
 }
 
-pub struct LfuHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    link: DlistLink,
-    base: BaseHandle<T, LfuContext>,
+impl Default for Queue {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// w-TinyLFU eviction algorithm hint.
+#[derive(Debug, Default)]
+pub struct LfuState {
+    link: LinkedListAtomicLink,
     queue: Queue,
 }
 
-impl<T> Debug for LfuHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LfuHandle").finish()
-    }
-}
-
-intrusive_adapter! { LfuHandleDlistAdapter<T> = LfuHandle<T> { link: DlistLink } where T: Send + Sync + 'static }
-
-impl<T> Default for LfuHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self {
-            link: DlistLink::default(),
-            base: BaseHandle::new(),
-            queue: Queue::None,
-        }
-    }
-}
-
-impl<T> Handle for LfuHandle<T>
-where
-    T: Send + Sync + 'static,
-{
-    type Data = T;
-    type Context = LfuContext;
-
-    fn base(&self) -> &BaseHandle<Self::Data, Self::Context> {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut BaseHandle<Self::Data, Self::Context> {
-        &mut self.base
-    }
-}
-
-unsafe impl<T> Send for LfuHandle<T> where T: Send + Sync + 'static {}
-unsafe impl<T> Sync for LfuHandle<T> where T: Send + Sync + 'static {}
+intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
@@ -154,13 +114,14 @@ unsafe impl<T> Sync for LfuHandle<T> where T: Send + Sync + 'static {}
 ///
 /// When evicting, the entry with a lower frequency from `window` or `probation` will be evicted first, then from
 /// `protected`.
-pub struct Lfu<T>
+pub struct Lfu<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
-    window: Dlist<LfuHandleDlistAdapter<T>>,
-    probation: Dlist<LfuHandleDlistAdapter<T>>,
-    protected: Dlist<LfuHandleDlistAdapter<T>>,
+    window: LinkedList<Adapter<K, V>>,
+    probation: LinkedList<Adapter<K, V>>,
+    protected: LinkedList<Adapter<K, V>>,
 
     window_weight: usize,
     probation_weight: usize,
@@ -169,19 +130,20 @@ where
     window_weight_capacity: usize,
     protected_weight_capacity: usize,
 
+    // TODO(MrCroxx): use a count-min-sketch impl with atomic u16
     frequencies: CMSketchU16,
 
     step: usize,
     decay: usize,
 }
 
-impl<T> Lfu<T>
+impl<K, V> Lfu<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
-    fn increase_queue_weight(&mut self, handle: &LfuHandle<T>) {
-        let weight = handle.base().weight();
-        match handle.queue {
+    fn increase_queue_weight(&mut self, queue: Queue, weight: usize) {
+        match queue {
             Queue::None => unreachable!(),
             Queue::Window => self.window_weight += weight,
             Queue::Probation => self.probation_weight += weight,
@@ -189,9 +151,8 @@ where
         }
     }
 
-    fn decrease_queue_weight(&mut self, handle: &LfuHandle<T>) {
-        let weight = handle.base().weight();
-        match handle.queue {
+    fn decrease_queue_weight(&mut self, queue: Queue, weight: usize) {
+        match queue {
             Queue::None => unreachable!(),
             Queue::Window => self.window_weight -= weight,
             Queue::Probation => self.probation_weight -= weight,
@@ -209,14 +170,18 @@ where
     }
 }
 
-impl<T> Eviction for Lfu<T>
+impl<K, V> Eviction for Lfu<K, V>
 where
-    T: Send + Sync + 'static,
+    K: Key,
+    V: Value,
 {
-    type Handle = LfuHandle<T>;
     type Config = LfuConfig;
+    type Key = K;
+    type Value = V;
+    type Hint = LfuHint;
+    type State = LfuState;
 
-    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
@@ -244,9 +209,9 @@ where
         let decay = frequencies.width();
 
         Self {
-            window: Dlist::new(),
-            probation: Dlist::new(),
-            protected: Dlist::new(),
+            window: LinkedList::new(Adapter::new()),
+            probation: LinkedList::new(Adapter::new()),
+            protected: LinkedList::new(Adapter::new()),
             window_weight: 0,
             probation_weight: 0,
             protected_weight: 0,
@@ -258,165 +223,182 @@ where
         }
     }
 
-    unsafe fn push(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let handle = ptr.as_mut();
+    fn update(&mut self, capacity: usize, config: &Self::Config) {
+        if config.window_capacity_ratio <= 0.0 || config.window_capacity_ratio >= 1.0 {
+            tracing::error!(
+                "window_capacity_ratio must be in (0, 1), given: {}, new config ignored",
+                config.window_capacity_ratio
+            );
+        }
 
-        strict_assert!(!handle.link.is_linked());
-        strict_assert!(!handle.base().is_in_eviction());
-        strict_assert_eq!(handle.queue, Queue::None);
+        if config.protected_capacity_ratio <= 0.0 || config.protected_capacity_ratio >= 1.0 {
+            tracing::error!(
+                "protected_capacity_ratio must be in (0, 1), given: {}, new config ignored",
+                config.protected_capacity_ratio
+            );
+        }
 
-        self.window.push_back(ptr);
-        handle.base_mut().set_in_eviction(true);
-        handle.queue = Queue::Window;
+        if config.window_capacity_ratio + config.protected_capacity_ratio >= 1.0 {
+            tracing::error!(
+                "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}, new config ignored",
+                config.window_capacity_ratio + config.protected_capacity_ratio
+            )
+        }
 
-        self.increase_queue_weight(handle);
-        self.update_frequencies(handle.base().hash());
+        // TODO(MrCroxx): Raise a warn log the cmsketch args updates is not supported yet if it is modified.
+
+        let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
+        let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
+
+        self.window_weight_capacity = window_weight_capacity;
+        self.protected_weight_capacity = protected_weight_capacity;
+    }
+
+    /// Push a new record to `window`.
+    ///
+    /// Overflow record from `window` to `probation` if needed.
+    fn push(&mut self, record: Arc<Record<Self>>) {
+        let state = unsafe { &mut *record.state().get() };
+
+        strict_assert!(!state.link.is_linked());
+        strict_assert!(!record.is_in_eviction());
+        strict_assert_eq!(state.queue, Queue::None);
+
+        record.set_in_eviction(true);
+        state.queue = Queue::Window;
+        self.increase_queue_weight(Queue::Window, record.weight());
+        self.update_frequencies(record.hash());
+        self.window.push_back(record);
 
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
         while self.window_weight > self.window_weight_capacity {
             strict_assert!(!self.window.is_empty());
-            let mut ptr = self.window.pop_front().strict_unwrap_unchecked();
-            let handle = ptr.as_mut();
-            self.decrease_queue_weight(handle);
-            handle.queue = Queue::Probation;
-            self.increase_queue_weight(handle);
-            self.probation.push_back(ptr);
+            let r = self.window.pop_front().unwrap();
+            let s = unsafe { &mut *r.state().get() };
+            self.decrease_queue_weight(Queue::Window, r.weight());
+            s.queue = Queue::Probation;
+            self.increase_queue_weight(Queue::Probation, r.weight());
+            self.probation.push_back(r);
         }
     }
 
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>> {
+    fn pop(&mut self) -> Option<Arc<Record<Self>>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
         // If both `window` and `probation` are empty, try evict from `protected`.
-        let mut ptr = match (self.window.front(), self.probation.front()) {
+        let mut cw = self.window.front_mut();
+        let mut cp = self.probation.front_mut();
+        let record = match (cw.get(), cp.get()) {
             (None, None) => None,
-            (None, Some(_)) => self.probation.pop_front(),
-            (Some(_), None) => self.window.pop_front(),
-            (Some(window), Some(probation)) => {
-                if self.frequencies.estimate(window.base().hash()) < self.frequencies.estimate(probation.base().hash())
-                {
-                    self.window.pop_front()
+            (None, Some(_)) => cp.remove(),
+            (Some(_), None) => cw.remove(),
+            (Some(w), Some(p)) => {
+                if self.frequencies.estimate(w.hash()) < self.frequencies.estimate(p.hash()) {
+                    cw.remove()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
                     // too long like CacheLib does?
                 } else {
-                    self.probation.pop_front()
+                    cp.remove()
                 }
             }
         }
         .or_else(|| self.protected.pop_front())?;
 
-        let handle = ptr.as_mut();
+        let state = unsafe { &mut *record.state().get() };
 
-        strict_assert!(!handle.link.is_linked());
-        strict_assert!(handle.base().is_in_eviction());
-        strict_assert_ne!(handle.queue, Queue::None);
+        strict_assert!(!state.link.is_linked());
+        strict_assert!(record.is_in_eviction());
+        strict_assert_ne!(state.queue, Queue::None);
 
-        self.decrease_queue_weight(handle);
-        handle.queue = Queue::None;
-        handle.base_mut().set_in_eviction(false);
+        self.decrease_queue_weight(state.queue, record.weight());
+        state.queue = Queue::None;
+        record.set_in_eviction(false);
 
-        Some(ptr)
+        Some(record)
     }
 
-    unsafe fn release(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let handle = ptr.as_mut();
+    fn remove(&mut self, record: &Arc<Record<Self>>) {
+        let state = unsafe { &mut *record.state().get() };
 
-        match handle.queue {
-            Queue::None => {
-                strict_assert!(!handle.link.is_linked());
-                strict_assert!(!handle.base().is_in_eviction());
-                self.push(ptr);
-                strict_assert!(handle.link.is_linked());
-                strict_assert!(handle.base().is_in_eviction());
-            }
-            Queue::Window => {
-                // Move to MRU position of `window`.
-                strict_assert!(handle.link.is_linked());
-                strict_assert!(handle.base().is_in_eviction());
-                self.window.remove_raw(handle.link.raw());
-                self.window.push_back(ptr);
-            }
-            Queue::Probation => {
-                // Promote to MRU position of `protected`.
-                strict_assert!(handle.link.is_linked());
-                strict_assert!(handle.base().is_in_eviction());
-                self.probation.remove_raw(handle.link.raw());
-                self.decrease_queue_weight(handle);
-                handle.queue = Queue::Protected;
-                self.increase_queue_weight(handle);
-                self.protected.push_back(ptr);
+        strict_assert!(state.link.is_linked());
+        strict_assert!(record.is_in_eviction());
+        strict_assert_ne!(state.queue, Queue::None);
 
-                // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
-                while self.protected_weight > self.protected_weight_capacity {
-                    strict_assert!(!self.protected.is_empty());
-                    let mut ptr = self.protected.pop_front().strict_unwrap_unchecked();
-                    let handle = ptr.as_mut();
-                    self.decrease_queue_weight(handle);
-                    handle.queue = Queue::Probation;
-                    self.increase_queue_weight(handle);
-                    self.probation.push_back(ptr);
-                }
-            }
-            Queue::Protected => {
-                // Move to MRU position of `protected`.
-                strict_assert!(handle.link.is_linked());
-                strict_assert!(handle.base().is_in_eviction());
-                self.protected.remove_raw(handle.link.raw());
-                self.protected.push_back(ptr);
-            }
-        }
-    }
-
-    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>) {
-        self.update_frequencies(ptr.as_ref().base().hash());
-    }
-
-    unsafe fn remove(&mut self, mut ptr: NonNull<Self::Handle>) {
-        let handle = ptr.as_mut();
-
-        strict_assert!(handle.link.is_linked());
-        strict_assert!(handle.base().is_in_eviction());
-        strict_assert_ne!(handle.queue, Queue::None);
-
-        match handle.queue {
+        match state.queue {
             Queue::None => unreachable!(),
-            Queue::Window => self.window.remove_raw(handle.link.raw()),
-            Queue::Probation => self.probation.remove_raw(handle.link.raw()),
-            Queue::Protected => self.protected.remove_raw(handle.link.raw()),
+            Queue::Window => unsafe { self.window.remove_from_ptr(Arc::as_ptr(record)) },
+            Queue::Probation => unsafe { self.probation.remove_from_ptr(Arc::as_ptr(record)) },
+            Queue::Protected => unsafe { self.protected.remove_from_ptr(Arc::as_ptr(record)) },
         };
 
-        strict_assert!(!handle.link.is_linked());
+        strict_assert!(!state.link.is_linked());
 
-        self.decrease_queue_weight(handle);
-        handle.queue = Queue::None;
-        handle.base_mut().set_in_eviction(false);
+        self.decrease_queue_weight(state.queue, record.weight());
+        state.queue = Queue::None;
+        record.set_in_eviction(false);
     }
 
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>> {
-        let mut res = Vec::with_capacity(self.len());
-
-        while !self.is_empty() {
-            let ptr = self.pop().strict_unwrap_unchecked();
-            strict_assert!(!ptr.as_ref().base().is_in_eviction());
-            strict_assert!(!ptr.as_ref().link.is_linked());
-            strict_assert_eq!(ptr.as_ref().queue, Queue::None);
-            res.push(ptr);
+    fn clear(&mut self) {
+        while let Some(record) = self.pop() {
+            let state = unsafe { &*record.state().get() };
+            strict_assert!(!record.is_in_eviction());
+            strict_assert!(!state.link.is_linked());
+            strict_assert_eq!(state.queue, Queue::None);
         }
-
-        res
     }
 
-    fn len(&self) -> usize {
-        self.window.len() + self.probation.len() + self.protected.len()
+    fn acquire() -> Op<Self> {
+        Op::mutable(|this: &mut Self, record| {
+            // Update frequency by access.
+            this.update_frequencies(record.hash());
+
+            if !record.is_in_eviction() {
+                return;
+            }
+
+            let state = unsafe { &mut *record.state().get() };
+
+            strict_assert!(state.link.is_linked());
+
+            match state.queue {
+                Queue::None => unreachable!(),
+                Queue::Window => {
+                    // Move to MRU position of `window`.
+                    let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.window.push_back(r);
+                }
+                Queue::Probation => {
+                    // Promote to MRU position of `protected`.
+                    let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.decrease_queue_weight(Queue::Probation, record.weight());
+                    state.queue = Queue::Protected;
+                    this.increase_queue_weight(Queue::Protected, record.weight());
+                    this.protected.push_back(r);
+
+                    // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
+                    while this.protected_weight > this.protected_weight_capacity {
+                        strict_assert!(!this.protected.is_empty());
+                        let r = this.protected.pop_front().unwrap();
+                        let s = unsafe { &mut *r.state().get() };
+                        this.decrease_queue_weight(Queue::Protected, r.weight());
+                        s.queue = Queue::Probation;
+                        this.increase_queue_weight(Queue::Probation, r.weight());
+                        this.probation.push_back(r);
+                    }
+                }
+                Queue::Protected => {
+                    // Move to MRU position of `protected`.
+                    let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
+                    this.protected.push_back(r);
+                }
+            }
+        })
     }
 
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn release() -> Op<Self> {
+        Op::noop()
     }
 }
-
-unsafe impl<T> Send for Lfu<T> where T: Send + Sync + 'static {}
-unsafe impl<T> Sync for Lfu<T> where T: Send + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
@@ -424,141 +406,241 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{eviction::test_utils::TestEviction, handle::HandleExt};
+    use crate::{
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        record::Data,
+    };
 
-    impl<T> TestEviction for Lfu<T>
+    impl<K, V> Dump for Lfu<K, V>
     where
-        T: Send + Sync + 'static + Clone,
+        K: Key + Clone,
+        V: Value + Clone,
     {
-        fn dump(&self) -> Vec<T> {
-            self.window
-                .iter()
-                .chain(self.probation.iter())
-                .chain(self.protected.iter())
-                .map(|handle| handle.base().data_unwrap_unchecked().clone())
-                .collect_vec()
+        type Output = Vec<Vec<Arc<Record<Self>>>>;
+        fn dump(&self) -> Self::Output {
+            let mut window = vec![];
+            let mut probation = vec![];
+            let mut protected = vec![];
+
+            let mut cursor = self.window.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => window.push(record),
+                    None => break,
+                }
+            }
+
+            let mut cursor = self.probation.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => probation.push(record),
+                    None => break,
+                }
+            }
+
+            let mut cursor = self.protected.cursor();
+            loop {
+                cursor.move_next();
+                match cursor.clone_pointer() {
+                    Some(record) => protected.push(record),
+                    None => break,
+                }
+            }
+
+            vec![window, probation, protected]
         }
     }
 
-    type TestLfu = Lfu<u64>;
-    type TestLfuHandle = LfuHandle<u64>;
-
-    unsafe fn assert_test_lfu(
-        lfu: &TestLfu,
-        len: usize,
-        window: usize,
-        probation: usize,
-        protected: usize,
-        entries: Vec<u64>,
-    ) {
-        assert_eq!(lfu.len(), len);
-        assert_eq!(lfu.window.len(), window);
-        assert_eq!(lfu.probation.len(), probation);
-        assert_eq!(lfu.protected.len(), protected);
-        assert_eq!(lfu.window_weight, window);
-        assert_eq!(lfu.probation_weight, probation);
-        assert_eq!(lfu.protected_weight, protected);
-        let es = lfu.dump().into_iter().collect_vec();
-        assert_eq!(es, entries);
-    }
-
-    fn assert_min_frequency(lfu: &TestLfu, hash: u64, count: usize) {
-        let freq = lfu.frequencies.estimate(hash);
-        assert!(freq >= count as u16, "assert {freq} >= {count} failed for {hash}");
-    }
+    type TestLfu = Lfu<u64, u64>;
 
     #[test]
     fn test_lfu() {
-        unsafe {
-            let ptrs = (0..100)
-                .map(|i| {
-                    let mut handle = Box::<TestLfuHandle>::default();
-                    handle.init(i, i, 1, LfuContext(CacheContext::Default));
-                    NonNull::new_unchecked(Box::into_raw(handle))
-                })
-                .collect_vec();
+        let rs = (0..100)
+            .map(|i| {
+                Arc::new(Record::new(Data {
+                    key: i,
+                    value: i,
+                    hint: LfuHint,
+                    hash: i,
+                    weight: 1,
+                }))
+            })
+            .collect_vec();
+        let r = |i: usize| rs[i].clone();
 
-            // window: 2, probation: 2, protected: 6
-            let config = LfuConfig {
-                window_capacity_ratio: 0.2,
-                protected_capacity_ratio: 0.6,
-                cmsketch_eps: 0.01,
-                cmsketch_confidence: 0.95,
-            };
-            let mut lfu = TestLfu::new(10, &config);
+        // window: 2, probation: 2, protected: 6
+        let config = LfuConfig {
+            window_capacity_ratio: 0.2,
+            protected_capacity_ratio: 0.6,
+            cmsketch_eps: 0.01,
+            cmsketch_confidence: 0.95,
+        };
+        let mut lfu = TestLfu::new(10, &config);
 
-            assert_eq!(lfu.window_weight_capacity, 2);
-            assert_eq!(lfu.protected_weight_capacity, 6);
+        assert_eq!(lfu.window_weight_capacity, 2);
+        assert_eq!(lfu.protected_weight_capacity, 6);
 
-            lfu.push(ptrs[0]);
-            lfu.push(ptrs[1]);
-            assert_test_lfu(&lfu, 2, 2, 0, 0, vec![0, 1]);
+        lfu.push(r(0));
+        lfu.push(r(1));
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![r(0), r(1)], vec![], vec![]]);
 
-            lfu.push(ptrs[2]);
-            lfu.push(ptrs[3]);
-            assert_test_lfu(&lfu, 4, 2, 2, 0, vec![2, 3, 0, 1]);
+        lfu.push(r(2));
+        lfu.push(r(3));
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![r(2), r(3)], vec![r(0), r(1)], vec![]]);
 
-            (4..10).for_each(|i| lfu.push(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![8, 9, 0, 1, 2, 3, 4, 5, 6, 7]);
+        (4..10).for_each(|i| lfu.push(r(i)));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(8), r(9)],
+                vec![r(0), r(1), r(2), r(3), r(4), r(5), r(6), r(7)],
+                vec![],
+            ],
+        );
 
-            (0..10).for_each(|i| assert_min_frequency(&lfu, i, 1));
+        // [8, 9] [1, 2, 3, 4, 5, 6, 7]
+        let r0 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[0], &r0);
 
-            // [8, 9] [1, 2, 3, 4, 5, 6, 7]
-            let p0 = lfu.pop().unwrap();
-            assert_eq!(p0, ptrs[0]);
+        // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
+        lfu.push(r(0));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(9), r(0)],
+                vec![r(1), r(2), r(3), r(4), r(5), r(6), r(7), r(8)],
+                vec![],
+            ],
+        );
 
-            // [9, 0] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.release(p0);
-            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![9, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
+        lfu.acquire_mutable(&rs[9]);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(3), r(4), r(5), r(6), r(7), r(8)],
+                vec![],
+            ],
+        );
 
-            // [0, 9] [1, 2, 3, 4, 5, 6, 7, 8]
-            lfu.release(ptrs[9]);
-            assert_test_lfu(&lfu, 10, 2, 8, 0, vec![0, 9, 1, 2, 3, 4, 5, 6, 7, 8]);
+        // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
+        (3..7).for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(7), r(8)],
+                vec![r(3), r(4), r(5), r(6)],
+            ],
+        );
 
-            // [0, 9] [1, 2, 7, 8] [3, 4, 5, 6]
-            (3..7).for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 3, 4, 5, 6]);
+        // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
+        (3..5).for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(1), r(2), r(7), r(8)],
+                vec![r(5), r(6), r(3), r(4)],
+            ],
+        );
 
-            // [0, 9] [1, 2, 7, 8] [5, 6, 3, 4]
-            (3..5).for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 4, 4, vec![0, 9, 1, 2, 7, 8, 5, 6, 3, 4]);
+        // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
+        [1, 2, 7, 8].into_iter().for_each(|i| lfu.acquire_mutable(&rs[i]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(0), r(9)],
+                vec![r(5), r(6)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // [0, 9] [5, 6] [3, 4, 1, 2, 7, 8]
-            [1, 2, 7, 8].into_iter().for_each(|i| lfu.release(ptrs[i]));
-            assert_test_lfu(&lfu, 10, 2, 2, 6, vec![0, 9, 5, 6, 3, 4, 1, 2, 7, 8]);
+        // [0, 9] [6] [3, 4, 1, 2, 7, 8]
+        let r5 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[5], &r5);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![vec![r(0), r(9)], vec![r(6)], vec![r(3), r(4), r(1), r(2), r(7), r(8)]],
+        );
 
-            // [0, 9] [6] [3, 4, 1, 2, 7, 8]
-            let p5 = lfu.pop().unwrap();
-            assert_eq!(p5, ptrs[5]);
-            assert_test_lfu(&lfu, 9, 2, 1, 6, vec![0, 9, 6, 3, 4, 1, 2, 7, 8]);
+        // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
+        (10..13).for_each(|i| lfu.push(r(i)));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(6), r(0), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            (10..13).for_each(|i| lfu.push(ptrs[i]));
+        // 0: high freq
+        // [11, 12] [6, 9, 10, 3] [4, 1, 2, 7, 8, 0]
+        (0..10).for_each(|_| lfu.acquire_mutable(&rs[0]));
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(6), r(9), r(10), r(3)],
+                vec![r(4), r(1), r(2), r(7), r(8), r(0)],
+            ],
+        );
 
-            // [11, 12] [6, 0, 9, 10] [3, 4, 1, 2, 7, 8]
-            assert_test_lfu(&lfu, 12, 2, 4, 6, vec![11, 12, 6, 0, 9, 10, 3, 4, 1, 2, 7, 8]);
-            (1..13).for_each(|i| assert_min_frequency(&lfu, i, 0));
-            lfu.acquire(ptrs[0]);
-            assert_min_frequency(&lfu, 0, 2);
+        // 0: high freq
+        // [11, 12] [0, 6, 9, 10] [3, 4, 1, 2, 7, 8]
+        lfu.acquire_mutable(&rs[6]);
+        lfu.acquire_mutable(&rs[9]);
+        lfu.acquire_mutable(&rs[10]);
+        lfu.acquire_mutable(&rs[3]);
+        lfu.acquire_mutable(&rs[4]);
+        lfu.acquire_mutable(&rs[1]);
+        lfu.acquire_mutable(&rs[2]);
+        lfu.acquire_mutable(&rs[7]);
+        lfu.acquire_mutable(&rs[8]);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![r(11), r(12)],
+                vec![r(0), r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            // evict 11 because freq(11) < freq(0)
-            // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
-            let p6 = lfu.pop().unwrap();
-            let p11 = lfu.pop().unwrap();
-            assert_eq!(p6, ptrs[6]);
-            assert_eq!(p11, ptrs[11]);
-            assert_test_lfu(&lfu, 10, 1, 3, 6, vec![12, 0, 9, 10, 3, 4, 1, 2, 7, 8]);
+        // evict 11, 12 because freq(11) < freq(0), freq(12) < freq(0)
+        // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
+        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(11));
+        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(12));
+        let r11 = lfu.pop().unwrap();
+        let r12 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[11], &r11);
+        assert_ptr_eq(&rs[12], &r12);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![],
+                vec![r(0), r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            assert_eq!(
-                lfu.clear(),
-                [12, 0, 9, 10, 3, 4, 1, 2, 7, 8]
-                    .into_iter()
-                    .map(|i| ptrs[i])
-                    .collect_vec()
-            );
+        // evict 0, high freq but cold
+        // [] [6, 9, 10] [3, 4, 1, 2, 7, 8]
+        let r0 = lfu.pop().unwrap();
+        assert_ptr_eq(&rs[0], &r0);
+        assert_ptr_vec_vec_eq(
+            lfu.dump(),
+            vec![
+                vec![],
+                vec![r(6), r(9), r(10)],
+                vec![r(3), r(4), r(1), r(2), r(7), r(8)],
+            ],
+        );
 
-            for ptr in ptrs {
-                let _ = Box::from_raw(ptr.as_ptr());
-            }
-        }
+        lfu.clear();
+        assert_ptr_vec_vec_eq(lfu.dump(), vec![vec![], vec![], vec![]]);
     }
 }

@@ -52,6 +52,7 @@ macro_rules! bloom_filter {
                     }
 
                     pub fn insert(&mut self, hash: u64) {
+                        tracing::trace!("[bloom filter]: insert hash {hash}");
                         for i in 0..N {
                             let seed = twang_mix64(i as _);
                             let hash = combine_hashes(hash, seed);
@@ -73,6 +74,7 @@ macro_rules! bloom_filter {
                     }
 
                     pub fn clear(&mut self) {
+                        tracing::trace!("[bloom filter]: clear");
                         self.data = [0; N];
                     }
                 }

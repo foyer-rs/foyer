@@ -9,6 +9,16 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## Unreleased
+
+### Changes
+
+- Refine in-memory cache framework:
+  - Allow "get"/"release"/"entry drop" to acquire read lock or lock-free if the algorithm allows.
+  - Make most `Eviction` APIs safe, only acquire unsafe Rust while accessing algorithm managed per-entry state with `UnsafeCell`.
+  - Replace the "reinsertion" design with `release` with real "release last ref" design.
+  - Rename some APIs.
+
 ## 2024-10-11
 
 ### Releases
