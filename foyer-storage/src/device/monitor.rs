@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::{bits, metrics::Metrics};
+use foyer_common::{bits, metrics::model::Metrics};
 
 use super::RegionId;
 use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
@@ -97,9 +97,11 @@ where
 
         let res = self.device.write(buf, region, offset).await;
 
-        self.metrics.storage_disk_write.increment(1);
-        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_write_duration.record(now.elapsed());
+        self.metrics.storage_disk_write.increase(1);
+        self.metrics.storage_disk_write_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_write_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -114,9 +116,11 @@ where
 
         let res = self.device.read(region, offset, len).await;
 
-        self.metrics.storage_disk_read.increment(1);
-        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_read_duration.record(now.elapsed());
+        self.metrics.storage_disk_read.increase(1);
+        self.metrics.storage_disk_read_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_read_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -129,8 +133,10 @@ where
 
         let res = self.device.flush(region).await;
 
-        self.metrics.storage_disk_flush.increment(1);
-        self.metrics.storage_disk_flush_duration.record(now.elapsed());
+        self.metrics.storage_disk_flush.increase(1);
+        self.metrics
+            .storage_disk_flush_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -178,9 +184,11 @@ impl Monitored<DirectFileDevice> {
 
         let res = self.device.pwrite(buf, offset).await;
 
-        self.metrics.storage_disk_write.increment(1);
-        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_write_duration.record(now.elapsed());
+        self.metrics.storage_disk_write.increase(1);
+        self.metrics.storage_disk_write_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_write_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -195,9 +203,11 @@ impl Monitored<DirectFileDevice> {
 
         let res = self.device.pread(offset, len).await;
 
-        self.metrics.storage_disk_read.increment(1);
-        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_read_duration.record(now.elapsed());
+        self.metrics.storage_disk_read.increase(1);
+        self.metrics.storage_disk_read_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_read_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }

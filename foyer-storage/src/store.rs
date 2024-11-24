@@ -26,7 +26,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, CacheEntry};
@@ -144,8 +144,11 @@ where
             self.inner.engine.enqueue(entry, estimated_size);
         }
 
-        self.inner.metrics.storage_enqueue.increment(1);
-        self.inner.metrics.storage_enqueue_duration.record(now.elapsed());
+        self.inner.metrics.storage_enqueue.increase(1);
+        self.inner
+            .metrics
+            .storage_enqueue_duration
+            .record(now.elapsed().as_secs_f64());
     }
 
     /// Load a cache entry from the disk cache.
@@ -341,8 +344,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: String,
+    name: &'static str,
     memory: Cache<K, V, S>,
+    metrics: Arc<Metrics>,
 
     device_options: DeviceOptions,
     engine: Engine,
@@ -364,14 +368,15 @@ where
     S: HashBuilder + Debug,
 {
     /// Setup disk cache store for the given in-memory cache.
-    pub fn new(memory: Cache<K, V, S>, engine: Engine) -> Self {
+    pub fn new(name: &'static str, memory: Cache<K, V, S>, metrics: Arc<Metrics>, engine: Engine) -> Self {
         if matches!(engine, Engine::Mixed(ratio) if !(0.0..=1.0).contains(&ratio)) {
             panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
         }
 
         Self {
-            name: "foyer".to_string(),
+            name,
             memory,
+            metrics,
 
             device_options: DeviceOptions::None,
             engine,
@@ -385,16 +390,6 @@ where
             large: LargeEngineOptions::new(),
             small: SmallEngineOptions::new(),
         }
-    }
-
-    /// Set the name of the foyer disk cache instance.
-    ///
-    /// foyer will use the name as the prefix of the metric names.
-    ///
-    /// Default: `foyer`.
-    pub fn with_name(mut self, name: &str) -> Self {
-        self.name = name.to_string();
-        self
     }
 
     /// Set device options for the disk cache store.
@@ -470,9 +465,9 @@ where
     /// Build the disk cache store with the given configuration.
     pub async fn build(self) -> Result<Store<K, V, S>> {
         let memory = self.memory.clone();
+        let metrics = self.metrics.clone();
         let admission_picker = self.admission_picker.clone();
 
-        let metrics = Arc::new(Metrics::new(&self.name));
         let statistics = Arc::<Statistics>::default();
 
         let compression = self.compression;
@@ -540,7 +535,6 @@ where
                         Engine::Large => {
                             let regions = 0..device.regions() as RegionId;
                             EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
-                                name: self.name,
                                 device,
                                 regions,
                                 compression: self.compression,
@@ -599,7 +593,6 @@ where
                                     marker: PhantomData,
                                 },
                                 right: GenericLargeStorageConfig {
-                                    name: self.name,
                                     device,
                                     regions: large_regions,
                                     compression: self.compression,

@@ -353,10 +353,11 @@ impl SetTimestamp {
 #[cfg(test)]
 mod tests {
 
+    use foyer_common::metrics::model::Metrics;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry};
 
     use super::*;
-    use crate::{serde::EntrySerializer, test_utils::metrics_for_test, Compression};
+    use crate::{serde::EntrySerializer, Compression};
 
     const PAGE: usize = 4096;
 
@@ -372,7 +373,7 @@ mod tests {
             entry.value(),
             &Compression::None,
             &mut buf,
-            metrics_for_test(),
+            &Metrics::noop(),
         )
         .unwrap();
 

@@ -281,7 +281,7 @@ mod tests {
     use std::path::Path;
 
     use bytesize::ByteSize;
-    use foyer_common::metrics::Metrics;
+    use foyer_common::metrics::model::Metrics;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use tokio::runtime::Handle;
 
@@ -312,7 +312,7 @@ mod tests {
                     .with_capacity(ByteSize::kib(64).as_u64() as _)
                     .with_file_size(ByteSize::kib(16).as_u64() as _)
                     .into(),
-                metrics: Arc::new(Metrics::new("test")),
+                metrics: Arc::new(Metrics::noop()),
             },
             runtime,
         )

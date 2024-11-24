@@ -28,7 +28,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
@@ -64,7 +64,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub name: String,
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
     pub compression: Compression,
@@ -93,7 +92,6 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
-            .field("name", &self.name)
             .field("device", &self.device)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
@@ -341,8 +339,8 @@ where
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
             };
@@ -362,8 +360,8 @@ where
                 | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
                     tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
                     indexer.remove(hash);
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
@@ -381,15 +379,15 @@ where
                 Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
                     tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
                     indexer.remove(hash);
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
             };
 
-            metrics.storage_hit.increment(1);
-            metrics.storage_hit_duration.record(now.elapsed());
+            metrics.storage_hit.increase(1);
+            metrics.storage_hit_duration.record(now.elapsed().as_secs_f64());
 
             Ok(Some((k, v)))
         }
@@ -418,8 +416,11 @@ where
             });
         });
 
-        self.inner.metrics.storage_delete.increment(1);
-        self.inner.metrics.storage_miss_duration.record(now.elapsed());
+        self.inner.metrics.storage_delete.increase(1);
+        self.inner
+            .metrics
+            .storage_miss_duration
+            .record(now.elapsed().as_secs_f64());
     }
 
     fn may_contains(&self, hash: u64) -> bool {
@@ -546,7 +547,7 @@ mod tests {
                     .with_capacity(ByteSize::kib(64).as_u64() as _)
                     .with_file_size(ByteSize::kib(16).as_u64() as _)
                     .into(),
-                metrics: Arc::new(Metrics::new("test")),
+                metrics: Arc::new(Metrics::noop()),
             },
             runtime,
         )
@@ -566,7 +567,6 @@ mod tests {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
-            name: "test".to_string(),
             device,
             regions,
             compression: Compression::None,
@@ -596,7 +596,6 @@ mod tests {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
-            name: "test".to_string(),
             device,
             regions,
             compression: Compression::None,

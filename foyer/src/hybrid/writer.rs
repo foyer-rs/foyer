@@ -126,11 +126,11 @@ where
         };
         self.hybrid.storage().enqueue(entry.clone(), true);
 
-        self.hybrid.metrics().hybrid_insert.increment(1);
+        self.hybrid.metrics().hybrid_insert.increase(1);
         self.hybrid
             .metrics()
             .hybrid_insert_duration
-            .record(now.elapsed() + self.pick_duration);
+            .record((now.elapsed() + self.pick_duration).as_secs_f64());
 
         Some(entry)
     }

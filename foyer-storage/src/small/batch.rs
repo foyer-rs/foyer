@@ -23,7 +23,7 @@ use std::{
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use foyer_memory::CacheEntry;
 use itertools::Itertools;

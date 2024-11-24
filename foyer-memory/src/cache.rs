@@ -20,6 +20,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
+    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, RegistryOps},
     runtime::SingletonHandle,
 };
 use pin_project::pin_project;
@@ -264,13 +265,13 @@ impl From<LfuConfig> for EvictionConfig {
 }
 
 /// In-memory cache builder.
-pub struct CacheBuilder<K, V, S>
+pub struct CacheBuilder<K, V, S, M>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
 {
-    name: String,
+    name: &'static str,
 
     capacity: usize,
     shards: usize,
@@ -280,9 +281,12 @@ where
     weighter: Arc<dyn Weighter<K, V>>,
 
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+
+    registry: M,
+    metrics: Option<Arc<Metrics>>,
 }
 
-impl<K, V> CacheBuilder<K, V, RandomState>
+impl<K, V> CacheBuilder<K, V, RandomState, NoopMetricsRegistry>
 where
     K: Key,
     V: Value,
@@ -290,7 +294,7 @@ where
     /// Create a new in-memory cache builder.
     pub fn new(capacity: usize) -> Self {
         Self {
-            name: "foyer".to_string(),
+            name: "foyer",
 
             capacity,
             shards: 8,
@@ -299,11 +303,14 @@ where
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+
+            registry: NoopMetricsRegistry,
+            metrics: None,
         }
     }
 }
 
-impl<K, V, S> CacheBuilder<K, V, S>
+impl<K, V, S, M> CacheBuilder<K, V, S, M>
 where
     K: Key,
     V: Value,
@@ -314,8 +321,8 @@ where
     /// foyer will use the name as the prefix of the metric names.
     ///
     /// Default: `foyer`.
-    pub fn with_name(mut self, name: &str) -> Self {
-        self.name = name.to_string();
+    pub fn with_name(mut self, name: &'static str) -> Self {
+        self.name = name;
         self
     }
 
@@ -335,7 +342,7 @@ where
     }
 
     /// Set in-memory cache hash builder.
-    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
+    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS, M>
     where
         OS: HashBuilder,
     {
@@ -347,6 +354,8 @@ where
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
+            registry: self.registry,
+            metrics: self.metrics,
         }
     }
 
@@ -362,8 +371,40 @@ where
         self
     }
 
+    /// Set metrics registry.
+    ///
+    /// Default: [`NoopMetricsRegistry`].
+    pub fn with_metrics_registry<OM>(self, registry: OM) -> CacheBuilder<K, V, S, OM>
+    where
+        OM: RegistryOps,
+    {
+        CacheBuilder {
+            name: self.name,
+            capacity: self.capacity,
+            shards: self.shards,
+            eviction_config: self.eviction_config,
+            hash_builder: self.hash_builder,
+            weighter: self.weighter,
+            event_listener: self.event_listener,
+            registry,
+            metrics: self.metrics,
+        }
+    }
+
+    /// Set metrics.
+    ///
+    /// Note: `with_metrics` is only supposed to be called by other foyer components.
+    #[doc(hidden)]
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     /// Build in-memory cache with the given configuration.
-    pub fn build(self) -> Cache<K, V, S> {
+    pub fn build(self) -> Cache<K, V, S>
+    where
+        M: RegistryOps,
+    {
         if self.capacity < self.shards {
             tracing::warn!(
                 "The in-memory cache capacity({}) < shards({}).",
@@ -372,42 +413,46 @@ where
             );
         }
 
+        let metrics = self
+            .metrics
+            .unwrap_or_else(|| Arc::new(Metrics::new(self.name, &self.registry)));
+
         match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(RawCache::new(RawCacheConfig {
-                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                metrics,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
-                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                metrics,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
-                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                metrics,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
-                name: self.name,
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                metrics,
             }))),
         }
     }
