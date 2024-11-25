@@ -165,7 +165,7 @@ jobs:
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets --features tracing -- -D warnings
-          cargo clippy --all-targets --features prometheus,opentelemetry -- -D warnings
+          cargo clippy --all-targets --features prometheus,opentelemetry_0_26,opentelemetry_0_27 -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -182,7 +182,7 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,prometheus,opentelemetry"
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,prometheus,opentelemetry_0_26,opentelemetry_0_27"
       - name: Run examples with coverage
         env:
           RUST_BACKTRACE: 1

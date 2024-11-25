@@ -47,6 +47,8 @@ tracing = [
 ]
 prometheus = ["foyer-common/prometheus"]
 opentelemetry = ["foyer-common/opentelemetry"]
+opentelemetry_0_27 = ["foyer-common/opentelemetry_0_27"]
+opentelemetry_0_26 = ["foyer-common/opentelemetry_0_26"]
 
 [lints]
 workspace = true
