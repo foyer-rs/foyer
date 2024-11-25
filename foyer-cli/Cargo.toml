@@ -17,7 +17,7 @@ publish = false
 anyhow = "1"
 bytesize = { workspace = true }
 clap = { workspace = true }
-thiserror = "1"
+thiserror = { workspace = true }
 
 [dev-dependencies]
 

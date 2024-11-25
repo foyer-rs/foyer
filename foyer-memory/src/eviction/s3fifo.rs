@@ -29,7 +29,10 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::record::{CacheHint, Record};
+use crate::{
+    error::{Error, Result},
+    record::{CacheHint, Record},
+};
 
 /// S3Fifo eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +135,8 @@ where
     main_weight: usize,
 
     small_to_main_freq_threshold: u8,
+
+    config: S3FifoConfig,
 }
 
 impl<K, V> S3Fifo<K, V>
@@ -215,9 +220,18 @@ where
     where
         Self: Sized,
     {
+        assert!(
+            config.small_queue_capacity_ratio > 0.0 && config.small_queue_capacity_ratio < 1.0,
+            "small_queue_capacity_ratio must be in (0, 1), given: {}",
+            config.small_queue_capacity_ratio
+        );
+
+        let config = config.clone();
+
         let ghost_queue_capacity = (capacity as f64 * config.ghost_queue_capacity_ratio) as usize;
         let ghost_queue = GhostQueue::new(ghost_queue_capacity);
         let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
+
         Self {
             ghost_queue,
             small_queue: LinkedList::new(Adapter::new()),
@@ -226,14 +240,27 @@ where
             small_weight: 0,
             main_weight: 0,
             small_to_main_freq_threshold: config.small_to_main_freq_threshold.min(S3FifoState::MAX_FREQUENCY),
+            config,
         }
     }
 
-    fn update(&mut self, capacity: usize, config: &Self::Config) {
-        let ghost_queue_capacity = (capacity as f64 * config.ghost_queue_capacity_ratio) as usize;
-        let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
+    fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
+        if let Some(config) = config {
+            if config.small_queue_capacity_ratio > 0.0 && config.small_queue_capacity_ratio < 1.0 {
+                return Err(Error::ConfigError(format!(
+                    "small_queue_capacity_ratio must be in (0, 1), given: {}",
+                    config.small_queue_capacity_ratio
+                )));
+            }
+            self.config = config.clone();
+        }
+
+        let ghost_queue_capacity = (capacity as f64 * self.config.ghost_queue_capacity_ratio) as usize;
+        let small_weight_capacity = (capacity as f64 * self.config.small_queue_capacity_ratio) as usize;
         self.ghost_queue.update(ghost_queue_capacity);
         self.small_weight_capacity = small_weight_capacity;
+
+        Ok(())
     }
 
     fn push(&mut self, record: Arc<Record<Self>>) {

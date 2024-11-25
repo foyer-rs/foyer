@@ -16,6 +16,7 @@ pub use ahash::RandomState;
 
 pub use crate::{
     cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
+    error::{Error, Result},
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
     raw::{FetchMark, FetchState, Weighter},
     record::{CacheHint, Record},

@@ -22,6 +22,7 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
+ahash = "0.8"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
 crossbeam = "0.8"
@@ -37,6 +38,7 @@ test-log = { version = "0.2", default-features = false, features = [
     "trace",
     "color",
 ] }
+thiserror = "2"
 tokio = { package = "madsim-tokio", version = "0.2", features = [
     "rt",
     "rt-multi-thread",

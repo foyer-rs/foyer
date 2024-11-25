@@ -36,6 +36,7 @@
 //! state requires operation on the `UnsafeCell`.
 
 mod cache;
+mod error;
 mod eviction;
 mod indexer;
 mod raw;

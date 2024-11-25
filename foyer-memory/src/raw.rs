@@ -43,6 +43,7 @@ use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
+    error::{Error, Result},
     eviction::{Eviction, Op},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     record::{Data, Record},
@@ -93,22 +94,10 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    fn emplace(
-        &mut self,
-        data: Data<E>,
-        ephemeral: bool,
-        garbages: &mut Vec<(Event, Arc<Record<E>>)>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
-    ) -> Arc<Record<E>> {
-        std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
-
-        let weight = data.weight;
-        let old_usage = self.usage;
-
-        let record = Arc::new(Record::new(data));
-
+    /// Evict entries to fit the target usage.
+    fn evict(&mut self, target: usize, garbages: &mut Vec<(Event, Arc<Record<E>>)>) {
         // Evict overflow records.
-        while self.usage + weight > self.capacity {
+        while self.usage > target {
             let evicted = match self.eviction.pop() {
                 Some(evicted) => evicted,
                 None => break,
@@ -125,6 +114,24 @@ where
 
             garbages.push((Event::Evict, evicted));
         }
+    }
+
+    fn emplace(
+        &mut self,
+        data: Data<E>,
+        ephemeral: bool,
+        garbages: &mut Vec<(Event, Arc<Record<E>>)>,
+        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
+    ) -> Arc<Record<E>> {
+        std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
+
+        let weight = data.weight;
+        let old_usage = self.usage;
+
+        let record = Arc::new(Record::new(data));
+
+        // Evict overflow records.
+        self.evict(self.capacity.saturating_sub(weight), garbages);
 
         // Insert new record
         if let Some(old) = self.indexer.insert(record.clone()) {
@@ -452,6 +459,46 @@ where
         };
 
         Self { inner: Arc::new(inner) }
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::resize")]
+    pub fn resize(&self, capacity: usize) -> Result<()> {
+        let shards = self.inner.shards.len();
+        let shard_capacity = capacity / shards;
+
+        let handles = (0..shards)
+            .map(|i| {
+                let inner = self.inner.clone();
+                std::thread::spawn(move || {
+                    let mut garbages = vec![];
+                    let res = inner.shards[i].write().with(|mut shard| {
+                        shard.eviction.update(shard_capacity, None).inspect(|_| {
+                            shard.capacity = shard_capacity;
+                            shard.evict(shard_capacity, &mut garbages)
+                        })
+                    });
+                    // Deallocate data out of the lock critical section.
+                    if let Some(listener) = inner.event_listener.as_ref() {
+                        for (event, record) in garbages {
+                            listener.on_leave(event, record.key(), record.value());
+                        }
+                    }
+                    res
+                })
+            })
+            .collect_vec();
+
+        let errs = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .filter(|res| res.is_err())
+            .map(|res| res.unwrap_err())
+            .collect_vec();
+        if !errs.is_empty() {
+            return Err(Error::multiple(errs));
+        }
+
+        Ok(())
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
@@ -936,6 +983,7 @@ where
 #[cfg(test)]
 mod tests {
 
+    use foyer_common::hasher::ModRandomState;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
 
     use super::*;
@@ -948,7 +996,15 @@ mod tests {
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
 
-    fn fifo_cache_for_test() -> RawCache<Fifo<u64, u64>> {
+    #[test]
+    fn test_send_sync_static() {
+        is_send_sync_static::<RawCache<Fifo<(), ()>>>();
+        is_send_sync_static::<RawCache<S3Fifo<(), ()>>>();
+        is_send_sync_static::<RawCache<Lfu<(), ()>>>();
+        is_send_sync_static::<RawCache<Lru<(), ()>>>();
+    }
+
+    fn fifo_cache_for_test() -> RawCache<Fifo<u64, u64>, ModRandomState, HashTableIndexer<Fifo<u64, u64>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -960,12 +1016,40 @@ mod tests {
         })
     }
 
-    #[test]
-    fn test_send_sync_static() {
-        is_send_sync_static::<RawCache<Fifo<(), ()>>>();
-        is_send_sync_static::<RawCache<S3Fifo<(), ()>>>();
-        is_send_sync_static::<RawCache<Lfu<(), ()>>>();
-        is_send_sync_static::<RawCache<Lru<(), ()>>>();
+    fn s3fifo_cache_for_test() -> RawCache<S3Fifo<u64, u64>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64>>> {
+        RawCache::new(RawCacheConfig {
+            capacity: 256,
+            shards: 4,
+            eviction_config: S3FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        })
+    }
+
+    fn lru_cache_for_test() -> RawCache<Lru<u64, u64>, ModRandomState, HashTableIndexer<Lru<u64, u64>>> {
+        RawCache::new(RawCacheConfig {
+            capacity: 256,
+            shards: 4,
+            eviction_config: LruConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        })
+    }
+
+    fn lfu_cache_for_test() -> RawCache<Lfu<u64, u64>, ModRandomState, HashTableIndexer<Lfu<u64, u64>>> {
+        RawCache::new(RawCacheConfig {
+            capacity: 256,
+            shards: 4,
+            eviction_config: LfuConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        })
     }
 
     #[test]
@@ -984,6 +1068,47 @@ mod tests {
         assert_eq!(fifo.usage(), 1);
         drop(e2b);
         assert_eq!(fifo.usage(), 1);
+    }
+
+    fn test_resize<E>(cache: &RawCache<E, ModRandomState, HashTableIndexer<E>>)
+    where
+        E: Eviction<Key = u64, Value = u64>,
+    {
+        let capacity = cache.capacity();
+        for i in 0..capacity as u64 * 2 {
+            cache.insert(i, i);
+        }
+        assert_eq!(cache.usage(), capacity);
+        cache.resize(capacity / 2).unwrap();
+        assert_eq!(cache.usage(), capacity / 2);
+        for i in 0..capacity as u64 * 2 {
+            cache.insert(i, i);
+        }
+        assert_eq!(cache.usage(), capacity / 2);
+    }
+
+    #[test]
+    fn test_fifo_cache_resize() {
+        let cache = fifo_cache_for_test();
+        test_resize(&cache);
+    }
+
+    #[test]
+    fn test_s3fifo_cache_resize() {
+        let cache = s3fifo_cache_for_test();
+        test_resize(&cache);
+    }
+
+    #[test]
+    fn test_lru_cache_resize() {
+        let cache = lru_cache_for_test();
+        test_resize(&cache);
+    }
+
+    #[test]
+    fn test_lfu_cache_resize() {
+        let cache = lfu_cache_for_test();
+        test_resize(&cache);
     }
 
     mod fuzzy {
