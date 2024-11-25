@@ -514,7 +514,7 @@ where
     V: Value,
     S: HashBuilder,
 {
-    /// Update capacity.
+    /// Update capacity and evict overflowed entries.
     #[fastrace::trace(name = "foyer::memory::cache::resize")]
     pub fn resize(&self, capacity: usize) -> Result<()> {
         match self {
