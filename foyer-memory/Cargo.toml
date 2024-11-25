@@ -13,7 +13,7 @@ readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ahash = "0.8"
+ahash = { workspace = true }
 bitflags = "2"
 cmsketch = "0.2.1"
 equivalent = { workspace = true }
@@ -27,6 +27,7 @@ parking_lot = { workspace = true }
 paste = "1"
 pin-project = "1"
 serde = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
 

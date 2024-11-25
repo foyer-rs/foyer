@@ -19,7 +19,10 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::record::{CacheHint, Record};
+use crate::{
+    error::Result,
+    record::{CacheHint, Record},
+};
 
 /// Fifo eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -77,7 +80,9 @@ where
         }
     }
 
-    fn update(&mut self, _: usize, _: &Self::Config) {}
+    fn update(&mut self, _: usize, _: Option<&Self::Config>) -> Result<()> {
+        Ok(())
+    }
 
     fn push(&mut self, record: Arc<Record<Self>>) {
         record.set_in_eviction(true);

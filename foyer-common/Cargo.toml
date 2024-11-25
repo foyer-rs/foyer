@@ -13,6 +13,7 @@ readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ahash = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 fastrace = { workspace = true }

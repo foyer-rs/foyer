@@ -281,7 +281,7 @@ mod tests {
     use std::path::Path;
 
     use bytesize::ByteSize;
-    use foyer_common::metrics::model::Metrics;
+    use foyer_common::{hasher::ModRandomState, metrics::model::Metrics};
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use tokio::runtime::Handle;
 
@@ -292,14 +292,13 @@ mod tests {
             Dev,
         },
         serde::EntrySerializer,
-        test_utils::ModHasher,
         DevExt, DirectFsDeviceOptions,
     };
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
         CacheBuilder::new(10)
             .with_shards(1)
-            .with_hash_builder(ModHasher::default())
+            .with_hash_builder(ModRandomState::default())
             .with_eviction_config(FifoConfig::default())
             .build()
     }
@@ -320,7 +319,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, ModHasher> {
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, ModRandomState> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericSmallStorageConfig {
@@ -339,14 +338,17 @@ mod tests {
         GenericSmallStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>, ModHasher>, entry: &CacheEntry<u64, Vec<u8>, ModHasher>) {
+    fn enqueue(
+        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
+        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
+    ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
         store.enqueue(entry.clone(), estimated_size);
     }
 
     async fn assert_some(
-        store: &GenericSmallStorage<u64, Vec<u8>, ModHasher>,
-        entry: &CacheEntry<u64, Vec<u8>, ModHasher>,
+        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
+        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
     ) {
         assert_eq!(
             store.load(entry.hash()).await.unwrap().unwrap(),
@@ -355,8 +357,8 @@ mod tests {
     }
 
     async fn assert_none(
-        store: &GenericSmallStorage<u64, Vec<u8>, ModHasher>,
-        entry: &CacheEntry<u64, Vec<u8>, ModHasher>,
+        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
+        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
     ) {
         assert!(store.load(entry.hash()).await.unwrap().is_none());
     }

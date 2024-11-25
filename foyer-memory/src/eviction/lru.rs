@@ -22,7 +22,10 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::record::{CacheHint, Record};
+use crate::{
+    error::{Error, Result},
+    record::{CacheHint, Record},
+};
 
 /// Lru eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +101,8 @@ where
 
     high_priority_weight: usize,
     high_priority_weight_capacity: usize,
+
+    config: LruConfig,
 }
 
 impl<K, V> Lru<K, V>
@@ -141,6 +146,8 @@ where
             config.high_priority_pool_ratio
         );
 
+        let config = config.clone();
+
         let high_priority_weight_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
 
         Self {
@@ -149,22 +156,29 @@ where
             pin_list: LinkedList::new(Adapter::new()),
             high_priority_weight: 0,
             high_priority_weight_capacity,
+            config,
         }
     }
 
-    fn update(&mut self, capacity: usize, config: &Self::Config) {
-        if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
-            tracing::error!(
-                "[lru]: high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
-                config.high_priority_pool_ratio
-            );
-            return;
+    fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
+        if let Some(config) = config {
+            if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
+                return Err(Error::ConfigError(
+                    format!(
+                        "[lru]: high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
+                        config.high_priority_pool_ratio
+                    )
+                ));
+            }
+            self.config = config.clone();
         }
 
-        let high_priority_weight_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
+        let high_priority_weight_capacity = (capacity as f64 * self.config.high_priority_pool_ratio) as usize;
         self.high_priority_weight_capacity = high_priority_weight_capacity;
 
         self.may_overflow_high_priority_pool();
+
+        Ok(())
     }
 
     fn push(&mut self, record: Arc<Record<Self>>) {

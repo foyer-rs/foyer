@@ -36,6 +36,7 @@ use crate::{
     },
     raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
+    Result,
 };
 
 pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
@@ -513,6 +514,17 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Update capacity.
+    #[fastrace::trace(name = "foyer::memory::cache::resize")]
+    pub fn resize(&self, capacity: usize) -> Result<()> {
+        match self {
+            Cache::Fifo(cache) => cache.resize(capacity),
+            Cache::S3Fifo(cache) => cache.resize(capacity),
+            Cache::Lru(cache) => cache.resize(capacity),
+            Cache::Lfu(cache) => cache.resize(capacity),
+        }
+    }
+
     /// Insert cache entry to the in-memory cache.
     #[fastrace::trace(name = "foyer::memory::cache::insert")]
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S> {

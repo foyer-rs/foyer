@@ -17,7 +17,10 @@ use std::sync::Arc;
 use foyer_common::code::{Key, Value};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::record::{CacheHint, Record};
+use crate::{
+    error::Result,
+    record::{CacheHint, Record},
+};
 
 pub trait Hint: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
 impl<T> Hint for T where T: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
@@ -102,7 +105,7 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     fn new(capacity: usize, config: &Self::Config) -> Self;
 
     /// Update the arguments of the ache eviction algorithm instance.
-    fn update(&mut self, capacity: usize, config: &Self::Config);
+    fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()>;
 
     /// Push a record into the cache eviction algorithm instance.
     ///

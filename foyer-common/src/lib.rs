@@ -30,6 +30,8 @@ pub mod countdown;
 pub mod event;
 /// Future extensions.
 pub mod future;
+/// Provisioned hashers.
+pub mod hasher;
 /// The shared metrics for foyer.
 pub mod metrics;
 /// Extensions for [`std::option::Option`].

@@ -23,7 +23,10 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::record::{CacheHint, Record};
+use crate::{
+    error::{Error, Result},
+    record::{CacheHint, Record},
+};
 
 /// w-TinyLFU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +138,8 @@ where
 
     step: usize,
     decay: usize,
+
+    config: LfuConfig,
 }
 
 impl<K, V> Lfu<K, V>
@@ -203,6 +208,8 @@ where
             config.window_capacity_ratio + config.protected_capacity_ratio
         );
 
+        let config = config.clone();
+
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
         let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
@@ -220,38 +227,48 @@ where
             frequencies,
             step: 0,
             decay,
+            config,
         }
     }
 
-    fn update(&mut self, capacity: usize, config: &Self::Config) {
-        if config.window_capacity_ratio <= 0.0 || config.window_capacity_ratio >= 1.0 {
-            tracing::error!(
-                "window_capacity_ratio must be in (0, 1), given: {}, new config ignored",
-                config.window_capacity_ratio
-            );
-        }
+    fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
+        if let Some(config) = config {
+            let mut msgs = vec![];
+            if config.window_capacity_ratio <= 0.0 || config.window_capacity_ratio >= 1.0 {
+                msgs.push(format!(
+                    "window_capacity_ratio must be in (0, 1), given: {}, new config ignored",
+                    config.window_capacity_ratio
+                ));
+            }
+            if config.protected_capacity_ratio <= 0.0 || config.protected_capacity_ratio >= 1.0 {
+                msgs.push(format!(
+                    "protected_capacity_ratio must be in (0, 1), given: {}, new config ignored",
+                    config.protected_capacity_ratio
+                ));
+            }
+            if config.window_capacity_ratio + config.protected_capacity_ratio >= 1.0 {
+                msgs.push(format!(
+                    "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}, new config ignored",
+                    config.window_capacity_ratio + config.protected_capacity_ratio
+                ));
+            }
 
-        if config.protected_capacity_ratio <= 0.0 || config.protected_capacity_ratio >= 1.0 {
-            tracing::error!(
-                "protected_capacity_ratio must be in (0, 1), given: {}, new config ignored",
-                config.protected_capacity_ratio
-            );
-        }
+            if !msgs.is_empty() {
+                return Err(Error::ConfigError(msgs.join(" | ")));
+            }
 
-        if config.window_capacity_ratio + config.protected_capacity_ratio >= 1.0 {
-            tracing::error!(
-                "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}, new config ignored",
-                config.window_capacity_ratio + config.protected_capacity_ratio
-            )
+            self.config = config.clone();
         }
 
         // TODO(MrCroxx): Raise a warn log the cmsketch args updates is not supported yet if it is modified.
 
-        let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
-        let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
+        let window_weight_capacity = (capacity as f64 * self.config.window_capacity_ratio) as usize;
+        let protected_weight_capacity = (capacity as f64 * self.config.protected_capacity_ratio) as usize;
 
         self.window_weight_capacity = window_weight_capacity;
         self.protected_weight_capacity = protected_weight_capacity;
+
+        Ok(())
     }
 
     /// Push a new record to `window`.
