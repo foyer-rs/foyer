@@ -14,9 +14,18 @@
 
 /// Some phantom metrics components that do nothing.
 pub mod noop;
-/// OpenTelemetry metrics components.
-#[cfg(feature = "opentelemetry")]
-pub mod opentelemetry;
+
 /// Prometheus metrics components.
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
+
+#[cfg(feature = "opentelemetry")]
+pub use opentelemetry_0_27 as opentelemetry;
+
+/// OpenTelemetry metrics components.
+#[cfg(feature = "opentelemetry_0_27")]
+pub mod opentelemetry_0_27;
+
+/// OpenTelemetry metrics components.
+#[cfg(feature = "opentelemetry_0_26")]
+pub mod opentelemetry_0_26;

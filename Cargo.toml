@@ -47,7 +47,8 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "fs",
 ] }
 prometheus = "0.13"
-opentelemetry = "0.27"
+opentelemetry_0_27 = { package = "opentelemetry", version = "0.27" }
+opentelemetry_0_26 = { package = "opentelemetry", version = "0.26" }
 
 # foyer components
 foyer-common = { version = "0.13.0-dev", path = "foyer-common" }

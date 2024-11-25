@@ -366,11 +366,23 @@ mod tests {
         case(&PrometheusMetricsRegistry::new(prometheus::Registry::new()));
     }
 
-    #[cfg(feature = "opentelemetry")]
+    #[cfg(feature = "opentelemetry_0_27")]
     #[test]
-    fn test_metrics_opentelemetry() {
-        use crate::metrics::registry::opentelemetry::OpenTelemetryMetricsRegistry;
+    fn test_metrics_opentelemetry_0_27() {
+        use crate::metrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 
-        case(&OpenTelemetryMetricsRegistry::new(opentelemetry::global::meter("test")));
+        case(&OpenTelemetryMetricsRegistry::new(opentelemetry_0_27::global::meter(
+            "test",
+        )));
+    }
+
+    #[cfg(feature = "opentelemetry_0_26")]
+    #[test]
+    fn test_metrics_opentelemetry_0_26() {
+        use crate::metrics::registry::opentelemetry_0_26::OpenTelemetryMetricsRegistry;
+
+        case(&OpenTelemetryMetricsRegistry::new(opentelemetry_0_26::global::meter(
+            "test",
+        )));
     }
 }

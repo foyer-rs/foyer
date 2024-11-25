@@ -19,7 +19,8 @@ fastrace = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }
 itertools = { workspace = true }
-opentelemetry = { workspace = true, optional = true }
+opentelemetry_0_26 = { workspace = true, optional = true }
+opentelemetry_0_27 = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project = "1"
 prometheus = { workspace = true, optional = true }
@@ -34,7 +35,9 @@ rand = "0.8.5"
 strict_assertions = []
 tracing = ["fastrace/enable"]
 prometheus = ["dep:prometheus"]
-opentelemetry = ["dep:opentelemetry"]
+opentelemetry = ["opentelemetry_0_27"]
+opentelemetry_0_27 = ["dep:opentelemetry_0_27"]
+opentelemetry_0_26 = ["dep:opentelemetry_0_26"]
 
 [lints]
 workspace = true

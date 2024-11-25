@@ -19,6 +19,7 @@ use opentelemetry::{
     metrics::{Counter as OtCounter, Gauge as OtGauge, Histogram as OtHistogram, Meter},
     KeyValue,
 };
+use opentelemetry_0_27 as opentelemetry;
 
 use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
