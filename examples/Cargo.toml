@@ -19,9 +19,15 @@ anyhow = "1"
 chrono = "0.4"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
-fastrace-jaeger = { workspace = true, optional = true }
-fastrace-opentelemetry = { workspace = true, optional = true }
-foyer = { workspace = true }
+fastrace-jaeger = { version = "0.7", optional = true }
+fastrace-opentelemetry = { version = "0.7", optional = true }
+foyer = { workspace = true, features = ["prometheus"] }
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = [
+    "server",
+    "http1",
+] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 opentelemetry = { version = "0.26", optional = true }
 opentelemetry-otlp = { version = "0.26", optional = true }
 opentelemetry-semantic-conventions = { version = "0.26", optional = true }
@@ -29,8 +35,10 @@ opentelemetry_sdk = { version = "0.26", features = [
     "rt-tokio",
     "trace",
 ], optional = true }
+prometheus = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
+tracing = { workspace = true }
 
 [features]
 jaeger = ["fastrace-jaeger"]
@@ -65,3 +73,7 @@ path = "tail_based_tracing.rs"
 [[example]]
 name = "equivalent"
 path = "equivalent.rs"
+
+[[example]]
+name = "export_metrics_prometheus_hyper"
+path = "export_metrics_prometheus_hyper.rs"

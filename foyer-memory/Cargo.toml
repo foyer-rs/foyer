@@ -29,7 +29,7 @@ pin-project = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 csv = "1.3.0"

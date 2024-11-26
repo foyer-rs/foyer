@@ -28,8 +28,6 @@ clap = { version = "4", features = ["derive"] }
 crossbeam = "0.8"
 equivalent = "1"
 fastrace = "0.7"
-fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.7"
 hashbrown = "0.14"
 itertools = "0.13"
 parking_lot = { version = "0.12" }
@@ -48,6 +46,7 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
     "signal",
     "fs",
 ] }
+tracing = "0.1"
 prometheus = "0.13"
 opentelemetry_0_27 = { package = "opentelemetry", version = "0.27" }
 opentelemetry_0_26 = { package = "opentelemetry", version = "0.26" }

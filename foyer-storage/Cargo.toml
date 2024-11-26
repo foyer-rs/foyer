@@ -45,7 +45,7 @@ rand = "0.8"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 twox-hash = "1"
 zstd = "0.13"
 

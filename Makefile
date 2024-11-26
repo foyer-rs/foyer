@@ -45,6 +45,7 @@ example:
 	cargo run --features "tracing,jaeger" --example tail_based_tracing
 	cargo run --features "tracing,ot" --example tail_based_tracing
 	cargo run --example equivalent
+	cargo run --example export_metrics_prometheus_hyper
 
 full: check-all test-all example udeps
 
