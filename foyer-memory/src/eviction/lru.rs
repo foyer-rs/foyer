@@ -226,7 +226,12 @@ where
         strict_assert!(state.link.is_linked());
 
         match (state.is_pinned, state.in_high_priority_pool) {
-            (true, _) => unsafe { self.pin_list.remove_from_ptr(Arc::as_ptr(record)) },
+            (true, false) => unsafe { self.pin_list.remove_from_ptr(Arc::as_ptr(record)) },
+            (true, true) => unsafe {
+                self.high_priority_weight -= record.weight();
+                state.in_high_priority_pool = false;
+                self.pin_list.remove_from_ptr(Arc::as_ptr(record))
+            },
             (false, true) => {
                 self.high_priority_weight -= record.weight();
                 state.in_high_priority_pool = false;
@@ -501,10 +506,23 @@ pub mod tests {
         lru.acquire_mutable(&rs[11]);
         assert_ptr_vec_vec_eq(lru.dump(), vec![vec![r(10)], vec![r(1)], vec![r(0), r(11)]]);
 
-        // remove pinned
+        // remove pinned (low priority)
         // pin: [0]
         // 10, [1]
         lru.remove(&rs[11]);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![r(10)], vec![r(1)], vec![r(0)]]);
+
+        // remove pinned (high priority)
+        // step 1:
+        //   pin: [0], [2]
+        //   10, [1]
+        lru.push(r(2));
+        lru.acquire_mutable(&rs[2]);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![r(10)], vec![r(1)], vec![r(0), r(2)]]);
+        // step 2:
+        //   pin: [0]
+        //   10, [1]
+        lru.remove(&rs[2]);
         assert_ptr_vec_vec_eq(lru.dump(), vec![vec![r(10)], vec![r(1)], vec![r(0)]]);
 
         // release removed
