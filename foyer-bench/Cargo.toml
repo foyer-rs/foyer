@@ -18,7 +18,7 @@ bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
-fastrace-jaeger = { workspace = true, optional = true }
+fastrace-jaeger = { version = "0.7", optional = true }
 foyer = { workspace = true, features = ["prometheus"] }
 futures = "0.3"
 hdrhistogram = "7"
@@ -36,7 +36,7 @@ rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.15"
 tokio = { workspace = true, features = ["net"] }
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-opentelemetry = { version = "0.27", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"

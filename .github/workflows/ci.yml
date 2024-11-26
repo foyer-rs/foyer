@@ -195,6 +195,7 @@ jobs:
           cargo llvm-cov --no-report run --features "tracing,jaeger" --example tail_based_tracing
           cargo llvm-cov --no-report run --features "tracing,ot" --example tail_based_tracing
           cargo llvm-cov --no-report run --example equivalent
+          cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
       - name: Run foyer-bench with coverage
         if: runner.os == 'Linux'
         env:
