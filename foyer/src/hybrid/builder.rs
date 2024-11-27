@@ -30,7 +30,7 @@ use foyer_storage::{
 use crate::HybridCache;
 
 /// Hybrid cache builder.
-pub struct HybridCacheBuilder<K, V, M> {
+pub struct HybridCacheBuilder<K, V, M = NoopMetricsRegistry> {
     name: &'static str,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     tracing_options: TracingOptions,
