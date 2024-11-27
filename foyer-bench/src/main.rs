@@ -38,9 +38,9 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, PrometheusMetricsRegistry,
-    RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
+    prometheus::PrometheusMetricsRegistry, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine,
+    FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig,
+    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
     TracingOptions,
 };
 use futures::future::join_all;

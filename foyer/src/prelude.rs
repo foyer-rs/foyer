@@ -13,9 +13,13 @@
 //  limitations under the License.
 
 #[cfg(feature = "opentelemetry")]
-pub use crate::common::metrics::registry::opentelemetry::OpenTelemetryMetricsRegistry;
+pub use crate::common::metrics::registry::opentelemetry;
+#[cfg(feature = "opentelemetry_0_26")]
+pub use crate::common::metrics::registry::opentelemetry_0_26;
+#[cfg(feature = "opentelemetry_0_27")]
+pub use crate::common::metrics::registry::opentelemetry_0_27;
 #[cfg(feature = "prometheus")]
-pub use crate::common::metrics::registry::prometheus::PrometheusMetricsRegistry;
+pub use crate::common::metrics::registry::prometheus;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
