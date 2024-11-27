@@ -15,7 +15,7 @@
 use std::{future::Future, net::SocketAddr, pin::Pin};
 
 use anyhow::Ok;
-use foyer::{Cache, CacheBuilder, PrometheusMetricsRegistry};
+use foyer::{prometheus::PrometheusMetricsRegistry, Cache, CacheBuilder};
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
