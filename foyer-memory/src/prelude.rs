@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@ pub use ahash::RandomState;
 
 pub use crate::{
     cache::{Cache, CacheBuilder, CacheEntry, EvictionConfig, Fetch},
-    context::CacheContext,
-    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
-    generic::{FetchMark, FetchState, Weighter},
+    error::{Error, Result},
+    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
+    raw::{FetchMark, FetchState, Weighter},
+    record::{CacheHint, Record},
 };

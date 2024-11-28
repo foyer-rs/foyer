@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -14,16 +14,9 @@
 
 //! Test utils for the `foyer-storage` crate.
 
-use std::{
-    borrow::Borrow,
-    collections::HashSet,
-    fmt::Debug,
-    hash::Hash,
-    marker::PhantomData,
-    sync::{Arc, OnceLock},
-};
+use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, sync::Arc};
 
-use foyer_common::{code::StorageKey, metrics::Metrics};
+use foyer_common::code::StorageKey;
 use parking_lot::Mutex;
 
 use crate::{
@@ -31,58 +24,46 @@ use crate::{
     statistics::Statistics,
 };
 
-/// A phantom metrics for test.
-static METRICS_FOR_TEST: OnceLock<Metrics> = OnceLock::new();
-
-/// Get a phantom metrics for test.
-pub fn metrics_for_test() -> &'static Metrics {
-    METRICS_FOR_TEST.get_or_init(|| Metrics::new("test"))
-}
-
 /// A picker that only admits key from the given list.
-pub struct BiasedPicker<K, Q> {
-    admits: HashSet<Q>,
-    _marker: PhantomData<K>,
+pub struct BiasedPicker<K> {
+    admits: HashSet<K>,
 }
 
-impl<K, Q> Debug for BiasedPicker<K, Q>
+impl<K> Debug for BiasedPicker<K>
 where
-    Q: Debug,
+    K: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BiasedPicker").field("admits", &self.admits).finish()
     }
 }
 
-impl<K, Q> BiasedPicker<K, Q> {
+impl<K> BiasedPicker<K> {
     /// Create a biased picker with the given admit list.
-    pub fn new(admits: impl IntoIterator<Item = Q>) -> Self
+    pub fn new(admits: impl IntoIterator<Item = K>) -> Self
     where
-        Q: Hash + Eq,
+        K: Hash + Eq,
     {
         Self {
             admits: admits.into_iter().collect(),
-            _marker: PhantomData,
         }
     }
 }
 
-impl<K, Q> AdmissionPicker for BiasedPicker<K, Q>
+impl<K> AdmissionPicker for BiasedPicker<K>
 where
-    K: Send + Sync + 'static + Borrow<Q>,
-    Q: Hash + Eq + Send + Sync + 'static + Debug,
+    K: Send + Sync + 'static + Hash + Eq + Debug,
 {
     type Key = K;
 
     fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
-        self.admits.contains(key.borrow())
+        self.admits.contains(key)
     }
 }
 
-impl<K, Q> ReinsertionPicker for BiasedPicker<K, Q>
+impl<K> ReinsertionPicker for BiasedPicker<K>
 where
-    K: Send + Sync + 'static + Borrow<Q>,
-    Q: Hash + Eq + Send + Sync + 'static + Debug,
+    K: Send + Sync + 'static + Hash + Eq + Debug,
 {
     type Key = K;
 

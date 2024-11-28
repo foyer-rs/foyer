@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Instant,
@@ -28,11 +28,11 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use foyer_memory::CacheEntry;
 use futures::future::{join_all, try_join_all};
-use tokio::{runtime::Handle, sync::Semaphore};
+use tokio::sync::Semaphore;
 
 use super::{
     batch::InvalidStats,
@@ -52,10 +52,10 @@ use crate::{
     },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
-    serde::{EntryDeserializer, KvInfo},
+    runtime::Runtime,
+    serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
-    IoBytes,
 };
 
 pub struct GenericLargeStorageConfig<K, V, S>
@@ -64,7 +64,6 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub name: String,
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
     pub compression: Compression,
@@ -74,15 +73,14 @@ where
     pub recover_concurrency: usize,
     pub flushers: usize,
     pub reclaimers: usize,
-    pub buffer_threshold: usize,
+    pub buffer_pool_size: usize,
+    pub submit_queue_size_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
-    pub read_runtime_handle: Handle,
-    pub write_runtime_handle: Handle,
-    pub user_runtime_handle: Handle,
+    pub runtime: Runtime,
     pub marker: PhantomData<(V, S)>,
 }
 
@@ -94,7 +92,6 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
-            .field("name", &self.name)
             .field("device", &self.device)
             .field("compression", &self.compression)
             .field("flush", &self.flush)
@@ -103,14 +100,14 @@ where
             .field("recover_concurrency", &self.recover_concurrency)
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
-            .field("buffer_threshold", &self.buffer_threshold)
+            .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
             .field("statistics", &self.statistics)
-            .field("read_runtime_handle", &self.read_runtime_handle)
-            .field("write_runtime_handle", &self.write_runtime_handle)
+            .field("runtime", &self.runtime)
             .finish()
     }
 }
@@ -148,15 +145,16 @@ where
     flushers: Vec<Flusher<K, V, S>>,
     reclaimers: Vec<Reclaimer>,
 
+    submit_queue_size: Arc<AtomicUsize>,
+    submit_queue_size_threshold: usize,
+
     statistics: Arc<Statistics>,
 
     flush: bool,
 
     sequence: AtomicSequence,
 
-    _read_runtime_handle: Handle,
-    write_runtime_handle: Handle,
-    _user_runtime_handle: Handle,
+    runtime: Runtime,
 
     active: AtomicBool,
 
@@ -183,6 +181,14 @@ where
     S: HashBuilder + Debug,
 {
     async fn open(mut config: GenericLargeStorageConfig<K, V, S>) -> Result<Self> {
+        if config.flushers + config.clean_region_threshold > config.device.regions() / 2 {
+            tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
+                flushers = config.flushers,
+                clean_region_threshold = config.clean_region_threshold,
+                regions = config.device.regions()
+            );
+        }
+
         let stats = config.statistics.clone();
 
         let device = config.device.clone();
@@ -191,13 +197,14 @@ where
         let mut tombstones = vec![];
         let tombstone_log = match &config.tombstone_log_config {
             None => None,
-            Some(config) => {
+            Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &config.path,
+                    &tombstone_log_config.path,
                     device.clone(),
-                    config.flush,
+                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
+                    config.runtime.clone(),
                 )
                 .await?;
                 Some(log)
@@ -207,7 +214,7 @@ where
         let indexer = Indexer::new(config.indexer_shards);
         let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         for picker in eviction_pickers.iter_mut() {
-            picker.init(device.regions(), device.region_size());
+            picker.init(0..device.regions() as RegionId, device.region_size());
         }
         let reclaim_semaphore = Arc::new(Semaphore::new(0));
         let region_manager = RegionManager::new(
@@ -217,6 +224,7 @@ where
             metrics.clone(),
         );
         let sequence = AtomicSequence::default();
+        let submit_queue_size = Arc::<AtomicUsize>::default();
 
         RecoverRunner::run(
             &config,
@@ -226,7 +234,7 @@ where
             &region_manager,
             &tombstones,
             metrics.clone(),
-            config.user_runtime_handle.clone(),
+            config.runtime.clone(),
         )
         .await?;
 
@@ -236,12 +244,12 @@ where
                 indexer.clone(),
                 region_manager.clone(),
                 device.clone(),
+                submit_queue_size.clone(),
                 tombstone_log.clone(),
                 stats.clone(),
                 metrics.clone(),
-                config.write_runtime_handle.clone(),
+                &config.runtime,
             )
-            .await
         }))
         .await?;
 
@@ -255,9 +263,8 @@ where
                 stats.clone(),
                 config.flush,
                 metrics.clone(),
-                config.write_runtime_handle.clone(),
+                &config.runtime,
             )
-            .await
         }))
         .await;
 
@@ -268,12 +275,12 @@ where
                 region_manager,
                 flushers,
                 reclaimers,
+                submit_queue_size,
+                submit_queue_size_threshold: config.submit_queue_size_threshold,
                 statistics: stats,
                 flush: config.flush,
                 sequence,
-                _read_runtime_handle: config.read_runtime_handle,
-                write_runtime_handle: config.write_runtime_handle,
-                _user_runtime_handle: config.user_runtime_handle,
+                runtime: config.runtime,
                 active: AtomicBool::new(true),
                 metrics,
             }),
@@ -296,17 +303,26 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo) {
+    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
         }
 
+        if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
+            tracing::warn!(
+                "[lodc] {} {}",
+                "submit queue overflow, new entry ignored.",
+                "Hint: set an appropriate rate limiter as the admission picker or scale out flushers."
+            );
+            return;
+        }
+
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             entry,
-            buffer,
-            info,
+            estimated_size,
             sequence,
         });
     }
@@ -323,8 +339,8 @@ where
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
             };
@@ -344,8 +360,8 @@ where
                 | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
                     tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
                     indexer.remove(hash);
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
@@ -363,15 +379,15 @@ where
                 Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
                     tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
                     indexer.remove(hash);
-                    metrics.storage_miss.increment(1);
-                    metrics.storage_miss_duration.record(now.elapsed());
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
             };
 
-            metrics.storage_hit.increment(1);
-            metrics.storage_hit_duration.record(now.elapsed());
+            metrics.storage_hit.increase(1);
+            metrics.storage_hit_duration.record(now.elapsed().as_secs_f64());
 
             Ok(Some((k, v)))
         }
@@ -392,7 +408,7 @@ where
         });
 
         let this = self.clone();
-        self.inner.write_runtime_handle.spawn(async move {
+        self.inner.runtime.write().spawn(async move {
             let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
             this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
                 tombstone: Tombstone { hash, sequence },
@@ -400,8 +416,11 @@ where
             });
         });
 
-        self.inner.metrics.storage_delete.increment(1);
-        self.inner.metrics.storage_miss_duration.record(now.elapsed());
+        self.inner.metrics.storage_delete.increase(1);
+        self.inner
+            .metrics
+            .storage_miss_duration
+            .record(now.elapsed().as_secs_f64());
     }
 
     fn may_contains(&self, hash: u64) -> bool {
@@ -462,8 +481,8 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, buffer: IoBytes, info: KvInfo) {
-        self.enqueue(entry, buffer, info)
+    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+        self.enqueue(entry, estimated_size)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
@@ -497,39 +516,41 @@ mod tests {
     use std::{fs::File, path::Path};
 
     use ahash::RandomState;
+    use bytesize::ByteSize;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig};
     use itertools::Itertools;
+    use tokio::runtime::Handle;
 
     use super::*;
     use crate::{
-        device::{
-            direct_fs::DirectFsDeviceOptions,
-            monitor::{Monitored, MonitoredOptions},
-        },
+        device::monitor::{Monitored, MonitoredConfig},
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
-        test_utils::{metrics_for_test, BiasedPicker},
-        IoBytesMut, TombstoneLogConfigBuilder,
+        test_utils::BiasedPicker,
+        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
 
     fn cache_for_test() -> Cache<u64, Vec<u8>> {
         CacheBuilder::new(10)
+            .with_shards(1)
             .with_eviction_config(FifoConfig::default())
             .build()
     }
 
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
-        Monitored::open(MonitoredOptions {
-            options: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            }
-            .into(),
-            metrics: Arc::new(Metrics::new("test")),
-        })
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredConfig {
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
+                metrics: Arc::new(Metrics::noop()),
+            },
+            runtime,
+        )
         .await
         .unwrap()
     }
@@ -546,7 +567,6 @@ mod tests {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
-            name: "test".to_string(),
             device,
             regions,
             compression: Compression::None,
@@ -560,11 +580,10 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
             tombstone_log_config: None,
-            buffer_threshold: 16 * 1024 * 1024,
+            buffer_pool_size: 16 * 1024 * 1024,
+            submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
-            read_runtime_handle: Handle::current(),
-            write_runtime_handle: Handle::current(),
-            user_runtime_handle: Handle::current(),
+            runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
@@ -577,7 +596,6 @@ mod tests {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
-            name: "test".to_string(),
             device,
             regions,
             compression: Compression::None,
@@ -591,28 +609,18 @@ mod tests {
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
-            buffer_threshold: 16 * 1024 * 1024,
+            buffer_pool_size: 16 * 1024 * 1024,
+            submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
-            read_runtime_handle: Handle::current(),
-            write_runtime_handle: Handle::current(),
-            user_runtime_handle: Handle::current(),
+            runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
 
     fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
-        let mut buffer = IoBytesMut::new();
-        let info = EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
-            &Compression::None,
-            &mut buffer,
-            metrics_for_test(),
-        )
-        .unwrap();
-        let buffer = buffer.freeze();
-        store.enqueue(entry, buffer, info);
+        let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
+        store.enqueue(entry, estimated_size);
     }
 
     #[test_log::test(tokio::test)]

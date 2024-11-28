@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -11,9 +11,6 @@
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
-
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
 
 //! Shared components and utils for foyer.
 
@@ -33,10 +30,12 @@ pub mod countdown;
 pub mod event;
 /// Future extensions.
 pub mod future;
+/// Provisioned hashers.
+pub mod hasher;
 /// The shared metrics for foyer.
 pub mod metrics;
-/// A concurrent object pool.
-pub mod object_pool;
+/// Extensions for [`std::option::Option`].
+pub mod option;
 /// The range extensions.
 pub mod range;
 /// A rate limiter that returns the wait duration for limitation.
@@ -45,6 +44,8 @@ pub mod rate;
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
+/// A kotlin like functional programming helper.
+pub mod scope;
 /// Tracing related components.
 pub mod tracing;
 /// An async wait group implementation.

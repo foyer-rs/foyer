@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -14,8 +14,11 @@
 
 use std::collections::VecDeque;
 
-use crate::{IoBuffer, IoBytes};
+use foyer_common::bits;
 
+use crate::{device::ALIGN, IoBuffer, IoBytes};
+
+#[derive(Debug)]
 pub enum Buffer {
     IoBuffer(IoBuffer),
     IoBytes(IoBytes),
@@ -33,6 +36,7 @@ impl From<IoBytes> for Buffer {
     }
 }
 
+#[derive(Debug)]
 pub struct IoBufferPool {
     capacity: usize,
     buffer_size: usize,
@@ -41,6 +45,7 @@ pub struct IoBufferPool {
 
 impl IoBufferPool {
     pub fn new(buffer_size: usize, capacity: usize) -> Self {
+        bits::assert_aligned(ALIGN, buffer_size);
         Self {
             capacity,
             buffer_size,

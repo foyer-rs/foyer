@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@ use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
 };
 use futures::future::join_all;
 use itertools::Itertools;
-use tokio::{
-    runtime::Handle,
-    sync::{mpsc, oneshot, Semaphore, SemaphorePermit},
-};
+use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
     device::IO_BUFFER_ALLOCATOR,
@@ -36,6 +33,7 @@ use crate::{
     },
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
+    runtime::Runtime,
     statistics::Statistics,
     IoBytes,
 };
@@ -47,7 +45,7 @@ pub struct Reclaimer {
 
 impl Reclaimer {
     #[expect(clippy::too_many_arguments)]
-    pub async fn open<K, V, S>(
+    pub fn open<K, V, S>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
@@ -56,7 +54,7 @@ impl Reclaimer {
         stats: Arc<Statistics>,
         flush: bool,
         metrics: Arc<Metrics>,
-        runtime: Handle,
+        runtime: &Runtime,
     ) -> Self
     where
         K: StorageKey,
@@ -78,7 +76,7 @@ impl Reclaimer {
             runtime: runtime.clone(),
         };
 
-        let _handle = runtime.spawn(async move { runner.run().await });
+        let _handle = runtime.write().spawn(async move { runner.run().await });
 
         Self { wait_tx }
     }
@@ -116,7 +114,7 @@ where
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
-    runtime: Handle,
+    runtime: Runtime,
 }
 
 impl<K, V, S> ReclaimRunner<K, V, S>
@@ -223,7 +221,7 @@ where
         let unpicked_count = unpicked.len();
 
         let waits = self.flushers.iter().map(|flusher| flusher.wait()).collect_vec();
-        self.runtime.spawn(async move {
+        self.runtime.write().spawn(async move {
             join_all(waits).await;
         });
         self.indexer.remove_batch(&unpicked);

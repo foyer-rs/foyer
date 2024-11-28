@@ -15,7 +15,7 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-07-19
+  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-08-30
   CARGO_TERM_COLOR: always
   CACHE_KEY_SUFFIX: 20240821
 
@@ -122,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust_toolchain: [stable, 1.81.0]
+        rust_toolchain: [stable, 1.82.0]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -164,7 +164,8 @@ jobs:
         run: |
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
-          cargo clippy --all-targets --features mtrace -- -D warnings
+          cargo clippy --all-targets --features tracing -- -D warnings
+          cargo clippy --all-targets --features prometheus,prometheus-client_0_22,opentelemetry_0_26,opentelemetry_0_27 -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -181,7 +182,7 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity"
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,prometheus,prometheus-client_0_22,opentelemetry_0_26,opentelemetry_0_27"
       - name: Run examples with coverage
         env:
           RUST_BACKTRACE: 1
@@ -191,8 +192,10 @@ jobs:
           cargo llvm-cov --no-report run --example hybrid
           cargo llvm-cov --no-report run --example hybrid_full
           cargo llvm-cov --no-report run --example event_listener
-          cargo llvm-cov --no-report run --features "mtrace,jaeger" --example tail_based_tracing
-          cargo llvm-cov --no-report run --features "mtrace,ot" --example tail_based_tracing
+          cargo llvm-cov --no-report run --features "tracing,jaeger" --example tail_based_tracing
+          cargo llvm-cov --no-report run --features "tracing,ot" --example tail_based_tracing
+          cargo llvm-cov --no-report run --example equivalent
+          cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
       - name: Run foyer-bench with coverage
         if: runner.os == 'Linux'
         env:
@@ -200,7 +203,9 @@ jobs:
           CI: true
         run: |
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions,sanity" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -240,7 +245,9 @@ jobs:
         run: |-
           cargo build --all --features deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -278,7 +285,9 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
@@ -326,7 +335,9 @@ jobs:
         run: |-
           cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
@@ -337,43 +348,43 @@ jobs:
         with:
           name: artifacts.lsan.tgz
           path: artifacts.lsan.tgz
-  # deterministic-test:
-  #   name: run deterministic test
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #     - name: Install rust toolchain
-  #       uses: dtolnay/rust-toolchain@master
-  #       with:
-  #         toolchain: ${{ env.RUST_TOOLCHAIN }}
-  #         components: rustfmt, clippy
-  #     - name: Cache Cargo home
-  #       uses: actions/cache@v4
-  #       id: cache
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deterministic-test
-  #     - if: steps.cache.outputs.cache-hit != 'true'
-  #       uses: taiki-e/install-action@nextest
-  #     - name: Run rust clippy check (madsim)
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #         RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
-  #         RUST_LOG: info
-  #         TOKIO_WORKER_THREADS: 1
-  #         CI: true
-  #       run: |-
-  #         cargo clippy --all-targets
-  #     - name: Run nextest (madsim)
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #         RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
-  #         RUST_LOG: info
-  #         TOKIO_WORKER_THREADS: 1
-  #       run: |-
-  #         cargo nextest run --all
+  madsim:
+    name: check build with madsim
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
+          components: rustfmt, clippy
+      - name: Cache Cargo home
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-madsim
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
+      - name: Run rust clippy check (madsim, check only)
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+          RUST_LOG: info
+          TOKIO_WORKER_THREADS: 1
+          CI: true
+        run: |-
+          cargo clippy --all-targets
+      # - name: Run nextest (madsim)
+      #   env:
+      #     RUST_BACKTRACE: 1
+      #     RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+      #     RUST_LOG: info
+      #     TOKIO_WORKER_THREADS: 1
+      #   run: |-
+      #     cargo nextest run --all --features "strict_assertions,sanity"

@@ -1,26 +1,31 @@
 [package]
 name = "foyer-common"
-version = "0.9.2"
-edition = "2021"
-authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "common components for foyer - the hybrid cache for Rust"
-license = "Apache-2.0"
-repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://github.com/foyer-rs/foyer"
-readme = "../README.md"
+description = "common components for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ahash = { workspace = true }
 bytes = "1"
 cfg-if = "1"
-crossbeam = "0.8"
 fastrace = { workspace = true }
 futures = "0.3"
-hashbrown = "0.14"
+hashbrown = { workspace = true }
 itertools = { workspace = true }
-metrics = { workspace = true }
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+opentelemetry_0_26 = { workspace = true, optional = true }
+opentelemetry_0_27 = { workspace = true, optional = true }
+parking_lot = { workspace = true }
 pin-project = "1"
+prometheus = { workspace = true, optional = true }
+prometheus-client_0_22 = { workspace = true, optional = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 
@@ -30,7 +35,13 @@ rand = "0.8.5"
 
 [features]
 strict_assertions = []
-mtrace = ["fastrace/enable"]
+tracing = ["fastrace/enable"]
+prometheus = ["dep:prometheus"]
+prometheus-client = ["prometheus-client_0_22"]
+prometheus-client_0_22 = ["dep:prometheus-client_0_22"]
+opentelemetry = ["opentelemetry_0_27"]
+opentelemetry_0_27 = ["dep:opentelemetry_0_27"]
+opentelemetry_0_26 = ["dep:opentelemetry_0_26"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+[lints]
+workspace = true

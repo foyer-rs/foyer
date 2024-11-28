@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -19,18 +19,18 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
+use foyer_common::{bits, metrics::model::Metrics, strict_assert_eq};
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 
 use crate::{
     device::{
-        direct_file::{DirectFileDevice, DirectFileDeviceOptionsBuilder},
-        monitor::{Monitored, MonitoredOptions},
+        direct_file::DirectFileDevice,
+        monitor::{Monitored, MonitoredConfig},
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    IoBytesMut,
+    DirectFileDeviceOptions, IoBytesMut, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -121,6 +121,7 @@ impl TombstoneLog {
         flush: bool,
         tombstones: &mut Vec<Tombstone>,
         metrics: Arc<Metrics>,
+        runtime: Runtime,
     ) -> Result<Self>
     where
         D: Dev,
@@ -134,13 +135,16 @@ impl TombstoneLog {
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
         let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
 
-        let device = Monitored::open(MonitoredOptions {
-            options: DirectFileDeviceOptionsBuilder::new(path)
-                .with_region_size(align)
-                .with_capacity(capacity)
-                .build(),
-            metrics,
-        })
+        let device = Monitored::open(
+            MonitoredConfig {
+                config: DirectFileDeviceOptions::new(path)
+                    .with_region_size(align)
+                    .with_capacity(capacity)
+                    .into(),
+                metrics,
+            },
+            runtime,
+        )
         .await?;
 
         let tasks = bits::align_up(Self::RECOVER_IO_SIZE, capacity) / Self::RECOVER_IO_SIZE;
@@ -308,17 +312,20 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptionsBuilder};
+    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions};
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {
+        let runtime = Runtime::current();
+
         let dir = tempdir().unwrap();
 
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
         let device = DirectFsDevice::open(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
+            DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(4 * 1024 * 1024)
-                .build(),
+                .into(),
+            runtime.clone(),
         )
         .await
         .unwrap();
@@ -328,7 +335,8 @@ mod tests {
             device.clone(),
             true,
             &mut vec![],
-            Arc::new(Metrics::new("test")),
+            Arc::new(Metrics::noop()),
+            runtime.clone(),
         )
         .await
         .unwrap();
@@ -357,7 +365,8 @@ mod tests {
             device,
             true,
             &mut vec![],
-            Arc::new(Metrics::new("test")),
+            Arc::new(Metrics::noop()),
+            runtime,
         )
         .await
         .unwrap();

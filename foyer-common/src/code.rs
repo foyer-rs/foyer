@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::hash::{BuildHasher, Hash};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Key trait for the in-memory cache.
-pub trait Key: Send + Sync + 'static + Hash + Eq + PartialEq {}
+pub trait Key: Send + Sync + 'static + Hash + Eq {}
 /// Value trait for the in-memory cache.
 pub trait Value: Send + Sync + 'static {}
 

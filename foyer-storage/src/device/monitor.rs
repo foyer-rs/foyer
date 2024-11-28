@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::{bits, metrics::Metrics};
+use foyer_common::{bits, metrics::model::Metrics};
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DevOptions, DirectFileDevice, IoBytes, IoBytesMut};
+use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -44,32 +44,23 @@ pub struct DeviceStats {
 }
 
 #[derive(Clone)]
-pub struct MonitoredOptions<D>
+pub struct MonitoredConfig<D>
 where
     D: Dev,
 {
-    pub options: D::Options,
+    pub config: D::Config,
     pub metrics: Arc<Metrics>,
 }
 
-impl<D> Debug for MonitoredOptions<D>
+impl<D> Debug for MonitoredConfig<D>
 where
     D: Dev,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MonitoredOptions")
-            .field("options", &self.options)
+            .field("options", &self.config)
             .field("metrics", &self.metrics)
             .finish()
-    }
-}
-
-impl<D> DevOptions for MonitoredOptions<D>
-where
-    D: Dev,
-{
-    fn verify(&self) -> Result<()> {
-        self.options.verify()
     }
 }
 
@@ -87,8 +78,8 @@ impl<D> Monitored<D>
 where
     D: Dev,
 {
-    async fn open(options: MonitoredOptions<D>) -> Result<Self> {
-        let device = D::open(options.options).await?;
+    async fn open(options: MonitoredConfig<D>, runtime: Runtime) -> Result<Self> {
+        let device = D::open(options.config, runtime).await?;
         Ok(Self {
             device,
             stats: Arc::default(),
@@ -106,9 +97,11 @@ where
 
         let res = self.device.write(buf, region, offset).await;
 
-        self.metrics.storage_disk_write.increment(1);
-        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_write_duration.record(now.elapsed());
+        self.metrics.storage_disk_write.increase(1);
+        self.metrics.storage_disk_write_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_write_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -123,9 +116,11 @@ where
 
         let res = self.device.read(region, offset, len).await;
 
-        self.metrics.storage_disk_read.increment(1);
-        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_read_duration.record(now.elapsed());
+        self.metrics.storage_disk_read.increase(1);
+        self.metrics.storage_disk_read_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_read_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -138,8 +133,10 @@ where
 
         let res = self.device.flush(region).await;
 
-        self.metrics.storage_disk_flush.increment(1);
-        self.metrics.storage_disk_flush_duration.record(now.elapsed());
+        self.metrics.storage_disk_flush.increase(1);
+        self.metrics
+            .storage_disk_flush_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -149,7 +146,7 @@ impl<D> Dev for Monitored<D>
 where
     D: Dev,
 {
-    type Options = MonitoredOptions<D>;
+    type Config = MonitoredConfig<D>;
 
     fn capacity(&self) -> usize {
         self.device.capacity()
@@ -159,8 +156,8 @@ where
         self.device.region_size()
     }
 
-    async fn open(options: Self::Options) -> Result<Self> {
-        Self::open(options).await
+    async fn open(config: Self::Config, runtime: Runtime) -> Result<Self> {
+        Self::open(config, runtime).await
     }
 
     async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
@@ -187,9 +184,11 @@ impl Monitored<DirectFileDevice> {
 
         let res = self.device.pwrite(buf, offset).await;
 
-        self.metrics.storage_disk_write.increment(1);
-        self.metrics.storage_disk_write_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_write_duration.record(now.elapsed());
+        self.metrics.storage_disk_write.increase(1);
+        self.metrics.storage_disk_write_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_write_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }
@@ -204,9 +203,11 @@ impl Monitored<DirectFileDevice> {
 
         let res = self.device.pread(offset, len).await;
 
-        self.metrics.storage_disk_read.increment(1);
-        self.metrics.storage_disk_read_bytes.increment(bytes as u64);
-        self.metrics.storage_disk_read_duration.record(now.elapsed());
+        self.metrics.storage_disk_read.increase(1);
+        self.metrics.storage_disk_read_bytes.increase(bytes as u64);
+        self.metrics
+            .storage_disk_read_duration
+            .record(now.elapsed().as_secs_f64());
 
         res
     }

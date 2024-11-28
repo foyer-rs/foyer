@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ pub use crate::{
     compress::Compression,
     device::{
         bytes::{IoBuffer, IoBytes, IoBytesMut},
-        direct_file::{DirectFileDevice, DirectFileDeviceOptions, DirectFileDeviceOptionsBuilder},
-        direct_fs::{DirectFsDevice, DirectFsDeviceOptions, DirectFsDeviceOptionsBuilder},
+        direct_file::{DirectFileDevice, DirectFileDeviceOptions},
+        direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
-        Dev, DevExt, DevOptions,
+        Dev, DevConfig, DevExt,
     },
     error::{Error, Result},
     large::{
@@ -30,7 +30,11 @@ pub use crate::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
+    runtime::Runtime,
     statistics::Statistics,
     storage::{either::Order, Storage},
-    store::{CombinedConfig, DeviceConfig, RuntimeConfig, RuntimeHandles, Store, StoreBuilder, TokioRuntimeConfig},
+    store::{
+        DeviceOptions, Engine, LargeEngineOptions, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
+        TokioRuntimeOptions,
+    },
 };

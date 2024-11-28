@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use ahash::RandomState;
+use foyer_common::metrics::model::Metrics;
 use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
-use foyer_storage::{test_utils::Recorder, Compression, DirectFsDeviceOptionsBuilder, StoreBuilder};
+use foyer_storage::{
+    test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
+};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * 1024;
@@ -106,18 +109,21 @@ fn basic(
     path: impl AsRef<Path>,
     recorder: &Arc<Recorder<u64>>,
 ) -> StoreBuilder<u64, Vec<u8>> {
-    StoreBuilder::new(memory.clone())
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(path)
+    // TODO(MrCroxx): Test mixed engine here.
+    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()), Engine::Large)
+        .with_device_options(
+            DirectFsDeviceOptions::new(path)
                 .with_capacity(4 * MB)
-                .with_file_size(MB)
-                .build(),
+                .with_file_size(MB),
         )
-        .with_indexer_shards(4)
         .with_admission_picker(recorder.clone())
-        .with_reinsertion_picker(recorder.clone())
-        .with_recover_concurrency(2)
         .with_flush(true)
+        .with_large_object_disk_cache_options(
+            LargeEngineOptions::new()
+                .with_recover_concurrency(2)
+                .with_indexer_shards(4)
+                .with_reinsertion_picker(recorder.clone()),
+        )
 }
 
 #[test_log::test(tokio::test)]

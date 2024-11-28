@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer::{Cache, CacheBuilder, EventListener, FifoConfig};
+use foyer::{Cache, CacheBuilder, Event, EventListener, FifoConfig};
 
 struct EchoEventListener;
 
@@ -22,11 +22,7 @@ impl EventListener for EchoEventListener {
     type Key = u64;
     type Value = String;
 
-    fn on_memory_release(&self, key: Self::Key, value: Self::Value)
-    where
-        Self::Key: foyer::Key,
-        Self::Value: foyer::Value,
-    {
+    fn on_leave(&self, _reason: Event, key: &Self::Key, value: &Self::Value) {
         println!("Entry [key = {key}] [value = {value}] is released.")
     }
 }
@@ -47,7 +43,7 @@ fn main() {
         .build();
 
     cache.insert(1, "Second".to_string());
-    cache.deposit(2, "First".to_string());
+    cache.insert_ephemeral(2, "First".to_string());
     cache.insert(3, "Third".to_string());
     cache.insert(3, "Forth".to_string());
 }

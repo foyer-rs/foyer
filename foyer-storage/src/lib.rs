@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -15,8 +15,7 @@
 //! A disk cache engine that serves as the disk cache backend of `foyer`.
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![warn(missing_docs)]
-#![warn(clippy::allow_attributes)]
+#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
 
 mod compress;
 mod device;
@@ -26,6 +25,7 @@ mod io_buffer_pool;
 mod large;
 mod picker;
 mod region;
+mod runtime;
 mod serde;
 mod small;
 mod statistics;

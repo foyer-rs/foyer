@@ -12,3 +12,5 @@ perf.data*
 flamegraph.svg
 
 trace.txt
+jeprof.out.*
+*.collapsed

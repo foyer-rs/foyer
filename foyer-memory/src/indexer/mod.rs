@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -12,28 +12,24 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{borrow::Borrow, hash::Hash, ptr::NonNull};
+use std::{hash::Hash, sync::Arc};
 
-use foyer_common::code::Key;
+use equivalent::Equivalent;
 
-use crate::handle::KeyedHandle;
+use crate::{eviction::Eviction, record::Record};
 
-pub trait Indexer: Send + Sync + 'static {
-    type Key: Key;
-    type Handle: KeyedHandle<Key = Self::Key>;
+pub trait Indexer: Send + Sync + 'static + Default {
+    type Eviction: Eviction;
 
-    fn new() -> Self;
-    unsafe fn insert(&mut self, ptr: NonNull<Self::Handle>) -> Option<NonNull<Self::Handle>>;
-    unsafe fn get<Q>(&self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+    fn insert(&mut self, record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>>;
+    fn get<Q>(&self, hash: u64, key: &Q) -> Option<&Arc<Record<Self::Eviction>>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<NonNull<Self::Handle>>
+        Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
+    fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<Self::Eviction>>>
     where
-        Self::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized;
-    unsafe fn drain(&mut self) -> impl Iterator<Item = NonNull<Self::Handle>>;
+        Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
+    fn drain(&mut self) -> impl Iterator<Item = Arc<Record<Self::Eviction>>>;
 }
 
 pub mod hash_table;
-pub mod sanity;
+pub mod sentry;

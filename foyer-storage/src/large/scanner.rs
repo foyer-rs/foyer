@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    metrics::Metrics,
+    metrics::model::Metrics,
     strict_assert,
 };
 
@@ -241,28 +241,30 @@ impl RegionScanner {
 mod tests {
     use std::path::Path;
 
+    use bytesize::ByteSize;
+
     use super::*;
     use crate::{
         device::{
-            monitor::{Monitored, MonitoredOptions},
+            monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice,
         },
         region::RegionStats,
-        DirectFsDeviceOptions,
+        DirectFsDeviceOptions, Runtime,
     };
 
-    const KB: usize = 1024;
-
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
-        Monitored::open(MonitoredOptions {
-            options: DirectFsDeviceOptions {
-                dir: dir.as_ref().into(),
-                capacity: 64 * KB,
-                file_size: 16 * KB,
-            }
-            .into(),
-            metrics: Arc::new(Metrics::new("test")),
-        })
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredConfig {
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
+                metrics: Arc::new(Metrics::noop()),
+            },
+            runtime,
+        )
         .await
         .unwrap()
     }

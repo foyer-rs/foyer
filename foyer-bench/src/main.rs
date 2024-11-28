@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! foyer benchmark tools.
+
 #![warn(clippy::allow_attributes)]
 
 mod analyze;
+mod exporter;
 mod rate;
 mod text;
 
@@ -33,14 +36,16 @@ use std::{
 use analyze::{analyze, monitor, Metrics};
 use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
+use exporter::PrometheusExporter;
 use foyer::{
-    Compression, DirectFileDeviceOptionsBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LfuConfig, LruConfig, RateLimitPicker, RecoverMode, RuntimeConfig,
-    S3FifoConfig, TokioRuntimeConfig, TracingConfig,
+    prometheus::PrometheusMetricsRegistry, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine,
+    FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig,
+    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
+    TracingOptions,
 };
 use futures::future::join_all;
 use itertools::Itertools;
-use metrics_exporter_prometheus::PrometheusBuilder;
+use prometheus::Registry;
 use rand::{
     distributions::Distribution,
     rngs::{OsRng, StdRng},
@@ -59,17 +64,23 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
-#[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir"]))]
-pub struct Args {
+#[command(group = ArgGroup::new("exclusive").required(true).args(&["file", "dir", "no_disk"]))]
+struct Args {
+    /// Run with in-memory cache compatible mode.
+    ///
+    /// One of `no_disk`, `file`, `dir` must be set.
+    #[arg(long)]
+    no_disk: bool,
+
     /// File for disk cache data. Use `DirectFile` as device.
     ///
-    /// Either `file` or `dir` must be set.
+    /// One of `no_disk`, `file`, `dir` must be set.
     #[arg(short, long)]
     file: Option<String>,
 
     /// Directory for disk cache data. Use `DirectFs` as device.
     ///
-    /// Either `file` or `dir` must be set.
+    /// One of `no_disk`, `file`, `dir` must be set.
     #[arg(short, long)]
     dir: Option<String>,
 
@@ -204,6 +215,11 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
 
+    // TODO(MrCroxx): use mixed engine by default.
+    /// Disk cache engine.
+    #[arg(long, default_value_t = Engine::Large)]
+    engine: Engine,
+
     /// Time-series operation distribution.
     ///
     /// Available values: "none", "uniform", "zipf".
@@ -233,21 +249,27 @@ pub struct Args {
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
-    /// Record insert trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_insert_us: usize,
-    /// Record get trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_get_us: usize,
-    /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_obtain_us: usize,
-    /// Record remove trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_remove_us: usize,
-    /// Record fetch trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
-    trace_fetch_us: usize,
+    #[arg(long, default_value_t = ByteSize::kib(16))]
+    set_size: ByteSize,
+
+    #[arg(long, default_value_t = 64)]
+    set_cache_capacity: usize,
+
+    /// Record insert trace threshold. Only effective with "tracing" feature.
+    #[arg(long, default_value = "1s")]
+    trace_insert: humantime::Duration,
+    /// Record get trace threshold. Only effective with "tracing" feature.
+    #[arg(long, default_value = "1s")]
+    trace_get: humantime::Duration,
+    /// Record obtain trace threshold. Only effective with "tracing" feature.
+    #[arg(long, default_value = "1s")]
+    trace_obtain: humantime::Duration,
+    /// Record remove trace threshold. Only effective with "tracing" feature.
+    #[arg(long, default_value = "1s")]
+    trace_remove: humantime::Duration,
+    /// Record fetch trace threshold. Only effective with "tracing" feature.
+    #[arg(long, default_value = "1s")]
+    trace_fetch: humantime::Duration,
 }
 
 #[derive(Debug)]
@@ -339,14 +361,14 @@ fn setup() {
     console_subscriber::init();
 }
 
-#[cfg(feature = "mtrace")]
+#[cfg(feature = "tracing")]
 fn setup() {
     use fastrace::collector::Config;
     let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
-#[cfg(not(any(feature = "tokio-console", feature = "mtrace")))]
+#[cfg(not(any(feature = "tokio-console", feature = "tracing")))]
 fn setup() {
     use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -360,10 +382,10 @@ fn setup() {
         .init();
 }
 
-#[cfg(not(any(feature = "mtrace")))]
+#[cfg(not(any(feature = "tracing")))]
 fn teardown() {}
 
-#[cfg(feature = "mtrace")]
+#[cfg(feature = "tracing")]
 fn teardown() {
     fastrace::flush();
 }
@@ -412,27 +434,26 @@ async fn benchmark(args: Args) {
 
     assert!(args.get_range > 0, "\"--get-range\" value must be greater than 0");
 
-    if args.metrics {
+    let tracing_options = TracingOptions::new()
+        .with_record_hybrid_insert_threshold(args.trace_insert.into())
+        .with_record_hybrid_get_threshold(args.trace_get.into())
+        .with_record_hybrid_obtain_threshold(args.trace_obtain.into())
+        .with_record_hybrid_remove_threshold(args.trace_remove.into())
+        .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
+
+    let builder = HybridCacheBuilder::new().with_tracing_options(tracing_options);
+
+    let builder = if args.metrics {
+        let registry = Registry::new();
         let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
-        PrometheusBuilder::new()
-            .with_http_listener(addr)
-            .set_buckets(&[0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 1.0])
-            .unwrap()
-            .install()
-            .unwrap();
-    }
-
-    let tracing_config = TracingConfig::default();
-    tracing_config.set_record_hybrid_insert_threshold(Duration::from_micros(args.trace_insert_us as _));
-    tracing_config.set_record_hybrid_get_threshold(Duration::from_micros(args.trace_get_us as _));
-    tracing_config.set_record_hybrid_obtain_threshold(Duration::from_micros(args.trace_obtain_us as _));
-    tracing_config.set_record_hybrid_remove_threshold(Duration::from_micros(args.trace_remove_us as _));
-    tracing_config.set_record_hybrid_fetch_threshold(Duration::from_micros(args.trace_fetch_us as _));
-
-    let builder = HybridCacheBuilder::new()
-        .with_tracing_config(tracing_config)
-        .memory(args.mem.as_u64() as _)
-        .with_shards(args.shards);
+        PrometheusExporter::new(registry.clone(), addr).run();
+        builder
+            .with_metrics_registry(PrometheusMetricsRegistry::new(registry))
+            .memory(args.mem.as_u64() as _)
+            .with_shards(args.shards)
+    } else {
+        builder.memory(args.mem.as_u64() as _).with_shards(args.shards)
+    };
 
     let builder = match args.eviction.as_str() {
         "lru" => builder.with_eviction_config(LruConfig::default()),
@@ -448,48 +469,39 @@ async fn benchmark(args: Args) {
 
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
-        .storage();
+        .storage(args.engine);
 
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
-        (Some(file), None) => builder.with_device_config(
-            DirectFileDeviceOptionsBuilder::new(file)
+        (Some(file), None) => builder.with_device_options(
+            DirectFileDeviceOptions::new(file)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _)
-                .build(),
+                .with_region_size(args.region_size.as_u64() as _),
         ),
-        (None, Some(dir)) => builder.with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir)
+        (None, Some(dir)) => builder.with_device_options(
+            DirectFsDeviceOptions::new(dir)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _)
-                .build(),
+                .with_file_size(args.region_size.as_u64() as _),
         ),
+        (None, None) => builder,
         _ => unreachable!(),
     };
 
     builder = builder
         .with_flush(args.flush)
-        .with_indexer_shards(args.shards)
         .with_recover_mode(args.recover_mode)
-        .with_recover_concurrency(args.recover_concurrency)
-        .with_flushers(args.flushers)
-        .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![
-            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-            Box::<FifoPicker>::default(),
-        ])
         .with_compression(args.compression)
-        .with_runtime_config(match args.runtime.as_str() {
-            "disabled" => RuntimeConfig::Disabled,
-            "unified" => RuntimeConfig::Unified(TokioRuntimeConfig {
+        .with_runtime_options(match args.runtime.as_str() {
+            "disabled" => RuntimeOptions::Disabled,
+            "unified" => RuntimeOptions::Unified(TokioRuntimeOptions {
                 worker_threads: args.runtime_worker_threads,
                 max_blocking_threads: args.runtime_max_blocking_threads,
             }),
-            "separated" => RuntimeConfig::Separated {
-                read_runtime_config: TokioRuntimeConfig {
+            "separated" => RuntimeOptions::Separated {
+                read_runtime_options: TokioRuntimeOptions {
                     worker_threads: args.read_runtime_worker_threads,
                     max_blocking_threads: args.read_runtime_max_blocking_threads,
                 },
-                write_runtime_config: TokioRuntimeConfig {
+                write_runtime_options: TokioRuntimeOptions {
                     worker_threads: args.write_runtime_worker_threads,
                     max_blocking_threads: args.write_runtime_max_blocking_threads,
                 },
@@ -497,22 +509,41 @@ async fn benchmark(args: Args) {
             _ => unreachable!(),
         });
 
+    let mut large = LargeEngineOptions::new()
+        .with_indexer_shards(args.shards)
+        .with_recover_concurrency(args.recover_concurrency)
+        .with_flushers(args.flushers)
+        .with_reclaimers(args.reclaimers)
+        .with_eviction_pickers(vec![
+            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+            Box::<FifoPicker>::default(),
+        ]);
+
+    let small = SmallEngineOptions::new()
+        .with_flushers(args.flushers)
+        .with_set_size(args.set_size.as_u64() as _)
+        .with_set_cache_capacity(args.set_cache_capacity);
+
     if args.admission_rate_limit.as_u64() > 0 {
         builder =
             builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
     if args.reinsertion_rate_limit.as_u64() > 0 {
-        builder =
-            builder.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
+        large = large.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
     }
 
     if args.clean_region_threshold > 0 {
-        builder = builder.with_clean_region_threshold(args.clean_region_threshold);
+        large = large.with_clean_region_threshold(args.clean_region_threshold);
     }
 
-    let hybrid = builder.build().await.unwrap();
+    let hybrid = builder
+        .with_large_object_disk_cache_options(large)
+        .with_small_object_disk_cache_options(small)
+        .build()
+        .await
+        .unwrap();
 
-    #[cfg(feature = "mtrace")]
+    #[cfg(feature = "tracing")]
     hybrid.enable_tracing();
 
     let stats = hybrid.stats();

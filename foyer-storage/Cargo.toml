@@ -1,47 +1,56 @@
 [package]
 name = "foyer-storage"
-version = "0.10.2"
-edition = "2021"
-authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "storage engine for foyer - the hybrid cache for Rust"
-license = "Apache-2.0"
-repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://github.com/foyer-rs/foyer"
-readme = "../README.md"
+description = "storage engine for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ahash = "0.8"
+ahash = { workspace = true }
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
 allocator-api2 = "0.2"
 anyhow = "1.0"
 # TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
 array-util = "1"
 async-channel = "2"
+auto_enums = { version = "0.8", features = ["futures03"] }
 bincode = "1"
 bitflags = "2.3.1"
 bytes = "1"
 clap = { workspace = true }
 either = "1"
+equivalent = { workspace = true }
 fastrace = { workspace = true }
-foyer-common = { version = "0.9.2", path = "../foyer-common" }
-foyer-memory = { version = "0.7.2", path = "../foyer-memory" }
+flume = "0.11"
+foyer-common = { workspace = true }
+foyer-memory = { workspace = true }
 fs4 = "0.9.1"
 futures = "0.3"
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24"
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+ordered_hash_map = "0.4"
+parking_lot = { workspace = true }
+paste = "1"
 pin-project = "1"
 rand = "0.8"
 serde = { workspace = true }
-thiserror = "1"
+thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 twox-hash = "1"
 zstd = "0.13"
 
 [dev-dependencies]
+bytesize = { workspace = true }
 tempfile = "3"
 test-log = { workspace = true }
 
@@ -53,7 +62,7 @@ strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-memory/strict_assertions",
 ]
-mtrace = ["fastrace/enable", "foyer-common/mtrace", "foyer-memory/mtrace"]
+tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+[lints]
+workspace = true

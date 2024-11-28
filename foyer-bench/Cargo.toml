@@ -1,13 +1,15 @@
 [package]
 name = "foyer-bench"
-version = "0.3.2"
-edition = "2021"
-authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "bench tool for foyer - the hybrid cache for Rust"
-license = "Apache-2.0"
-repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://github.com/foyer-rs/foyer"
-readme = "../README.md"
+description = "bench tool for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,20 +18,26 @@ bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
-fastrace-jaeger = { workspace = true, optional = true }
-foyer = { version = "0.11.2", path = "../foyer" }
+fastrace-jaeger = { version = "0.7", optional = true }
+foyer = { workspace = true, features = ["prometheus"] }
 futures = "0.3"
 hdrhistogram = "7"
+http-body-util = "0.1"
+humantime = "2"
+hyper = { version = "1", default-features = false, features = [
+    "server",
+    "http1",
+] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 itertools = { workspace = true }
-metrics = { workspace = true }
-metrics-exporter-prometheus = "0.15"
-parking_lot = "0.12"
+parking_lot = { workspace = true }
+prometheus = { workspace = true }
 rand = "0.8.5"
 serde = { workspace = true }
 serde_bytes = "0.11.15"
-tokio = { workspace = true }
-tracing = "0.1"
-tracing-opentelemetry = { version = "0.25", optional = true }
+tokio = { workspace = true, features = ["net"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { version = "0.27", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zipf = "7"
 
@@ -37,9 +45,14 @@ zipf = "7"
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
+default = ["jemalloc"]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
-tokio-console = ["console-subscriber"]
+tokio-console = ["dep:console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 sanity = ["foyer/sanity"]
-jemalloc = ["tikv-jemallocator"]
-mtrace = ["foyer/mtrace", "fastrace-jaeger", "fastrace"]
+jemalloc = ["dep:tikv-jemallocator"]
+jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
+tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+
+[lints]
+workspace = true

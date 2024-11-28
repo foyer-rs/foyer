@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 //  limitations under the License.
 
 use std::{
-    borrow::Borrow,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -28,14 +27,15 @@ use std::{
 };
 
 use ahash::RandomState;
+use equivalent::Equivalent;
 use fastrace::prelude::*;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
-    metrics::Metrics,
-    tracing::{InRootSpan, TracingConfig},
+    metrics::model::Metrics,
+    tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
-use foyer_memory::{Cache, CacheContext, CacheEntry, Fetch, FetchMark, FetchState};
+use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState};
 use foyer_storage::{DeviceStats, Store};
 use futures::FutureExt;
 use pin_project::pin_project;
@@ -127,26 +127,26 @@ where
     S: HashBuilder + Debug,
 {
     pub(crate) fn new(
-        name: String,
         memory: Cache<K, V, S>,
         storage: Store<K, V, S>,
-        tracing_config: TracingConfig,
+        tracing_options: TracingOptions,
+        metrics: Arc<Metrics>,
     ) -> Self {
-        let metrics = Arc::new(Metrics::new(&name));
-        let tracing_config = Arc::new(tracing_config);
-        let trace = Arc::new(AtomicBool::new(false));
+        let tracing_config = Arc::<TracingConfig>::default();
+        tracing_config.update(tracing_options);
+        let tracing = Arc::new(AtomicBool::new(false));
         Self {
             memory,
             storage,
             metrics,
             tracing_config,
-            tracing: trace,
+            tracing,
         }
     }
 
-    /// Access the trace config.
-    pub fn tracing_config(&self) -> &TracingConfig {
-        &self.tracing_config
+    /// Access the trace config with options.
+    pub fn update_tracing_options(&self, options: TracingOptions) {
+        self.tracing_config.update(options);
     }
 
     /// Access the in-memory cache.
@@ -180,27 +180,27 @@ where
         let entry = self.memory.insert(key, value);
         self.storage.enqueue(entry.clone(), false);
 
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
+        self.metrics.hybrid_insert.increase(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
         entry
     }
 
-    /// Insert cache entry with cache context to the hybrid cache.
-    pub fn insert_with_context(&self, key: K, value: V, context: CacheContext) -> HybridCacheEntry<K, V, S> {
+    /// Insert cache entry with cache hint to the hybrid cache.
+    pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
         root_span!(self, mut span, "foyer::hybrid::cache::insert_with_context");
 
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
 
-        let entry = self.memory.insert_with_context(key, value, context);
+        let entry = self.memory.insert_with_hint(key, value, hint);
         self.storage.enqueue(entry.clone(), false);
 
-        self.metrics.hybrid_insert.increment(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed());
+        self.metrics.hybrid_insert.increase(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_insert_threshold);
 
@@ -210,20 +210,19 @@ where
     /// Get cached entry with the given key from the hybrid cache.
     pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + Send + Sync + 'static + Clone,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::get");
 
         let now = Instant::now();
 
         let record_hit = || {
-            self.metrics.hybrid_hit.increment(1);
-            self.metrics.hybrid_hit_duration.record(now.elapsed());
+            self.metrics.hybrid_hit.increase(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
         };
         let record_miss = || {
-            self.metrics.hybrid_miss.increment(1);
-            self.metrics.hybrid_miss_duration.record(now.elapsed());
+            self.metrics.hybrid_miss.increase(1);
+            self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
         };
 
         let guard = span.set_local_parent();
@@ -286,14 +285,14 @@ where
 
         match res {
             Ok(entry) => {
-                self.metrics.hybrid_hit.increment(1);
-                self.metrics.hybrid_hit_duration.record(now.elapsed());
+                self.metrics.hybrid_hit.increase(1);
+                self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::NotExist) => {
-                self.metrics.hybrid_miss.increment(1);
-                self.metrics.hybrid_miss_duration.record(now.elapsed());
+                self.metrics.hybrid_miss.increase(1);
+                self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
@@ -311,8 +310,7 @@ where
     /// Remove a cached entry with the given key from the hybrid cache.
     pub fn remove<Q>(&self, key: &Q)
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized + Send + Sync + 'static,
+        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         root_span!(self, mut span, "foyer::hybrid::cache::remove");
 
@@ -323,8 +321,8 @@ where
         self.memory.remove(key);
         self.storage.delete(key);
 
-        self.metrics.hybrid_remove.increment(1);
-        self.metrics.hybrid_remove_duration.record(now.elapsed());
+        self.metrics.hybrid_remove.increase(1);
+        self.metrics.hybrid_remove_duration.record(now.elapsed().as_secs_f64());
 
         try_cancel!(self, span, record_hybrid_remove_threshold);
     }
@@ -334,8 +332,7 @@ where
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.memory.contains(key) || self.storage.may_contains(key)
     }
@@ -459,14 +456,14 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
-        self.fetch_with_context(key, CacheContext::default(), fetch)
+        self.fetch_with_hint(key, CacheHint::Normal, fetch)
     }
 
-    /// Fetch and insert a cache entry with the given key, context, and method if there is a cache miss.
+    /// Fetch and insert a cache entry with the given key, hint, and method if there is a cache miss.
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_context<F, FU>(&self, key: K, context: CacheContext, fetch: F) -> HybridFetch<K, V, S>
+    pub fn fetch_with_hint<F, FU>(&self, key: K, hint: CacheHint, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
@@ -482,16 +479,16 @@ where
         let future = fetch();
         let inner = self.memory.fetch_inner(
             key.clone(),
-            context,
+            hint,
             || {
                 let metrics = self.metrics.clone();
-                let user_runtime_handle = self.storage().runtimes().user_runtime_handle.clone();
+                let runtime = self.storage().runtime().clone();
 
                 async move {
                     match store.load(&key).await.map_err(anyhow::Error::from) {
                         Ok(Some((_k, v))) => {
-                            metrics.hybrid_hit.increment(1);
-                            metrics.hybrid_hit_duration.record(now.elapsed());
+                            metrics.hybrid_hit.increase(1);
+                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
 
                             return Ok(v).into();
                         }
@@ -499,10 +496,11 @@ where
                         Err(e) => return Err(e).into(),
                     };
 
-                    metrics.hybrid_miss.increment(1);
-                    metrics.hybrid_miss_duration.record(now.elapsed());
+                    metrics.hybrid_miss.increase(1);
+                    metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
 
-                    user_runtime_handle
+                    runtime
+                        .user()
                         .spawn(
                             future
                                 .map(|res| Diversion {
@@ -515,12 +513,12 @@ where
                         .unwrap()
                 }
             },
-            self.storage().runtimes().read_runtime_handle,
+            self.storage().runtime().read(),
         );
 
         if inner.state() == FetchState::Hit {
-            self.metrics.hybrid_hit.increment(1);
-            self.metrics.hybrid_hit_duration.record(now.elapsed());
+            self.metrics.hybrid_hit.increase(1);
+            self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
         }
 
         let inner = HybridFetchInner {
@@ -535,7 +533,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{borrow::Borrow, fmt::Debug, hash::Hash, path::Path, sync::Arc};
+    use std::{path::Path, sync::Arc};
 
     use storage::test_utils::BiasedPicker;
 
@@ -548,35 +546,31 @@ mod tests {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
-            .storage()
-            .with_device_config(
-                DirectFsDeviceOptionsBuilder::new(dir)
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
-                    .with_file_size(MB)
-                    .build(),
+                    .with_file_size(MB),
             )
             .build()
             .await
             .unwrap()
     }
 
-    async fn open_with_biased_admission_picker<Q>(
+    async fn open_with_biased_admission_picker(
         dir: impl AsRef<Path>,
-        admits: impl IntoIterator<Item = Q>,
-    ) -> HybridCache<u64, Vec<u8>>
-    where
-        u64: Borrow<Q>,
-        Q: Hash + Eq + Send + Sync + 'static + Debug,
-    {
+        admits: impl IntoIterator<Item = u64>,
+    ) -> HybridCache<u64, Vec<u8>> {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
-            .storage()
-            .with_device_config(
-                DirectFsDeviceOptionsBuilder::new(dir)
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
-                    .with_file_size(MB)
-                    .build(),
+                    .with_file_size(MB),
             )
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
             .build()
@@ -591,14 +585,14 @@ mod tests {
         let hybrid = open(dir.path()).await;
 
         let e1 = hybrid.insert(1, vec![1; 7 * KB]);
-        let e2 = hybrid.insert_with_context(2, vec![2; 7 * KB], CacheContext::default());
+        let e2 = hybrid.insert_with_hint(2, vec![2; 7 * KB], CacheHint::Normal);
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.storage_writer(3).insert(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
             .storage_writer(4)
-            .insert_with_context(vec![4; 7 * KB], CacheContext::default())
+            .insert_with_context(vec![4; 7 * KB], CacheHint::Normal)
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -627,17 +621,13 @@ mod tests {
         let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
 
         let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
-        let e2 = hybrid
-            .writer(2)
-            .insert_with_context(vec![2; 7 * KB], CacheContext::default());
+        let e2 = hybrid.writer(2).insert_with_hint(vec![2; 7 * KB], CacheHint::Normal);
 
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.writer(3).storage().insert(vec![3; 7 * KB]).unwrap();
-        let e4 = hybrid
-            .writer(4)
-            .insert_with_context(vec![4; 7 * KB], CacheContext::default());
+        let e4 = hybrid.writer(4).insert_with_hint(vec![4; 7 * KB], CacheHint::Normal);
 
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);

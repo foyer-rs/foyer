@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder, TracingOptions};
 
 #[cfg(feature = "jaeger")]
 fn init_jaeger_exporter() {
@@ -61,7 +61,7 @@ fn init_exporter() {
     panic!("Either jaeger or opentelemetry feature must be enabled!");
 }
 
-/// NOTE: To run this example, please enable feature "mtrace" and either "jaeger" or "ot".
+/// NOTE: To run this example, please enable feature "tracing" and either "jaeger" or "ot".
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_exporter();
@@ -70,19 +70,13 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
-                .with_capacity(256 * 1024 * 1024)
-                .build(),
-        )
+        .storage(Engine::Large)
+        .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
         .build()
         .await?;
 
     hybrid.enable_tracing();
-    hybrid
-        .tracing_config()
-        .set_record_hybrid_get_threshold(Duration::from_millis(10));
+    hybrid.update_tracing_options(TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)));
 
     hybrid.insert(42, "The answer to life, the universe, and everything.".to_string());
     assert_eq!(

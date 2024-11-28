@@ -2,12 +2,27 @@
     <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/slogan.min.svg" />
 </p>
 
+<p align="center">
+    <a href="https://foyer.rs">
+        <img src="https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&down_message=website&style=for-the-badge&logo=htmx" alt="docs.rs" />
+    </a>
+    <a href="https://crates.io/crates/foyer">
+        <img src="https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555" alt="crates.io" />
+    </a>
+    <a href="https://docs.rs/foyer">
+        <img src="https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555" alt="docs.rs" />
+    </a>
+</p>
+
+<p align="center">
+    <b>Tutorial & Document:</b>
+    <a href="https://foyer.rs"><b>https://foyer.rs</b></a>
+</p>
+
 # foyer
 
-![Crates.io Version](https://img.shields.io/crates/v/foyer)
-![Crates.io MSRV](https://img.shields.io/crates/msrv/foyer)
 ![GitHub License](https://img.shields.io/github/license/foyer-rs/foyer)
-
+![Crates.io MSRV](https://img.shields.io/crates/msrv/foyer)
 [![CI](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml)
 [![License Checker](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml)
 [![codecov](https://codecov.io/github/foyer-rs/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/foyer-rs/foyer)
@@ -18,9 +33,16 @@ foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cac
 
 However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
+For more details, please visit foyer's website: https://foyer.rs 🥰
+
+[Website](https://foyer.rs) |
+[Tutorial](https://foyer.rs/docs/overview) |
+[API Docs](https://docs.rs/foyer) |
+[Crate](https://crates.io/crates/foyer)
+
 ## Features
 
-- **Hybrid Cache**: Seamlessly integrates both in-memory and disk-based caching for optimal performance and flexibility.
+- **Hybrid Cache**: Seamlessly integrates both in-memory and disk cache for optimal performance and flexibility.
 - **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
 - **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
 - **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
@@ -35,18 +57,20 @@ Feel free to open a PR and add your projects here:
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 - [SlateDB](https://github.com/slatedb/slatedb): A cloud native embedded storage engine built on object storage.
 
-## Usage
+## Quick Start
+
+**This section only shows briefs. Please visit https://foyer.rs for more details.**
 
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.11"
+foyer = "0.12"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.11", features = ["nightly"] }
+foyer = { version = "0.12", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -67,7 +91,7 @@ fn main() {
 ### Easy-to-use Hybrid Cache
 
 ```rust
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -75,12 +99,8 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
-                .with_capacity(256 * 1024 * 1024)
-                .build(),
-        )
+        .storage(Engine::Large) // use large object disk cache engine only
+        .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
         .build()
         .await?;
 
@@ -102,8 +122,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, FifoPicker, HybridCache, HybridCacheBuilder, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeConfig, TokioRuntimeConfig, TombstoneLogConfigBuilder,
+    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
+    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -120,40 +140,48 @@ async fn main() -> Result<()> {
         .with_object_pool_capacity(1024)
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage()
-        .with_device_config(
-            DirectFsDeviceOptionsBuilder::new(dir.path())
+        .storage(Engine::Mixed(0.1))
+        .with_device_options(
+            DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
-                .build(),
+                .with_file_size(4 * 1024 * 1024),
         )
         .with_flush(true)
-        .with_indexer_shards(64)
         .with_recover_mode(RecoverMode::Quiet)
-        .with_recover_concurrency(8)
-        .with_flushers(2)
-        .with_reclaimers(2)
-        .with_buffer_threshold(256 * 1024 * 1024)
-        .with_clean_region_threshold(4)
-        .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
         .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
-        .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
         .with_compression(foyer::Compression::Lz4)
-        .with_tombstone_log_config(
-            TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                .with_flush(true)
-                .build(),
-        )
-        .with_runtime_config(RuntimeConfig::Separated {
-            read_runtime_config: TokioRuntimeConfig {
+        .with_runtime_options(RuntimeOptions::Separated {
+            read_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
-            write_runtime_config: TokioRuntimeConfig {
+            write_runtime_options: TokioRuntimeOptions {
                 worker_threads: 4,
                 max_blocking_threads: 8,
             },
         })
+        .with_large_object_disk_cache_options(
+            LargeEngineOptions::new()
+                .with_indexer_shards(64)
+                .with_recover_concurrency(8)
+                .with_flushers(2)
+                .with_reclaimers(2)
+                .with_buffer_pool_size(256 * 1024 * 1024)
+                .with_clean_region_threshold(4)
+                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
+                .with_tombstone_log_config(
+                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
+                        .with_flush(true)
+                        .build(),
+                ),
+        )
+        .with_small_object_disk_cache_options(
+            SmallEngineOptions::new()
+                .with_set_size(16 * 1024)
+                .with_set_cache_capacity(64)
+                .with_flushers(2),
+        )
         .build()
         .await?;
 
@@ -195,7 +223,7 @@ More examples and details can be found [here](https://github.com/foyer-rs/foyer/
 
 ## Supported Rust Versions
 
-*foyer* is built against the recent stable release. The minimum supported version is 1.81.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+*foyer* is built against the recent stable release. The minimum supported version is 1.82.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
 ## Supported Platforms
 

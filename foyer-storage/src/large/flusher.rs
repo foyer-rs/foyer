@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -15,18 +15,19 @@
 use std::{
     fmt::Debug,
     future::Future,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::Metrics,
-    strict_assert,
+    metrics::model::Metrics,
 };
 use foyer_memory::CacheEntry;
 use futures::future::{try_join, try_join_all};
-use parking_lot::Mutex;
-use tokio::{runtime::Handle, sync::Notify};
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::{
     batch::{Batch, BatchMut, InvalidStats, TombstoneInfo},
@@ -39,13 +40,11 @@ use super::{
 use crate::{
     device::MonitoredDevice,
     error::{Error, Result},
-    large::serde::EntryHeader,
     region::RegionManager,
-    serde::{Checksummer, KvInfo},
-    Compression, IoBytes, Statistics,
+    runtime::Runtime,
+    Compression, Statistics,
 };
 
-#[derive(Debug)]
 pub enum Submission<K, V, S>
 where
     K: StorageKey,
@@ -54,8 +53,7 @@ where
 {
     CacheEntry {
         entry: CacheEntry<K, V, S>,
-        buffer: IoBytes,
-        info: KvInfo,
+        estimated_size: usize,
         sequence: Sequence,
     },
     Tombstone {
@@ -65,6 +63,39 @@ where
     Reinsertion {
         reinsertion: Reinsertion,
     },
+    Wait {
+        tx: oneshot::Sender<()>,
+    },
+}
+
+impl<K, V, S> Debug for Submission<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CacheEntry {
+                entry: _,
+                estimated_size,
+                sequence,
+            } => f
+                .debug_struct("CacheEntry")
+                .field("estimated_size", estimated_size)
+                .field("sequence", sequence)
+                .finish(),
+            Self::Tombstone { tombstone, stats } => f
+                .debug_struct("Tombstone")
+                .field("tombstone", tombstone)
+                .field("stats", stats)
+                .finish(),
+            Self::Reinsertion { reinsertion } => {
+                f.debug_struct("Reinsertion").field("reinsertion", reinsertion).finish()
+            }
+            Self::Wait { .. } => f.debug_struct("Wait").finish(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -74,11 +105,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    batch: Arc<Mutex<BatchMut<K, V, S>>>,
+    tx: flume::Sender<Submission<K, V, S>>,
+    submit_queue_size: Arc<AtomicUsize>,
 
-    notify: Arc<Notify>,
-
-    compression: Compression,
     metrics: Arc<Metrics>,
 }
 
@@ -90,9 +119,8 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            batch: self.batch.clone(),
-            notify: self.notify.clone(),
-            compression: self.compression,
+            tx: self.tx.clone(),
+            submit_queue_size: self.submit_queue_size.clone(),
             metrics: self.metrics.clone(),
         }
     }
@@ -105,110 +133,71 @@ where
     S: HashBuilder + Debug,
 {
     #[expect(clippy::too_many_arguments)]
-    pub async fn open(
+    pub fn open(
         config: &GenericLargeStorageConfig<K, V, S>,
         indexer: Indexer,
         region_manager: RegionManager,
         device: MonitoredDevice,
+        submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
-        runtime: Handle,
+        runtime: &Runtime,
     ) -> Result<Self> {
-        let notify = Arc::new(Notify::new());
+        let (tx, rx) = flume::unbounded();
 
-        let buffer_size = config.buffer_threshold / config.flushers;
-        let batch = Arc::new(Mutex::new(BatchMut::new(
+        let buffer_size = config.buffer_pool_size / config.flushers;
+        let batch = BatchMut::new(
             buffer_size,
             region_manager.clone(),
             device.clone(),
             indexer.clone(),
-        )));
+            metrics.clone(),
+        );
 
         let runner = Runner {
-            batch: batch.clone(),
-            notify: notify.clone(),
+            rx,
+            batch,
+            flight: Arc::new(Semaphore::new(1)),
+            submit_queue_size: submit_queue_size.clone(),
             region_manager,
             indexer,
             tombstone_log,
+            compression: config.compression,
             flush: config.flush,
             stats,
             metrics: metrics.clone(),
         };
 
-        runtime.spawn(async move {
+        runtime.write().spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!("[flusher]: flusher exit with error: {e}");
             }
         });
 
         Ok(Self {
-            batch,
-            notify,
-            compression: config.compression,
+            tx,
+            submit_queue_size,
             metrics,
         })
     }
 
     pub fn submit(&self, submission: Submission<K, V, S>) {
-        match submission {
-            Submission::CacheEntry {
-                entry,
-                buffer,
-                info,
-                sequence,
-            } => self.entry(entry, buffer, info, sequence),
-            Submission::Tombstone { tombstone, stats } => self.tombstone(tombstone, stats),
-            Submission::Reinsertion { reinsertion } => self.reinsertion(reinsertion),
+        tracing::trace!("[lodc flusher]: submit task: {submission:?}");
+        if let Submission::CacheEntry { estimated_size, .. } = &submission {
+            self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
         }
-        self.notify.notify_one();
+        if let Err(e) = self.tx.send(submission) {
+            tracing::error!("[lodc flusher]: error raised when submitting task, error: {e}");
+        }
     }
 
     pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let waiter = self.batch.lock().wait();
-        self.notify.notify_one();
+        let (tx, rx) = oneshot::channel();
+        self.submit(Submission::Wait { tx });
         async move {
-            let _ = waiter.await;
+            let _ = rx.await;
         }
-    }
-
-    fn entry(&self, entry: CacheEntry<K, V, S>, buffer: IoBytes, info: KvInfo, sequence: u64) {
-        let header = EntryHeader {
-            key_len: info.key_len as _,
-            value_len: info.value_len as _,
-            hash: entry.hash(),
-            sequence,
-            checksum: Checksummer::checksum(&buffer),
-            compression: self.compression,
-        };
-
-        let mut allocation = match self.batch.lock().entry(header.entry_len(), entry, sequence) {
-            Some(allocation) => allocation,
-            None => {
-                self.metrics.storage_queue_drop.increment(1);
-                return;
-            }
-        };
-        strict_assert!(allocation.len() >= header.entry_len());
-
-        header.write(&mut allocation[0..EntryHeader::serialized_len()]);
-        allocation[EntryHeader::serialized_len()..header.entry_len()].copy_from_slice(&buffer);
-    }
-
-    fn tombstone(&self, tombstone: Tombstone, stats: Option<InvalidStats>) {
-        self.batch.lock().tombstone(tombstone, stats);
-    }
-
-    fn reinsertion(&self, reinsertion: Reinsertion) {
-        let mut allocation = match self.batch.lock().reinsertion(&reinsertion) {
-            Some(allocation) => allocation,
-            None => {
-                self.metrics.storage_queue_drop.increment(1);
-                return;
-            }
-        };
-        strict_assert!(allocation.len() > reinsertion.buffer.len());
-        allocation[0..reinsertion.buffer.len()].copy_from_slice(&reinsertion.buffer);
     }
 }
 
@@ -218,14 +207,16 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    batch: Arc<Mutex<BatchMut<K, V, S>>>,
-
-    notify: Arc<Notify>,
+    rx: flume::Receiver<Submission<K, V, S>>,
+    batch: BatchMut<K, V, S>,
+    flight: Arc<Semaphore>,
+    submit_queue_size: Arc<AtomicUsize>,
 
     region_manager: RegionManager,
     indexer: Indexer,
     tombstone_log: Option<TombstoneLog>,
 
+    compression: Compression,
     flush: bool,
 
     stats: Arc<Statistics>,
@@ -238,25 +229,51 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub async fn run(self) -> Result<()> {
-        // TODO(MrCroxx): Graceful shutdown.
+    pub async fn run(mut self) -> Result<()> {
         loop {
-            let rotation = self.batch.lock().rotate();
-            let (batch, wait) = match rotation {
-                Some(rotation) => rotation,
-                None => {
-                    self.notify.notified().await;
-                    continue;
+            let flight = self.flight.clone();
+            tokio::select! {
+                biased;
+                Ok(permit) = flight.acquire_owned(), if !self.batch.is_empty() => {
+                    // TODO(MrCroxx): `rotate()` should always return a `Some(..)` here.
+                    if let Some(batch) = self.batch.rotate() {
+                        self.commit(batch, permit).await;
+                    }
                 }
-            };
+                Ok(submission) = self.rx.recv_async() => {
+                    self.submit(submission);
+                }
+                // Graceful shutdown.
+                else => break,
+            }
+        }
+        Ok(())
+    }
 
-            wait.await;
+    fn submit(&mut self, submission: Submission<K, V, S>) {
+        let report = |enqueued: bool| {
+            if !enqueued {
+                self.metrics.storage_queue_drop.increase(1);
+            }
+        };
 
-            self.commit(batch).await
+        match submission {
+            Submission::CacheEntry {
+                entry,
+                estimated_size,
+                sequence,
+            } => {
+                report(self.batch.entry(entry, &self.compression, sequence));
+                self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
+            }
+
+            Submission::Tombstone { tombstone, stats } => self.batch.tombstone(tombstone, stats),
+            Submission::Reinsertion { reinsertion } => report(self.batch.reinsertion(&reinsertion)),
+            Submission::Wait { tx } => self.batch.wait(tx),
         }
     }
 
-    async fn commit(&self, batch: Batch<K, V, S>) {
+    async fn commit(&mut self, batch: Batch<K, V, S>, permit: OwnedSemaphorePermit) {
         tracing::trace!("[flusher] commit batch: {batch:?}");
 
         // Write regions concurrently.
@@ -328,8 +345,12 @@ where
         }
 
         if let Some(init) = batch.init.as_ref() {
-            self.metrics.storage_queue_rotate.increment(1);
-            self.metrics.storage_queue_rotate_duration.record(init.elapsed());
+            self.metrics.storage_queue_rotate.increase(1);
+            self.metrics
+                .storage_queue_rotate_duration
+                .record(init.elapsed().as_secs_f64());
         }
+
+        drop(permit);
     }
 }

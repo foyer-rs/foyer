@@ -1,33 +1,44 @@
 [package]
 name = "examples"
-version = "0.0.0"
-edition = "2021"
-authors = ["MrCroxx <mrcroxx@outlook.com>"]
-description = "Hybrid cache for Rust"
-license = "Apache-2.0"
-repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://github.com/foyer-rs/foyer"
-readme = "../README.md"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "examples for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
 publish = false
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ahash = "0.8"
+ahash = { workspace = true }
 anyhow = "1"
 chrono = "0.4"
+equivalent = { workspace = true }
 fastrace = { workspace = true }
-fastrace-jaeger = { workspace = true, optional = true }
-fastrace-opentelemetry = { workspace = true, optional = true }
-foyer = { version = "*", path = "../foyer" }
-opentelemetry = { version = "0.24", optional = true }
-opentelemetry-otlp = { version = "0.17", optional = true }
-opentelemetry-semantic-conventions = { version = "0.16", optional = true }
-opentelemetry_sdk = { version = "0.24", features = [
+fastrace-jaeger = { version = "0.7", optional = true }
+fastrace-opentelemetry = { version = "0.7", optional = true }
+foyer = { workspace = true, features = ["prometheus"] }
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = [
+    "server",
+    "http1",
+] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+opentelemetry = { version = "0.26", optional = true }
+opentelemetry-otlp = { version = "0.26", optional = true }
+opentelemetry-semantic-conventions = { version = "0.26", optional = true }
+opentelemetry_sdk = { version = "0.26", features = [
     "rt-tokio",
     "trace",
 ], optional = true }
+prometheus = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
+tracing = { workspace = true }
 
 [features]
 jaeger = ["fastrace-jaeger"]
@@ -58,3 +69,11 @@ path = "event_listener.rs"
 [[example]]
 name = "tail_based_tracing"
 path = "tail_based_tracing.rs"
+
+[[example]]
+name = "equivalent"
+path = "equivalent.rs"
+
+[[example]]
+name = "export_metrics_prometheus_hyper"
+path = "export_metrics_prometheus_hyper.rs"

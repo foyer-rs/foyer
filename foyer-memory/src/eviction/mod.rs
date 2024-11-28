@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -12,97 +12,142 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::ptr::NonNull;
+use std::sync::Arc;
 
+use foyer_common::code::{Key, Value};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::handle::Handle;
+use crate::{
+    error::Result,
+    record::{CacheHint, Record},
+};
 
-pub trait EvictionConfig: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
-impl<T> EvictionConfig for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
+pub trait Hint: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
+impl<T> Hint for T where T: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
 
-/// The lifetime of `handle: Self::H` is managed by [`Indexer`].
+pub trait State: Send + Sync + 'static + Default {}
+impl<T> State for T where T: Send + Sync + 'static + Default {}
+
+pub trait Config: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
+impl<T> Config for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
+
+/// Wrapper for one of the three kind of operations for the eviction container:
 ///
-/// Each `handle`'s lifetime in [`Indexer`] must outlive the raw pointer in [`Eviction`].
-pub trait Eviction: Send + Sync + 'static {
-    type Handle: Handle;
-    type Config: EvictionConfig;
+/// 1. no operation
+/// 2. immutable operation
+/// 3. mutable operation
+#[expect(clippy::type_complexity)]
+pub enum Op<E>
+where
+    E: Eviction,
+{
+    /// no operation
+    Noop,
+    /// immutable operation
+    Immutable(Box<dyn Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static>),
+    /// mutable operation
+    Mutable(Box<dyn FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static>),
+}
 
-    /// Create a new empty eviction container.
-    ///
-    /// # Safety
-    unsafe fn new(capacity: usize, config: &Self::Config) -> Self
+impl<E> Op<E>
+where
+    E: Eviction,
+{
+    /// no operation
+    pub fn noop() -> Self {
+        Self::Noop
+    }
+
+    /// immutable operation
+    pub fn immutable<F>(f: F) -> Self
     where
-        Self: Sized;
+        F: Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static,
+    {
+        Self::Immutable(Box::new(f))
+    }
 
-    /// Push a handle `ptr` into the eviction container.
-    ///
-    /// The caller guarantees that the `ptr` is NOT in the eviction container.
-    ///
-    /// # Safety
-    ///
-    /// The `ptr` must be kept holding until `pop` or `remove`.
-    ///
-    /// The base handle associated to the `ptr` must be set in cache.
-    unsafe fn push(&mut self, ptr: NonNull<Self::Handle>);
+    /// mutable operation
+    pub fn mutable<F>(f: F) -> Self
+    where
+        F: FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static,
+    {
+        Self::Mutable(Box::new(f))
+    }
+}
 
-    /// Pop a handle `ptr` from the eviction container.
-    ///
-    /// # Safety
-    ///
-    /// The `ptr` must be taken from the eviction container.
-    /// Or it may become dangling and cause UB.
-    ///
-    /// The base handle associated to the `ptr` must be set NOT in cache.
-    unsafe fn pop(&mut self) -> Option<NonNull<Self::Handle>>;
+/// Cache eviction algorithm abstraction.
+///
+/// [`Eviction`] provides essential APIs for the plug-and-play algorithm abstraction.
+///
+/// [`Eviction`] is needs to be implemented to support a new cache eviction algorithm.
+///
+/// For performance considerations, most APIs pass parameters via [`NonNull`] pointers to implement intrusive data
+/// structures. It is not required to implement the cache eviction algorithm using the [`NonNull`] pointers. They can
+/// also be used as a token for the target entry.
+///
+/// # Safety
+///
+/// The pointer can be dereferenced as a mutable reference ***iff*** the `self` reference is also mutable.
+/// Dereferencing a pointer as a mutable reference when `self` is immutable will cause UB.
+pub trait Eviction: Send + Sync + 'static + Sized {
+    /// Cache eviction algorithm configurations.
+    type Config: Config;
+    /// Cache key. Generally, it is supposed to be a generic type of the implementation.
+    type Key: Key;
+    /// Cache value. Generally, it is supposed to be a generic type of the implementation.
+    type Value: Value;
+    /// Hint for a cache entry. Can be used to support priority at the entry granularity.
+    type Hint: Hint;
+    /// State for a cache entry. Mutable state for maintaining the cache eviction algorithm implementation.
+    type State: State;
 
-    /// Notify the eviction container that the `ptr` is acquired by **AN** external user.
-    ///
-    /// # Safety
-    ///
-    /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
-    unsafe fn acquire(&mut self, ptr: NonNull<Self::Handle>);
+    /// Create a new cache eviction algorithm instance with the given arguments.
+    fn new(capacity: usize, config: &Self::Config) -> Self;
 
-    /// Notify the eviction container that the `ptr` is released by **ALL** external users.
-    ///
-    /// # Safety
-    ///
-    /// The given `ptr` can be EITHER in the eviction container OR not in the eviction container.
-    unsafe fn release(&mut self, ptr: NonNull<Self::Handle>);
+    /// Update the arguments of the ache eviction algorithm instance.
+    fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()>;
 
-    /// Remove the given `ptr` from the eviction container.
+    /// Push a record into the cache eviction algorithm instance.
     ///
-    /// /// The caller guarantees that the `ptr` is NOT in the eviction container.
+    /// The caller guarantees that the record is NOT in the cache eviction algorithm instance.
     ///
-    /// # Safety
-    ///
-    /// The `ptr` must be taken from the eviction container, otherwise it may become dangling and cause UB.
-    ///
-    /// The base handle associated to the `ptr` must be set NOT in cache.
-    unsafe fn remove(&mut self, ptr: NonNull<Self::Handle>);
+    /// The cache eviction algorithm instance MUST hold the record and set its `IN_EVICTION` flag to true.
+    fn push(&mut self, record: Arc<Record<Self>>);
 
-    /// Remove all `ptr`s from the eviction container and reset.
+    /// Push a record from the cache eviction algorithm instance.
     ///
-    /// # Safety
-    ///
-    /// All `ptr` must be taken from the eviction container, otherwise it may become dangling and cause UB.
-    ///
-    /// All base handles associated to the `ptr`s must be set NOT in cache.
-    unsafe fn clear(&mut self) -> Vec<NonNull<Self::Handle>>;
+    /// The cache eviction algorithm instance MUST remove the record and set its `IN_EVICTION` flag to false.
+    fn pop(&mut self) -> Option<Arc<Record<Self>>>;
 
-    /// Return the count of the `ptr`s that in the eviction container.
-    fn len(&self) -> usize;
+    /// Remove a record from the cache eviction algorithm instance.
+    ///
+    /// The caller guarantees that the record is in the cache eviction algorithm instance.
+    ///
+    /// The cache eviction algorithm instance MUST remove the record and set its `IN_EVICTION` flag to false.
+    fn remove(&mut self, record: &Arc<Record<Self>>);
 
-    /// Return `true` if the eviction container is empty.
-    fn is_empty(&self) -> bool;
+    /// Remove all records from the cache eviction algorithm instance.
+    ///
+    /// The cache eviction algorithm instance MUST remove the records and set its `IN_EVICTION` flag to false.
+    fn clear(&mut self) {
+        while self.pop().is_some() {}
+    }
+
+    /// `acquire` is called when an external caller acquire a cache entry from the cache.
+    ///
+    /// The entry can be EITHER in the cache eviction algorithm instance or not.
+    fn acquire() -> Op<Self>;
+
+    /// `release` is called when the last external caller drops the cache entry.
+    ///
+    /// The entry can be EITHER in the cache eviction algorithm instance or not.
+    fn release() -> Op<Self>;
 }
 
 pub mod fifo;
 pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
-
-pub mod sanity;
 
 #[cfg(test)]
 pub mod test_utils;

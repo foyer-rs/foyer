@@ -1,4 +1,4 @@
-//  Copyright 2024 Foyer Project Authors
+//  Copyright 2024 foyer Project Authors
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
+
+//! micro benchmark for foyer in-memory cache hit ratio
 
 use std::sync::Arc;
 
@@ -25,7 +27,7 @@ const ITEMS: usize = 10_000;
 const ITERATIONS: usize = 5_000_000;
 
 const SHARDS: usize = 1;
-const OBJECT_POOL_CAPACITY: usize = 16;
+
 /*
 inspired by pingora/tinyufo/benches/bench_hit_ratio.rs
 cargo bench --bench bench_hit_ratio
@@ -87,7 +89,6 @@ fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
     CacheBuilder::new(capacity)
         .with_shards(SHARDS)
         .with_eviction_config(FifoConfig {})
-        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
@@ -97,7 +98,6 @@ fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
         .with_eviction_config(LruConfig {
             high_priority_pool_ratio: 0.1,
         })
-        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
@@ -110,7 +110,6 @@ fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
             cmsketch_eps: 0.001,
             cmsketch_confidence: 0.9,
         })
-        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
@@ -122,7 +121,6 @@ fn new_s3fifo_cache_wo_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
             ghost_queue_capacity_ratio: 0.0,
             small_to_main_freq_threshold: 2,
         })
-        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
@@ -134,7 +132,6 @@ fn new_s3fifo_cache_w_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
             ghost_queue_capacity_ratio: 1.0,
             small_to_main_freq_threshold: 2,
         })
-        .with_object_pool_capacity(OBJECT_POOL_CAPACITY)
         .build()
 }
 
