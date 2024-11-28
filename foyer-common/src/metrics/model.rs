@@ -366,6 +366,20 @@ mod tests {
         case(&PrometheusMetricsRegistry::new(prometheus::Registry::new()));
     }
 
+    #[cfg(feature = "prometheus-client_0_22")]
+    #[test]
+    fn test_metrics_prometheus_client_0_22() {
+        use std::sync::Arc;
+
+        use parking_lot::Mutex;
+
+        use crate::metrics::registry::prometheus_client_0_22::PrometheusClientMetricsRegistry;
+
+        case(&PrometheusClientMetricsRegistry::new(Arc::new(Mutex::new(
+            prometheus_client_0_22::registry::Registry::default(),
+        ))));
+    }
+
     #[cfg(feature = "opentelemetry_0_27")]
     #[test]
     fn test_metrics_opentelemetry_0_27() {

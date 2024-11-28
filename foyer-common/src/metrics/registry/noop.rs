@@ -23,7 +23,7 @@ impl CounterOps for NoopMetricsRegistry {
 }
 
 impl CounterVecOps for NoopMetricsRegistry {
-    fn counter(&self, _: &[&str]) -> impl CounterOps {
+    fn counter(&self, _: &[&'static str]) -> impl CounterOps {
         NoopMetricsRegistry
     }
 }
@@ -37,7 +37,7 @@ impl GaugeOps for NoopMetricsRegistry {
 }
 
 impl GaugeVecOps for NoopMetricsRegistry {
-    fn gauge(&self, _: &[&str]) -> impl GaugeOps {
+    fn gauge(&self, _: &[&'static str]) -> impl GaugeOps {
         NoopMetricsRegistry
     }
 }
@@ -47,7 +47,7 @@ impl HistogramOps for NoopMetricsRegistry {
 }
 
 impl HistogramVecOps for NoopMetricsRegistry {
-    fn histogram(&self, _: &[&str]) -> impl HistogramOps {
+    fn histogram(&self, _: &[&'static str]) -> impl HistogramOps {
         NoopMetricsRegistry
     }
 }

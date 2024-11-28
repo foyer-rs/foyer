@@ -84,7 +84,7 @@ pub struct MetricVec {
 }
 
 impl CounterVecOps for MetricVec {
-    fn counter(&self, labels: &[&str]) -> impl CounterOps {
+    fn counter(&self, labels: &[&'static str]) -> impl CounterOps {
         let counter = self.meter.u64_counter(self.name).with_description(self.desc).init();
         let labels = self
             .label_names
@@ -97,7 +97,7 @@ impl CounterVecOps for MetricVec {
 }
 
 impl GaugeVecOps for MetricVec {
-    fn gauge(&self, labels: &[&str]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps {
         let gauge = self.meter.u64_gauge(self.name).with_description(self.desc).init();
         let labels = self
             .label_names
@@ -111,7 +111,7 @@ impl GaugeVecOps for MetricVec {
 }
 
 impl HistogramVecOps for MetricVec {
-    fn histogram(&self, labels: &[&str]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps {
         let histogram = self.meter.f64_histogram(self.name).with_description(self.desc).init();
         let labels = self
             .label_names

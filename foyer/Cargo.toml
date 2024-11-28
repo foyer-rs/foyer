@@ -46,6 +46,8 @@ tracing = [
     "foyer-storage/tracing",
 ]
 prometheus = ["foyer-common/prometheus"]
+prometheus-client = ["foyer-common/prometheus-client"]
+prometheus-client_0_22 = ["foyer-common/prometheus-client_0_22"]
 opentelemetry = ["foyer-common/opentelemetry"]
 opentelemetry_0_27 = ["foyer-common/opentelemetry_0_27"]
 opentelemetry_0_26 = ["foyer-common/opentelemetry_0_26"]

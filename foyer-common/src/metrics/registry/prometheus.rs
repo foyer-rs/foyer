@@ -119,7 +119,7 @@ impl CounterOps for IntCounter {
 }
 
 impl CounterVecOps for IntCounterVec {
-    fn counter(&self, labels: &[&str]) -> impl CounterOps {
+    fn counter(&self, labels: &[&'static str]) -> impl CounterOps {
         self.with_label_values(labels)
     }
 }
@@ -139,7 +139,7 @@ impl GaugeOps for IntGauge {
 }
 
 impl GaugeVecOps for IntGaugeVec {
-    fn gauge(&self, labels: &[&str]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps {
         self.with_label_values(labels)
     }
 }
@@ -151,12 +151,12 @@ impl HistogramOps for Histogram {
 }
 
 impl HistogramVecOps for HistogramVec {
-    fn histogram(&self, labels: &[&str]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps {
         self.with_label_values(labels)
     }
 }
 
-/// Prometheus metrics registry.
+/// Prometheus metric registry with lib `prometheus`.
 ///
 /// The [`PrometheusMetricsRegistry`] can be cloned and used by multiple foyer instances, without worrying about
 /// duplicately registering.
