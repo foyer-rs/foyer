@@ -49,7 +49,7 @@ example:
 
 full: check-all test-all example udeps
 
-fast: check test example1
+fast: check test example
 
 msrv:
 	shellcheck ./scripts/*
