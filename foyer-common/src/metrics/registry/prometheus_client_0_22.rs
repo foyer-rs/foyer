@@ -202,25 +202,31 @@ impl RegistryOps for PrometheusClientMetricsRegistry {
 
 #[cfg(test)]
 mod tests {
+    use prometheus_client_0_22::encoding::text::encode;
+
     use super::*;
 
     #[test]
     fn test() {
         let registry = Arc::new(Mutex::new(Registry::default()));
-        let ot = PrometheusClientMetricsRegistry::new(registry);
+        let pc = PrometheusClientMetricsRegistry::new(registry.clone());
 
-        let cv = ot.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
+        let cv = pc.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
         let c = cv.counter(&["l1", "l2"]);
         c.increase(42);
 
-        let gv = ot.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
+        let gv = pc.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
         let g = gv.gauge(&["l1", "l2"]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
-        let hv = ot.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
+        let hv = pc.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
         let h = hv.histogram(&["l1", "l2"]);
         h.record(114.514);
+
+        let mut text = String::new();
+        encode(&mut text, &registry.lock()).unwrap();
+        println!("{text}");
     }
 }
