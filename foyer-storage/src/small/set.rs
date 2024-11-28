@@ -286,7 +286,7 @@ pub struct SetEntry<'a> {
     pub value: &'a [u8],
 }
 
-impl<'a> SetEntry<'a> {
+impl SetEntry<'_> {
     /// Length of the entry with header, key and value included.
     pub fn len(&self) -> usize {
         EntryHeader::ENTRY_HEADER_SIZE + self.key.len() + self.value.len()

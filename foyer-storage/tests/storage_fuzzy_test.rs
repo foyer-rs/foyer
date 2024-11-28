@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+//! Fuzzy test for foyer storage engines.
+
 #![expect(clippy::identity_op)]
 
 use std::{path::Path, sync::Arc, time::Duration};
