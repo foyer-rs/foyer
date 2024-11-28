@@ -216,7 +216,7 @@ async fn mock() -> Result<String> {
 
 ### Other Examples
 
-- [Event Listener](https://github.com/foyer-rs/foyer/tree/main/examples/event_listener.rs)
+- [Export Metrics with `prometheus` and `hyper`](https://github.com/foyer-rs/foyer/tree/main/examples/export_metrics_prometheus_hyper.rs)
 - [Tail-based Tracing](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs)
 
 More examples and details can be found [here](https://github.com/foyer-rs/foyer/tree/main/examples).
