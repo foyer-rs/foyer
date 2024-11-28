@@ -19,6 +19,14 @@ pub mod noop;
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
 
+/// Prometheus metrics components.
+#[cfg(feature = "prometheus-client")]
+pub use prometheus_client_0_22 as prometheus_client;
+
+/// Prometheus metrics components.
+#[cfg(feature = "prometheus-client_0_22")]
+pub mod prometheus_client_0_22;
+
 #[cfg(feature = "opentelemetry")]
 pub use opentelemetry_0_27 as opentelemetry;
 

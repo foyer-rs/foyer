@@ -50,6 +50,7 @@ tracing = "0.1"
 prometheus = "0.13"
 opentelemetry_0_27 = { package = "opentelemetry", version = "0.27" }
 opentelemetry_0_26 = { package = "opentelemetry", version = "0.26" }
+prometheus-client_0_22 = { package = "prometheus-client", version = "0.22" }
 
 # foyer components
 foyer-common = { version = "0.13.0-dev", path = "foyer-common" }

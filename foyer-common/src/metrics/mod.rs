@@ -39,19 +39,19 @@ pub trait HistogramOps: Send + Sync + 'static + Debug {
 /// A vector of counters.
 pub trait CounterVecOps: Send + Sync + 'static + Debug {
     /// Get a counter within the vector of counters.
-    fn counter(&self, labels: &[&str]) -> impl CounterOps;
+    fn counter(&self, labels: &[&'static str]) -> impl CounterOps;
 }
 
 /// A vector of gauges.
 pub trait GaugeVecOps: Send + Sync + 'static + Debug {
     /// Get a gauge within the vector of gauges.
-    fn gauge(&self, labels: &[&str]) -> impl GaugeOps;
+    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps;
 }
 
 /// A vector of histograms.
 pub trait HistogramVecOps: Send + Sync + 'static + Debug {
     /// Get a histogram within the vector of histograms.
-    fn histogram(&self, labels: &[&str]) -> impl HistogramOps;
+    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps;
 }
 
 /// Metrics registry.

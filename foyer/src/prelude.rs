@@ -20,6 +20,10 @@ pub use crate::common::metrics::registry::opentelemetry_0_26;
 pub use crate::common::metrics::registry::opentelemetry_0_27;
 #[cfg(feature = "prometheus")]
 pub use crate::common::metrics::registry::prometheus;
+#[cfg(feature = "prometheus-client")]
+pub use crate::common::metrics::registry::prometheus_client;
+#[cfg(feature = "prometheus-client_0_22")]
+pub use crate::common::metrics::registry::prometheus_client_0_22;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
