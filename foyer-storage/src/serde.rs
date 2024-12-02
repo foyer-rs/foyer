@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, hash::Hasher, io::Write, time::Instant};
+use std::{fmt::Debug, io::Write, time::Instant};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
@@ -30,15 +30,11 @@ pub struct Checksummer;
 
 impl Checksummer {
     pub fn checksum64(buf: &[u8]) -> u64 {
-        let mut hasher = XxHash64::with_seed(0);
-        hasher.write(buf);
-        hasher.finish()
+        XxHash64::oneshot(0, buf)
     }
 
     pub fn checksum32(buf: &[u8]) -> u32 {
-        let mut hasher = XxHash32::with_seed(0);
-        hasher.write(buf);
-        hasher.finish() as u32
+        XxHash32::oneshot(0, buf)
     }
 }
 

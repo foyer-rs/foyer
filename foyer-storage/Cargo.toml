@@ -31,7 +31,7 @@ fastrace = { workspace = true }
 flume = "0.11"
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-fs4 = "0.9.1"
+fs4 = { version = "0.12", default-features = false }
 futures = "0.3"
 hashbrown = { workspace = true }
 itertools = { workspace = true }
@@ -46,7 +46,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-twox-hash = "1"
+twox-hash = "2"
 zstd = "0.13"
 
 [dev-dependencies]
