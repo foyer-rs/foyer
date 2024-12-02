@@ -39,6 +39,7 @@ test-log = { workspace = true }
 zipf = "7.0.1"
 
 [features]
+nightly = ["hashbrown/nightly"]
 deadlock = ["parking_lot/deadlock_detection"]
 # FIXME: remove sanity feature
 sanity = []

@@ -31,7 +31,11 @@ test-log = { workspace = true }
 
 [features]
 default = []
-nightly = ["foyer-storage/nightly"]
+nightly = [
+    "foyer-storage/nightly",
+    "foyer-common/nightly",
+    "foyer-memory/nightly",
+]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
     "foyer-common/strict_assertions",
