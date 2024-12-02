@@ -9,7 +9,17 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
-## Unreleased
+## 2024-12-02
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.13.0 |
+| foyer-common | 0.13.0 |
+| foyer-memory | 0.13.0 |
+| foyer-storage | 0.13.0 |
+| foyer-bench | 0.13.0 |
 
 ### Changes
 
@@ -18,6 +28,9 @@ date: 2023-05-12T11:02:09+08:00
   - Make most `Eviction` APIs safe, only acquire unsafe Rust while accessing algorithm managed per-entry state with `UnsafeCell`.
   - Replace the "reinsertion" design with `release` with real "release last ref" design.
   - Rename some APIs.
+- Refine metrics framework:
+  - Replace `metrics` with customized metrics framework to support various metrics backend.
+  - Implement built-in metrics exporter that adapts to crate `prometheus`/`prometheus-client`/`opentelemetry`.
 
 ## 2024-10-11
 
@@ -25,7 +38,7 @@ date: 2023-05-12T11:02:09+08:00
 
 | crate | version |
 | - | - |
-| foyer | 0.12.2|
+| foyer | 0.12.2 |
 | foyer-common | 0.12.2 |
 | foyer-intrusive | 0.12.2 |
 | foyer-memory | 0.12.2 |

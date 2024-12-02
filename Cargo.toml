@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.13.0-dev"
+version = "0.13.0"
 edition = "2021"
 rust-version = "1.81.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -53,10 +53,10 @@ opentelemetry_0_26 = { package = "opentelemetry", version = "0.26" }
 prometheus-client_0_22 = { package = "prometheus-client", version = "0.22" }
 
 # foyer components
-foyer-common = { version = "0.13.0-dev", path = "foyer-common" }
-foyer-memory = { version = "0.13.0-dev", path = "foyer-memory" }
-foyer-storage = { version = "0.13.0-dev", path = "foyer-storage" }
-foyer = { version = "0.13.0-dev", path = "foyer" }
+foyer-common = { version = "0.13.0", path = "foyer-common" }
+foyer-memory = { version = "0.13.0", path = "foyer-memory" }
+foyer-storage = { version = "0.13.0", path = "foyer-storage" }
+foyer = { version = "0.13.0", path = "foyer" }
 
 [workspace.lints.rust]
 missing_docs = "warn"
