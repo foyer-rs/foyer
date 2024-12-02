@@ -21,7 +21,7 @@ fastrace = { workspace = true }
 foyer-common = { workspace = true }
 futures = "0.3"
 hashbrown = { workspace = true }
-intrusive-collections = { git = "https://github.com/foyer-rs/intrusive-rs", rev = "94cfac4701dbc0033b7bc27e31c46bf3a12d96d7" }
+intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 paste = "1"
