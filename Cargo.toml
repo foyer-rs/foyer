@@ -28,7 +28,7 @@ clap = { version = "4", features = ["derive"] }
 crossbeam = "0.8"
 equivalent = "1"
 fastrace = "0.7"
-hashbrown = "0.14"
+hashbrown = "0.15"
 itertools = "0.13"
 parking_lot = { version = "0.12" }
 serde = { version = "1", features = ["derive", "rc"] }
