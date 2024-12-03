@@ -32,7 +32,7 @@ use crate::{
 pub struct LruConfig {
     /// The ratio of the high priority pool occupied.
     ///
-    /// [`Lru`] guarantees that the high priority weight are always as larger as
+    /// `Lru` guarantees that the high priority weight are always as larger as
     /// but no larger that the capacity * high priority pool ratio.
     ///
     /// # Panic

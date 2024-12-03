@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A hybrid cache library that supports plug-and-play cache algorithms, in-memory cache and disk cache.
 //!

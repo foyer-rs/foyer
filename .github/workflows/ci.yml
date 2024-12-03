@@ -216,6 +216,52 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           verbose: true
+  rustdoc-test:
+    name: rust doc test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - name: Cache Cargo home
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-rustdoc-test
+      - name: Install NASM for aws-lc-rs on Windows
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+      - name: Install ninja-build tool for aws-lc-fips-sys on Windows
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: Run rustdoc test
+        run: |
+          cargo test --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27" --doc
+      - name: Test docs build with docs.rs
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+        run: |
+          cargo doc --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27"
+      - name: Upload docs.rs docs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: target/doc
+          if-no-files-found: error
+          retention-days: 7
+        
   deadlock:
     name: run with single worker thread and deadlock detection
     runs-on: ubuntu-latest
