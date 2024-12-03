@@ -12,6 +12,9 @@ license = { workspace = true }
 readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 ahash = { workspace = true }
 bitflags = "2"
