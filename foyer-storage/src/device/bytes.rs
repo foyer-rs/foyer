@@ -436,7 +436,7 @@ impl IoBytes {
     ///
     /// Otherwise, [`None`] is returned.
     ///
-    /// It is strongly recommended to use `into_io_buffer` instead if you don't want to keep the original [`IoByes`]
+    /// It is strongly recommended to use `into_io_buffer` instead if you don't want to keep the original [`IoBytes`]
     /// in the [`Err`] path. See `Arc::try_unwrap` and `Arc::into_inner` docs.
     ///
     /// Note: The [`IoBytes`] can be a slice of the underlying [`IoBuffer`].

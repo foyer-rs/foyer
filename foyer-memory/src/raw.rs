@@ -804,7 +804,7 @@ where
     }
 }
 
-/// The state of [`Fetch`].
+/// The state of `fetch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchState {
     /// Cache hit.

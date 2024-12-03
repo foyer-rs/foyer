@@ -81,10 +81,6 @@ where
 ///
 /// [`Eviction`] is needs to be implemented to support a new cache eviction algorithm.
 ///
-/// For performance considerations, most APIs pass parameters via [`NonNull`] pointers to implement intrusive data
-/// structures. It is not required to implement the cache eviction algorithm using the [`NonNull`] pointers. They can
-/// also be used as a token for the target entry.
-///
 /// # Safety
 ///
 /// The pointer can be dereferenced as a mutable reference ***iff*** the `self` reference is also mutable.

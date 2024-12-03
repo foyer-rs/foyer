@@ -12,6 +12,19 @@ license = { workspace = true }
 readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.docs.rs]
+features = [
+    "nightly",
+    # build docs for exporters
+    "prometheus",
+    "prometheus-client",
+    "prometheus-client_0_22",
+    "opentelemetry",
+    "opentelemetry_0_26",
+    "opentelemetry_0_27",
+]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 ahash = { workspace = true }
 anyhow = "1"
