@@ -253,7 +253,7 @@ jobs:
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
         run: |
-          cargo doc --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27"
+          cargo doc --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27" --no-deps
       - name: Upload docs.rs docs as artifacts
         uses: actions/upload-artifact@v4
         with:
