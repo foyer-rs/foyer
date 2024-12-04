@@ -13,11 +13,13 @@
 //  limitations under the License.
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     hash::{Hash, Hasher},
     sync::{Arc, LazyLock},
 };
 
+use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::{
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
@@ -107,8 +109,8 @@ enum MetricVec {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct Metadata {
-    name: &'static str,
-    desc: &'static str,
+    name: Cow<'static, str>,
+    desc: Cow<'static, str>,
     label_names: &'static [&'static str],
 }
 
@@ -119,8 +121,9 @@ impl CounterOps for IntCounter {
 }
 
 impl CounterVecOps for IntCounterVec {
-    fn counter(&self, labels: &[&'static str]) -> impl CounterOps {
-        self.with_label_values(labels)
+    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
+        let labels = labels.iter().map(Cow::as_ref).collect_vec();
+        self.with_label_values(&labels)
     }
 }
 
@@ -139,8 +142,9 @@ impl GaugeOps for IntGauge {
 }
 
 impl GaugeVecOps for IntGaugeVec {
-    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps {
-        self.with_label_values(labels)
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
+        let labels = labels.iter().map(Cow::as_ref).collect_vec();
+        self.with_label_values(&labels)
     }
 }
 
@@ -151,8 +155,9 @@ impl HistogramOps for Histogram {
 }
 
 impl HistogramVecOps for HistogramVec {
-    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps {
-        self.with_label_values(labels)
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
+        let labels = labels.iter().map(Cow::as_ref).collect_vec();
+        self.with_label_values(&labels)
     }
 }
 
@@ -192,15 +197,15 @@ impl PrometheusMetricsRegistry {
 impl RegistryOps for PrometheusMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl CounterVecOps {
         get_or_register_counter_vec(
             self,
             Metadata {
-                name,
-                desc,
+                name: name.into(),
+                desc: desc.into(),
                 label_names,
             },
         )
@@ -208,15 +213,15 @@ impl RegistryOps for PrometheusMetricsRegistry {
 
     fn register_gauge_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl GaugeVecOps {
         get_or_register_gauge_vec(
             self,
             Metadata {
-                name,
-                desc,
+                name: name.into(),
+                desc: desc.into(),
                 label_names,
             },
         )
@@ -224,15 +229,15 @@ impl RegistryOps for PrometheusMetricsRegistry {
 
     fn register_histogram_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl HistogramVecOps {
         get_or_register_histogram_vec(
             self,
             Metadata {
-                name,
-                desc,
+                name: name.into(),
+                desc: desc.into(),
                 label_names,
             },
         )
@@ -245,17 +250,17 @@ mod tests {
 
     fn case(registry: &PrometheusMetricsRegistry) {
         let cv = registry.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
-        let c = cv.counter(&["l1", "l2"]);
+        let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
         let gv = registry.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
-        let g = gv.gauge(&["l1", "l2"]);
+        let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
         let hv = registry.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
-        let h = hv.histogram(&["l1", "l2"]);
+        let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }
 

@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 use std::{
+    borrow::Cow,
     fmt::{Debug, Display},
     hash::Hash,
     marker::PhantomData,
@@ -344,7 +345,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: &'static str,
+    name: Cow<'static, str>,
     memory: Cache<K, V, S>,
     metrics: Arc<Metrics>,
 
@@ -368,13 +369,18 @@ where
     S: HashBuilder + Debug,
 {
     /// Setup disk cache store for the given in-memory cache.
-    pub fn new(name: &'static str, memory: Cache<K, V, S>, metrics: Arc<Metrics>, engine: Engine) -> Self {
+    pub fn new(
+        name: impl Into<Cow<'static, str>>,
+        memory: Cache<K, V, S>,
+        metrics: Arc<Metrics>,
+        engine: Engine,
+    ) -> Self {
         if matches!(engine, Engine::Mixed(ratio) if !(0.0..=1.0).contains(&ratio)) {
             panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
         }
 
         Self {
-            name,
+            name: name.into(),
             memory,
             metrics,
 

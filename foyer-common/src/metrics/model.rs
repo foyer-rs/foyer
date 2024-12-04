@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::borrow::Cow;
+
 use super::{BoxedCounter, BoxedGauge, BoxedHistogram, GaugeVecOps, HistogramVecOps, RegistryOps};
 use crate::metrics::CounterVecOps;
 
@@ -92,10 +94,12 @@ pub struct Metrics {
 
 impl Metrics {
     /// Create a new metric with the given name.
-    pub fn new<R>(name: &'static str, registry: &R) -> Self
+    pub fn new<R>(name: impl Into<Cow<'static, str>>, registry: &R) -> Self
     where
         R: RegistryOps,
     {
+        let name = name.into();
+
         /* in-memory cache metrics */
 
         let foyer_memory_op_total = registry.register_counter_vec(
@@ -106,18 +110,20 @@ impl Metrics {
         let foyer_memory_usage =
             registry.register_gauge_vec("foyer_memory_usage", "foyer in-memory cache usage", &["name"]);
 
-        let memory_insert = foyer_memory_op_total.counter(&[name, "insert"]).boxed();
-        let memory_replace = foyer_memory_op_total.counter(&[name, "replace"]).boxed();
-        let memory_hit = foyer_memory_op_total.counter(&[name, "hit"]).boxed();
-        let memory_miss = foyer_memory_op_total.counter(&[name, "miss"]).boxed();
-        let memory_remove = foyer_memory_op_total.counter(&[name, "remove"]).boxed();
-        let memory_evict = foyer_memory_op_total.counter(&[name, "evict"]).boxed();
-        let memory_reinsert = foyer_memory_op_total.counter(&[name, "reinsert"]).boxed();
-        let memory_release = foyer_memory_op_total.counter(&[name, "release"]).boxed();
-        let memory_queue = foyer_memory_op_total.counter(&[name, "queue"]).boxed();
-        let memory_fetch = foyer_memory_op_total.counter(&[name, "fetch"]).boxed();
+        let memory_insert = foyer_memory_op_total.counter(&[name.clone(), "insert".into()]).boxed();
+        let memory_replace = foyer_memory_op_total.counter(&[name.clone(), "replace".into()]).boxed();
+        let memory_hit = foyer_memory_op_total.counter(&[name.clone(), "hit".into()]).boxed();
+        let memory_miss = foyer_memory_op_total.counter(&[name.clone(), "miss".into()]).boxed();
+        let memory_remove = foyer_memory_op_total.counter(&[name.clone(), "remove".into()]).boxed();
+        let memory_evict = foyer_memory_op_total.counter(&[name.clone(), "evict".into()]).boxed();
+        let memory_reinsert = foyer_memory_op_total
+            .counter(&[name.clone(), "reinsert".into()])
+            .boxed();
+        let memory_release = foyer_memory_op_total.counter(&[name.clone(), "release".into()]).boxed();
+        let memory_queue = foyer_memory_op_total.counter(&[name.clone(), "queue".into()]).boxed();
+        let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]).boxed();
 
-        let memory_usage = foyer_memory_usage.gauge(&[name]).boxed();
+        let memory_usage = foyer_memory_usage.gauge(&[name.clone()]).boxed();
 
         /* disk cache metrics */
 
@@ -170,45 +176,75 @@ impl Metrics {
             &["name", "op"],
         );
 
-        let storage_enqueue = foyer_storage_op_total.counter(&[name, "enqueue"]).boxed();
-        let storage_hit = foyer_storage_op_total.counter(&[name, "hit"]).boxed();
-        let storage_miss = foyer_storage_op_total.counter(&[name, "miss"]).boxed();
-        let storage_delete = foyer_storage_op_total.counter(&[name, "delete"]).boxed();
+        let storage_enqueue = foyer_storage_op_total
+            .counter(&[name.clone(), "enqueue".into()])
+            .boxed();
+        let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]).boxed();
+        let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]).boxed();
+        let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]).boxed();
 
-        let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name, "enqueue"]).boxed();
-        let storage_hit_duration = foyer_storage_op_duration.histogram(&[name, "hit"]).boxed();
-        let storage_miss_duration = foyer_storage_op_duration.histogram(&[name, "miss"]).boxed();
-        let storage_delete_duration = foyer_storage_op_duration.histogram(&[name, "delete"]).boxed();
+        let storage_enqueue_duration = foyer_storage_op_duration
+            .histogram(&[name.clone(), "enqueue".into()])
+            .boxed();
+        let storage_hit_duration = foyer_storage_op_duration
+            .histogram(&[name.clone(), "hit".into()])
+            .boxed();
+        let storage_miss_duration = foyer_storage_op_duration
+            .histogram(&[name.clone(), "miss".into()])
+            .boxed();
+        let storage_delete_duration = foyer_storage_op_duration
+            .histogram(&[name.clone(), "delete".into()])
+            .boxed();
 
-        let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name, "queue_rotate"]).boxed();
-        let storage_queue_drop = foyer_storage_inner_op_total.counter(&[name, "queue_drop"]).boxed();
+        let storage_queue_rotate = foyer_storage_inner_op_total
+            .counter(&[name.clone(), "queue_rotate".into()])
+            .boxed();
+        let storage_queue_drop = foyer_storage_inner_op_total
+            .counter(&[name.clone(), "queue_drop".into()])
+            .boxed();
 
         let storage_queue_rotate_duration = foyer_storage_inner_op_duration
-            .histogram(&[name, "queue_rotate"])
+            .histogram(&[name.clone(), "queue_rotate".into()])
             .boxed();
 
-        let storage_disk_write = foyer_storage_disk_io_total.counter(&[name, "write"]).boxed();
-        let storage_disk_read = foyer_storage_disk_io_total.counter(&[name, "read"]).boxed();
-        let storage_disk_flush = foyer_storage_disk_io_total.counter(&[name, "flush"]).boxed();
+        let storage_disk_write = foyer_storage_disk_io_total
+            .counter(&[name.clone(), "write".into()])
+            .boxed();
+        let storage_disk_read = foyer_storage_disk_io_total
+            .counter(&[name.clone(), "read".into()])
+            .boxed();
+        let storage_disk_flush = foyer_storage_disk_io_total
+            .counter(&[name.clone(), "flush".into()])
+            .boxed();
 
-        let storage_disk_write_bytes = foyer_storage_disk_io_bytes.counter(&[name, "write"]).boxed();
-        let storage_disk_read_bytes = foyer_storage_disk_io_bytes.counter(&[name, "read"]).boxed();
+        let storage_disk_write_bytes = foyer_storage_disk_io_bytes
+            .counter(&[name.clone(), "write".into()])
+            .boxed();
+        let storage_disk_read_bytes = foyer_storage_disk_io_bytes
+            .counter(&[name.clone(), "read".into()])
+            .boxed();
 
-        let storage_disk_write_duration = foyer_storage_disk_io_duration.histogram(&[name, "write"]).boxed();
-        let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name, "read"]).boxed();
-        let storage_disk_flush_duration = foyer_storage_disk_io_duration.histogram(&[name, "flush"]).boxed();
+        let storage_disk_write_duration = foyer_storage_disk_io_duration
+            .histogram(&[name.clone(), "write".into()])
+            .boxed();
+        let storage_disk_read_duration = foyer_storage_disk_io_duration
+            .histogram(&[name.clone(), "read".into()])
+            .boxed();
+        let storage_disk_flush_duration = foyer_storage_disk_io_duration
+            .histogram(&[name.clone(), "flush".into()])
+            .boxed();
 
-        let storage_region_total = foyer_storage_region.gauge(&[name, "total"]).boxed();
-        let storage_region_clean = foyer_storage_region.gauge(&[name, "clean"]).boxed();
-        let storage_region_evictable = foyer_storage_region.gauge(&[name, "evictable"]).boxed();
+        let storage_region_total = foyer_storage_region.gauge(&[name.clone(), "total".into()]).boxed();
+        let storage_region_clean = foyer_storage_region.gauge(&[name.clone(), "clean".into()]).boxed();
+        let storage_region_evictable = foyer_storage_region.gauge(&[name.clone(), "evictable".into()]).boxed();
 
-        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name]).boxed();
+        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name.clone()]).boxed();
 
         let storage_entry_serialize_duration = foyer_storage_entry_serde_duration
-            .histogram(&[name, "serialize"])
+            .histogram(&[name.clone(), "serialize".into()])
             .boxed();
         let storage_entry_deserialize_duration = foyer_storage_entry_serde_duration
-            .histogram(&[name, "deserialize"])
+            .histogram(&[name.clone(), "deserialize".into()])
             .boxed();
 
         /* hybrid cache metrics */
@@ -224,16 +260,26 @@ impl Metrics {
             &["name", "op"],
         );
 
-        let hybrid_insert = foyer_hybrid_op_total.counter(&[name, "insert"]).boxed();
-        let hybrid_hit = foyer_hybrid_op_total.counter(&[name, "hit"]).boxed();
-        let hybrid_miss = foyer_hybrid_op_total.counter(&[name, "miss"]).boxed();
-        let hybrid_remove = foyer_hybrid_op_total.counter(&[name, "remove"]).boxed();
+        let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]).boxed();
+        let hybrid_hit = foyer_hybrid_op_total.counter(&[name.clone(), "hit".into()]).boxed();
+        let hybrid_miss = foyer_hybrid_op_total.counter(&[name.clone(), "miss".into()]).boxed();
+        let hybrid_remove = foyer_hybrid_op_total.counter(&[name.clone(), "remove".into()]).boxed();
 
-        let hybrid_insert_duration = foyer_hybrid_op_duration.histogram(&[name, "insert"]).boxed();
-        let hybrid_hit_duration = foyer_hybrid_op_duration.histogram(&[name, "hit"]).boxed();
-        let hybrid_miss_duration = foyer_hybrid_op_duration.histogram(&[name, "miss"]).boxed();
-        let hybrid_remove_duration = foyer_hybrid_op_duration.histogram(&[name, "remove"]).boxed();
-        let hybrid_fetch_duration = foyer_hybrid_op_duration.histogram(&[name, "fetch"]).boxed();
+        let hybrid_insert_duration = foyer_hybrid_op_duration
+            .histogram(&[name.clone(), "insert".into()])
+            .boxed();
+        let hybrid_hit_duration = foyer_hybrid_op_duration
+            .histogram(&[name.clone(), "hit".into()])
+            .boxed();
+        let hybrid_miss_duration = foyer_hybrid_op_duration
+            .histogram(&[name.clone(), "miss".into()])
+            .boxed();
+        let hybrid_remove_duration = foyer_hybrid_op_duration
+            .histogram(&[name.clone(), "remove".into()])
+            .boxed();
+        let hybrid_fetch_duration = foyer_hybrid_op_duration
+            .histogram(&[name.clone(), "fetch".into()])
+            .boxed();
 
         Self {
             memory_insert,

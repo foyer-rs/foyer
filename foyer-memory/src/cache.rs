@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
+use std::{borrow::Cow, fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
 
 use ahash::RandomState;
 use equivalent::Equivalent;
@@ -272,7 +272,7 @@ where
     V: Value,
     S: HashBuilder,
 {
-    name: &'static str,
+    name: Cow<'static, str>,
 
     capacity: usize,
     shards: usize,
@@ -295,7 +295,7 @@ where
     /// Create a new in-memory cache builder.
     pub fn new(capacity: usize) -> Self {
         Self {
-            name: "foyer",
+            name: "foyer".into(),
 
             capacity,
             shards: 8,
@@ -322,8 +322,8 @@ where
     /// foyer will use the name as the prefix of the metric names.
     ///
     /// Default: `foyer`.
-    pub fn with_name(mut self, name: &'static str) -> Self {
-        self.name = name;
+    pub fn with_name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        self.name = name.into();
         self
     }
 

@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 /// Counter metric operations.
 pub trait CounterOps: Send + Sync + 'static + Debug {
@@ -39,19 +39,19 @@ pub trait HistogramOps: Send + Sync + 'static + Debug {
 /// A vector of counters.
 pub trait CounterVecOps: Send + Sync + 'static + Debug {
     /// Get a counter within the vector of counters.
-    fn counter(&self, labels: &[&'static str]) -> impl CounterOps;
+    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps;
 }
 
 /// A vector of gauges.
 pub trait GaugeVecOps: Send + Sync + 'static + Debug {
     /// Get a gauge within the vector of gauges.
-    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps;
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps;
 }
 
 /// A vector of histograms.
 pub trait HistogramVecOps: Send + Sync + 'static + Debug {
     /// Get a histogram within the vector of histograms.
-    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps;
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps;
 }
 
 /// Metrics registry.
@@ -59,24 +59,24 @@ pub trait RegistryOps: Send + Sync + 'static + Debug {
     /// Register a vector of counters to the registry.
     fn register_counter_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl CounterVecOps;
 
     /// Register a vector of gauges to the registry.
     fn register_gauge_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl GaugeVecOps;
 
     /// Register a vector of histograms to the registry.
     fn register_histogram_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl HistogramVecOps;
 }

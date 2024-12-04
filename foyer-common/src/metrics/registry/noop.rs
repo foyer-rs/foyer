@@ -12,6 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+use std::borrow::Cow;
+
 use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
 
 /// Noop metrics placeholder.
@@ -23,7 +25,7 @@ impl CounterOps for NoopMetricsRegistry {
 }
 
 impl CounterVecOps for NoopMetricsRegistry {
-    fn counter(&self, _: &[&'static str]) -> impl CounterOps {
+    fn counter(&self, _: &[Cow<'static, str>]) -> impl CounterOps {
         NoopMetricsRegistry
     }
 }
@@ -37,7 +39,7 @@ impl GaugeOps for NoopMetricsRegistry {
 }
 
 impl GaugeVecOps for NoopMetricsRegistry {
-    fn gauge(&self, _: &[&'static str]) -> impl GaugeOps {
+    fn gauge(&self, _: &[Cow<'static, str>]) -> impl GaugeOps {
         NoopMetricsRegistry
     }
 }
@@ -47,24 +49,34 @@ impl HistogramOps for NoopMetricsRegistry {
 }
 
 impl HistogramVecOps for NoopMetricsRegistry {
-    fn histogram(&self, _: &[&'static str]) -> impl HistogramOps {
+    fn histogram(&self, _: &[Cow<'static, str>]) -> impl HistogramOps {
         NoopMetricsRegistry
     }
 }
 
 impl RegistryOps for NoopMetricsRegistry {
-    fn register_counter_vec(&self, _: &'static str, _: &'static str, _: &'static [&'static str]) -> impl CounterVecOps {
+    fn register_counter_vec(
+        &self,
+        _: impl Into<Cow<'static, str>>,
+        _: impl Into<Cow<'static, str>>,
+        _: &'static [&'static str],
+    ) -> impl CounterVecOps {
         NoopMetricsRegistry
     }
 
-    fn register_gauge_vec(&self, _: &'static str, _: &'static str, _: &'static [&'static str]) -> impl GaugeVecOps {
+    fn register_gauge_vec(
+        &self,
+        _: impl Into<Cow<'static, str>>,
+        _: impl Into<Cow<'static, str>>,
+        _: &'static [&'static str],
+    ) -> impl GaugeVecOps {
         NoopMetricsRegistry
     }
 
     fn register_histogram_vec(
         &self,
-        _: &'static str,
-        _: &'static str,
+        _: impl Into<Cow<'static, str>>,
+        _: impl Into<Cow<'static, str>>,
         _: &'static [&'static str],
     ) -> impl HistogramVecOps {
         NoopMetricsRegistry
@@ -80,17 +92,17 @@ mod tests {
         let noop = NoopMetricsRegistry;
 
         let cv = noop.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
-        let c = cv.counter(&["l1", "l2"]);
+        let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
         let gv = noop.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
-        let g = gv.gauge(&["l1", "l2"]);
+        let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
         let hv = noop.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
-        let h = hv.histogram(&["l1", "l2"]);
+        let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }
 }

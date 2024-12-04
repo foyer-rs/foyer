@@ -12,7 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    borrow::Cow,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use itertools::Itertools;
 use opentelemetry::{
@@ -78,32 +81,40 @@ impl HistogramOps for Histogram {
 #[derive(Debug)]
 pub struct MetricVec {
     meter: Meter,
-    name: &'static str,
-    desc: &'static str,
+    name: Cow<'static, str>,
+    desc: Cow<'static, str>,
     label_names: &'static [&'static str],
 }
 
 impl CounterVecOps for MetricVec {
-    fn counter(&self, labels: &[&'static str]) -> impl CounterOps {
-        let counter = self.meter.u64_counter(self.name).with_description(self.desc).build();
+    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
+        let counter = self
+            .meter
+            .u64_counter(self.name.clone())
+            .with_description(self.desc.clone())
+            .build();
         let labels = self
             .label_names
             .iter()
             .zip_eq(labels.iter())
-            .map(|(name, label)| KeyValue::new(name.to_string(), label.to_string()))
+            .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
         Counter { counter, labels }
     }
 }
 
 impl GaugeVecOps for MetricVec {
-    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps {
-        let gauge = self.meter.u64_gauge(self.name).with_description(self.desc).build();
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
+        let gauge = self
+            .meter
+            .u64_gauge(self.name.clone())
+            .with_description(self.desc.clone())
+            .build();
         let labels = self
             .label_names
             .iter()
             .zip_eq(labels.iter())
-            .map(|(name, label)| KeyValue::new(name.to_string(), label.to_string()))
+            .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
         let val = AtomicU64::new(0);
         Gauge { val, gauge, labels }
@@ -111,13 +122,17 @@ impl GaugeVecOps for MetricVec {
 }
 
 impl HistogramVecOps for MetricVec {
-    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps {
-        let histogram = self.meter.f64_histogram(self.name).with_description(self.desc).build();
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
+        let histogram = self
+            .meter
+            .f64_histogram(self.name.clone())
+            .with_description(self.desc.clone())
+            .build();
         let labels = self
             .label_names
             .iter()
             .zip_eq(labels.iter())
-            .map(|(name, label)| KeyValue::new(name.to_string(), label.to_string()))
+            .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
         Histogram { histogram, labels }
     }
@@ -139,45 +154,42 @@ impl OpenTelemetryMetricsRegistry {
 impl RegistryOps for OpenTelemetryMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl CounterVecOps {
-        let meter = self.meter.clone();
         MetricVec {
-            meter,
-            name,
-            desc,
+            meter: self.meter.clone(),
+            name: name.into(),
+            desc: desc.into(),
             label_names,
         }
     }
 
     fn register_gauge_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl GaugeVecOps {
-        let meter = self.meter.clone();
         MetricVec {
-            meter,
-            name,
-            desc,
+            meter: self.meter.clone(),
+            name: name.into(),
+            desc: desc.into(),
             label_names,
         }
     }
 
     fn register_histogram_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl HistogramVecOps {
-        let meter = self.meter.clone();
         MetricVec {
-            meter,
-            name,
-            desc,
+            meter: self.meter.clone(),
+            name: name.into(),
+            desc: desc.into(),
             label_names,
         }
     }
@@ -193,17 +205,17 @@ mod tests {
         let ot = OpenTelemetryMetricsRegistry::new(meter);
 
         let cv = ot.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
-        let c = cv.counter(&["l1", "l2"]);
+        let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
         let gv = ot.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
-        let g = gv.gauge(&["l1", "l2"]);
+        let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
         let hv = ot.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
-        let h = hv.histogram(&["l1", "l2"]);
+        let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }
 }
