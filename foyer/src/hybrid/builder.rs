@@ -269,7 +269,7 @@ where
     ///
     /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
     ///
-    /// Default: [`AdmitAllPicker`].
+    /// Default: [`crate::AdmitAllPicker`].
     pub fn with_admission_picker(self, admission_picker: Arc<dyn AdmissionPicker<Key = K>>) -> Self {
         let builder = self.builder.with_admission_picker(admission_picker);
         Self {

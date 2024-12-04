@@ -38,7 +38,7 @@ pub enum CacheHint {
     Normal,
     /// Suggest the priority of the entry is low.
     ///
-    /// Used by [`crate::eviction::lru::Lru`].
+    /// Used by LRU.
     Low,
 }
 
