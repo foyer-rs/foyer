@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -28,7 +28,7 @@ use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, Histogram
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Labels {
-    pairs: Vec<(&'static str, &'static str)>,
+    pairs: Vec<(&'static str, Cow<'static, str>)>,
 }
 
 impl EncodeLabelSet for Labels {
@@ -59,7 +59,7 @@ struct CounterVec {
 }
 
 impl CounterVecOps for CounterVec {
-    fn counter(&self, labels: &[&'static str]) -> impl CounterOps {
+    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
         Counter {
             counter: self.counter.clone(),
             labels: Labels {
@@ -67,7 +67,7 @@ impl CounterVecOps for CounterVec {
                     .label_names
                     .iter()
                     .zip_eq(labels.iter())
-                    .map(|(name, label)| (*name, *label))
+                    .map(|(name, label)| (*name, label.clone()))
                     .collect(),
             },
         }
@@ -101,7 +101,7 @@ struct GaugeVec {
 }
 
 impl GaugeVecOps for GaugeVec {
-    fn gauge(&self, labels: &[&'static str]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
         Gauge {
             gauge: self.gauge.clone(),
             labels: Labels {
@@ -109,7 +109,7 @@ impl GaugeVecOps for GaugeVec {
                     .label_names
                     .iter()
                     .zip_eq(labels.iter())
-                    .map(|(name, label)| (*name, *label))
+                    .map(|(name, label)| (*name, label.clone()))
                     .collect(),
             },
         }
@@ -135,7 +135,7 @@ struct HistogramVec {
 }
 
 impl HistogramVecOps for HistogramVec {
-    fn histogram(&self, labels: &[&'static str]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
         Histogram {
             histogram: self.histogram.clone(),
             labels: Labels {
@@ -143,7 +143,7 @@ impl HistogramVecOps for HistogramVec {
                     .label_names
                     .iter()
                     .zip_eq(labels.iter())
-                    .map(|(name, label)| (*name, *label))
+                    .map(|(name, label)| (*name, label.clone()))
                     .collect(),
             },
         }
@@ -166,36 +166,38 @@ impl PrometheusClientMetricsRegistry {
 impl RegistryOps for PrometheusClientMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl CounterVecOps {
         let counter = Family::<Labels, PcCounter>::default();
-        self.registry.lock().register(name, desc, counter.clone());
+        self.registry.lock().register(name.into(), desc.into(), counter.clone());
         CounterVec { counter, label_names }
     }
 
     fn register_gauge_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl GaugeVecOps {
         let gauge = Family::<Labels, PcGauge>::default();
-        self.registry.lock().register(name, desc, gauge.clone());
+        self.registry.lock().register(name.into(), desc.into(), gauge.clone());
         GaugeVec { gauge, label_names }
     }
 
     fn register_histogram_vec(
         &self,
-        name: &'static str,
-        desc: &'static str,
+        name: impl Into<Cow<'static, str>>,
+        desc: impl Into<Cow<'static, str>>,
         label_names: &'static [&'static str],
     ) -> impl HistogramVecOps {
         let histogram = Family::<Labels, PcHistogram>::new_with_constructor(|| {
             PcHistogram::new([0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0].into_iter())
         });
-        self.registry.lock().register(name, desc, histogram.clone());
+        self.registry
+            .lock()
+            .register(name.into(), desc.into(), histogram.clone());
         HistogramVec { histogram, label_names }
     }
 }
@@ -212,17 +214,17 @@ mod tests {
         let pc = PrometheusClientMetricsRegistry::new(registry.clone());
 
         let cv = pc.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
-        let c = cv.counter(&["l1", "l2"]);
+        let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
         let gv = pc.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
-        let g = gv.gauge(&["l1", "l2"]);
+        let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
         let hv = pc.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
-        let h = hv.histogram(&["l1", "l2"]);
+        let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
 
         let mut text = String::new();

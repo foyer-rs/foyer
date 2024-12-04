@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-use std::{fmt::Debug, sync::Arc};
+use std::{borrow::Cow, fmt::Debug, sync::Arc};
 
 use ahash::RandomState;
 use foyer_common::{
@@ -31,7 +31,7 @@ use crate::HybridCache;
 
 /// Hybrid cache builder.
 pub struct HybridCacheBuilder<K, V, M = NoopMetricsRegistry> {
-    name: &'static str,
+    name: Cow<'static, str>,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     tracing_options: TracingOptions,
     registry: M,
@@ -47,7 +47,7 @@ impl<K, V> HybridCacheBuilder<K, V, NoopMetricsRegistry> {
     /// Create a new hybrid cache builder.
     pub fn new() -> Self {
         Self {
-            name: "foyer",
+            name: "foyer".into(),
             event_listener: None,
             tracing_options: TracingOptions::default(),
             registry: NoopMetricsRegistry,
@@ -61,8 +61,8 @@ impl<K, V, M> HybridCacheBuilder<K, V, M> {
     /// foyer will use the name as the prefix of the metric names.
     ///
     /// Default: `foyer`.
-    pub fn with_name(mut self, name: &'static str) -> Self {
-        self.name = name;
+    pub fn with_name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        self.name = name.into();
         self
     }
 
@@ -104,9 +104,9 @@ impl<K, V, M> HybridCacheBuilder<K, V, M> {
         V: StorageValue,
         M: RegistryOps,
     {
-        let metrics = Arc::new(Metrics::new(self.name, &self.registry));
+        let metrics = Arc::new(Metrics::new(self.name.clone(), &self.registry));
         let mut builder = CacheBuilder::new(capacity)
-            .with_name(self.name)
+            .with_name(self.name.clone())
             .with_metrics(metrics.clone());
         if let Some(event_listener) = self.event_listener {
             builder = builder.with_event_listener(event_listener);
@@ -127,7 +127,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: &'static str,
+    name: Cow<'static, str>,
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
     // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
@@ -194,7 +194,7 @@ where
     pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
-            builder: StoreBuilder::new(self.name, memory.clone(), self.metrics.clone(), engine),
+            builder: StoreBuilder::new(self.name.clone(), memory.clone(), self.metrics.clone(), engine),
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
@@ -210,7 +210,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    name: &'static str,
+    name: Cow<'static, str>,
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
     memory: Cache<K, V, S>,
