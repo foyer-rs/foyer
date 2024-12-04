@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2024-12-04
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.13.1 |
+| foyer-common | 0.13.1 |
+| foyer-memory | 0.13.1 |
+| foyer-storage | 0.13.1 |
+| foyer-bench | 0.13.1 |
+
+### Changes
+
+- Refactor cache builders. `name` field requires `Cow<'static, str>` instead of `&'static str` for convenience.
+
 ## 2024-12-02
 
 ### Releases
