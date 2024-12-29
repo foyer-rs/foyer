@@ -451,3 +451,63 @@ where
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::path::Path;
+
+    use bytesize::ByteSize;
+    use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use tokio::sync::Semaphore;
+
+    use super::*;
+    use crate::{
+        device::monitor::{Monitored, MonitoredConfig},
+        DirectFsDeviceOptions, FifoPicker, Runtime,
+    };
+
+    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+        let runtime = Runtime::current();
+        Monitored::open(
+            MonitoredConfig {
+                config: DirectFsDeviceOptions::new(dir)
+                    .with_capacity(ByteSize::kib(64).as_u64() as _)
+                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .into(),
+                metrics: Arc::new(Metrics::noop()),
+            },
+            runtime,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+        CacheBuilder::new(10)
+            .with_shards(1)
+            .with_eviction_config(FifoConfig::default())
+            .build()
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_batch_mut_entry_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = device_for_test(dir.path()).await;
+        let metrics = Arc::new(Metrics::noop());
+        let region_manager = RegionManager::new(
+            device.clone(),
+            vec![Box::new(FifoPicker::default())],
+            Arc::new(Semaphore::new(0)),
+            Arc::new(Metrics::noop()),
+        );
+        let indexer = Indexer::new(1);
+
+        let mem = cache_for_test();
+        let mut b = BatchMut::new(64 * 1024, region_manager, device, indexer, metrics);
+
+        let e = mem.insert(1, vec![1; 128 * 1024]);
+        let inserted = b.entry(e, &Compression::None, 1);
+        assert!(!inserted);
+    }
+}
