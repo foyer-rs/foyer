@@ -18,7 +18,6 @@ bytes = "1"
 cfg-if = "1"
 fastrace = { workspace = true }
 futures = "0.3"
-hashbrown = { workspace = true }
 itertools = { workspace = true }
 opentelemetry_0_26 = { workspace = true, optional = true }
 opentelemetry_0_27 = { workspace = true, optional = true }
@@ -34,7 +33,6 @@ futures = "0.3"
 rand = "0.8.5"
 
 [features]
-nightly = ["hashbrown/nightly"]
 strict_assertions = []
 tracing = ["fastrace/enable"]
 prometheus = ["dep:prometheus"]

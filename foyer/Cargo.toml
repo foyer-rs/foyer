@@ -46,7 +46,6 @@ test-log = { workspace = true }
 default = []
 nightly = [
     "foyer-storage/nightly",
-    "foyer-common/nightly",
     "foyer-memory/nightly",
 ]
 deadlock = ["foyer-storage/deadlock"]
