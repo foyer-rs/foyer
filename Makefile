@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt machete
 
 deps:
 	./scripts/install-deps.sh
@@ -48,9 +48,9 @@ example:
 	cargo run --example equivalent
 	cargo run --example export_metrics_prometheus_hyper
 
-full: check-all test-all example udeps
+full: check-all test-all example machete udeps
 
-fast: ffmt check test example
+fast: ffmt check test example machete
 
 msrv:
 	shellcheck ./scripts/*
@@ -66,6 +66,9 @@ msrv:
 
 udeps:
 	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-08-30 udeps --all-targets
+
+machete:
+	cargo machete
 
 monitor:
 	./scripts/monitor.sh
