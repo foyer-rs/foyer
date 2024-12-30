@@ -42,6 +42,14 @@ jobs:
           ./scripts/minimize-dashboards.sh --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
+  rust-machete:
+    name: rust machete check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run cargo machete
+        uses: bnjbvr/cargo-machete@main
   rust-udeps:
     name: rust udeps test
     strategy:

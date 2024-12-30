@@ -22,7 +22,6 @@ array-util = "1"
 async-channel = "2"
 auto_enums = { version = "0.8", features = ["futures03"] }
 bincode = "1"
-bitflags = "2.3.1"
 bytes = "1"
 clap = { workspace = true }
 either = "1"
@@ -33,7 +32,6 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 fs4 = { version = "0.12", default-features = false }
 futures = "0.3"
-hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24"
@@ -57,7 +55,7 @@ test-log = { workspace = true }
 [features]
 default = []
 deadlock = ["parking_lot/deadlock_detection"]
-nightly = ["allocator-api2/nightly", "hashbrown/nightly"]
+nightly = ["allocator-api2/nightly"]
 strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-memory/strict_assertions",
