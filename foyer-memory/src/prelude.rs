@@ -19,5 +19,5 @@ pub use crate::{
     error::{Error, Result},
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
     raw::{FetchMark, FetchState, Weighter},
-    record::{CacheHint, Record},
+    record::CacheHint,
 };
