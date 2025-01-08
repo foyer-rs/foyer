@@ -24,6 +24,7 @@ pub struct Piece<K, V> {
     key: *const K,
     value: *const V,
     hash: u64,
+    drop_fn: fn(*const ()),
 }
 
 impl<K, V> Debug for Piece<K, V> {
@@ -40,7 +41,7 @@ unsafe impl<K, V> Sync for Piece<K, V> {}
 
 impl<K, V> Drop for Piece<K, V> {
     fn drop(&mut self) {
-        let _ = unsafe { Arc::from_raw(self.record as *const Self) };
+        (self.drop_fn)(self.record);
     }
 }
 
@@ -55,11 +56,15 @@ impl<K, V> Piece<K, V> {
         let key = unsafe { (*raw).key() } as *const _;
         let value = unsafe { (*raw).value() } as *const _;
         let hash = unsafe { (*raw).hash() };
+        let drop_fn = |ptr| unsafe {
+            let _ = Arc::from_raw(ptr as *const Record<E>);
+        };
         Self {
             record,
             key,
             value,
             hash,
+            drop_fn,
         }
     }
 
