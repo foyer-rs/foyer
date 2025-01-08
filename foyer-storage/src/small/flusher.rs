@@ -33,10 +33,10 @@ use std::{
 };
 
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
 };
-use foyer_memory::CacheEntry;
+use foyer_memory::Piece;
 use futures::future::try_join_all;
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
@@ -50,34 +50,25 @@ use crate::{
     Statistics,
 };
 
-pub enum Submission<K, V, S>
+pub enum Submission<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    Insertion {
-        entry: CacheEntry<K, V, S>,
-        estimated_size: usize,
-    },
-    Deletion {
-        hash: u64,
-    },
-    Wait {
-        tx: oneshot::Sender<()>,
-    },
+    Insertion { piece: Piece<K, V>, estimated_size: usize },
+    Deletion { hash: u64 },
+    Wait { tx: oneshot::Sender<()> },
 }
 
-impl<K, V, S> Debug for Submission<K, V, S>
+impl<K, V> Debug for Submission<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Insertion {
-                entry: _,
+                piece: _,
                 estimated_size,
             } => f
                 .debug_struct("Insertion")
@@ -89,23 +80,21 @@ where
     }
 }
 
-pub struct Flusher<K, V, S>
+pub struct Flusher<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    tx: flume::Sender<Submission<K, V, S>>,
+    tx: flume::Sender<Submission<K, V>>,
 }
 
-impl<K, V, S> Flusher<K, V, S>
+impl<K, V> Flusher<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub fn open(
-        config: &GenericSmallStorageConfig<K, V, S>,
+        config: &GenericSmallStorageConfig<K, V>,
         set_manager: SetManager,
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
@@ -134,7 +123,7 @@ where
         Self { tx }
     }
 
-    pub fn submit(&self, submission: Submission<K, V, S>) {
+    pub fn submit(&self, submission: Submission<K, V>) {
         tracing::trace!("[sodc flusher]: submit task: {submission:?}");
         if let Err(e) = self.tx.send(submission) {
             tracing::error!("[sodc flusher]: error raised when submitting task, error: {e}");
@@ -150,14 +139,13 @@ where
     }
 }
 
-struct Runner<K, V, S>
+struct Runner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    rx: flume::Receiver<Submission<K, V, S>>,
-    batch: BatchMut<K, V, S>,
+    rx: flume::Receiver<Submission<K, V>>,
+    batch: BatchMut<K, V>,
     flight: Arc<Semaphore>,
 
     set_manager: SetManager,
@@ -166,11 +154,10 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S> Runner<K, V, S>
+impl<K, V> Runner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub async fn run(mut self) -> Result<()> {
         loop {
@@ -193,7 +180,7 @@ where
         Ok(())
     }
 
-    fn submit(&mut self, submission: Submission<K, V, S>) {
+    fn submit(&mut self, submission: Submission<K, V>) {
         let report = |enqueued: bool| {
             if !enqueued {
                 self.metrics.storage_queue_drop.increase(1);
@@ -201,13 +188,16 @@ where
         };
 
         match submission {
-            Submission::Insertion { entry, estimated_size } => report(self.batch.insert(entry, estimated_size)),
+            Submission::Insertion {
+                piece: entry,
+                estimated_size,
+            } => report(self.batch.insert(entry, estimated_size)),
             Submission::Deletion { hash } => self.batch.delete(hash),
             Submission::Wait { tx } => self.batch.wait(tx),
         }
     }
 
-    pub async fn commit(&self, batch: Batch<K, V, S>, permit: OwnedSemaphorePermit) {
+    pub async fn commit(&self, batch: Batch<K, V>, permit: OwnedSemaphorePermit) {
         tracing::trace!("[sodc flusher] commit batch: {batch:?}");
 
         let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {

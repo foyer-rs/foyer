@@ -29,8 +29,8 @@
 use std::{fmt::Debug, sync::Arc};
 
 use auto_enums::auto_enum;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheEntry;
+use foyer_common::code::{StorageKey, StorageValue};
+use foyer_memory::Piece;
 use futures::{
     future::{join, ready, select, try_join, Either as EitherFuture},
     pin_mut, Future, FutureExt,
@@ -56,14 +56,13 @@ pub enum Order {
     Parallel,
 }
 
-pub struct EitherConfig<K, V, S, SL, SR, SE>
+pub struct EitherConfig<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     pub selector: SE,
     pub left: SL::Config,
@@ -71,14 +70,13 @@ where
     pub load_order: Order,
 }
 
-impl<K, V, S, SL, SR, SE> Debug for EitherConfig<K, V, S, SL, SR, SE>
+impl<K, V, SL, SR, SE> Debug for EitherConfig<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EitherStoreConfig")
@@ -97,20 +95,17 @@ pub enum Selection {
 pub trait Selector: Send + Sync + 'static + Debug {
     type Key: StorageKey;
     type Value: StorageValue;
-    type BuildHasher: HashBuilder;
 
-    fn select(&self, entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize)
-        -> Selection;
+    fn select(&self, piece: &Piece<Self::Key, Self::Value>, estimated_size: usize) -> Selection;
 }
 
-pub struct Either<K, V, S, SL, SR, SE>
+pub struct Either<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     selector: Arc<SE>,
 
@@ -120,14 +115,13 @@ where
     load_order: Order,
 }
 
-impl<K, V, S, SL, SR, SE> Debug for Either<K, V, S, SL, SR, SE>
+impl<K, V, SL, SR, SE> Debug for Either<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EitherStore")
@@ -137,14 +131,13 @@ where
     }
 }
 
-impl<K, V, S, SL, SR, SE> Clone for Either<K, V, S, SL, SR, SE>
+impl<K, V, SL, SR, SE> Clone for Either<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -156,19 +149,17 @@ where
     }
 }
 
-impl<K, V, S, SL, SR, SE> Storage for Either<K, V, S, SL, SR, SE>
+impl<K, V, SL, SR, SE> Storage for Either<K, V, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
-    SL: Storage<Key = K, Value = V, BuildHasher = S>,
-    SR: Storage<Key = K, Value = V, BuildHasher = S>,
-    SE: Selector<Key = K, Value = V, BuildHasher = S>,
+    SL: Storage<Key = K, Value = V>,
+    SR: Storage<Key = K, Value = V>,
+    SE: Selector<Key = K, Value = V>,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
-    type Config = EitherConfig<K, V, S, SL, SR, SE>;
+    type Config = EitherConfig<K, V, SL, SR, SE>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         let selector = Arc::new(config.selector);
@@ -189,15 +180,15 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
-        match self.selector.select(&entry, estimated_size) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+        match self.selector.select(&piece, estimated_size) {
             Selection::Left => {
-                self.right.delete(entry.hash());
-                self.left.enqueue(entry, estimated_size);
+                self.right.delete(piece.hash());
+                self.left.enqueue(piece, estimated_size);
             }
             Selection::Right => {
-                self.right.delete(entry.hash());
-                self.right.enqueue(entry, estimated_size);
+                self.right.delete(piece.hash());
+                self.right.enqueue(piece, estimated_size);
             }
         }
     }

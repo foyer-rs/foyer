@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{record::Record, Eviction};
 
@@ -25,6 +25,18 @@ pub struct Piece<K, V> {
     value: *const V,
     hash: u64,
 }
+
+impl<K, V> Debug for Piece<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Piece")
+            .field("record", &self.record)
+            .field("hash", &self.hash)
+            .finish()
+    }
+}
+
+unsafe impl<K, V> Send for Piece<K, V> {}
+unsafe impl<K, V> Sync for Piece<K, V> {}
 
 impl<K, V> Drop for Piece<K, V> {
     fn drop(&mut self) {
@@ -40,9 +52,9 @@ impl<K, V> Piece<K, V> {
     {
         let raw = Arc::into_raw(record);
         let record = raw as *const ();
-        let key = unsafe { (&*raw).key() } as *const _;
-        let value = unsafe { (&*raw).value() } as *const _;
-        let hash = unsafe { (&*raw).hash() };
+        let key = unsafe { (*raw).key() } as *const _;
+        let value = unsafe { (*raw).value() } as *const _;
+        let hash = unsafe { (*raw).hash() };
         Self {
             record,
             key,

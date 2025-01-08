@@ -138,7 +138,7 @@ where
             Some(hint) => self.hybrid.memory().insert_ephemeral_with_hint(self.key, value, hint),
             None => self.hybrid.memory().insert_ephemeral(self.key, value),
         };
-        self.hybrid.storage().enqueue(entry.clone(), true);
+        self.hybrid.storage().enqueue(entry.piece(), true);
 
         self.hybrid.metrics().hybrid_insert.increase(1);
         self.hybrid

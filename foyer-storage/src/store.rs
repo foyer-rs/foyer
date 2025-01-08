@@ -44,7 +44,7 @@ use foyer_common::{
     metrics::model::Metrics,
     runtime::BackgroundShutdownRuntime,
 };
-use foyer_memory::{Cache, CacheEntry};
+use foyer_memory::{Cache, Piece};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
@@ -90,7 +90,7 @@ where
 {
     memory: Cache<K, V, S>,
 
-    engine: EngineEnum<K, V, S>,
+    engine: EngineEnum<K, V>,
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
 
@@ -150,13 +150,13 @@ where
         self.inner.admission_picker.pick(&self.inner.statistics, key)
     }
 
-    /// Push a in-memory cache entry to the disk cache write queue.
-    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) {
+    /// Push a in-memory cache piece to the disk cache write queue.
+    pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
         let now = Instant::now();
 
-        if force || self.pick(entry.key()) {
-            let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-            self.inner.engine.enqueue(entry, estimated_size);
+        if force || self.pick(piece.key()) {
+            let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+            self.inner.engine.enqueue(piece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -213,6 +213,11 @@ where
     /// Get the runtime.
     pub fn runtime(&self) -> &Runtime {
         &self.inner.runtime
+    }
+
+    /// Wait for the ongoing flush and reclaim tasks to finish.
+    pub async fn wait(&self) {
+        self.inner.engine.wait().await
     }
 }
 

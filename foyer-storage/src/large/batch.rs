@@ -30,12 +30,12 @@ use std::{fmt::Debug, ops::Range, sync::Arc, time::Instant};
 
 use foyer_common::{
     bits,
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
     range::RangeBoundsExt,
     strict_assert_eq,
 };
-use foyer_memory::CacheEntry;
+use foyer_memory::Piece;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 
@@ -54,15 +54,14 @@ use crate::{
     Compression, Dev, DevExt, IoBuffer,
 };
 
-pub struct BatchMut<K, V, S>
+pub struct BatchMut<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     buffer: IoBuffer,
     len: usize,
-    groups: Vec<GroupMut<K, V, S>>,
+    groups: Vec<GroupMut<K, V>>,
     tombstones: Vec<TombstoneInfo>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Option<Instant>,
@@ -76,11 +75,10 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S> Debug for BatchMut<K, V, S>
+impl<K, V> Debug for BatchMut<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchMut")
@@ -93,11 +91,10 @@ where
     }
 }
 
-impl<K, V, S> BatchMut<K, V, S>
+impl<K, V> BatchMut<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub fn new(
         buffer_size: usize,
@@ -124,14 +121,10 @@ where
         batch
     }
 
-    pub fn entry(&mut self, entry: CacheEntry<K, V, S>, compression: &Compression, sequence: Sequence) -> bool {
+    pub fn piece(&mut self, piece: Piece<K, V>, compression: &Compression, sequence: Sequence) -> bool {
         tracing::trace!("[batch]: append entry with sequence: {sequence}");
 
         self.may_init();
-
-        if entry.is_outdated() {
-            return false;
-        }
 
         let pos = self.len;
 
@@ -141,8 +134,8 @@ where
         }
 
         let info = match EntrySerializer::serialize(
-            entry.key(),
-            entry.value(),
+            piece.key(),
+            piece.value(),
             compression,
             &mut self.buffer[pos + EntryHeader::serialized_len()..],
             &self.metrics,
@@ -157,7 +150,7 @@ where
         let header = EntryHeader {
             key_len: info.key_len as _,
             value_len: info.value_len as _,
-            hash: entry.hash(),
+            hash: piece.hash(),
             sequence,
             checksum: Checksummer::checksum64(
                 &self.buffer[pos + EntryHeader::serialized_len()
@@ -172,7 +165,7 @@ where
 
         let group = self.groups.last_mut().unwrap();
         group.indices.push(HashedEntryAddress {
-            hash: entry.hash(),
+            hash: piece.hash(),
             address: EntryAddress {
                 region: RegionId::MAX,
                 offset: group.region.offset as u32 + group.region.len as u32,
@@ -180,7 +173,7 @@ where
                 sequence,
             },
         });
-        group.entries.push(entry);
+        group.pieces.push(piece);
         group.region.len += aligned;
         group.range.end += aligned;
 
@@ -238,7 +231,7 @@ where
         self.waiters.push(tx);
     }
 
-    pub fn rotate(&mut self) -> Option<Batch<K, V, S>> {
+    pub fn rotate(&mut self) -> Option<Batch<K, V>> {
         if self.is_empty() {
             return None;
         }
@@ -265,7 +258,7 @@ where
                     is_full: false,
                 },
                 indices: vec![],
-                entries: vec![],
+                pieces: vec![],
                 range: 0..0,
             };
             tracing::trace!("[batch]: try to reuse the last region with: {next:?}");
@@ -284,7 +277,7 @@ where
                     region: group.region,
                     bytes: buffer.slice(group.range),
                     indices: group.indices,
-                    entries: group.entries,
+                    pieces: group.pieces,
                 }
             })
             .collect_vec();
@@ -338,7 +331,7 @@ where
                 is_full: false,
             },
             indices: vec![],
-            entries: vec![],
+            pieces: vec![],
             range: self.len..self.len,
         })
     }
@@ -371,27 +364,25 @@ impl Debug for RegionHandle {
     }
 }
 
-struct GroupMut<K, V, S>
+struct GroupMut<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     /// Reusable Clean region handle.
     region: RegionHandle,
     /// Entry indices to be inserted.
     indices: Vec<HashedEntryAddress>,
     /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
-    entries: Vec<CacheEntry<K, V, S>>,
+    pieces: Vec<Piece<K, V>>,
     /// Tracks the group bytes range of the batch buffer.
     range: Range<usize>,
 }
 
-impl<K, V, S> Debug for GroupMut<K, V, S>
+impl<K, V> Debug for GroupMut<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Group")
@@ -402,11 +393,10 @@ where
     }
 }
 
-pub struct Group<K, V, S>
+pub struct Group<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     /// Reusable Clean region handle.
     pub region: RegionHandle,
@@ -415,14 +405,13 @@ where
     /// Entry indices to be inserted.
     pub indices: Vec<HashedEntryAddress>,
     /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
-    pub entries: Vec<CacheEntry<K, V, S>>,
+    pub pieces: Vec<Piece<K, V>>,
 }
 
-impl<K, V, S> Debug for Group<K, V, S>
+impl<K, V> Debug for Group<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Group")
@@ -438,23 +427,21 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
-pub struct Batch<K, V, S>
+pub struct Batch<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    pub groups: Vec<Group<K, V, S>>,
+    pub groups: Vec<Group<K, V>>,
     pub tombstones: Vec<TombstoneInfo>,
     pub waiters: Vec<oneshot::Sender<()>>,
     pub init: Option<Instant>,
 }
 
-impl<K, V, S> Debug for Batch<K, V, S>
+impl<K, V> Debug for Batch<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Batch")
@@ -521,7 +508,7 @@ mod tests {
         let mut b = BatchMut::new(64 * 1024, region_manager, device, indexer, metrics);
 
         let e = mem.insert(1, vec![1; 128 * 1024]);
-        let inserted = b.entry(e, &Compression::None, 1);
+        let inserted = b.piece(e.piece(), &Compression::None, 1);
         assert!(!inserted);
     }
 }

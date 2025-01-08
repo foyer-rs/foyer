@@ -58,7 +58,7 @@ pub use crate::{
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-        cache::{HybridCache, HybridCacheEntry, HybridFetch, HybridFetchInner},
+        cache::{HybridCache, HybridCacheEntry, HybridFetch},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{

@@ -36,8 +36,8 @@ use std::{
     },
 };
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheEntry;
+use foyer_common::code::{StorageKey, StorageValue};
+use foyer_memory::Piece;
 use futures::{future::join_all, Future};
 use itertools::Itertools;
 
@@ -52,11 +52,10 @@ use crate::{
     DeviceStats, Runtime, Statistics,
 };
 
-pub struct GenericSmallStorageConfig<K, V, S>
+pub struct GenericSmallStorageConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub set_size: usize,
     pub set_cache_capacity: usize,
@@ -68,14 +67,13 @@ where
     pub buffer_pool_size: usize,
     pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
-    pub marker: PhantomData<(K, V, S)>,
+    pub marker: PhantomData<(K, V)>,
 }
 
-impl<K, V, S> Debug for GenericSmallStorageConfig<K, V, S>
+impl<K, V> Debug for GenericSmallStorageConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericSmallStorageConfig")
@@ -94,13 +92,12 @@ where
     }
 }
 
-struct GenericSmallStorageInner<K, V, S>
+struct GenericSmallStorageInner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    flushers: Vec<Flusher<K, V, S>>,
+    flushers: Vec<Flusher<K, V>>,
 
     device: MonitoredDevice,
     set_manager: SetManager,
@@ -111,31 +108,28 @@ where
     _runtime: Runtime,
 }
 
-pub struct GenericSmallStorage<K, V, S>
+pub struct GenericSmallStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    inner: Arc<GenericSmallStorageInner<K, V, S>>,
+    inner: Arc<GenericSmallStorageInner<K, V>>,
 }
 
-impl<K, V, S> Debug for GenericSmallStorage<K, V, S>
+impl<K, V> Debug for GenericSmallStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericSmallStorage").finish()
     }
 }
 
-impl<K, V, S> Clone for GenericSmallStorage<K, V, S>
+impl<K, V> Clone for GenericSmallStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self {
@@ -144,13 +138,12 @@ where
     }
 }
 
-impl<K, V, S> GenericSmallStorage<K, V, S>
+impl<K, V> GenericSmallStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    async fn open(config: GenericSmallStorageConfig<K, V, S>) -> Result<Self> {
+    async fn open(config: GenericSmallStorageConfig<K, V>) -> Result<Self> {
         let stats = config.statistics.clone();
         let metrics = config.device.metrics().clone();
 
@@ -192,15 +185,15 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<K, V>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
         }
 
         // Entries with the same hash must be grouped in the batch.
-        let id = entry.hash() as usize % self.inner.flushers.len();
-        self.inner.flushers[id].submit(Submission::Insertion { entry, estimated_size });
+        let id = piece.hash() as usize % self.inner.flushers.len();
+        self.inner.flushers[id].submit(Submission::Insertion { piece, estimated_size });
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
@@ -241,16 +234,14 @@ where
     }
 }
 
-impl<K, V, S> Storage for GenericSmallStorage<K, V, S>
+impl<K, V> Storage for GenericSmallStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
-    type Config = GenericSmallStorageConfig<K, V, S>;
+    type Config = GenericSmallStorageConfig<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -261,8 +252,8 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
-        self.enqueue(entry, estimated_size);
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+        self.enqueue(piece, estimated_size);
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
@@ -296,7 +287,7 @@ mod tests {
 
     use bytesize::ByteSize;
     use foyer_common::{hasher::ModRandomState, metrics::model::Metrics};
-    use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
     use tokio::runtime::Handle;
 
     use super::*;
@@ -333,7 +324,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, ModRandomState> {
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericSmallStorageConfig {
@@ -352,28 +343,19 @@ mod tests {
         GenericSmallStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(
-        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
-        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
-    ) {
-        let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-        store.enqueue(entry.clone(), estimated_size);
+    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>>, piece: Piece<u64, Vec<u8>>) {
+        let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+        store.enqueue(piece, estimated_size);
     }
 
-    async fn assert_some(
-        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
-        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
-    ) {
+    async fn assert_some(store: &GenericSmallStorage<u64, Vec<u8>>, entry: &CacheEntry<u64, Vec<u8>, ModRandomState>) {
         assert_eq!(
             store.load(entry.hash()).await.unwrap().unwrap(),
             (*entry.key(), entry.value().clone())
         );
     }
 
-    async fn assert_none(
-        store: &GenericSmallStorage<u64, Vec<u8>, ModRandomState>,
-        entry: &CacheEntry<u64, Vec<u8>, ModRandomState>,
-    ) {
+    async fn assert_none(store: &GenericSmallStorage<u64, Vec<u8>>, entry: &CacheEntry<u64, Vec<u8>, ModRandomState>) {
         assert!(store.load(entry.hash()).await.unwrap().is_none());
     }
 
@@ -385,7 +367,7 @@ mod tests {
         let store = store_for_test(dir.path()).await;
 
         let e1 = memory.insert(1, vec![1; 42]);
-        enqueue(&store, &e1);
+        enqueue(&store, e1.piece());
         store.wait().await;
 
         assert_some(&store, &e1).await;
@@ -398,9 +380,9 @@ mod tests {
         let e2 = memory.insert(2, vec![2; 192]);
         let e3 = memory.insert(3, vec![3; 168]);
 
-        enqueue(&store, &e1);
-        enqueue(&store, &e2);
-        enqueue(&store, &e3);
+        enqueue(&store, e1.piece());
+        enqueue(&store, e2.piece());
+        enqueue(&store, e3.piece());
         store.wait().await;
 
         assert_some(&store, &e1).await;

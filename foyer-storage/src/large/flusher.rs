@@ -36,10 +36,10 @@ use std::{
 };
 
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
 };
-use foyer_memory::CacheEntry;
+use foyer_memory::Piece;
 use futures::future::{try_join, try_join_all};
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
@@ -59,14 +59,13 @@ use crate::{
     Compression, Statistics,
 };
 
-pub enum Submission<K, V, S>
+pub enum Submission<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     CacheEntry {
-        entry: CacheEntry<K, V, S>,
+        piece: Piece<K, V>,
         estimated_size: usize,
         sequence: Sequence,
     },
@@ -82,16 +81,15 @@ where
     },
 }
 
-impl<K, V, S> Debug for Submission<K, V, S>
+impl<K, V> Debug for Submission<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CacheEntry {
-                entry: _,
+                piece: _,
                 estimated_size,
                 sequence,
             } => f
@@ -113,23 +111,21 @@ where
 }
 
 #[derive(Debug)]
-pub struct Flusher<K, V, S>
+pub struct Flusher<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    tx: flume::Sender<Submission<K, V, S>>,
+    tx: flume::Sender<Submission<K, V>>,
     submit_queue_size: Arc<AtomicUsize>,
 
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S> Clone for Flusher<K, V, S>
+impl<K, V> Clone for Flusher<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self {
@@ -140,15 +136,14 @@ where
     }
 }
 
-impl<K, V, S> Flusher<K, V, S>
+impl<K, V> Flusher<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     #[expect(clippy::too_many_arguments)]
     pub fn open(
-        config: &GenericLargeStorageConfig<K, V, S>,
+        config: &GenericLargeStorageConfig<K, V>,
         indexer: Indexer,
         region_manager: RegionManager,
         device: MonitoredDevice,
@@ -196,7 +191,7 @@ where
         })
     }
 
-    pub fn submit(&self, submission: Submission<K, V, S>) {
+    pub fn submit(&self, submission: Submission<K, V>) {
         tracing::trace!("[lodc flusher]: submit task: {submission:?}");
         if let Submission::CacheEntry { estimated_size, .. } = &submission {
             self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
@@ -215,14 +210,13 @@ where
     }
 }
 
-struct Runner<K, V, S>
+struct Runner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    rx: flume::Receiver<Submission<K, V, S>>,
-    batch: BatchMut<K, V, S>,
+    rx: flume::Receiver<Submission<K, V>>,
+    batch: BatchMut<K, V>,
     flight: Arc<Semaphore>,
     submit_queue_size: Arc<AtomicUsize>,
 
@@ -237,11 +231,10 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S> Runner<K, V, S>
+impl<K, V> Runner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub async fn run(mut self) -> Result<()> {
         loop {
@@ -264,7 +257,7 @@ where
         Ok(())
     }
 
-    fn submit(&mut self, submission: Submission<K, V, S>) {
+    fn submit(&mut self, submission: Submission<K, V>) {
         let report = |enqueued: bool| {
             if !enqueued {
                 self.metrics.storage_queue_drop.increase(1);
@@ -273,11 +266,11 @@ where
 
         match submission {
             Submission::CacheEntry {
-                entry,
+                piece: entry,
                 estimated_size,
                 sequence,
             } => {
-                report(self.batch.entry(entry, &self.compression, sequence));
+                report(self.batch.piece(entry, &self.compression, sequence));
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
@@ -287,7 +280,7 @@ where
         }
     }
 
-    async fn commit(&mut self, batch: Batch<K, V, S>, permit: OwnedSemaphorePermit) {
+    async fn commit(&mut self, batch: Batch<K, V>, permit: OwnedSemaphorePermit) {
         tracing::trace!("[flusher] commit batch: {batch:?}");
 
         // Write regions concurrently.
@@ -325,7 +318,7 @@ where
                     region_manager.mark_evictable(region.id());
                 }
                 // Make sure entries are dropped after written.
-                drop(group.entries);
+                drop(group.pieces);
                 tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
                 Ok::<_, Error>(())
             }

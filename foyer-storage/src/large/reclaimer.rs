@@ -29,7 +29,7 @@
 use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
 };
 use futures::future::join_all;
@@ -59,12 +59,12 @@ pub struct Reclaimer {
 
 impl Reclaimer {
     #[expect(clippy::too_many_arguments)]
-    pub fn open<K, V, S>(
+    pub fn open<K, V>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
-        flushers: Vec<Flusher<K, V, S>>,
+        flushers: Vec<Flusher<K, V>>,
         stats: Arc<Statistics>,
         flush: bool,
         metrics: Arc<Metrics>,
@@ -73,7 +73,6 @@ impl Reclaimer {
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
@@ -105,11 +104,10 @@ impl Reclaimer {
     }
 }
 
-struct ReclaimRunner<K, V, S>
+struct ReclaimRunner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
 
@@ -118,7 +116,7 @@ where
 
     indexer: Indexer,
 
-    flushers: Vec<Flusher<K, V, S>>,
+    flushers: Vec<Flusher<K, V>>,
 
     stats: Arc<Statistics>,
 
@@ -131,11 +129,10 @@ where
     runtime: Runtime,
 }
 
-impl<K, V, S> ReclaimRunner<K, V, S>
+impl<K, V> ReclaimRunner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 

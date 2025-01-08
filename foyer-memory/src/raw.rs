@@ -834,6 +834,10 @@ where
     pub fn is_outdated(&self) -> bool {
         !self.record.is_in_indexer()
     }
+
+    pub fn piece(&self) -> Piece<E::Key, E::Value> {
+        Piece::new(self.record.clone())
+    }
 }
 
 /// The state of `fetch`.

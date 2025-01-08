@@ -50,7 +50,7 @@ use crate::{
     },
     raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
-    Pipe, Result,
+    Piece, Pipe, Result,
 };
 
 pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
@@ -238,6 +238,16 @@ where
             CacheEntry::Lru(entry) => entry.is_outdated(),
             CacheEntry::Lfu(entry) => entry.is_outdated(),
             CacheEntry::S3Fifo(entry) => entry.is_outdated(),
+        }
+    }
+
+    /// Get the piece of the entry record.
+    pub fn piece(&self) -> Piece<K, V> {
+        match self {
+            CacheEntry::Fifo(entry) => entry.piece(),
+            CacheEntry::Lru(entry) => entry.piece(),
+            CacheEntry::Lfu(entry) => entry.piece(),
+            CacheEntry::S3Fifo(entry) => entry.piece(),
         }
     }
 }

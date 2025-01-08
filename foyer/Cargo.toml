@@ -34,7 +34,6 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
 futures = "0.3"
-pin-project = "1"
 tokio = { workspace = true }
 tracing = { workspace = true }
 
@@ -44,10 +43,7 @@ test-log = { workspace = true }
 
 [features]
 default = []
-nightly = [
-    "foyer-storage/nightly",
-    "foyer-memory/nightly",
-]
+nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
     "foyer-common/strict_assertions",
