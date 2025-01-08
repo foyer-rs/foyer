@@ -50,7 +50,7 @@ use crate::{
     },
     raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
-    Result,
+    Pipe, Result,
 };
 
 pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
@@ -296,6 +296,7 @@ where
     weighter: Arc<dyn Weighter<K, V>>,
 
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
+    pipe: Option<Arc<dyn Pipe<Key = K, Value = V>>>,
 
     registry: M,
     metrics: Option<Arc<Metrics>>,
@@ -318,6 +319,7 @@ where
             hash_builder: RandomState::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            pipe: None,
 
             registry: NoopMetricsRegistry,
             metrics: None,
@@ -369,6 +371,7 @@ where
             hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
+            pipe: self.pipe,
             registry: self.registry,
             metrics: self.metrics,
         }
@@ -383,6 +386,13 @@ where
     /// Set event listener.
     pub fn with_event_listener(mut self, event_listener: Arc<dyn EventListener<Key = K, Value = V>>) -> Self {
         self.event_listener = Some(event_listener);
+        self
+    }
+
+    /// Set pipe.
+    #[doc(hidden)]
+    pub fn with_pipe(mut self, pipe: Arc<dyn Pipe<Key = K, Value = V>>) -> Self {
+        self.pipe = Some(pipe);
         self
     }
 
@@ -401,6 +411,7 @@ where
             hash_builder: self.hash_builder,
             weighter: self.weighter,
             event_listener: self.event_listener,
+            pipe: self.pipe,
             registry,
             metrics: self.metrics,
         }
@@ -440,6 +451,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                pipe: self.pipe,
                 metrics,
             }))),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
@@ -449,6 +461,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                pipe: self.pipe,
                 metrics,
             }))),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
@@ -458,6 +471,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                pipe: self.pipe,
                 metrics,
             }))),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
@@ -467,6 +481,7 @@ where
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
                 event_listener: self.event_listener,
+                pipe: self.pipe,
                 metrics,
             }))),
         }

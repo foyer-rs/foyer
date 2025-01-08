@@ -61,6 +61,7 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     record::{Data, Record},
+    Piece, Pipe,
 };
 
 /// The weighter for the in-memory cache.
@@ -80,6 +81,7 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
+    pub pipe: Option<Arc<dyn Pipe<Key = E::Key, Value = E::Value>>>,
     pub metrics: Arc<Metrics>,
 }
 
@@ -382,6 +384,7 @@ where
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
+    pipe: Option<Arc<dyn Pipe<Key = E::Key, Value = E::Value>>>,
 }
 
 impl<E, S, I> RawCacheInner<E, S, I>
@@ -470,6 +473,7 @@ where
             weighter: config.weighter,
             metrics: config.metrics,
             event_listener: config.event_listener,
+            pipe: config.pipe,
         };
 
         Self { inner: Arc::new(inner) }
@@ -492,9 +496,16 @@ where
                         })
                     });
                     // Deallocate data out of the lock critical section.
-                    if let Some(listener) = inner.event_listener.as_ref() {
+                    if inner.event_listener.is_some() || inner.pipe.is_some() {
                         for (event, record) in garbages {
-                            listener.on_leave(event, record.key(), record.value());
+                            if let Some(listener) = inner.event_listener.as_ref() {
+                                listener.on_leave(event, record.key(), record.value())
+                            }
+                            if event == Event::Evict {
+                                if let Some(pipe) = inner.pipe.as_ref() {
+                                    pipe.send(Piece::new(record));
+                                }
+                            }
                         }
                     }
                     res
@@ -567,9 +578,16 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        if let Some(listener) = self.inner.event_listener.as_ref() {
+        if self.inner.event_listener.is_some() || self.inner.pipe.is_some() {
             for (event, record) in garbages {
-                listener.on_leave(event, record.key(), record.value());
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(event, record.key(), record.value())
+                }
+                if event == Event::Evict {
+                    if let Some(pipe) = self.inner.pipe.as_ref() {
+                        pipe.send(Piece::new(record));
+                    }
+                }
             }
         }
 
@@ -1026,6 +1044,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1038,6 +1057,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1050,6 +1070,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1062,6 +1083,7 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
+            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1166,6 +1188,7 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![FifoHint];
@@ -1181,6 +1204,7 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![S3FifoHint];
@@ -1196,6 +1220,7 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
@@ -1211,6 +1236,7 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
+                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LfuHint];
