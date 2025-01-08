@@ -30,9 +30,10 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
-use super::{Eviction, Op};
-use crate::Record;
-
+use crate::{
+    eviction::{Eviction, Op},
+    record::Record,
+};
 #[expect(dead_code)]
 pub trait OpExt: Eviction {
     fn acquire_immutable(&self, record: &Arc<Record<Self>>) {

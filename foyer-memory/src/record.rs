@@ -81,8 +81,9 @@ pub struct Record<E>
 where
     E: Eviction,
 {
-    data: Option<Data<E>>,
+    data: Data<E>,
     state: UnsafeCell<E::State>,
+    /// Reference count used in the in-memory cache.
     refs: AtomicUsize,
     flags: AtomicU64,
 }
@@ -95,11 +96,7 @@ where
     E: Eviction,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = f.debug_struct("Record");
-        if let Some(data) = self.data.as_ref() {
-            s.field("hash", &data.hash);
-        }
-        s.finish()
+        f.debug_struct("Record").field("hash", &self.data.hash).finish()
     }
 }
 
@@ -113,67 +110,36 @@ where
     /// Create a record with data.
     pub fn new(data: Data<E>) -> Self {
         Record {
-            data: Some(data),
+            data,
             state: Default::default(),
             refs: AtomicUsize::new(0),
             flags: AtomicU64::new(0),
         }
-    }
-
-    /// Create a record without data.
-    pub fn empty() -> Self {
-        Record {
-            data: None,
-            state: Default::default(),
-            refs: AtomicUsize::new(0),
-            flags: AtomicU64::new(0),
-        }
-    }
-
-    /// Wrap the data in the record.
-    ///
-    /// # Safety
-    ///
-    /// Panics if the record is already wrapping data.
-    pub fn insert(&mut self, data: Data<E>) {
-        assert!(self.data.replace(data).is_none());
-    }
-
-    /// Unwrap the inner data.
-    ///
-    /// # Safety
-    ///
-    /// Panics if the record is not wrapping data.
-    pub fn take(&mut self) -> Data<E> {
-        self.state = Default::default();
-        self.refs.store(0, Ordering::SeqCst);
-        self.flags.store(0, Ordering::SeqCst);
-        self.data.take().unwrap()
     }
 
     /// Get the immutable reference of the record key.
     pub fn key(&self) -> &E::Key {
-        &self.data.as_ref().unwrap().key
+        &self.data.key
     }
 
     /// Get the immutable reference of the record value.
     pub fn value(&self) -> &E::Value {
-        &self.data.as_ref().unwrap().value
+        &self.data.value
     }
 
     /// Get the immutable reference of the record hint.
     pub fn hint(&self) -> &E::Hint {
-        &self.data.as_ref().unwrap().hint
+        &self.data.hint
     }
 
     /// Get the record hash.
     pub fn hash(&self) -> u64 {
-        self.data.as_ref().unwrap().hash
+        self.data.hash
     }
 
     /// Get the record weight.
     pub fn weight(&self) -> usize {
-        self.data.as_ref().unwrap().weight
+        self.data.weight
     }
 
     /// Get the record state wrapped with [`UnsafeCell`].
