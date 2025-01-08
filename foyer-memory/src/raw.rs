@@ -365,7 +365,7 @@ where
 
     capacity: usize,
 
-    hash_builder: S,
+    hash_builder: Arc<S>,
     weighter: Arc<dyn Weighter<E::Key, E::Value>>,
 
     metrics: Arc<Metrics>,
@@ -455,7 +455,7 @@ where
         let inner = RawCacheInner {
             shards,
             capacity: config.capacity,
-            hash_builder: config.hash_builder,
+            hash_builder: Arc::new(config.hash_builder),
             weighter: config.weighter,
             metrics: config.metrics,
             event_listener: config.event_listener,
@@ -677,7 +677,7 @@ where
         &self.inner.metrics
     }
 
-    pub fn hash_builder(&self) -> &S {
+    pub fn hash_builder(&self) -> &Arc<S> {
         &self.inner.hash_builder
     }
 

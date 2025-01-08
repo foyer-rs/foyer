@@ -74,7 +74,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    memory: Cache<K, V, S>,
+    hasher: Arc<S>,
 
     engine: EngineEnum<K, V>,
 
@@ -96,7 +96,6 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
-            .field("memory", &self.inner.memory)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("compression", &self.inner.compression)
@@ -157,7 +156,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
             Ok(Some((k, v))) if key.equivalent(&k) => Ok(Some((k, v))),
@@ -171,7 +170,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         self.inner.engine.delete(hash)
     }
 
@@ -182,7 +181,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         self.inner.engine.may_contains(hash)
     }
 
@@ -633,8 +632,9 @@ where
         }).await.unwrap()?
         };
 
+        let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
-            memory,
+            hasher,
             engine,
             admission_picker,
             compression,

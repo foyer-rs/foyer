@@ -94,3 +94,35 @@ pub trait Pipe: Send + Sync + 'static {
     /// Send the piece to the disk cache.
     fn send(&self, piece: Piece<Self::Key, Self::Value>);
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        eviction::fifo::{Fifo, FifoHint},
+        record::Data,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_piece() {
+        let r1 = Arc::new(Record::new(Data::<Fifo<Arc<Vec<u8>>, Arc<Vec<u8>>>> {
+            key: Arc::new(vec![b'k'; 4096]),
+            value: Arc::new(vec![b'k'; 16384]),
+            hint: FifoHint,
+            hash: 1,
+            weight: 1,
+        }));
+
+        let p1 = Piece::new(r1.clone());
+        let k1 = p1.key().clone();
+        let r2 = r1.clone();
+        let p2 = Piece::new(r1.clone());
+
+        drop(p1);
+        drop(r2);
+        drop(p2);
+        drop(r1);
+        drop(k1);
+    }
+}

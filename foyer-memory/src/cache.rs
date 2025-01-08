@@ -700,7 +700,7 @@ where
     }
 
     /// Get the hash builder of the in-memory cache.
-    pub fn hash_builder(&self) -> &S {
+    pub fn hash_builder(&self) -> &Arc<S> {
         match self {
             Cache::Fifo(cache) => cache.hash_builder(),
             Cache::S3Fifo(cache) => cache.hash_builder(),
