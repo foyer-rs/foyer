@@ -108,6 +108,18 @@ where
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
 
 /// Hybrid cache that integrates in-memory cache and disk cache.
+///
+/// # NOTE
+///
+/// Please be careful not to create a circular reference between `memory` and `storage`.
+///
+/// Currently:
+///
+/// ```text
+/// memory => pipe => storage
+/// ```
+///
+/// So, `storage` must not hold the reference of `memory`.
 pub struct HybridCache<K, V, S = RandomState>
 where
     K: StorageKey,

@@ -97,12 +97,11 @@ pub trait Pipe: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         eviction::fifo::{Fifo, FifoHint},
         record::Data,
     };
-
-    use super::*;
 
     #[test]
     fn test_piece() {
