@@ -14,18 +14,8 @@
 
 use std::borrow::Cow;
 
-use super::{BoxedCounter, BoxedGauge, BoxedHistogram, GaugeVecOps, HistogramVecOps, RegistryOps};
-use crate::metrics::CounterVecOps;
-
-trait Boxer {
-    fn boxed(self) -> Box<Self>
-    where
-        Self: Sized,
-    {
-        Box::new(self)
-    }
-}
-impl<T> Boxer for T {}
+use super::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
+use crate::metrics::Boxer;
 
 #[expect(missing_docs)]
 #[derive(Debug)]
@@ -94,192 +84,153 @@ pub struct Metrics {
 
 impl Metrics {
     /// Create a new metric with the given name.
-    pub fn new<R>(name: impl Into<Cow<'static, str>>, registry: &R) -> Self
-    where
-        R: RegistryOps,
-    {
+    pub fn new(name: impl Into<Cow<'static, str>>, registry: &BoxedRegistry) -> Self {
         let name = name.into();
 
         /* in-memory cache metrics */
 
         let foyer_memory_op_total = registry.register_counter_vec(
-            "foyer_memory_op_total",
-            "foyer in-memory cache operations",
+            "foyer_memory_op_total".into(),
+            "foyer in-memory cache operations".into(),
             &["name", "op"],
         );
-        let foyer_memory_usage =
-            registry.register_gauge_vec("foyer_memory_usage", "foyer in-memory cache usage", &["name"]);
+        let foyer_memory_usage = registry.register_gauge_vec(
+            "foyer_memory_usage".into(),
+            "foyer in-memory cache usage".into(),
+            &["name"],
+        );
 
-        let memory_insert = foyer_memory_op_total.counter(&[name.clone(), "insert".into()]).boxed();
-        let memory_replace = foyer_memory_op_total.counter(&[name.clone(), "replace".into()]).boxed();
-        let memory_hit = foyer_memory_op_total.counter(&[name.clone(), "hit".into()]).boxed();
-        let memory_miss = foyer_memory_op_total.counter(&[name.clone(), "miss".into()]).boxed();
-        let memory_remove = foyer_memory_op_total.counter(&[name.clone(), "remove".into()]).boxed();
-        let memory_evict = foyer_memory_op_total.counter(&[name.clone(), "evict".into()]).boxed();
-        let memory_reinsert = foyer_memory_op_total
-            .counter(&[name.clone(), "reinsert".into()])
-            .boxed();
-        let memory_release = foyer_memory_op_total.counter(&[name.clone(), "release".into()]).boxed();
-        let memory_queue = foyer_memory_op_total.counter(&[name.clone(), "queue".into()]).boxed();
-        let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]).boxed();
+        let memory_insert = foyer_memory_op_total.counter(&[name.clone(), "insert".into()]);
+        let memory_replace = foyer_memory_op_total.counter(&[name.clone(), "replace".into()]);
+        let memory_hit = foyer_memory_op_total.counter(&[name.clone(), "hit".into()]);
+        let memory_miss = foyer_memory_op_total.counter(&[name.clone(), "miss".into()]);
+        let memory_remove = foyer_memory_op_total.counter(&[name.clone(), "remove".into()]);
+        let memory_evict = foyer_memory_op_total.counter(&[name.clone(), "evict".into()]);
+        let memory_reinsert = foyer_memory_op_total.counter(&[name.clone(), "reinsert".into()]);
+        let memory_release = foyer_memory_op_total.counter(&[name.clone(), "release".into()]);
+        let memory_queue = foyer_memory_op_total.counter(&[name.clone(), "queue".into()]);
+        let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]);
 
-        let memory_usage = foyer_memory_usage.gauge(&[name.clone()]).boxed();
+        let memory_usage = foyer_memory_usage.gauge(&[name.clone()]);
 
         /* disk cache metrics */
 
-        let foyer_storage_op_total =
-            registry.register_counter_vec("foyer_storage_op_total", "foyer disk cache operations", &["name", "op"]);
+        let foyer_storage_op_total = registry.register_counter_vec(
+            "foyer_storage_op_total".into(),
+            "foyer disk cache operations".into(),
+            &["name", "op"],
+        );
         let foyer_storage_op_duration = registry.register_histogram_vec(
-            "foyer_storage_op_duration",
-            "foyer disk cache op durations",
+            "foyer_storage_op_duration".into(),
+            "foyer disk cache op durations".into(),
             &["name", "op"],
         );
 
         let foyer_storage_inner_op_total = registry.register_counter_vec(
-            "foyer_storage_inner_op_total",
-            "foyer disk cache inner operations",
+            "foyer_storage_inner_op_total".into(),
+            "foyer disk cache inner operations".into(),
             &["name", "op"],
         );
         let foyer_storage_inner_op_duration = registry.register_histogram_vec(
-            "foyer_storage_inner_op_duration",
-            "foyer disk cache inner op durations",
+            "foyer_storage_inner_op_duration".into(),
+            "foyer disk cache inner op durations".into(),
             &["name", "op"],
         );
 
         let foyer_storage_disk_io_total = registry.register_counter_vec(
-            "foyer_storage_disk_io_total",
-            "foyer disk cache disk operations",
+            "foyer_storage_disk_io_total".into(),
+            "foyer disk cache disk operations".into(),
             &["name", "op"],
         );
         let foyer_storage_disk_io_bytes = registry.register_counter_vec(
-            "foyer_storage_disk_io_bytes",
-            "foyer disk cache disk io bytes",
+            "foyer_storage_disk_io_bytes".into(),
+            "foyer disk cache disk io bytes".into(),
             &["name", "op"],
         );
         let foyer_storage_disk_io_duration = registry.register_histogram_vec(
-            "foyer_storage_disk_io_duration",
-            "foyer disk cache disk io duration",
+            "foyer_storage_disk_io_duration".into(),
+            "foyer disk cache disk io duration".into(),
             &["name", "op"],
         );
 
-        let foyer_storage_region =
-            registry.register_gauge_vec("foyer_storage_region", "foyer disk cache regions", &["name", "type"]);
+        let foyer_storage_region = registry.register_gauge_vec(
+            "foyer_storage_region".into(),
+            "foyer disk cache regions".into(),
+            &["name", "type"],
+        );
         let foyer_storage_region_size_bytes = registry.register_gauge_vec(
-            "foyer_storage_region_size_bytes",
-            "foyer disk cache region sizes",
+            "foyer_storage_region_size_bytes".into(),
+            "foyer disk cache region sizes".into(),
             &["name"],
         );
 
         let foyer_storage_entry_serde_duration = registry.register_histogram_vec(
-            "foyer_storage_entry_serde_duration",
-            "foyer disk cache entry serde durations",
+            "foyer_storage_entry_serde_duration".into(),
+            "foyer disk cache entry serde durations".into(),
             &["name", "op"],
         );
 
-        let storage_enqueue = foyer_storage_op_total
-            .counter(&[name.clone(), "enqueue".into()])
-            .boxed();
-        let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]).boxed();
-        let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]).boxed();
-        let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]).boxed();
+        let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
+        let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
+        let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
+        let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]);
 
-        let storage_enqueue_duration = foyer_storage_op_duration
-            .histogram(&[name.clone(), "enqueue".into()])
-            .boxed();
-        let storage_hit_duration = foyer_storage_op_duration
-            .histogram(&[name.clone(), "hit".into()])
-            .boxed();
-        let storage_miss_duration = foyer_storage_op_duration
-            .histogram(&[name.clone(), "miss".into()])
-            .boxed();
-        let storage_delete_duration = foyer_storage_op_duration
-            .histogram(&[name.clone(), "delete".into()])
-            .boxed();
+        let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
+        let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
+        let storage_miss_duration = foyer_storage_op_duration.histogram(&[name.clone(), "miss".into()]);
+        let storage_delete_duration = foyer_storage_op_duration.histogram(&[name.clone(), "delete".into()]);
 
-        let storage_queue_rotate = foyer_storage_inner_op_total
-            .counter(&[name.clone(), "queue_rotate".into()])
-            .boxed();
-        let storage_queue_drop = foyer_storage_inner_op_total
-            .counter(&[name.clone(), "queue_drop".into()])
-            .boxed();
+        let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_rotate".into()]);
+        let storage_queue_drop = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_drop".into()]);
 
-        let storage_queue_rotate_duration = foyer_storage_inner_op_duration
-            .histogram(&[name.clone(), "queue_rotate".into()])
-            .boxed();
+        let storage_queue_rotate_duration =
+            foyer_storage_inner_op_duration.histogram(&[name.clone(), "queue_rotate".into()]);
 
-        let storage_disk_write = foyer_storage_disk_io_total
-            .counter(&[name.clone(), "write".into()])
-            .boxed();
-        let storage_disk_read = foyer_storage_disk_io_total
-            .counter(&[name.clone(), "read".into()])
-            .boxed();
-        let storage_disk_flush = foyer_storage_disk_io_total
-            .counter(&[name.clone(), "flush".into()])
-            .boxed();
+        let storage_disk_write = foyer_storage_disk_io_total.counter(&[name.clone(), "write".into()]);
+        let storage_disk_read = foyer_storage_disk_io_total.counter(&[name.clone(), "read".into()]);
+        let storage_disk_flush = foyer_storage_disk_io_total.counter(&[name.clone(), "flush".into()]);
 
-        let storage_disk_write_bytes = foyer_storage_disk_io_bytes
-            .counter(&[name.clone(), "write".into()])
-            .boxed();
-        let storage_disk_read_bytes = foyer_storage_disk_io_bytes
-            .counter(&[name.clone(), "read".into()])
-            .boxed();
+        let storage_disk_write_bytes = foyer_storage_disk_io_bytes.counter(&[name.clone(), "write".into()]);
+        let storage_disk_read_bytes = foyer_storage_disk_io_bytes.counter(&[name.clone(), "read".into()]);
 
-        let storage_disk_write_duration = foyer_storage_disk_io_duration
-            .histogram(&[name.clone(), "write".into()])
-            .boxed();
-        let storage_disk_read_duration = foyer_storage_disk_io_duration
-            .histogram(&[name.clone(), "read".into()])
-            .boxed();
-        let storage_disk_flush_duration = foyer_storage_disk_io_duration
-            .histogram(&[name.clone(), "flush".into()])
-            .boxed();
+        let storage_disk_write_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "write".into()]);
+        let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "read".into()]);
+        let storage_disk_flush_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "flush".into()]);
 
-        let storage_region_total = foyer_storage_region.gauge(&[name.clone(), "total".into()]).boxed();
-        let storage_region_clean = foyer_storage_region.gauge(&[name.clone(), "clean".into()]).boxed();
-        let storage_region_evictable = foyer_storage_region.gauge(&[name.clone(), "evictable".into()]).boxed();
+        let storage_region_total = foyer_storage_region.gauge(&[name.clone(), "total".into()]);
+        let storage_region_clean = foyer_storage_region.gauge(&[name.clone(), "clean".into()]);
+        let storage_region_evictable = foyer_storage_region.gauge(&[name.clone(), "evictable".into()]);
 
-        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name.clone()]).boxed();
+        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name.clone()]);
 
-        let storage_entry_serialize_duration = foyer_storage_entry_serde_duration
-            .histogram(&[name.clone(), "serialize".into()])
-            .boxed();
-        let storage_entry_deserialize_duration = foyer_storage_entry_serde_duration
-            .histogram(&[name.clone(), "deserialize".into()])
-            .boxed();
+        let storage_entry_serialize_duration =
+            foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
+        let storage_entry_deserialize_duration =
+            foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
 
         /* hybrid cache metrics */
 
         let foyer_hybrid_op_total = registry.register_counter_vec(
-            "foyer_hybrid_op_total",
-            "foyer hybrid cache operations",
+            "foyer_hybrid_op_total".into(),
+            "foyer hybrid cache operations".into(),
             &["name", "op"],
         );
         let foyer_hybrid_op_duration = registry.register_histogram_vec(
-            "foyer_hybrid_op_duration",
-            "foyer hybrid cache operation durations",
+            "foyer_hybrid_op_duration".into(),
+            "foyer hybrid cache operation durations".into(),
             &["name", "op"],
         );
 
-        let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]).boxed();
-        let hybrid_hit = foyer_hybrid_op_total.counter(&[name.clone(), "hit".into()]).boxed();
-        let hybrid_miss = foyer_hybrid_op_total.counter(&[name.clone(), "miss".into()]).boxed();
-        let hybrid_remove = foyer_hybrid_op_total.counter(&[name.clone(), "remove".into()]).boxed();
+        let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]);
+        let hybrid_hit = foyer_hybrid_op_total.counter(&[name.clone(), "hit".into()]);
+        let hybrid_miss = foyer_hybrid_op_total.counter(&[name.clone(), "miss".into()]);
+        let hybrid_remove = foyer_hybrid_op_total.counter(&[name.clone(), "remove".into()]);
 
-        let hybrid_insert_duration = foyer_hybrid_op_duration
-            .histogram(&[name.clone(), "insert".into()])
-            .boxed();
-        let hybrid_hit_duration = foyer_hybrid_op_duration
-            .histogram(&[name.clone(), "hit".into()])
-            .boxed();
-        let hybrid_miss_duration = foyer_hybrid_op_duration
-            .histogram(&[name.clone(), "miss".into()])
-            .boxed();
-        let hybrid_remove_duration = foyer_hybrid_op_duration
-            .histogram(&[name.clone(), "remove".into()])
-            .boxed();
-        let hybrid_fetch_duration = foyer_hybrid_op_duration
-            .histogram(&[name.clone(), "fetch".into()])
-            .boxed();
+        let hybrid_insert_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "insert".into()]);
+        let hybrid_hit_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "hit".into()]);
+        let hybrid_miss_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "miss".into()]);
+        let hybrid_remove_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "remove".into()]);
+        let hybrid_fetch_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "fetch".into()]);
 
         Self {
             memory_insert,
@@ -338,8 +289,8 @@ impl Metrics {
     #[doc(hidden)]
     pub fn noop() -> Self {
         use super::registry::noop::NoopMetricsRegistry;
-
-        Self::new("test", &NoopMetricsRegistry)
+        let registry: BoxedRegistry = NoopMetricsRegistry.boxed();
+        Self::new("test", &registry)
     }
 }
 
@@ -348,13 +299,13 @@ mod tests {
     use super::*;
     use crate::metrics::registry::noop::NoopMetricsRegistry;
 
-    fn case(registry: &impl RegistryOps) {
-        let _ = Metrics::new("test", registry);
+    fn case(registry: BoxedRegistry) {
+        let _ = Metrics::new("test", &registry);
     }
 
     #[test]
     fn test_metrics_noop() {
-        case(&NoopMetricsRegistry);
+        case(NoopMetricsRegistry.boxed());
     }
 
     #[cfg(feature = "prometheus")]
@@ -362,7 +313,7 @@ mod tests {
     fn test_metrics_prometheus() {
         use crate::metrics::registry::prometheus::PrometheusMetricsRegistry;
 
-        case(&PrometheusMetricsRegistry::new(prometheus::Registry::new()));
+        case(PrometheusMetricsRegistry::new(prometheus::Registry::new()).boxed());
     }
 
     #[cfg(feature = "prometheus-client_0_22")]
@@ -374,9 +325,12 @@ mod tests {
 
         use crate::metrics::registry::prometheus_client_0_22::PrometheusClientMetricsRegistry;
 
-        case(&PrometheusClientMetricsRegistry::new(Arc::new(Mutex::new(
-            prometheus_client_0_22::registry::Registry::default(),
-        ))));
+        case(
+            PrometheusClientMetricsRegistry::new(Arc::new(Mutex::new(
+                prometheus_client_0_22::registry::Registry::default(),
+            )))
+            .boxed(),
+        );
     }
 
     #[cfg(feature = "opentelemetry_0_27")]
@@ -384,9 +338,7 @@ mod tests {
     fn test_metrics_opentelemetry_0_27() {
         use crate::metrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 
-        case(&OpenTelemetryMetricsRegistry::new(opentelemetry_0_27::global::meter(
-            "test",
-        )));
+        case(OpenTelemetryMetricsRegistry::new(opentelemetry_0_27::global::meter("test")).boxed());
     }
 
     #[cfg(feature = "opentelemetry_0_26")]
@@ -394,8 +346,6 @@ mod tests {
     fn test_metrics_opentelemetry_0_26() {
         use crate::metrics::registry::opentelemetry_0_26::OpenTelemetryMetricsRegistry;
 
-        case(&OpenTelemetryMetricsRegistry::new(opentelemetry_0_26::global::meter(
-            "test",
-        )));
+        case(OpenTelemetryMetricsRegistry::new(opentelemetry_0_26::global::meter("test")).boxed());
     }
 }

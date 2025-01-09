@@ -36,8 +36,9 @@ pub use crate::{
         code::{Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
         metrics::{
-            registry::noop::NoopMetricsRegistry, CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps,
-            HistogramVecOps, RegistryOps,
+            registry::noop::NoopMetricsRegistry, BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec,
+            BoxedHistogram, BoxedHistogramVec, BoxedRegistry, CounterOps, CounterVecOps, GaugeOps, GaugeVecOps,
+            HistogramOps, HistogramVecOps, RegistryOps,
         },
         range::RangeBoundsExt,
         tracing::TracingOptions,

@@ -448,7 +448,7 @@ async fn benchmark(args: Args) {
         let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
         PrometheusExporter::new(registry.clone(), addr).run();
         builder
-            .with_metrics_registry(PrometheusMetricsRegistry::new(registry))
+            .with_metrics_registry(Box::new(PrometheusMetricsRegistry::new(registry)))
             .memory(args.mem.as_u64() as _)
             .with_shards(args.shards)
     } else {
