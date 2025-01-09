@@ -353,56 +353,6 @@ jobs:
         with:
           name: artifacts.asan.tgz
           path: artifacts.asan.tgz
-  # lsan:
-  #   name: run with leak saniziter
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #     - name: Install rust toolchain
-  #       uses: dtolnay/rust-toolchain@master
-  #       with:
-  #         toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
-  #     - name: Cache Cargo home
-  #       uses: actions/cache@v4
-  #       id: cache
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-lsan
-  #     - name: Run Unit Tests With Leak Sanitizer
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #         RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
-  #         RUST_LOG: info
-  #         CI: true
-  #       run: |-
-  #         cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
-  #     - name: Run foyer-bench With Leak Sanitizer
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #         RUSTFLAGS: "-Zsanitizer=leak --cfg tokio_unstable"
-  #         RUST_LOG: info
-  #         CI: true
-  #       run: |-
-  #         cargo +${{ env.RUST_TOOLCHAIN_NIGHTLY }} build --all --target x86_64-unknown-linux-gnu
-  #         mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan
-  #         timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
-  #         timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
-  #         timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/lsan --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
-  #     - name: Prepare Artifacts on Failure
-  #       if: ${{ failure() }}
-  #       run: |-
-  #         find ./target/x86_64-unknown-linux-gnu/debug/ -type f -executable -name 'foyer*' -print0 | xargs -0 tar czvf artifacts.lsan.tgz --transform 's#.*/##'
-  #     - name: Upload Artifacts on Failure
-  #       uses: actions/upload-artifact@v4
-  #       if: ${{ failure() }}
-  #       with:
-  #         name: artifacts.lsan.tgz
-  #         path: artifacts.lsan.tgz
   madsim:
     name: check build with madsim
     runs-on: ubuntu-latest
