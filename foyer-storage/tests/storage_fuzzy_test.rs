@@ -16,11 +16,11 @@
 
 #![expect(clippy::identity_op)]
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc};
 
 use ahash::RandomState;
 use foyer_common::metrics::model::Metrics;
-use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
+use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
 };
@@ -30,12 +30,6 @@ const MB: usize = 1024 * 1024;
 
 const INSERTS: usize = 100;
 const LOOPS: usize = 10;
-
-async fn wait(entry: CacheEntry<u64, Vec<u8>, RandomState>, refs: usize) {
-    while entry.refs() != refs {
-        tokio::time::sleep(Duration::from_micros(10)).await;
-    }
-}
 
 async fn test_store(
     memory: Cache<u64, Vec<u8>>,
@@ -49,8 +43,8 @@ async fn test_store(
     for _ in 0..INSERTS as u64 {
         index += 1;
         let e = memory.insert(index, vec![index as u8; KB]);
-        store.enqueue(e.clone(), false);
-        wait(e, 1).await;
+        store.enqueue(e.piece(), false);
+        store.wait().await;
     }
 
     store.close().await.unwrap();
@@ -85,8 +79,8 @@ async fn test_store(
         for _ in 0..INSERTS as u64 {
             index += 1;
             let e = memory.insert(index, vec![index as u8; KB]);
-            store.enqueue(e.clone(), false);
-            wait(e, 1).await;
+            store.enqueue(e.piece(), false);
+            store.wait().await;
         }
 
         store.close().await.unwrap();

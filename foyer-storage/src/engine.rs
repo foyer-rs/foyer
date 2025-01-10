@@ -14,10 +14,9 @@
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-use ahash::RandomState;
 use auto_enums::auto_enum;
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheEntry;
+use foyer_common::code::{StorageKey, StorageValue};
+use foyer_memory::Piece;
 use futures::Future;
 
 use crate::{
@@ -31,21 +30,19 @@ use crate::{
     DeviceStats, Storage,
 };
 
-pub struct SizeSelector<K, V, S>
+pub struct SizeSelector<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     threshold: usize,
-    _marker: PhantomData<(K, V, S)>,
+    _marker: PhantomData<(K, V)>,
 }
 
-impl<K, V, S> Debug for SizeSelector<K, V, S>
+impl<K, V> Debug for SizeSelector<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SizeSelector")
@@ -54,11 +51,10 @@ where
     }
 }
 
-impl<K, V, S> SizeSelector<K, V, S>
+impl<K, V> SizeSelector<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub fn new(threshold: usize) -> Self {
         Self {
@@ -68,21 +64,15 @@ where
     }
 }
 
-impl<K, V, S> Selector for SizeSelector<K, V, S>
+impl<K, V> Selector for SizeSelector<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
 
-    fn select(
-        &self,
-        _entry: &CacheEntry<Self::Key, Self::Value, Self::BuildHasher>,
-        estimated_size: usize,
-    ) -> Selection {
+    fn select(&self, _piece: &Piece<Self::Key, Self::Value>, estimated_size: usize) -> Selection {
         if estimated_size < self.threshold {
             Selection::Left
         } else {
@@ -92,23 +82,21 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-pub enum EngineConfig<K, V, S = RandomState>
+pub enum EngineConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     Noop,
-    Large(GenericLargeStorageConfig<K, V, S>),
-    Small(GenericSmallStorageConfig<K, V, S>),
-    Mixed(EitherConfig<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>),
+    Large(GenericLargeStorageConfig<K, V>),
+    Small(GenericSmallStorageConfig<K, V>),
+    Mixed(EitherConfig<K, V, GenericSmallStorage<K, V>, GenericLargeStorage<K, V>, SizeSelector<K, V>>),
 }
 
-impl<K, V, S> Debug for EngineConfig<K, V, S>
+impl<K, V> Debug for EngineConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -121,27 +109,25 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-pub enum EngineEnum<K, V, S = RandomState>
+pub enum EngineEnum<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     /// No-op disk cache.
-    Noop(Noop<K, V, S>),
+    Noop(Noop<K, V>),
     /// Large object disk cache.
-    Large(GenericLargeStorage<K, V, S>),
+    Large(GenericLargeStorage<K, V>),
     /// Small object disk cache.
-    Small(GenericSmallStorage<K, V, S>),
+    Small(GenericSmallStorage<K, V>),
     /// Mixed large and small object disk cache.
-    Mixed(Either<K, V, S, GenericSmallStorage<K, V, S>, GenericLargeStorage<K, V, S>, SizeSelector<K, V, S>>),
+    Mixed(Either<K, V, GenericSmallStorage<K, V>, GenericLargeStorage<K, V>, SizeSelector<K, V>>),
 }
 
-impl<K, V, S> Debug for EngineEnum<K, V, S>
+impl<K, V> Debug for EngineEnum<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -153,11 +139,10 @@ where
     }
 }
 
-impl<K, V, S> Clone for EngineEnum<K, V, S>
+impl<K, V> Clone for EngineEnum<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         match self {
@@ -169,16 +154,14 @@ where
     }
 }
 
-impl<K, V, S> Storage for EngineEnum<K, V, S>
+impl<K, V> Storage for EngineEnum<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
-    type Config = EngineConfig<K, V, S>;
+    type Config = EngineConfig<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
@@ -198,12 +181,12 @@ where
         }
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
         match self {
-            EngineEnum::Noop(storage) => storage.enqueue(entry, estimated_size),
-            EngineEnum::Large(storage) => storage.enqueue(entry, estimated_size),
-            EngineEnum::Small(storage) => storage.enqueue(entry, estimated_size),
-            EngineEnum::Mixed(storage) => storage.enqueue(entry, estimated_size),
+            EngineEnum::Noop(storage) => storage.enqueue(piece, estimated_size),
+            EngineEnum::Large(storage) => storage.enqueue(piece, estimated_size),
+            EngineEnum::Small(storage) => storage.enqueue(piece, estimated_size),
+            EngineEnum::Mixed(storage) => storage.enqueue(piece, estimated_size),
         }
     }
 

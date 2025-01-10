@@ -15,7 +15,7 @@
 use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc};
 
 use bytes::{Buf, BufMut};
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::code::{StorageKey, StorageValue};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -91,11 +91,10 @@ impl Debug for SetManager {
 }
 
 impl SetManager {
-    pub async fn open<K, V, S>(config: &GenericSmallStorageConfig<K, V, S>) -> Result<Self>
+    pub async fn open<K, V>(config: &GenericSmallStorageConfig<K, V>) -> Result<Self>
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         let device = config.device.clone();
         let regions = config.regions.clone();
@@ -171,11 +170,10 @@ impl SetManager {
         res
     }
 
-    pub async fn update<K, V, S>(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item<K, V, S>>) -> Result<()>
+    pub async fn update<K, V>(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item<K, V>>) -> Result<()>
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         // Acquire set lock.
         let set = self.inner.sets[sid as usize].write().await;

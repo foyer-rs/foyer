@@ -27,10 +27,10 @@ use std::{
 use fastrace::prelude::*;
 use foyer_common::{
     bits,
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
 };
-use foyer_memory::CacheEntry;
+use foyer_memory::Piece;
 use futures::future::{join_all, try_join_all};
 use tokio::sync::Semaphore;
 
@@ -58,11 +58,10 @@ use crate::{
     storage::Storage,
 };
 
-pub struct GenericLargeStorageConfig<K, V, S>
+pub struct GenericLargeStorageConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
@@ -81,14 +80,13 @@ where
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
-    pub marker: PhantomData<(V, S)>,
+    pub marker: PhantomData<V>,
 }
 
-impl<K, V, S> Debug for GenericLargeStorageConfig<K, V, S>
+impl<K, V> Debug for GenericLargeStorageConfig<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStoreConfig")
@@ -112,37 +110,34 @@ where
     }
 }
 
-pub struct GenericLargeStorage<K, V, S>
+pub struct GenericLargeStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    inner: Arc<GenericStoreInner<K, V, S>>,
+    inner: Arc<GenericStoreInner<K, V>>,
 }
 
-impl<K, V, S> Debug for GenericLargeStorage<K, V, S>
+impl<K, V> Debug for GenericLargeStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStore").finish()
     }
 }
 
-struct GenericStoreInner<K, V, S>
+struct GenericStoreInner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     indexer: Indexer,
     device: MonitoredDevice,
     region_manager: RegionManager,
 
-    flushers: Vec<Flusher<K, V, S>>,
+    flushers: Vec<Flusher<K, V>>,
     reclaimers: Vec<Reclaimer>,
 
     submit_queue_size: Arc<AtomicUsize>,
@@ -161,11 +156,10 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V, S> Clone for GenericLargeStorage<K, V, S>
+impl<K, V> Clone for GenericLargeStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self {
@@ -174,13 +168,12 @@ where
     }
 }
 
-impl<K, V, S> GenericLargeStorage<K, V, S>
+impl<K, V> GenericLargeStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    async fn open(mut config: GenericLargeStorageConfig<K, V, S>) -> Result<Self> {
+    async fn open(mut config: GenericLargeStorageConfig<K, V>) -> Result<Self> {
         if config.flushers + config.clean_region_threshold > config.device.regions() / 2 {
             tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
                 flushers = config.flushers,
@@ -303,7 +296,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, entry: CacheEntry<K, V, S>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<K, V>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -321,7 +314,7 @@ where
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
 
         self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
-            entry,
+            piece,
             estimated_size,
             sequence,
         });
@@ -462,16 +455,14 @@ where
     }
 }
 
-impl<K, V, S> Storage for GenericLargeStorage<K, V, S>
+impl<K, V> Storage for GenericLargeStorage<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
-    type Config = GenericLargeStorageConfig<K, V, S>;
+    type Config = GenericLargeStorageConfig<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         Self::open(config).await
@@ -481,8 +472,8 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, estimated_size: usize) {
-        self.enqueue(entry, estimated_size)
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+        self.enqueue(piece, estimated_size)
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
@@ -517,7 +508,7 @@ mod tests {
 
     use ahash::RandomState;
     use bytesize::ByteSize;
-    use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
     use itertools::Itertools;
     use tokio::runtime::Handle;
 
@@ -556,14 +547,14 @@ mod tests {
     }
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
-    async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>> {
         store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker<u64>>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+    ) -> GenericLargeStorage<u64, Vec<u8>> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
@@ -592,7 +583,7 @@ mod tests {
     async fn store_for_test_with_tombstone_log(
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, RandomState> {
+    ) -> GenericLargeStorage<u64, Vec<u8>> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
@@ -618,9 +609,9 @@ mod tests {
         GenericLargeStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>, RandomState>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
+    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-        store.enqueue(entry, estimated_size);
+        store.enqueue(entry.piece(), estimated_size);
     }
 
     #[test_log::test(tokio::test)]

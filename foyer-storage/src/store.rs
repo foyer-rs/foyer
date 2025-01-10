@@ -30,7 +30,7 @@ use foyer_common::{
     metrics::model::Metrics,
     runtime::BackgroundShutdownRuntime,
 };
-use foyer_memory::{Cache, CacheEntry};
+use foyer_memory::{Cache, Piece};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
@@ -74,9 +74,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    memory: Cache<K, V, S>,
+    hasher: Arc<S>,
 
-    engine: EngineEnum<K, V, S>,
+    engine: EngineEnum<K, V>,
 
     admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
 
@@ -96,7 +96,6 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
-            .field("memory", &self.inner.memory)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("compression", &self.inner.compression)
@@ -136,13 +135,13 @@ where
         self.inner.admission_picker.pick(&self.inner.statistics, key)
     }
 
-    /// Push a in-memory cache entry to the disk cache write queue.
-    pub fn enqueue(&self, entry: CacheEntry<K, V, S>, force: bool) {
+    /// Push a in-memory cache piece to the disk cache write queue.
+    pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
         let now = Instant::now();
 
-        if force || self.pick(entry.key()) {
-            let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-            self.inner.engine.enqueue(entry, estimated_size);
+        if force || self.pick(piece.key()) {
+            let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+            self.inner.engine.enqueue(piece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -157,7 +156,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
             Ok(Some((k, v))) if key.equivalent(&k) => Ok(Some((k, v))),
@@ -171,7 +170,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         self.inner.engine.delete(hash)
     }
 
@@ -182,7 +181,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        let hash = self.inner.memory.hash(key);
+        let hash = self.inner.hasher.hash_one(key);
         self.inner.engine.may_contains(hash)
     }
 
@@ -199,6 +198,11 @@ where
     /// Get the runtime.
     pub fn runtime(&self) -> &Runtime {
         &self.inner.runtime
+    }
+
+    /// Wait for the ongoing flush and reclaim tasks to finish.
+    pub async fn wait(&self) {
+        self.inner.engine.wait().await
     }
 }
 
@@ -628,8 +632,9 @@ where
         }).await.unwrap()?
         };
 
+        let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
-            memory,
+            hasher,
             engine,
             admission_picker,
             compression,

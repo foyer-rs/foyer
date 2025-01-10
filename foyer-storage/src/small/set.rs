@@ -20,7 +20,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut};
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
+use foyer_common::code::{StorageKey, StorageValue};
 
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
@@ -142,11 +142,10 @@ impl SetStorage {
         self.buffer.freeze()
     }
 
-    pub fn apply<K, V, S>(&mut self, deletions: &HashSet<u64>, items: Vec<Item<K, V, S>>)
+    pub fn apply<K, V>(&mut self, deletions: &HashSet<u64>, items: Vec<Item<K, V>>)
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         self.deletes(deletions);
         self.append(items);
@@ -185,11 +184,10 @@ impl SetStorage {
         self.len = wcursor;
     }
 
-    fn append<K, V, S>(&mut self, items: Vec<Item<K, V, S>>)
+    fn append<K, V>(&mut self, items: Vec<Item<K, V>>)
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         let (skip, size, _) = items
             .iter()
@@ -207,7 +205,7 @@ impl SetStorage {
         let mut cursor = Self::SET_HEADER_SIZE + self.len;
         for item in items.iter().skip(skip) {
             self.buffer[cursor..cursor + item.buffer.len()].copy_from_slice(&item.buffer);
-            self.bloom_filter.insert(item.entry.hash());
+            self.bloom_filter.insert(item.piece.hash());
             cursor += item.buffer.len();
         }
         self.len = cursor - Self::SET_HEADER_SIZE;
@@ -423,7 +421,7 @@ mod tests {
             &HashSet::from_iter([2, 4]),
             vec![Item {
                 buffer: b1.clone(),
-                entry: e1.clone(),
+                piece: e1.piece(),
             }],
         );
         assert_eq!(storage.len(), b1.len());
@@ -435,7 +433,7 @@ mod tests {
             &HashSet::from_iter([e1.hash(), 3, 5]),
             vec![Item {
                 buffer: b2.clone(),
-                entry: e2.clone(),
+                piece: e2.piece(),
             }],
         );
         assert_eq!(storage.len(), b2.len());
@@ -448,7 +446,7 @@ mod tests {
             &HashSet::from_iter([e1.hash()]),
             vec![Item {
                 buffer: b3.clone(),
-                entry: e3.clone(),
+                piece: e3.piece(),
             }],
         );
         assert_eq!(storage.len(), b2.len() + b3.len());
@@ -462,7 +460,7 @@ mod tests {
             &HashSet::from_iter([e1.hash()]),
             vec![Item {
                 buffer: b4.clone(),
-                entry: e4.clone(),
+                piece: e4.piece(),
             }],
         );
         assert_eq!(storage.len(), b4.len());
@@ -492,7 +490,7 @@ mod tests {
             &HashSet::new(),
             vec![Item {
                 buffer: b5.clone(),
-                entry: e5.clone(),
+                piece: e5.piece(),
             }],
         );
         assert_eq!(storage.len(), b4.len());

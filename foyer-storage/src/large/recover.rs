@@ -21,7 +21,7 @@ use std::{
 
 use clap::ValueEnum;
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
     metrics::model::Metrics,
 };
 use futures::future::try_join_all;
@@ -65,8 +65,8 @@ pub struct RecoverRunner;
 
 impl RecoverRunner {
     #[expect(clippy::too_many_arguments)]
-    pub async fn run<K, V, S>(
-        config: &GenericLargeStorageConfig<K, V, S>,
+    pub async fn run<K, V>(
+        config: &GenericLargeStorageConfig<K, V>,
         regions: Range<RegionId>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
@@ -78,7 +78,6 @@ impl RecoverRunner {
     where
         K: StorageKey,
         V: StorageValue,
-        S: HashBuilder + Debug,
     {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));

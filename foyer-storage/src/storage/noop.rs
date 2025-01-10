@@ -14,52 +14,47 @@
 
 use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
-use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheEntry;
+use foyer_common::code::{StorageKey, StorageValue};
+use foyer_memory::Piece;
 use futures::future::ready;
 
 use crate::{device::monitor::DeviceStats, error::Result, storage::Storage};
 
-pub struct Noop<K, V, S>
+pub struct Noop<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
-    _marker: PhantomData<(K, V, S)>,
+    _marker: PhantomData<(K, V)>,
 }
 
-impl<K, V, S> Debug for Noop<K, V, S>
+impl<K, V> Debug for Noop<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("NoneStore").finish()
     }
 }
 
-impl<K, V, S> Clone for Noop<K, V, S>
+impl<K, V> Clone for Noop<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     fn clone(&self) -> Self {
         Self { _marker: PhantomData }
     }
 }
 
-impl<K, V, S> Storage for Noop<K, V, S>
+impl<K, V> Storage for Noop<K, V>
 where
     K: StorageKey,
     V: StorageValue,
-    S: HashBuilder + Debug,
 {
     type Key = K;
     type Value = V;
-    type BuildHasher = S;
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
@@ -70,7 +65,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _entry: CacheEntry<Self::Key, Self::Value, Self::BuildHasher>, _estimated_size: usize) {}
+    fn enqueue(&self, _piece: Piece<Self::Key, Self::Value>, _estimated_size: usize) {}
 
     fn load(&self, _: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         ready(Ok(None))
@@ -110,9 +105,9 @@ mod tests {
     #[tokio::test]
     async fn test_none_store() {
         let memory = cache_for_test();
-        let store = Noop::open(()).await.unwrap();
+        let store: Noop<u64, Vec<u8>> = Noop::open(()).await.unwrap();
 
-        store.enqueue(memory.insert(0, vec![b'x'; 16384]), 16384);
+        store.enqueue(memory.insert(0, vec![b'x'; 16384]).piece(), 16384);
         store.wait().await;
         assert!(store.load(memory.hash(&0)).await.unwrap().is_none());
         store.delete(memory.hash(&0));

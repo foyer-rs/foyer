@@ -27,6 +27,7 @@ use foyer_storage::{
     SmallEngineOptions, StoreBuilder,
 };
 
+use super::cache::HybridCachePipe;
 use crate::HybridCache;
 
 /// Hybrid cache builder.
@@ -103,10 +104,13 @@ impl<K, V> HybridCacheBuilder<K, V> {
         if let Some(event_listener) = self.event_listener {
             builder = builder.with_event_listener(event_listener);
         }
+        let pipe = Arc::new(HybridCachePipe::new());
+        builder = builder.with_pipe(pipe.clone());
         HybridCacheBuilderPhaseMemory {
             builder,
             name: self.name,
             metrics,
+            pipe,
             tracing_options: self.tracing_options,
         }
     }
@@ -122,6 +126,7 @@ where
     name: Cow<'static, str>,
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
+    pipe: Arc<HybridCachePipe<K, V, S>>,
     // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
     builder: CacheBuilder<K, V, S>,
 }
@@ -140,6 +145,7 @@ where
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -153,6 +159,7 @@ where
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -162,11 +169,13 @@ where
     where
         OS: HashBuilder + Debug,
     {
-        let builder = self.builder.with_hash_builder(hash_builder);
+        let pipe = Arc::new(HybridCachePipe::new());
+        let builder = self.builder.with_hash_builder(hash_builder).with_pipe(pipe.clone());
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
+            pipe,
             builder,
         }
     }
@@ -178,6 +187,7 @@ where
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -190,6 +200,7 @@ where
             name: self.name,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
+            pipe: self.pipe,
             memory,
         }
     }
@@ -206,6 +217,7 @@ where
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
     memory: Cache<K, V, S>,
+    pipe: Arc<HybridCachePipe<K, V, S>>,
     builder: StoreBuilder<K, V, S>,
 }
 
@@ -223,6 +235,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -237,6 +250,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -253,6 +267,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -269,6 +284,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -283,6 +299,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -295,6 +312,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -309,6 +327,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -323,6 +342,7 @@ where
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
+            pipe: self.pipe,
             builder,
         }
     }
@@ -330,6 +350,7 @@ where
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let storage = self.builder.build().await?;
+        self.pipe.set(storage.clone());
         Ok(HybridCache::new(
             self.memory,
             storage,
