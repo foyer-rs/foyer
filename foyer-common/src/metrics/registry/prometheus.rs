@@ -27,7 +27,10 @@ use prometheus::{
 };
 
 use crate::{
-    metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps},
+    metrics::{
+        BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec, BoxedHistogram, BoxedHistogramVec, Boxer, CounterOps,
+        CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps,
+    },
     scope::Scope,
 };
 
@@ -121,9 +124,9 @@ impl CounterOps for IntCounter {
 }
 
 impl CounterVecOps for IntCounterVec {
-    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
+    fn counter(&self, labels: &[Cow<'static, str>]) -> BoxedCounter {
         let labels = labels.iter().map(Cow::as_ref).collect_vec();
-        self.with_label_values(&labels)
+        self.with_label_values(&labels).boxed()
     }
 }
 
@@ -142,9 +145,9 @@ impl GaugeOps for IntGauge {
 }
 
 impl GaugeVecOps for IntGaugeVec {
-    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> BoxedGauge {
         let labels = labels.iter().map(Cow::as_ref).collect_vec();
-        self.with_label_values(&labels)
+        self.with_label_values(&labels).boxed()
     }
 }
 
@@ -155,9 +158,9 @@ impl HistogramOps for Histogram {
 }
 
 impl HistogramVecOps for HistogramVec {
-    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> BoxedHistogram {
         let labels = labels.iter().map(Cow::as_ref).collect_vec();
-        self.with_label_values(&labels)
+        self.with_label_values(&labels).boxed()
     }
 }
 
@@ -197,50 +200,53 @@ impl PrometheusMetricsRegistry {
 impl RegistryOps for PrometheusMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl CounterVecOps {
+    ) -> BoxedCounterVec {
         get_or_register_counter_vec(
             self,
             Metadata {
-                name: name.into(),
-                desc: desc.into(),
+                name,
+                desc,
                 label_names,
             },
         )
+        .boxed()
     }
 
     fn register_gauge_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl GaugeVecOps {
+    ) -> BoxedGaugeVec {
         get_or_register_gauge_vec(
             self,
             Metadata {
-                name: name.into(),
-                desc: desc.into(),
+                name,
+                desc,
                 label_names,
             },
         )
+        .boxed()
     }
 
     fn register_histogram_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl HistogramVecOps {
+    ) -> BoxedHistogramVec {
         get_or_register_histogram_vec(
             self,
             Metadata {
-                name: name.into(),
-                desc: desc.into(),
+                name,
+                desc,
                 label_names,
             },
         )
+        .boxed()
     }
 }
 
@@ -249,17 +255,21 @@ mod tests {
     use super::*;
 
     fn case(registry: &PrometheusMetricsRegistry) {
-        let cv = registry.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
+        let cv = registry.register_counter_vec("test_counter_1".into(), "test counter 1".into(), &["label1", "label2"]);
         let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
-        let gv = registry.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
+        let gv = registry.register_gauge_vec("test_gauge_1".into(), "test gauge 1".into(), &["label1", "label2"]);
         let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
-        let hv = registry.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
+        let hv = registry.register_histogram_vec(
+            "test_histogram_1".into(),
+            "test histogram 1".into(),
+            &["label1", "label2"],
+        );
         let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }

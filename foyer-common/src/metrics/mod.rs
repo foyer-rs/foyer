@@ -39,19 +39,19 @@ pub trait HistogramOps: Send + Sync + 'static + Debug {
 /// A vector of counters.
 pub trait CounterVecOps: Send + Sync + 'static + Debug {
     /// Get a counter within the vector of counters.
-    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps;
+    fn counter(&self, labels: &[Cow<'static, str>]) -> BoxedCounter;
 }
 
 /// A vector of gauges.
 pub trait GaugeVecOps: Send + Sync + 'static + Debug {
     /// Get a gauge within the vector of gauges.
-    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps;
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> BoxedGauge;
 }
 
 /// A vector of histograms.
 pub trait HistogramVecOps: Send + Sync + 'static + Debug {
     /// Get a histogram within the vector of histograms.
-    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps;
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> BoxedHistogram;
 }
 
 /// Metrics registry.
@@ -59,27 +59,37 @@ pub trait RegistryOps: Send + Sync + 'static + Debug {
     /// Register a vector of counters to the registry.
     fn register_counter_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl CounterVecOps;
+    ) -> BoxedCounterVec;
 
     /// Register a vector of gauges to the registry.
     fn register_gauge_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl GaugeVecOps;
+    ) -> BoxedGaugeVec;
 
     /// Register a vector of histograms to the registry.
     fn register_histogram_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl HistogramVecOps;
+    ) -> BoxedHistogramVec;
 }
+
+trait Boxer {
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+}
+impl<T> Boxer for T {}
 
 /// Boxed generic counter.
 pub type BoxedCounter = Box<dyn CounterOps>;
@@ -87,6 +97,16 @@ pub type BoxedCounter = Box<dyn CounterOps>;
 pub type BoxedGauge = Box<dyn GaugeOps>;
 /// Boxed generic histogram.
 pub type BoxedHistogram = Box<dyn HistogramOps>;
+
+/// Boxed generic counter vec.
+pub type BoxedCounterVec = Box<dyn CounterVecOps>;
+/// Boxed generic gauge vec.
+pub type BoxedGaugeVec = Box<dyn GaugeVecOps>;
+/// Boxed generic histogram vec.
+pub type BoxedHistogramVec = Box<dyn HistogramVecOps>;
+
+/// Boxed generic registry.
+pub type BoxedRegistry = Box<dyn RegistryOps>;
 
 /// Shared metrics model.
 pub mod model;

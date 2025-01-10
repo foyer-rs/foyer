@@ -151,7 +151,7 @@ where
         }
     }
 
-    async fn handle<'s>(&self, permit: SemaphorePermit<'s>) {
+    async fn handle(&self, permit: SemaphorePermit<'_>) {
         let Some(region) = self.region_manager.evict() else {
             // There is no evictable region, which means all regions are being written or being reclaiming.
             //

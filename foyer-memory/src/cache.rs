@@ -20,7 +20,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
-    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, RegistryOps},
+    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, BoxedRegistry},
     runtime::SingletonHandle,
 };
 use pin_project::pin_project;
@@ -276,7 +276,7 @@ impl From<LfuConfig> for EvictionConfig {
 }
 
 /// In-memory cache builder.
-pub struct CacheBuilder<K, V, S, M>
+pub struct CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
@@ -294,11 +294,11 @@ where
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     pipe: Option<Arc<dyn Pipe<Key = K, Value = V>>>,
 
-    registry: M,
+    registry: BoxedRegistry,
     metrics: Option<Arc<Metrics>>,
 }
 
-impl<K, V> CacheBuilder<K, V, RandomState, NoopMetricsRegistry>
+impl<K, V> CacheBuilder<K, V, RandomState>
 where
     K: Key,
     V: Value,
@@ -317,13 +317,13 @@ where
             event_listener: None,
             pipe: None,
 
-            registry: NoopMetricsRegistry,
+            registry: Box::new(NoopMetricsRegistry),
             metrics: None,
         }
     }
 }
 
-impl<K, V, S, M> CacheBuilder<K, V, S, M>
+impl<K, V, S> CacheBuilder<K, V, S>
 where
     K: Key,
     V: Value,
@@ -355,7 +355,7 @@ where
     }
 
     /// Set in-memory cache hash builder.
-    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS, M>
+    pub fn with_hash_builder<OS>(self, hash_builder: OS) -> CacheBuilder<K, V, OS>
     where
         OS: HashBuilder,
     {
@@ -395,22 +395,9 @@ where
     /// Set metrics registry.
     ///
     /// Default: [`NoopMetricsRegistry`].
-    pub fn with_metrics_registry<OM>(self, registry: OM) -> CacheBuilder<K, V, S, OM>
-    where
-        OM: RegistryOps,
-    {
-        CacheBuilder {
-            name: self.name,
-            capacity: self.capacity,
-            shards: self.shards,
-            eviction_config: self.eviction_config,
-            hash_builder: self.hash_builder,
-            weighter: self.weighter,
-            event_listener: self.event_listener,
-            pipe: self.pipe,
-            registry,
-            metrics: self.metrics,
-        }
+    pub fn with_metrics_registry(mut self, registry: BoxedRegistry) -> CacheBuilder<K, V, S> {
+        self.registry = registry;
+        self
     }
 
     /// Set metrics.
@@ -423,10 +410,7 @@ where
     }
 
     /// Build in-memory cache with the given configuration.
-    pub fn build(self) -> Cache<K, V, S>
-    where
-        M: RegistryOps,
-    {
+    pub fn build(self) -> Cache<K, V, S> {
         if self.capacity < self.shards {
             tracing::warn!(
                 "The in-memory cache capacity({}) < shards({}).",

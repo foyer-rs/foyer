@@ -14,7 +14,10 @@
 
 use std::borrow::Cow;
 
-use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{
+    BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec, BoxedHistogram, BoxedHistogramVec, CounterOps,
+    CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps,
+};
 
 /// Noop metrics placeholder.
 #[derive(Debug)]
@@ -25,8 +28,8 @@ impl CounterOps for NoopMetricsRegistry {
 }
 
 impl CounterVecOps for NoopMetricsRegistry {
-    fn counter(&self, _: &[Cow<'static, str>]) -> impl CounterOps {
-        NoopMetricsRegistry
+    fn counter(&self, _: &[Cow<'static, str>]) -> BoxedCounter {
+        Box::new(NoopMetricsRegistry)
     }
 }
 
@@ -39,8 +42,8 @@ impl GaugeOps for NoopMetricsRegistry {
 }
 
 impl GaugeVecOps for NoopMetricsRegistry {
-    fn gauge(&self, _: &[Cow<'static, str>]) -> impl GaugeOps {
-        NoopMetricsRegistry
+    fn gauge(&self, _: &[Cow<'static, str>]) -> BoxedGauge {
+        Box::new(NoopMetricsRegistry)
     }
 }
 
@@ -49,37 +52,37 @@ impl HistogramOps for NoopMetricsRegistry {
 }
 
 impl HistogramVecOps for NoopMetricsRegistry {
-    fn histogram(&self, _: &[Cow<'static, str>]) -> impl HistogramOps {
-        NoopMetricsRegistry
+    fn histogram(&self, _: &[Cow<'static, str>]) -> BoxedHistogram {
+        Box::new(NoopMetricsRegistry)
     }
 }
 
 impl RegistryOps for NoopMetricsRegistry {
     fn register_counter_vec(
         &self,
-        _: impl Into<Cow<'static, str>>,
-        _: impl Into<Cow<'static, str>>,
+        _: Cow<'static, str>,
+        _: Cow<'static, str>,
         _: &'static [&'static str],
-    ) -> impl CounterVecOps {
-        NoopMetricsRegistry
+    ) -> BoxedCounterVec {
+        Box::new(NoopMetricsRegistry)
     }
 
     fn register_gauge_vec(
         &self,
-        _: impl Into<Cow<'static, str>>,
-        _: impl Into<Cow<'static, str>>,
+        _: Cow<'static, str>,
+        _: Cow<'static, str>,
         _: &'static [&'static str],
-    ) -> impl GaugeVecOps {
-        NoopMetricsRegistry
+    ) -> BoxedGaugeVec {
+        Box::new(NoopMetricsRegistry)
     }
 
     fn register_histogram_vec(
         &self,
-        _: impl Into<Cow<'static, str>>,
-        _: impl Into<Cow<'static, str>>,
+        _: Cow<'static, str>,
+        _: Cow<'static, str>,
         _: &'static [&'static str],
-    ) -> impl HistogramVecOps {
-        NoopMetricsRegistry
+    ) -> BoxedHistogramVec {
+        Box::new(NoopMetricsRegistry)
     }
 }
 
@@ -91,17 +94,21 @@ mod tests {
     fn test() {
         let noop = NoopMetricsRegistry;
 
-        let cv = noop.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
+        let cv = noop.register_counter_vec("test_counter_1".into(), "test counter 1".into(), &["label1", "label2"]);
         let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
-        let gv = noop.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
+        let gv = noop.register_gauge_vec("test_gauge_1".into(), "test gauge 1".into(), &["label1", "label2"]);
         let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
-        let hv = noop.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
+        let hv = noop.register_histogram_vec(
+            "test_histogram_1".into(),
+            "test histogram 1".into(),
+            &["label1", "label2"],
+        );
         let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }

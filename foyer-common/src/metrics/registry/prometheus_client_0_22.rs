@@ -24,7 +24,10 @@ use prometheus_client_0_22::{
     registry::Registry,
 };
 
-use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{
+    BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec, BoxedHistogram, BoxedHistogramVec, Boxer, CounterOps,
+    CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Labels {
@@ -59,7 +62,7 @@ struct CounterVec {
 }
 
 impl CounterVecOps for CounterVec {
-    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
+    fn counter(&self, labels: &[Cow<'static, str>]) -> BoxedCounter {
         Counter {
             counter: self.counter.clone(),
             labels: Labels {
@@ -71,6 +74,7 @@ impl CounterVecOps for CounterVec {
                     .collect(),
             },
         }
+        .boxed()
     }
 }
 
@@ -101,7 +105,7 @@ struct GaugeVec {
 }
 
 impl GaugeVecOps for GaugeVec {
-    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> BoxedGauge {
         Gauge {
             gauge: self.gauge.clone(),
             labels: Labels {
@@ -113,6 +117,7 @@ impl GaugeVecOps for GaugeVec {
                     .collect(),
             },
         }
+        .boxed()
     }
 }
 
@@ -135,7 +140,7 @@ struct HistogramVec {
 }
 
 impl HistogramVecOps for HistogramVec {
-    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> BoxedHistogram {
         Histogram {
             histogram: self.histogram.clone(),
             labels: Labels {
@@ -147,6 +152,7 @@ impl HistogramVecOps for HistogramVec {
                     .collect(),
             },
         }
+        .boxed()
     }
 }
 
@@ -166,39 +172,37 @@ impl PrometheusClientMetricsRegistry {
 impl RegistryOps for PrometheusClientMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl CounterVecOps {
+    ) -> BoxedCounterVec {
         let counter = Family::<Labels, PcCounter>::default();
-        self.registry.lock().register(name.into(), desc.into(), counter.clone());
-        CounterVec { counter, label_names }
+        self.registry.lock().register(name, desc, counter.clone());
+        CounterVec { counter, label_names }.boxed()
     }
 
     fn register_gauge_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl GaugeVecOps {
+    ) -> BoxedGaugeVec {
         let gauge = Family::<Labels, PcGauge>::default();
-        self.registry.lock().register(name.into(), desc.into(), gauge.clone());
-        GaugeVec { gauge, label_names }
+        self.registry.lock().register(name, desc, gauge.clone());
+        GaugeVec { gauge, label_names }.boxed()
     }
 
     fn register_histogram_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl HistogramVecOps {
+    ) -> BoxedHistogramVec {
         let histogram = Family::<Labels, PcHistogram>::new_with_constructor(|| {
             PcHistogram::new([0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0].into_iter())
         });
-        self.registry
-            .lock()
-            .register(name.into(), desc.into(), histogram.clone());
-        HistogramVec { histogram, label_names }
+        self.registry.lock().register(name, desc, histogram.clone());
+        HistogramVec { histogram, label_names }.boxed()
     }
 }
 
@@ -213,17 +217,21 @@ mod tests {
         let registry = Arc::new(Mutex::new(Registry::default()));
         let pc = PrometheusClientMetricsRegistry::new(registry.clone());
 
-        let cv = pc.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
+        let cv = pc.register_counter_vec("test_counter_1".into(), "test counter 1".into(), &["label1", "label2"]);
         let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
-        let gv = pc.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
+        let gv = pc.register_gauge_vec("test_gauge_1".into(), "test gauge 1".into(), &["label1", "label2"]);
         let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
-        let hv = pc.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
+        let hv = pc.register_histogram_vec(
+            "test_histogram_1".into(),
+            "test histogram 1".into(),
+            &["label1", "label2"],
+        );
         let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
 

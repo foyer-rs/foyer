@@ -24,7 +24,10 @@ use opentelemetry::{
 };
 use opentelemetry_0_27 as opentelemetry;
 
-use crate::metrics::{CounterOps, CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps};
+use crate::metrics::{
+    BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec, BoxedHistogram, BoxedHistogramVec, Boxer, CounterOps,
+    CounterVecOps, GaugeOps, GaugeVecOps, HistogramOps, HistogramVecOps, RegistryOps,
+};
 
 /// OpenTelemetry counter metric.
 #[derive(Debug)]
@@ -87,7 +90,7 @@ pub struct MetricVec {
 }
 
 impl CounterVecOps for MetricVec {
-    fn counter(&self, labels: &[Cow<'static, str>]) -> impl CounterOps {
+    fn counter(&self, labels: &[Cow<'static, str>]) -> BoxedCounter {
         let counter = self
             .meter
             .u64_counter(self.name.clone())
@@ -99,12 +102,12 @@ impl CounterVecOps for MetricVec {
             .zip_eq(labels.iter())
             .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
-        Counter { counter, labels }
+        Counter { counter, labels }.boxed()
     }
 }
 
 impl GaugeVecOps for MetricVec {
-    fn gauge(&self, labels: &[Cow<'static, str>]) -> impl GaugeOps {
+    fn gauge(&self, labels: &[Cow<'static, str>]) -> BoxedGauge {
         let gauge = self
             .meter
             .u64_gauge(self.name.clone())
@@ -117,12 +120,12 @@ impl GaugeVecOps for MetricVec {
             .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
         let val = AtomicU64::new(0);
-        Gauge { val, gauge, labels }
+        Gauge { val, gauge, labels }.boxed()
     }
 }
 
 impl HistogramVecOps for MetricVec {
-    fn histogram(&self, labels: &[Cow<'static, str>]) -> impl HistogramOps {
+    fn histogram(&self, labels: &[Cow<'static, str>]) -> BoxedHistogram {
         let histogram = self
             .meter
             .f64_histogram(self.name.clone())
@@ -134,7 +137,7 @@ impl HistogramVecOps for MetricVec {
             .zip_eq(labels.iter())
             .map(|(name, label)| KeyValue::new(name.to_string(), label.clone()))
             .collect();
-        Histogram { histogram, labels }
+        Histogram { histogram, labels }.boxed()
     }
 }
 
@@ -154,44 +157,47 @@ impl OpenTelemetryMetricsRegistry {
 impl RegistryOps for OpenTelemetryMetricsRegistry {
     fn register_counter_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl CounterVecOps {
+    ) -> BoxedCounterVec {
         MetricVec {
             meter: self.meter.clone(),
-            name: name.into(),
-            desc: desc.into(),
+            name,
+            desc,
             label_names,
         }
+        .boxed()
     }
 
     fn register_gauge_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl GaugeVecOps {
+    ) -> BoxedGaugeVec {
         MetricVec {
             meter: self.meter.clone(),
-            name: name.into(),
-            desc: desc.into(),
+            name,
+            desc,
             label_names,
         }
+        .boxed()
     }
 
     fn register_histogram_vec(
         &self,
-        name: impl Into<Cow<'static, str>>,
-        desc: impl Into<Cow<'static, str>>,
+        name: Cow<'static, str>,
+        desc: Cow<'static, str>,
         label_names: &'static [&'static str],
-    ) -> impl HistogramVecOps {
+    ) -> BoxedHistogramVec {
         MetricVec {
             meter: self.meter.clone(),
-            name: name.into(),
-            desc: desc.into(),
+            name,
+            desc,
             label_names,
         }
+        .boxed()
     }
 }
 
@@ -204,17 +210,21 @@ mod tests {
         let meter = opentelemetry::global::meter("test");
         let ot = OpenTelemetryMetricsRegistry::new(meter);
 
-        let cv = ot.register_counter_vec("test_counter_1", "test counter 1", &["label1", "label2"]);
+        let cv = ot.register_counter_vec("test_counter_1".into(), "test counter 1".into(), &["label1", "label2"]);
         let c = cv.counter(&["l1".into(), "l2".into()]);
         c.increase(42);
 
-        let gv = ot.register_gauge_vec("test_gauge_1", "test gauge 1", &["label1", "label2"]);
+        let gv = ot.register_gauge_vec("test_gauge_1".into(), "test gauge 1".into(), &["label1", "label2"]);
         let g = gv.gauge(&["l1".into(), "l2".into()]);
         g.increase(514);
         g.decrease(114);
         g.absolute(114514);
 
-        let hv = ot.register_histogram_vec("test_histogram_1", "test histogram 1", &["label1", "label2"]);
+        let hv = ot.register_histogram_vec(
+            "test_histogram_1".into(),
+            "test histogram 1".into(),
+            &["label1", "label2"],
+        );
         let h = hv.histogram(&["l1".into(), "l2".into()]);
         h.record(114.514);
     }

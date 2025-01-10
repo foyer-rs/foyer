@@ -18,7 +18,7 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
-    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, RegistryOps},
+    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, BoxedRegistry},
     tracing::TracingOptions,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
@@ -31,32 +31,32 @@ use super::cache::HybridCachePipe;
 use crate::HybridCache;
 
 /// Hybrid cache builder.
-pub struct HybridCacheBuilder<K, V, M = NoopMetricsRegistry> {
+pub struct HybridCacheBuilder<K, V> {
     name: Cow<'static, str>,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     tracing_options: TracingOptions,
-    registry: M,
+    registry: BoxedRegistry,
 }
 
-impl<K, V> Default for HybridCacheBuilder<K, V, NoopMetricsRegistry> {
+impl<K, V> Default for HybridCacheBuilder<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V> HybridCacheBuilder<K, V, NoopMetricsRegistry> {
+impl<K, V> HybridCacheBuilder<K, V> {
     /// Create a new hybrid cache builder.
     pub fn new() -> Self {
         Self {
             name: "foyer".into(),
             event_listener: None,
             tracing_options: TracingOptions::default(),
-            registry: NoopMetricsRegistry,
+            registry: Box::new(NoopMetricsRegistry),
         }
     }
 }
 
-impl<K, V, M> HybridCacheBuilder<K, V, M> {
+impl<K, V> HybridCacheBuilder<K, V> {
     /// Set the name of the foyer hybrid cache instance.
     ///
     /// foyer will use the name as the prefix of the metric names.
@@ -86,16 +86,9 @@ impl<K, V, M> HybridCacheBuilder<K, V, M> {
     /// Set metrics registry.
     ///
     /// Default: [`NoopMetricsRegistry`].
-    pub fn with_metrics_registry<OM>(self, registry: OM) -> HybridCacheBuilder<K, V, OM>
-    where
-        OM: RegistryOps,
-    {
-        HybridCacheBuilder {
-            name: self.name,
-            event_listener: self.event_listener,
-            tracing_options: self.tracing_options,
-            registry,
-        }
+    pub fn with_metrics_registry(mut self, registry: BoxedRegistry) -> HybridCacheBuilder<K, V> {
+        self.registry = registry;
+        self
     }
 
     /// Continue to modify the in-memory cache configurations.
@@ -103,7 +96,6 @@ impl<K, V, M> HybridCacheBuilder<K, V, M> {
     where
         K: StorageKey,
         V: StorageValue,
-        M: RegistryOps,
     {
         let metrics = Arc::new(Metrics::new(self.name.clone(), &self.registry));
         let mut builder = CacheBuilder::new(capacity)
@@ -136,7 +128,7 @@ where
     metrics: Arc<Metrics>,
     pipe: Arc<HybridCachePipe<K, V, S>>,
     // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
-    builder: CacheBuilder<K, V, S, NoopMetricsRegistry>,
+    builder: CacheBuilder<K, V, S>,
 }
 
 impl<K, V, S> HybridCacheBuilderPhaseMemory<K, V, S>
