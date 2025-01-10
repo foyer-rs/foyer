@@ -23,6 +23,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 use fastrace::{
     future::{FutureExt, InSpan},
@@ -46,6 +47,7 @@ use crate::{
     error::{Error, Result},
     eviction::{Eviction, Op},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
+    pipe::NoopPipe,
     record::{Data, Record},
     Piece, Pipe,
 };
@@ -67,7 +69,6 @@ where
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pub pipe: Option<Arc<dyn Pipe<Key = E::Key, Value = E::Value>>>,
     pub metrics: Arc<Metrics>,
 }
 
@@ -370,7 +371,7 @@ where
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pipe: Option<Arc<dyn Pipe<Key = E::Key, Value = E::Value>>>,
+    pipe: ArcSwap<Box<dyn Pipe<Key = E::Key, Value = E::Value>>>,
 }
 
 impl<E, S, I> RawCacheInner<E, S, I>
@@ -452,6 +453,8 @@ where
             .map(RwLock::new)
             .collect_vec();
 
+        let pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value>> = Box::new(NoopPipe::default());
+
         let inner = RawCacheInner {
             shards,
             capacity: config.capacity,
@@ -459,7 +462,7 @@ where
             weighter: config.weighter,
             metrics: config.metrics,
             event_listener: config.event_listener,
-            pipe: config.pipe,
+            pipe: ArcSwap::new(Arc::new(pipe)),
         };
 
         Self { inner: Arc::new(inner) }
@@ -482,15 +485,15 @@ where
                         })
                     });
                     // Deallocate data out of the lock critical section.
-                    if inner.event_listener.is_some() || inner.pipe.is_some() {
+                    let pipe = inner.pipe.load();
+                    let piped = pipe.is_enabled();
+                    if inner.event_listener.is_some() || piped {
                         for (event, record) in garbages {
                             if let Some(listener) = inner.event_listener.as_ref() {
                                 listener.on_leave(event, record.key(), record.value())
                             }
-                            if event == Event::Evict {
-                                if let Some(pipe) = inner.pipe.as_ref() {
-                                    pipe.send(Piece::new(record));
-                                }
+                            if piped && event == Event::Evict {
+                                pipe.send(Piece::new(record));
                             }
                         }
                     }
@@ -564,15 +567,15 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        if self.inner.event_listener.is_some() || self.inner.pipe.is_some() {
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+        if self.inner.event_listener.is_some() || piped {
             for (event, record) in garbages {
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(event, record.key(), record.value())
                 }
-                if event == Event::Evict {
-                    if let Some(pipe) = self.inner.pipe.as_ref() {
-                        pipe.send(Piece::new(record));
-                    }
+                if piped && event == Event::Evict {
+                    pipe.send(Piece::new(record));
                 }
             }
         }
@@ -683,6 +686,10 @@ where
 
     pub fn shards(&self) -> usize {
         self.inner.shards.len()
+    }
+
+    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value>>) {
+        self.inner.pipe.store(Arc::new(pipe));
     }
 
     fn shard(&self, hash: u64) -> usize {
@@ -1034,7 +1041,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1047,7 +1053,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1060,7 +1065,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1073,7 +1077,6 @@ mod tests {
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
-            pipe: None,
             metrics: Arc::new(Metrics::noop()),
         })
     }
@@ -1178,7 +1181,6 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
-                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![FifoHint];
@@ -1194,7 +1196,6 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
-                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![S3FifoHint];
@@ -1210,7 +1211,6 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
-                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
@@ -1226,7 +1226,6 @@ mod tests {
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,
-                pipe: None,
                 metrics: Arc::new(Metrics::noop()),
             });
             let hints = vec![LfuHint];

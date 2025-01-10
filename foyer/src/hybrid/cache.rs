@@ -18,7 +18,7 @@ use std::{
     hash::Hash,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     time::Instant,
 };
@@ -72,7 +72,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    store: OnceLock<Store<K, V, S>>,
+    store: Store<K, V, S>,
 }
 
 impl<K, V, S> HybridCachePipe<K, V, S>
@@ -81,12 +81,8 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new() -> Self {
-        Self { store: OnceLock::new() }
-    }
-
-    pub fn set(&self, store: Store<K, V, S>) {
-        self.store.set(store).unwrap();
+    pub fn new(store: Store<K, V, S>) -> Self {
+        Self { store }
     }
 }
 
@@ -99,8 +95,12 @@ where
     type Key = K;
     type Value = V;
 
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     fn send(&self, piece: Piece<Self::Key, Self::Value>) {
-        self.store.get().as_ref().unwrap().enqueue(piece, false);
+        self.store.enqueue(piece, false);
     }
 }
 

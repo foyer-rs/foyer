@@ -647,6 +647,11 @@ where
 
         Ok(store)
     }
+
+    /// Return true the builder is based on a noop device.
+    pub fn is_noop(&self) -> bool {
+        matches! {self.device_options, DeviceOptions::None}
+    }
 }
 
 /// Large object disk cache engine default options.

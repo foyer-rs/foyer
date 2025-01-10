@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+
+use foyer_common::code::{Key, Value};
 
 use crate::{record::Record, Eviction};
 
@@ -91,8 +93,36 @@ pub trait Pipe: Send + Sync + 'static {
     /// Type of the value of the record.
     type Value;
 
+    /// Decide whether to send evicted entry to pipe.
+    fn is_enabled(&self) -> bool;
+
     /// Send the piece to the disk cache.
     fn send(&self, piece: Piece<Self::Key, Self::Value>);
+}
+
+/// An no-op pipe that is never enabled.
+#[derive(Debug)]
+pub struct NoopPipe<K, V>(PhantomData<(K, V)>);
+
+impl<K, V> Default for NoopPipe<K, V> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K, V> Pipe for NoopPipe<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+
+    fn is_enabled(&self) -> bool {
+        false
+    }
+
+    fn send(&self, _: Piece<Self::Key, Self::Value>) {}
 }
 
 #[cfg(test)]
