@@ -291,3 +291,16 @@ impl Metrics {
         Self::new("test", &registry)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mixtrics::metrics::BoxedRegistry;
+
+    use super::Metrics;
+
+    fn test_fn(registry: &BoxedRegistry) {
+        Metrics::new("test", registry);
+    }
+
+    mixtrics::test! { test_fn }
+}
