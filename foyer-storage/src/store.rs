@@ -27,7 +27,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};

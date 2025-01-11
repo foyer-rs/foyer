@@ -20,9 +20,10 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
-    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, BoxedRegistry},
+    metrics::Metrics,
     runtime::SingletonHandle,
 };
+use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;

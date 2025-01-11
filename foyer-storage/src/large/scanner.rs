@@ -17,7 +17,7 @@ use std::sync::Arc;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
     strict_assert,
 };
 

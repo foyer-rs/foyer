@@ -12,34 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "opentelemetry")]
-#[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry")))]
-pub use crate::common::metrics::registry::opentelemetry;
-#[cfg(feature = "opentelemetry_0_26")]
-#[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry_0_26")))]
-pub use crate::common::metrics::registry::opentelemetry_0_26;
-#[cfg(feature = "opentelemetry_0_27")]
-#[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry_0_27")))]
-pub use crate::common::metrics::registry::opentelemetry_0_27;
-#[cfg(feature = "prometheus")]
-#[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
-pub use crate::common::metrics::registry::prometheus;
-#[cfg(feature = "prometheus-client")]
-#[cfg_attr(docsrs, doc(cfg(feature = "prometheus-client")))]
-pub use crate::common::metrics::registry::prometheus_client;
-#[cfg(feature = "prometheus-client_0_22")]
-#[cfg_attr(docsrs, doc(cfg(feature = "prometheus-client_0_22")))]
-pub use crate::common::metrics::registry::prometheus_client_0_22;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
         code::{Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
-        metrics::{
-            registry::noop::NoopMetricsRegistry, BoxedCounter, BoxedCounterVec, BoxedGauge, BoxedGaugeVec,
-            BoxedHistogram, BoxedHistogramVec, BoxedRegistry, CounterOps, CounterVecOps, GaugeOps, GaugeVecOps,
-            HistogramOps, HistogramVecOps, RegistryOps,
-        },
         range::RangeBoundsExt,
         tracing::TracingOptions,
     },

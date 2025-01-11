@@ -19,7 +19,7 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, metrics::model::Metrics, strict_assert_eq};
+use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
 use futures::future::try_join_all;
 use tokio::sync::Mutex;
 

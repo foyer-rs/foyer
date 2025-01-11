@@ -16,7 +16,7 @@ use std::{fmt::Debug, io::Write, time::Instant};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
 };
 use twox_hash::{XxHash32, XxHash64};
 

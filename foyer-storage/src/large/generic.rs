@@ -28,7 +28,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
 };
 use foyer_memory::Piece;
 use futures::future::{join_all, try_join_all};

@@ -174,7 +174,6 @@ jobs:
           cargo clippy --all-targets --features tokio-console -- -D warnings
           cargo clippy --all-targets --features deadlock -- -D warnings
           cargo clippy --all-targets --features tracing -- -D warnings
-          cargo clippy --all-targets --features prometheus,prometheus-client_0_22,opentelemetry_0_26,opentelemetry_0_27 -- -D warnings
           cargo clippy --all-targets -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -191,7 +190,7 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity,prometheus,prometheus-client_0_22,opentelemetry_0_26,opentelemetry_0_27"
+          cargo llvm-cov --no-report nextest --features "strict_assertions,sanity"
       - name: Run examples with coverage
         env:
           RUST_BACKTRACE: 1
@@ -256,12 +255,12 @@ jobs:
         uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Run rustdoc test
         run: |
-          cargo test --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27" --doc
+          cargo test --features "nightly" --doc
       - name: Test docs build with docs.rs
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
         run: |
-          cargo doc --features "nightly,prometheus,prometheus-client,prometheus-client_0_22,opentelemetry,opentelemetry_0_26,opentelemetry_0_27" --no-deps
+          cargo doc --features "nightly" --no-deps
       - name: Upload docs.rs docs as artifacts
         uses: actions/upload-artifact@v4
         with:

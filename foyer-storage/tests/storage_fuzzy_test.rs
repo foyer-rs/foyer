@@ -19,7 +19,7 @@
 use std::{path::Path, sync::Arc};
 
 use ahash::RandomState;
-use foyer_common::metrics::model::Metrics;
+use foyer_common::metrics::Metrics;
 use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
