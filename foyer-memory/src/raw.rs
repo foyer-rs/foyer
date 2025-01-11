@@ -33,7 +33,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
-    metrics::model::Metrics,
+    metrics::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
     strict_assert,

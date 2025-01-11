@@ -38,13 +38,13 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    prometheus::PrometheusMetricsRegistry, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine,
-    FifoConfig, FifoPicker, HybridCache, HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig,
-    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
-    TracingOptions,
+    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
+    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
+    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
 };
 use futures::future::join_all;
 use itertools::Itertools;
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{
     distributions::Distribution,

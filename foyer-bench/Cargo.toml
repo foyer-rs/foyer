@@ -19,7 +19,7 @@ clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { version = "0.7", optional = true }
-foyer = { workspace = true, features = ["prometheus"] }
+foyer = { workspace = true }
 futures = "0.3"
 hdrhistogram = "7"
 http-body-util = "0.1"
@@ -30,6 +30,7 @@ hyper = { version = "1", default-features = false, features = [
 ] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 itertools = { workspace = true }
+mixtrics = { workspace = true, features = ["prometheus"] }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
 rand = "0.8.5"

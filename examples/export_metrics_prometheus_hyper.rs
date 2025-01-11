@@ -15,7 +15,7 @@
 use std::{future::Future, net::SocketAddr, pin::Pin};
 
 use anyhow::Ok;
-use foyer::{prometheus::PrometheusMetricsRegistry, Cache, CacheBuilder};
+use foyer::{Cache, CacheBuilder};
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -25,6 +25,7 @@ use hyper::{
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::{Encoder, Registry, TextEncoder};
 use tokio::net::TcpListener;
 

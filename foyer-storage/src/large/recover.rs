@@ -22,7 +22,7 @@ use std::{
 use clap::ValueEnum;
 use foyer_common::{
     code::{StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
 };
 use futures::future::try_join_all;
 use itertools::Itertools;

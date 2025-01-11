@@ -13,16 +13,7 @@ readme = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.docs.rs]
-features = [
-    "nightly",
-    # build docs for exporters
-    "prometheus",
-    "prometheus-client",
-    "prometheus-client_0_22",
-    "opentelemetry",
-    "opentelemetry_0_26",
-    "opentelemetry_0_27",
-]
+features = ["nightly"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -34,6 +25,7 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
 futures = "0.3"
+mixtrics = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
@@ -57,12 +49,6 @@ tracing = [
     "foyer-memory/tracing",
     "foyer-storage/tracing",
 ]
-prometheus = ["foyer-common/prometheus"]
-prometheus-client = ["foyer-common/prometheus-client"]
-prometheus-client_0_22 = ["foyer-common/prometheus-client_0_22"]
-opentelemetry = ["foyer-common/opentelemetry"]
-opentelemetry_0_27 = ["foyer-common/opentelemetry_0_27"]
-opentelemetry_0_26 = ["foyer-common/opentelemetry_0_26"]
 
 [lints]
 workspace = true

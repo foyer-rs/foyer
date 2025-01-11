@@ -351,7 +351,7 @@ impl SetTimestamp {
 #[cfg(test)]
 mod tests {
 
-    use foyer_common::metrics::model::Metrics;
+    use foyer_common::metrics::Metrics;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry};
 
     use super::*;

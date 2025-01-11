@@ -21,13 +21,14 @@ equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-jaeger = { version = "0.7", optional = true }
 fastrace-opentelemetry = { version = "0.7", optional = true }
-foyer = { workspace = true, features = ["prometheus"] }
+foyer = { workspace = true }
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = [
     "server",
     "http1",
 ] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+mixtrics = { workspace = true, features = ["prometheus"] }
 opentelemetry = { version = "0.26", optional = true }
 opentelemetry-otlp = { version = "0.26", optional = true }
 opentelemetry-semantic-conventions = { version = "0.26", optional = true }

@@ -25,7 +25,7 @@ use std::{
 };
 
 use async_channel::{Receiver, Sender};
-use foyer_common::{countdown::Countdown, metrics::model::Metrics};
+use foyer_common::{countdown::Countdown, metrics::Metrics};
 use futures::{
     future::{BoxFuture, Shared},
     FutureExt,

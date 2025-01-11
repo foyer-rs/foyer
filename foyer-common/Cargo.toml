@@ -19,12 +19,9 @@ cfg-if = "1"
 fastrace = { workspace = true }
 futures = "0.3"
 itertools = { workspace = true }
-opentelemetry_0_26 = { workspace = true, optional = true }
-opentelemetry_0_27 = { workspace = true, optional = true }
+mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = "1"
-prometheus = { workspace = true, optional = true }
-prometheus-client_0_22 = { workspace = true, optional = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 
@@ -35,12 +32,6 @@ rand = "0.8.5"
 [features]
 strict_assertions = []
 tracing = ["fastrace/enable"]
-prometheus = ["dep:prometheus"]
-prometheus-client = ["prometheus-client_0_22"]
-prometheus-client_0_22 = ["dep:prometheus-client_0_22"]
-opentelemetry = ["opentelemetry_0_27"]
-opentelemetry_0_27 = ["dep:opentelemetry_0_27"]
-opentelemetry_0_26 = ["dep:opentelemetry_0_26"]
 
 [lints]
 workspace = true

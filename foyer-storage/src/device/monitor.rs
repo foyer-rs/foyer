@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::{bits, metrics::model::Metrics};
+use foyer_common::{bits, metrics::Metrics};
 
 use super::RegionId;
 use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};

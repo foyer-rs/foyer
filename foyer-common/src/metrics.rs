@@ -14,8 +14,7 @@
 
 use std::borrow::Cow;
 
-use super::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
-use crate::metrics::Boxer;
+use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
 
 #[expect(missing_docs)]
 #[derive(Debug)]
@@ -288,64 +287,7 @@ impl Metrics {
     /// Note: `noop` is only supposed to be called by other foyer components.
     #[doc(hidden)]
     pub fn noop() -> Self {
-        use super::registry::noop::NoopMetricsRegistry;
-        let registry: BoxedRegistry = NoopMetricsRegistry.boxed();
+        let registry: BoxedRegistry = Box::new(mixtrics::registry::noop::NoopMetricsRegistry);
         Self::new("test", &registry)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::metrics::registry::noop::NoopMetricsRegistry;
-
-    fn case(registry: BoxedRegistry) {
-        let _ = Metrics::new("test", &registry);
-    }
-
-    #[test]
-    fn test_metrics_noop() {
-        case(NoopMetricsRegistry.boxed());
-    }
-
-    #[cfg(feature = "prometheus")]
-    #[test]
-    fn test_metrics_prometheus() {
-        use crate::metrics::registry::prometheus::PrometheusMetricsRegistry;
-
-        case(PrometheusMetricsRegistry::new(prometheus::Registry::new()).boxed());
-    }
-
-    #[cfg(feature = "prometheus-client_0_22")]
-    #[test]
-    fn test_metrics_prometheus_client_0_22() {
-        use std::sync::Arc;
-
-        use parking_lot::Mutex;
-
-        use crate::metrics::registry::prometheus_client_0_22::PrometheusClientMetricsRegistry;
-
-        case(
-            PrometheusClientMetricsRegistry::new(Arc::new(Mutex::new(
-                prometheus_client_0_22::registry::Registry::default(),
-            )))
-            .boxed(),
-        );
-    }
-
-    #[cfg(feature = "opentelemetry_0_27")]
-    #[test]
-    fn test_metrics_opentelemetry_0_27() {
-        use crate::metrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
-
-        case(OpenTelemetryMetricsRegistry::new(opentelemetry_0_27::global::meter("test")).boxed());
-    }
-
-    #[cfg(feature = "opentelemetry_0_26")]
-    #[test]
-    fn test_metrics_opentelemetry_0_26() {
-        use crate::metrics::registry::opentelemetry_0_26::OpenTelemetryMetricsRegistry;
-
-        case(OpenTelemetryMetricsRegistry::new(opentelemetry_0_26::global::meter("test")).boxed());
     }
 }

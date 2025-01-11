@@ -24,6 +24,7 @@ futures = "0.3"
 hashbrown = { workspace = true }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
 itertools = { workspace = true }
+mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true }

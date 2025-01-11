@@ -272,7 +272,7 @@ mod tests {
     use std::path::Path;
 
     use bytesize::ByteSize;
-    use foyer_common::{hasher::ModRandomState, metrics::model::Metrics};
+    use foyer_common::{hasher::ModRandomState, metrics::Metrics};
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
     use tokio::runtime::Handle;
 

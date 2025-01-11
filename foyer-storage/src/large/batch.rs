@@ -17,7 +17,7 @@ use std::{fmt::Debug, ops::Range, sync::Arc, time::Instant};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
-    metrics::model::Metrics,
+    metrics::Metrics,
     range::RangeBoundsExt,
     strict_assert_eq,
 };

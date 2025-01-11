@@ -18,7 +18,7 @@ use ahash::RandomState;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
-    metrics::{model::Metrics, registry::noop::NoopMetricsRegistry, BoxedRegistry},
+    metrics::Metrics,
     tracing::TracingOptions,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
@@ -26,6 +26,7 @@ use foyer_storage::{
     AdmissionPicker, Compression, DeviceOptions, Engine, LargeEngineOptions, RecoverMode, RuntimeOptions,
     SmallEngineOptions, StoreBuilder,
 };
+use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use super::cache::HybridCachePipe;
 use crate::HybridCache;
