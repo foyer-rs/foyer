@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## Unreleased
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.14.0-dev |
+| foyer-common | 0.14.0-dev |
+| foyer-memory | 0.14.0-dev |
+| foyer-storage | 0.14.0-dev |
+| foyer-bench | 0.14.0-dev |
+
+### Changes
+
+- Insert disk cache on in-memory cache eviction, instead of double write on insertion.
+- Extrace multiple metrics backend support to crate [`mixtrics`](https://crates.io/crates/mixtrics).
+
 ## 2024-12-04
 
 ### Releases
