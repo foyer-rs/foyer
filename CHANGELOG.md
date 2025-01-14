@@ -9,17 +9,17 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
-## Unreleased
+## 2025-01-14
 
 ### Releases
 
 | crate | version |
 | - | - |
-| foyer | 0.14.0-dev |
-| foyer-common | 0.14.0-dev |
-| foyer-memory | 0.14.0-dev |
-| foyer-storage | 0.14.0-dev |
-| foyer-bench | 0.14.0-dev |
+| foyer | 0.14.0 |
+| foyer-common | 0.14.0 |
+| foyer-memory | 0.14.0 |
+| foyer-storage | 0.14.0 |
+| foyer-bench | 0.14.0 |
 
 ### Changes
 
