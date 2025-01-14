@@ -29,7 +29,7 @@ crossbeam = "0.8"
 equivalent = "1"
 fastrace = "0.7"
 hashbrown = "0.15"
-itertools = "0.13"
+itertools = "0.14"
 parking_lot = { version = "0.12" }
 serde = { version = "1", features = ["derive", "rc"] }
 test-log = { version = "0.2", default-features = false, features = [
