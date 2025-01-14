@@ -24,8 +24,8 @@ fastrace-opentelemetry = { version = "0.7", optional = true }
 foyer = { workspace = true }
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = [
-    "server",
-    "http1",
+  "server",
+  "http1",
 ] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 mixtrics = { workspace = true, features = ["prometheus"] }
@@ -33,8 +33,8 @@ opentelemetry = { version = "0.26", optional = true }
 opentelemetry-otlp = { version = "0.26", optional = true }
 opentelemetry-semantic-conventions = { version = "0.26", optional = true }
 opentelemetry_sdk = { version = "0.26", features = [
-    "rt-tokio",
-    "trace",
+  "rt-tokio",
+  "trace",
 ], optional = true }
 prometheus = { workspace = true }
 tempfile = "3"
@@ -44,11 +44,11 @@ tracing = { workspace = true }
 [features]
 jaeger = ["fastrace-jaeger"]
 ot = [
-    "fastrace-opentelemetry",
-    "opentelemetry",
-    "opentelemetry-otlp",
-    "opentelemetry-semantic-conventions",
-    "opentelemetry_sdk",
+  "fastrace-opentelemetry",
+  "opentelemetry",
+  "opentelemetry-otlp",
+  "opentelemetry-semantic-conventions",
+  "opentelemetry_sdk",
 ]
 
 [[example]]

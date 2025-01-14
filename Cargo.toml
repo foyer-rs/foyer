@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "examples",
-    "foyer",
-    "foyer-bench",
-    "foyer-cli",
-    "foyer-common",
-    "foyer-memory",
-    "foyer-storage",
+  "examples",
+  "foyer",
+  "foyer-bench",
+  "foyer-cli",
+  "foyer-common",
+  "foyer-memory",
+  "foyer-storage",
 ]
 
 [workspace.package]
@@ -33,18 +33,18 @@ itertools = "0.14"
 parking_lot = { version = "0.12" }
 serde = { version = "1", features = ["derive", "rc"] }
 test-log = { version = "0.2", default-features = false, features = [
-    "trace",
-    "color",
+  "trace",
+  "color",
 ] }
 thiserror = "2"
 tokio = { package = "madsim-tokio", version = "0.2", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
 ] }
 tracing = "0.1"
 prometheus = "0.13"
