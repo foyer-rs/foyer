@@ -38,16 +38,16 @@ default = []
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
-    "foyer-common/strict_assertions",
-    "foyer-memory/strict_assertions",
-    "foyer-storage/strict_assertions",
+  "foyer-common/strict_assertions",
+  "foyer-memory/strict_assertions",
+  "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
 tracing = [
-    "fastrace/enable",
-    "foyer-common/tracing",
-    "foyer-memory/tracing",
-    "foyer-storage/tracing",
+  "fastrace/enable",
+  "foyer-common/tracing",
+  "foyer-memory/tracing",
+  "foyer-storage/tracing",
 ]
 
 [lints]

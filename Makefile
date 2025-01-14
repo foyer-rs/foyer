@@ -9,6 +9,7 @@ check:
 	shellcheck ./scripts/*
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
+	taplo fmt
 	cargo fmt --all
 	cargo clippy --all-targets
 
@@ -16,6 +17,7 @@ check-all:
 	shellcheck ./scripts/*
 	./scripts/minimize-dashboards.sh
 	cargo sort -w
+	taplo fmt
 	cargo fmt --all
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
