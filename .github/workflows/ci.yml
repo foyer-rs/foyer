@@ -81,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -222,7 +222,7 @@ jobs:
           cargo llvm-cov --no-report run --example equivalent
           cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
       - name: Run foyer-bench with coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         env:
           RUST_BACKTRACE: 1
           CI: true
@@ -235,7 +235,7 @@ jobs:
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
-        if: runner.os == 'Linux' && matrix.rust_toolchain == 'stable'
+        if: runner.os == 'Linux' && runner.arch == 'X64' && matrix.rust_toolchain == 'stable'
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
