@@ -48,7 +48,7 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
 ] }
 tracing = "0.1"
 prometheus = "0.13"
-mixtrics = "0.0.2"
+mixtrics = "0.0.3"
 
 # foyer components
 foyer-common = { version = "0.14.0", path = "foyer-common" }
