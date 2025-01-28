@@ -22,7 +22,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op};
+use super::{Eviction, Op, OpCtx};
 use crate::{
     error::{Error, Result},
     record::{CacheHint, Record},
@@ -364,48 +364,56 @@ where
     }
 
     fn acquire() -> Op<Self> {
-        Op::mutable(|this: &mut Self, record| {
-            if !record.is_in_eviction() {
-                return;
-            }
+        Op::mutable_ctx(|this: &mut Self, ctx| {
+            match ctx {
+                OpCtx::Hit { record } => {
+                    // Update frequency by access.
+                    this.update_frequencies(record.hash());
 
-            // Update frequency by access.
-            this.update_frequencies(record.hash());
+                    if !record.is_in_eviction() {
+                        return;
+                    }
 
-            let state = unsafe { &mut *record.state().get() };
+                    let state = unsafe { &mut *record.state().get() };
 
-            strict_assert!(state.link.is_linked());
+                    strict_assert!(state.link.is_linked());
 
-            match state.queue {
-                Queue::None => unreachable!(),
-                Queue::Window => {
-                    // Move to MRU position of `window`.
-                    let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.window.push_back(r);
-                }
-                Queue::Probation => {
-                    // Promote to MRU position of `protected`.
-                    let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.decrease_queue_weight(Queue::Probation, record.weight());
-                    state.queue = Queue::Protected;
-                    this.increase_queue_weight(Queue::Protected, record.weight());
-                    this.protected.push_back(r);
+                    match state.queue {
+                        Queue::None => unreachable!(),
+                        Queue::Window => {
+                            // Move to MRU position of `window`.
+                            let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.window.push_back(r);
+                        }
+                        Queue::Probation => {
+                            // Promote to MRU position of `protected`.
+                            let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.decrease_queue_weight(Queue::Probation, record.weight());
+                            state.queue = Queue::Protected;
+                            this.increase_queue_weight(Queue::Protected, record.weight());
+                            this.protected.push_back(r);
 
-                    // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
-                    while this.protected_weight > this.protected_weight_capacity {
-                        strict_assert!(!this.protected.is_empty());
-                        let r = this.protected.pop_front().unwrap();
-                        let s = unsafe { &mut *r.state().get() };
-                        this.decrease_queue_weight(Queue::Protected, r.weight());
-                        s.queue = Queue::Probation;
-                        this.increase_queue_weight(Queue::Probation, r.weight());
-                        this.probation.push_back(r);
+                            // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
+                            while this.protected_weight > this.protected_weight_capacity {
+                                strict_assert!(!this.protected.is_empty());
+                                let r = this.protected.pop_front().unwrap();
+                                let s = unsafe { &mut *r.state().get() };
+                                this.decrease_queue_weight(Queue::Protected, r.weight());
+                                s.queue = Queue::Probation;
+                                this.increase_queue_weight(Queue::Probation, r.weight());
+                                this.probation.push_back(r);
+                            }
+                        }
+                        Queue::Protected => {
+                            // Move to MRU position of `protected`.
+                            let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.protected.push_back(r);
+                        }
                     }
                 }
-                Queue::Protected => {
-                    // Move to MRU position of `protected`.
-                    let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.protected.push_back(r);
+                OpCtx::Miss { hash } => {
+                    // Update frequency by access.
+                    this.update_frequencies(hash);
                 }
             }
         })

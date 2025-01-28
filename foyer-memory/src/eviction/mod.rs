@@ -43,10 +43,22 @@ where
 {
     /// no operation
     Noop,
-    /// immutable operation
+    /// perform immutable operation on cache hit
     Immutable(Box<dyn Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static>),
-    /// mutable operation
+    /// perform mutable operation on cache hit
     Mutable(Box<dyn FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static>),
+    /// perform immutable operation on both hit and miss
+    ImmutableCtx(Box<dyn Fn(&E, OpCtx<'_, E>) + Send + Sync + 'static>),
+    /// perform mutable operation on both hit and miss
+    MutableCtx(Box<dyn FnMut(&mut E, OpCtx<'_, E>) + Send + Sync + 'static>),
+}
+
+pub enum OpCtx<'a, E>
+where
+    E: Eviction,
+{
+    Hit { record: &'a Arc<Record<E>> },
+    Miss { hash: u64 },
 }
 
 impl<E> Op<E>
@@ -58,7 +70,7 @@ where
         Self::Noop
     }
 
-    /// immutable operation
+    /// perform immutable operation on cache hit
     pub fn immutable<F>(f: F) -> Self
     where
         F: Fn(&E, &Arc<Record<E>>) + Send + Sync + 'static,
@@ -66,12 +78,28 @@ where
         Self::Immutable(Box::new(f))
     }
 
-    /// mutable operation
+    /// perform mutable operation on cache hit
     pub fn mutable<F>(f: F) -> Self
     where
         F: FnMut(&mut E, &Arc<Record<E>>) + Send + Sync + 'static,
     {
         Self::Mutable(Box::new(f))
+    }
+
+    /// perform immutable operation on both hit and miss
+    pub fn immutable_ctx<F>(f: F) -> Self
+    where
+        F: Fn(&E, OpCtx<'_, E>) + Send + Sync + 'static,
+    {
+        Self::ImmutableCtx(Box::new(f))
+    }
+
+    /// perform mutable operation on both hit and miss
+    pub fn mutable_ctx<F>(f: F) -> Self
+    where
+        F: FnMut(&mut E, OpCtx<'_, E>) + Send + Sync + 'static,
+    {
+        Self::MutableCtx(Box::new(f))
     }
 }
 
@@ -139,6 +167,53 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     /// The entry can be EITHER in the cache eviction algorithm instance or not.
     fn release() -> Op<Self>;
 }
+
+/// Provides helper functions for developers.
+pub trait EvictionExt: Eviction {
+    fn acquire_immutable(&self, record: &Arc<Record<Self>>) {
+        match Self::acquire() {
+            Op::Immutable(f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn acquire_mutable(&mut self, record: &Arc<Record<Self>>) {
+        match Self::acquire() {
+            Op::Mutable(mut f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn acquire_immutable_ctx(&self, ctx: OpCtx<'_, Self>) {
+        match Self::acquire() {
+            Op::ImmutableCtx(f) => f(self, ctx),
+            _ => unreachable!(),
+        }
+    }
+
+    fn acquire_mutable_ctx(&mut self, ctx: OpCtx<'_, Self>) {
+        match Self::acquire() {
+            Op::MutableCtx(mut f) => f(self, ctx),
+            _ => unreachable!(),
+        }
+    }
+
+    fn release_immutable(&self, record: &Arc<Record<Self>>) {
+        match Self::release() {
+            Op::Immutable(f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+
+    fn release_mutable(&mut self, record: &Arc<Record<Self>>) {
+        match Self::release() {
+            Op::Mutable(mut f) => f(self, record),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<E> EvictionExt for E where E: Eviction {}
 
 pub mod fifo;
 pub mod lfu;
