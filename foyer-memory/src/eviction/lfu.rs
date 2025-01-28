@@ -284,7 +284,6 @@ where
         record.set_in_eviction(true);
         state.queue = Queue::Window;
         self.increase_queue_weight(Queue::Window, record.weight());
-        self.update_frequencies(record.hash());
         self.window.push_back(record);
 
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
@@ -366,12 +365,12 @@ where
 
     fn acquire() -> Op<Self> {
         Op::mutable(|this: &mut Self, record| {
-            // Update frequency by access.
-            this.update_frequencies(record.hash());
-
             if !record.is_in_eviction() {
                 return;
             }
+
+            // Update frequency by access.
+            this.update_frequencies(record.hash());
 
             let state = unsafe { &mut *record.state().get() };
 
