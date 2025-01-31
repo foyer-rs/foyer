@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
-
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::Future;
+use std::future::Future;
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use crate::{
     error::Result,

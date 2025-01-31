@@ -20,7 +20,7 @@ use std::{
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 

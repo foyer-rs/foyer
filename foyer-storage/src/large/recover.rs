@@ -24,7 +24,7 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;

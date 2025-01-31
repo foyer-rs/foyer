@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, sync::Arc};
-
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::{
+use futures_util::{
     future::{join, ready, select, try_join, Either as EitherFuture},
-    pin_mut, Future, FutureExt,
+    pin_mut, FutureExt,
 };
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{error::Result, storage::Storage, DeviceStats};
 
@@ -30,11 +30,11 @@ use crate::{error::Result, storage::Storage, DeviceStats};
 pub enum Order {
     /// Use the left engine first.
     ///
-    /// If the op does returns the expected result, use then right engine then.
+    /// If the op does return the expected result, use then right engine then.
     LeftFirst,
     /// Use the right engine first.
     ///
-    /// If the op does returns the expected result, use then left engine then.
+    /// If the op does return the expected result, use then left engine then.
     RightFirst,
     /// Use the left engine and the right engine in parallel.
     ///
@@ -234,7 +234,7 @@ where
         Ok(())
     }
 
-    fn stats(&self) -> std::sync::Arc<DeviceStats> {
+    fn stats(&self) -> Arc<DeviceStats> {
         // The two engines share the same device, so it is okay to use either device stats of those.
         self.left.stats()
     }

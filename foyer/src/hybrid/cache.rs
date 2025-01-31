@@ -34,7 +34,6 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState, Piece, Pipe};
 use foyer_storage::{DeviceStats, Store};
-use futures::FutureExt;
 use tokio::sync::oneshot;
 
 use super::writer::HybridCacheStorageWriter;
@@ -494,18 +493,15 @@ where
                     metrics.hybrid_miss.increase(1);
                     metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
 
-                    runtime
-                        .user()
-                        .spawn(
-                            future
-                                .map(|res| Diversion {
-                                    target: res,
-                                    store: Some(FetchMark),
-                                })
-                                .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn")),
-                        )
-                        .await
-                        .unwrap()
+                    let fut = async move {
+                        Diversion {
+                            target: future.await,
+                            store: Some(FetchMark),
+                        }
+                    }
+                    .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+
+                    runtime.user().spawn(fut).await.unwrap()
                 }
             },
             self.storage().runtime().read(),

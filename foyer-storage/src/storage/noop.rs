@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
-
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::future::ready;
+use std::future::ready;
+use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
 use crate::{device::monitor::DeviceStats, error::Result, storage::Storage};
 

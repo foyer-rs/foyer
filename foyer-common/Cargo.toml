@@ -17,7 +17,6 @@ ahash = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 fastrace = { workspace = true }
-futures = "0.3"
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
@@ -26,7 +25,7 @@ serde = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-futures = "0.3"
+futures-util = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
 rand = "0.8.5"
 

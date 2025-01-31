@@ -56,7 +56,7 @@ impl Countdown {
 mod tests {
     use std::time::Duration;
 
-    use futures::future::join_all;
+    use futures_util::future::join_all;
 
     use super::*;
 

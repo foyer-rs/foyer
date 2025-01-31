@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fastrace::prelude::*;
+use pin_project::pin_project;
+use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::{
     ops::Deref,
     pin::Pin,
@@ -19,11 +23,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-
-use fastrace::prelude::*;
-use futures::{ready, Future};
-use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
 
 /// Configurations for tracing.
 #[derive(Debug, Default)]
@@ -201,7 +200,10 @@ where
         let this = self.project();
 
         let _guard = this.root.as_ref().map(|s| s.set_local_parent());
-        let res = ready!(this.inner.poll(cx));
+        let res = match this.inner.poll(cx) {
+            Poll::Ready(res) => res,
+            Poll::Pending => return Poll::Pending,
+        };
 
         let mut root = this.root.take().unwrap();
 

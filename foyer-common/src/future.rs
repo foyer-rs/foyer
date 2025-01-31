@@ -93,9 +93,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::future::poll_fn;
     use std::pin::pin;
-
-    use futures::future::poll_fn;
 
     use super::*;
 
