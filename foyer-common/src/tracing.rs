@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fastrace::prelude::*;
-use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::{
+    future::Future,
     ops::Deref,
     pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll},
     time::Duration,
 };
+
+use fastrace::prelude::*;
+use pin_project::pin_project;
+use serde::{Deserialize, Serialize};
 
 /// Configurations for tracing.
 #[derive(Debug, Default)]

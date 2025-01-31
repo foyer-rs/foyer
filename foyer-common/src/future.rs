@@ -93,8 +93,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::future::poll_fn;
-    use std::pin::pin;
+    use std::{future::poll_fn, pin::pin};
 
     use super::*;
 

@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer_common::code::{StorageKey, StorageValue};
-use foyer_memory::Piece;
-use futures_util::future::join_all;
-use itertools::Itertools;
-use std::future::Future;
 use std::{
     fmt::Debug,
+    future::Future,
     marker::PhantomData,
     ops::Range,
     sync::{
@@ -26,6 +22,11 @@ use std::{
         Arc,
     },
 };
+
+use foyer_common::code::{StorageKey, StorageValue};
+use foyer_memory::Piece;
+use futures_util::future::join_all;
+use itertools::Itertools;
 
 use crate::{
     device::{MonitoredDevice, RegionId},

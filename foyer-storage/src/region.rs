@@ -27,8 +27,7 @@ use std::{
 use async_channel::{Receiver, Sender};
 use foyer_common::{countdown::Countdown, metrics::Metrics};
 use futures_core::future::BoxFuture;
-use futures_util::future::Shared;
-use futures_util::FutureExt;
+use futures_util::{future::Shared, FutureExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use pin_project::pin_project;

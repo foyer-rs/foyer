@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::{fmt::Debug, future::Future, sync::Arc};
+
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
@@ -20,8 +22,6 @@ use futures_util::{
     pin_mut, FutureExt,
 };
 use serde::{Deserialize, Serialize};
-use std::future::Future;
-use std::{fmt::Debug, sync::Arc};
 
 use crate::{error::Result, storage::Storage, DeviceStats};
 
