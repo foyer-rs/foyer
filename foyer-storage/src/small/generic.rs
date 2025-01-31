@@ -14,6 +14,7 @@
 
 use std::{
     fmt::Debug,
+    future::Future,
     marker::PhantomData,
     ops::Range,
     sync::{
@@ -24,7 +25,7 @@ use std::{
 
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::{future::join_all, Future};
+use futures_util::future::join_all;
 use itertools::Itertools;
 
 use crate::{

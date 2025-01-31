@@ -42,7 +42,7 @@ use foyer::{
     HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
     RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
 };
-use futures::future::join_all;
+use futures_util::future::join_all;
 use itertools::Itertools;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;

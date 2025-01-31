@@ -891,7 +891,7 @@ where
 mod tests {
     use std::{ops::Range, time::Duration};
 
-    use futures::future::join_all;
+    use futures_util::future::join_all;
     use itertools::Itertools;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 

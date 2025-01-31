@@ -31,7 +31,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::Piece;
-use futures::future::{join_all, try_join_all};
+use futures_util::future::{join_all, try_join_all};
 use tokio::sync::Semaphore;
 
 use super::{

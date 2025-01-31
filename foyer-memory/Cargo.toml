@@ -20,7 +20,6 @@ cmsketch = "0.2.1"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
-futures = "0.3"
 hashbrown = { workspace = true }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
 itertools = { workspace = true }
@@ -34,6 +33,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 csv = "1.3.0"
+futures-util = { workspace = true }
 moka = { version = "0.12", features = ["sync"] }
 rand = { version = "0.8", features = ["small_rng"] }
 test-log = { workspace = true }

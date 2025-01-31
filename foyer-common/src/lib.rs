@@ -14,7 +14,7 @@
 
 //! Shared components and utils for foyer.
 
-/// Allow enable debug assertions in release profile with feature "strict_assertion".
+/// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
 /// The util that convert the blocking call to async call.
 pub mod asyncify;
@@ -48,5 +48,3 @@ pub mod runtime;
 pub mod scope;
 /// Tracing related components.
 pub mod tracing;
-/// An async wait group implementation.
-pub mod wait_group;

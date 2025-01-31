@@ -24,7 +24,6 @@ fastrace = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
-futures = "0.3"
 mixtrics = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

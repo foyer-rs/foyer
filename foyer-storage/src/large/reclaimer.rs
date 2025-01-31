@@ -18,7 +18,7 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
-use futures::future::join_all;
+use futures_util::future::join_all;
 use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
