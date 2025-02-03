@@ -46,7 +46,7 @@ use futures_util::future::join_all;
 use itertools::Itertools;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
-use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use rate::RateLimiter;
 use serde::{Deserialize, Serialize};
 use text::text;
@@ -831,14 +831,12 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     }
 }
 
-fn gen_zipf_histogram(n: usize, s: f64, groups: usize, samples: usize) -> BTreeMap<usize, f64> {
+fn gen_zipf_histogram(n: usize, _s: f64, groups: usize, samples: usize) -> BTreeMap<usize, f64> {
     let step = n / groups;
 
-    let mut rng = rand::rng();
-    let mut zipf = zipf::ZipfDistribution::new(n, s).unwrap();
     let mut data: BTreeMap<usize, usize> = BTreeMap::default();
     for _ in 0..samples {
-        let v = zipf.sample(&mut rng);
+        let v = 1;
         let g = std::cmp::min(v / step, groups);
         *data.entry(g).or_default() += 1;
     }
