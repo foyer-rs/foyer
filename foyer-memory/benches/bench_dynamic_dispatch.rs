@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{distr::Alphanumeric, rng, Rng};
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 struct T<F>
 where
@@ -31,7 +31,7 @@ where
 }
 
 fn rand_string(len: usize) -> String {
-    rng()
+    thread_rng()
         .sample_iter(&Alphanumeric)
         .take(len)
         .map(char::from)
@@ -44,7 +44,7 @@ where
 {
     let mut dur = Duration::default();
     for _ in 0..loops {
-        let s = rand_string(rng().random_range(0..100));
+        let s = rand_string(thread_rng().gen_range(0..100));
         let now = Instant::now();
         let _ = (t.f1)(&s);
         dur += now.elapsed();
@@ -58,7 +58,7 @@ where
 {
     let mut dur = Duration::default();
     for _ in 0..loops {
-        let s = rand_string(rng().random_range(0..100));
+        let s = rand_string(thread_rng().gen_range(0..100));
         let now = Instant::now();
         let _ = (t.f3)(&s);
         dur += now.elapsed();
@@ -72,7 +72,7 @@ where
 {
     let mut dur = Duration::default();
     for _ in 0..loops {
-        let s = rand_string(rng().random_range(0..100));
+        let s = rand_string(thread_rng().gen_range(0..100));
         let now = Instant::now();
         let _ = (t.f2)(&s);
         dur += now.elapsed();

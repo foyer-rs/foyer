@@ -1141,7 +1141,7 @@ mod tests {
     }
 
     mod fuzzy {
-        use rand::prelude::IndexedRandom;
+        use rand::prelude::SliceRandom;
         use super::*;
 
         fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)

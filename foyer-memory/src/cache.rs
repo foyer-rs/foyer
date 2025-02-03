@@ -952,8 +952,8 @@ mod tests {
     }
 
     async fn operate(cache: &Cache<u64, u64>, rng: &mut StdRng) {
-        let i = rng.random_range(RANGE);
-        match rng.random_range(0..=3) {
+        let i = rng.gen_range(RANGE);
+        match rng.gen_range(0..=3) {
             0 => {
                 let entry = cache.insert(i, i);
                 assert_eq!(*entry.key(), i);
@@ -972,7 +972,7 @@ mod tests {
                 let entry = cache
                     .fetch(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, tokio::sync::oneshot::error::RecvError>(i)
+                        Ok::<_, oneshot::error::RecvError>(i)
                     })
                     .await
                     .unwrap();

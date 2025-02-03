@@ -36,7 +36,8 @@ tokio = { workspace = true, optional = true }
 csv = "1.3.0"
 futures-util = { workspace = true }
 moka = { version = "0.12", features = ["sync"] }
-rand = { workspace = true, features = ["small_rng"] }
+# TODO: blocked by https://github.com/jonhoo/rust-zipf/pull/12
+rand = { version = "0.8", features = ["small_rng"] }
 test-log = { workspace = true }
 zipf = "7.0.1"
 

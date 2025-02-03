@@ -51,7 +51,8 @@ use futures_util::future::join_all;
 use itertools::Itertools;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
-use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
+use rand::{distributions::Distribution, rngs::StdRng, Rng, SeedableRng};
+use rand::rngs::OsRng;
 use rate::RateLimiter;
 use serde::{Deserialize, Serialize};
 use text::text;
@@ -681,7 +682,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         _ => None,
     };
 
-    let mut osrng = StdRng::from_os_rng();
+    let mut osrng = OsRng;
     let mut c = 0;
 
     loop {
@@ -696,7 +697,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         }
 
         let idx = id + step * c;
-        let entry_size = osrng.random_range(context.entry_size_range.clone());
+        let entry_size = osrng.gen_range(context.entry_size_range.clone());
         let data = Value {
             inner: Arc::new(text(idx as usize, entry_size)),
         };
@@ -759,7 +760,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     let step = context.counts.len() as u64;
 
     let mut rng = StdRng::seed_from_u64(0);
-    let mut osrng = StdRng::from_os_rng();
+    let mut osrng = OsRng;
 
     loop {
         match stop.try_recv() {
@@ -770,13 +771,13 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             return;
         }
 
-        let w = rng.random_range(0..step); // pick a writer to read form
+        let w = rng.gen_range(0..step); // pick a writer to read form
         let c_w = context.counts[w as usize].load(Ordering::Relaxed);
         if c_w == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
-        let c = rng.random_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
+        let c = rng.gen_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
         let (miss_tx, mut miss_rx) = oneshot::channel();
@@ -785,7 +786,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let fetch = hybrid.fetch(idx, || {
             let context = context.clone();
-            let entry_size = osrng.random_range(context.entry_size_range.clone());
+            let entry_size = osrng.gen_range(context.entry_size_range.clone());
             async move {
                 let _ = miss_tx.send(time.elapsed());
                 Ok(Value {
@@ -839,8 +840,8 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 fn gen_zipf_histogram(n: usize, s: f64, groups: usize, samples: usize) -> BTreeMap<usize, f64> {
     let step = n / groups;
 
-    let mut rng = rand::rng();
-    let mut zipf = zipf::ZipfDistribution::new(n, s).unwrap();
+    let mut rng = rand::thread_rng();
+    let zipf = zipf::ZipfDistribution::new(n, s).unwrap();
     let mut data: BTreeMap<usize, usize> = BTreeMap::default();
     for _ in 0..samples {
         let v = zipf.sample(&mut rng);
