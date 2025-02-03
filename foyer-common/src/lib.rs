@@ -14,6 +14,11 @@
 
 //! Shared components and utils for foyer.
 
+#[cfg(feature = "tokio")]
+extern crate tokio;
+#[cfg(feature = "madsim")]
+extern crate madsim_tokio as tokio;
+
 /// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
 /// The util that convert the blocking call to async call.

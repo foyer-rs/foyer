@@ -16,6 +16,11 @@
 
 #![warn(clippy::allow_attributes)]
 
+#[cfg(feature = "tokio")]
+extern crate tokio;
+#[cfg(feature = "madsim")]
+extern crate madsim_tokio as tokio;
+
 mod analyze;
 mod exporter;
 mod rate;

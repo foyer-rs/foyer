@@ -10,7 +10,6 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ahash = { workspace = true }
@@ -22,7 +21,9 @@ mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true }
-tokio = { workspace = true }
+
+tokio = { workspace = true, optional = true }
+madsim-tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures-util = { workspace = true }
@@ -30,7 +31,10 @@ mixtrics = { workspace = true, features = ["test-utils"] }
 rand = { workspace = true }
 
 [features]
+default = ["tokio"]
+madsim = ["dep:madsim-tokio"]
 strict_assertions = []
+tokio = ["dep:tokio"]
 tracing = ["fastrace/enable"]
 
 [lints]

@@ -10,7 +10,6 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.docs.rs]
 features = ["nightly"]
@@ -25,28 +24,42 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
 mixtrics = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
+
+madsim-tokio = { workspace = true, features = ["net"], optional = true }
+tokio = { workspace = true, features = ["net"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
 test-log = { workspace = true }
 
 [features]
-default = []
+default = ["tokio"]
+madsim = [
+    "dep:madsim-tokio",
+    "foyer-common/madsim",
+    "foyer-memory/madsim",
+    "foyer-storage/madsim",
+]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
-  "foyer-common/strict_assertions",
-  "foyer-memory/strict_assertions",
-  "foyer-storage/strict_assertions",
+    "foyer-common/strict_assertions",
+    "foyer-memory/strict_assertions",
+    "foyer-storage/strict_assertions",
 ]
 sanity = ["strict_assertions", "foyer-memory/sanity"]
+tokio = [
+    "dep:tokio",
+    "foyer-common/tokio",
+    "foyer-memory/tokio",
+    "foyer-storage/tokio",
+]
 tracing = [
-  "fastrace/enable",
-  "foyer-common/tracing",
-  "foyer-memory/tracing",
-  "foyer-storage/tracing",
+    "fastrace/enable",
+    "foyer-common/tracing",
+    "foyer-memory/tracing",
+    "foyer-storage/tracing",
 ]
 
 [lints]

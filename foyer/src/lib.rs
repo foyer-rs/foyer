@@ -30,6 +30,11 @@ use foyer_common as common;
 use foyer_memory as memory;
 use foyer_storage as storage;
 
+#[cfg(feature = "tokio")]
+extern crate tokio;
+#[cfg(feature = "madsim")]
+extern crate madsim_tokio as tokio;
+
 mod hybrid;
 
 mod prelude;

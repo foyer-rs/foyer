@@ -35,6 +35,11 @@
 //! thread, it is hard to implement in 100% safe Rust without overhead. So, accessing the algorithm managed per-entry
 //! state requires operation on the `UnsafeCell`.
 
+#[cfg(feature = "tokio")]
+extern crate tokio;
+#[cfg(feature = "madsim")]
+extern crate madsim_tokio as tokio;
+
 mod cache;
 mod error;
 mod eviction;

@@ -10,7 +10,6 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ahash = { workspace = true }
@@ -42,10 +41,12 @@ pin-project = "1"
 rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 twox-hash = "2"
 zstd = "0.13"
+
+madsim-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }
@@ -53,13 +54,15 @@ tempfile = "3"
 test-log = { workspace = true }
 
 [features]
-default = []
+default = ["tokio"]
 deadlock = ["parking_lot/deadlock_detection"]
+madsim = ["dep:madsim-tokio", "foyer-common/madsim", "foyer-memory/madsim"]
 nightly = ["allocator-api2/nightly"]
 strict_assertions = [
     "foyer-common/strict_assertions",
     "foyer-memory/strict_assertions",
 ]
+tokio = ["dep:tokio", "foyer-common/tokio", "foyer-memory/tokio"]
 tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 
 [lints]

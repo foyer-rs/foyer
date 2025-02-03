@@ -17,6 +17,12 @@
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(feature = "nightly", feature(write_all_vectored))]
 
+
+#[cfg(feature = "tokio")]
+extern crate tokio;
+#[cfg(feature = "madsim")]
+extern crate madsim_tokio as tokio;
+
 mod compress;
 mod device;
 mod engine;

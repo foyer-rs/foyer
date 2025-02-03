@@ -10,7 +10,6 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ahash = { workspace = true }
@@ -28,8 +27,10 @@ parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
+
+madsim-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 csv = "1.3.0"
@@ -40,11 +41,14 @@ test-log = { workspace = true }
 zipf = "7.0.1"
 
 [features]
+default = ["tokio"]
 nightly = ["hashbrown/nightly"]
 deadlock = ["parking_lot/deadlock_detection"]
+madsim = ["dep:madsim-tokio", "foyer-common/madsim"]
 # FIXME: remove sanity feature
 sanity = []
 strict_assertions = ["foyer-common/strict_assertions"]
+tokio = ["dep:tokio", "foyer-common/tokio"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
 
 [[bench]]
