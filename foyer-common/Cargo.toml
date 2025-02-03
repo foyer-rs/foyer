@@ -27,7 +27,7 @@ tokio = { workspace = true }
 [dev-dependencies]
 futures-util = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
-rand = "0.8.5"
+rand = { workspace = true }
 
 [features]
 strict_assertions = []

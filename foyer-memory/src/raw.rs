@@ -1013,7 +1013,7 @@ where
 mod tests {
 
     use foyer_common::hasher::ModRandomState;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{rngs::SmallRng, RngCore, SeedableRng};
 
     use super::*;
     use crate::eviction::{
@@ -1141,6 +1141,7 @@ mod tests {
     }
 
     mod fuzzy {
+        use rand::prelude::IndexedRandom;
         use super::*;
 
         fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)

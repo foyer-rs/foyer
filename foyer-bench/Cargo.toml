@@ -25,15 +25,15 @@ hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
 hyper = { version = "1", default-features = false, features = [
-  "server",
-  "http1",
+    "server",
+    "http1",
 ] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 itertools = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
-rand = "0.8.5"
+rand = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11.15"
 tokio = { workspace = true, features = ["net"] }

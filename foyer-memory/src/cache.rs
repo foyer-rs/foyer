@@ -952,8 +952,8 @@ mod tests {
     }
 
     async fn operate(cache: &Cache<u64, u64>, rng: &mut StdRng) {
-        let i = rng.gen_range(RANGE);
-        match rng.gen_range(0..=3) {
+        let i = rng.random_range(RANGE);
+        match rng.random_range(0..=3) {
             0 => {
                 let entry = cache.insert(i, i);
                 assert_eq!(*entry.key(), i);

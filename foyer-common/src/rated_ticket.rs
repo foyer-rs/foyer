@@ -92,7 +92,7 @@ mod tests {
     };
 
     use itertools::Itertools;
-    use rand::{thread_rng, Rng};
+    use rand::{rng, Rng};
 
     use super::*;
 
@@ -154,19 +154,19 @@ mod tests {
         let limiter = Arc::new(RatedTicket::new(RATE as f64));
         let task = |rate: usize, v: Arc<AtomicUsize>, limiter: Arc<RatedTicket>, f: F| {
             let start = Instant::now();
-            let mut rng = thread_rng();
+            let mut rng = rng();
             loop {
                 if start.elapsed() >= DURATION {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(rng.gen_range(1..10)));
+                std::thread::sleep(Duration::from_millis(rng.random_range(1..10)));
                 f(rate, &v, &limiter)
             }
         };
         let mut handles = vec![];
-        let mut rng = thread_rng();
+        let mut rng = rng();
         for _ in 0..THREADS {
-            let rate = rng.gen_range(10..20);
+            let rate = rng.random_range(10..20);
             let handle = std::thread::spawn({
                 let v = v.clone();
                 let limiter = limiter.clone();

@@ -228,7 +228,7 @@ impl RegionManager {
             eviction
                 .evictable
                 .keys()
-                .choose(&mut rand::thread_rng())
+                .choose(&mut rand::rng())
                 .copied()
                 .unwrap()
         });
