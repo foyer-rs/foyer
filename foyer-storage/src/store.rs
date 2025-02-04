@@ -484,6 +484,8 @@ where
 
         let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
+            #[cfg(madsim)]
+            let _ = config;
             #[cfg(not(madsim))]
             if config.worker_threads != 0 {
                 builder.worker_threads(config.worker_threads);

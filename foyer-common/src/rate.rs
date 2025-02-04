@@ -68,7 +68,7 @@ mod tests {
         Arc,
     };
 
-    use rand::{thread_rng, Rng};
+    use rand::{rng, Rng};
 
     use super::*;
 
@@ -95,9 +95,9 @@ mod tests {
             }
         };
         let mut handles = vec![];
-        let mut rng = thread_rng();
+        let mut rng = rng();
         for _ in 0..THREADS {
-            let rate = rng.gen_range(10..20);
+            let rate = rng.random_range(10..20);
             let handle = std::thread::spawn({
                 let v = v.clone();
                 let limiter = limiter.clone();

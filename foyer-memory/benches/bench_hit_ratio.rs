@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use csv::Reader;
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, LfuConfig, LruConfig, S3FifoConfig};
-use rand::{distributions::Distribution, thread_rng};
+use rand::{distr::Distribution, rng};
 
 type CacheKey = String;
 type CacheValue = ();
@@ -200,13 +200,17 @@ fn bench_workload(keys: Vec<String>, cache_size: usize) {
 
 fn bench_one(zif_exp: f64, cache_size_percent: f64) {
     print!("{zif_exp:6.2}, {cache_size_percent:6}{:6}", "");
-    let mut rng = thread_rng();
-    let zipf = zipf::ZipfDistribution::new(ITEMS, zif_exp).unwrap();
 
-    let cache_size = (ITEMS as f64 * cache_size_percent) as usize;
+    let items = ITEMS as f64;
+
+    let mut rng = rng();
+    let zipf = rand_distr::Zipf::new(items, zif_exp).unwrap();
+
+    let cache_size = (items * cache_size_percent) as usize;
     let mut keys = Vec::with_capacity(ITERATIONS);
     for _ in 0..ITERATIONS {
-        let key = zipf.sample(&mut rng).to_string();
+        let key = zipf.sample(&mut rng).round() as usize;
+        let key = key.to_string();
         keys.push(key.clone());
     }
     bench_workload(keys, cache_size);
