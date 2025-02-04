@@ -220,7 +220,8 @@ impl SingletonHandle {
     }
 
     #[cfg(madsim)]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+    /// Dummy implementation for madsim.
+    pub fn block_on<F: Future>(&self, _: F) -> F::Output {
         unimplemented!("`block_on()` is not supported with madsim")
     }
 }

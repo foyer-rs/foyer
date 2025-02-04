@@ -1011,9 +1011,8 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use foyer_common::hasher::ModRandomState;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
 
     use super::*;
     use crate::eviction::{

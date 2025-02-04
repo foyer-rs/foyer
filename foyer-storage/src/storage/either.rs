@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, future::Future, sync::Arc};
+use std::{
+    fmt::Debug,
+    future::{ready, Future},
+    pin::pin,
+    sync::Arc,
+};
 
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
 use futures_util::{
-    future::{join, ready, select, try_join, Either as EitherFuture},
-    pin_mut, FutureExt,
+    future::{join, select, try_join, Either as EitherFuture},
+    FutureExt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -198,8 +203,8 @@ where
             }),
             Order::Parallel => {
                 async move {
-                    pin_mut!(fleft);
-                    pin_mut!(fright);
+                    let fleft = pin!(fleft);
+                    let fright = pin!(fright);
                     // Returns a 4-way `Either` by nesting `Either` in `Either`.
                     select(fleft, fright)
                         .then(|either| match either {

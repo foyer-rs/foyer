@@ -224,14 +224,7 @@ impl RegionManager {
         }
 
         // If no region is selected, just randomly pick one.
-        let picked = picked.unwrap_or_else(|| {
-            eviction
-                .evictable
-                .keys()
-                .choose(&mut rand::thread_rng())
-                .copied()
-                .unwrap()
-        });
+        let picked = picked.unwrap_or_else(|| eviction.evictable.keys().choose(&mut rand::rng()).copied().unwrap());
 
         // Update evictable map.
         eviction.evictable.remove(&picked).unwrap();
