@@ -27,7 +27,6 @@ parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
@@ -37,6 +36,28 @@ moka = { version = "0.12", features = ["sync"] }
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr = { workspace = true }
 test-log = { workspace = true }
+
+[target.'cfg(madsim)'.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { package = "tokio", version = "1", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
 
 [features]
 nightly = ["hashbrown/nightly"]
