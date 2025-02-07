@@ -40,15 +40,6 @@ test-log = { version = "0.2", default-features = false, features = [
   "color",
 ] }
 thiserror = "2"
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
 tracing = "0.1"
 prometheus = "0.13"
 mixtrics = "0.0.3"
