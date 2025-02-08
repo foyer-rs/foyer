@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-02-08
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.14.1 |
+| foyer-common | 0.14.1 |
+| foyer-memory | 0.14.1 |
+| foyer-storage | 0.14.1 |
+| foyer-bench | 0.14.1 |
+
+### Changes
+
+- Use `tokio-rs/tokio` by default as the runtime, use `madsim-tokio` when `madsim` configuration is enabled.
+- Optimize dependencies.
+
 ## 2025-01-14
 
 ### Releases
