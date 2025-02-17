@@ -26,7 +26,8 @@ use super::{Dev, DevExt, RegionId};
 use crate::{
     device::ALIGN,
     error::{Error, Result},
-    IoBytes, IoBytesMut, Runtime,
+    io::bytes::{IoBytes, IoBytesMut},
+    Runtime,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

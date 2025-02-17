@@ -80,7 +80,7 @@ impl EntryHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::IoBytesMut;
+    use crate::io::bytes::IoBytesMut;
 
     #[test]
     fn test_entry_header_serde() {

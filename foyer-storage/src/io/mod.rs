@@ -12,28 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+use allocator::AlignedAllocator;
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
+pub mod allocator;
+pub mod bytes;
 
-mod compress;
-mod device;
-mod engine;
-mod error;
-mod io;
-mod io_buffer_pool;
-mod large;
-mod picker;
-mod region;
-mod runtime;
-mod serde;
-mod small;
-mod statistics;
-mod storage;
-mod store;
-
-mod prelude;
-pub use prelude::*;
-
-pub mod test_utils;
+pub const ALIGN: usize = 4096;
+pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new();

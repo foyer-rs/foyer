@@ -38,10 +38,11 @@ use crate::{
     compress::Compression,
     device::{
         monitor::{DeviceStats, Monitored, MonitoredConfig},
-        DeviceConfig, RegionId, ALIGN,
+        DeviceConfig, RegionId,
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
+    io::ALIGN,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
