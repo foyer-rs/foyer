@@ -30,7 +30,8 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    DirectFileDeviceOptions, IoBytesMut, Runtime,
+    io::bytes::IoBytesMut,
+    DirectFileDeviceOptions, Runtime,
 };
 
 /// The configurations for the tombstone log.

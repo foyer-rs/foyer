@@ -30,7 +30,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    IoBytesMut,
+    io::bytes::IoBytesMut,
 };
 
 /// # Lock Order

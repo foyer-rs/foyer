@@ -16,7 +16,10 @@ use std::collections::VecDeque;
 
 use foyer_common::bits;
 
-use crate::{device::ALIGN, IoBuffer, IoBytes};
+use crate::io::{
+    bytes::{IoBuffer, IoBytes},
+    ALIGN,
+};
 
 #[derive(Debug)]
 pub enum Buffer {

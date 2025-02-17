@@ -23,8 +23,8 @@ use foyer_common::{
 
 use super::indexer::EntryAddress;
 use crate::{
-    device::bytes::IoBytes,
     error::{Error, Result},
+    io::bytes::IoBytes,
     large::serde::{EntryHeader, Sequence},
     region::Region,
     serde::EntryDeserializer,

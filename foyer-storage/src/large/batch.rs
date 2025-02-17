@@ -32,12 +32,13 @@ use super::{
     tombstone::Tombstone,
 };
 use crate::{
-    device::{bytes::IoBytes, MonitoredDevice, RegionId},
+    device::{MonitoredDevice, RegionId},
+    io::bytes::{IoBuffer, IoBytes},
     io_buffer_pool::IoBufferPool,
     large::{indexer::HashedEntryAddress, serde::EntryHeader},
     region::{GetCleanRegionHandle, RegionManager},
     serde::{Checksummer, EntrySerializer},
-    Compression, Dev, DevExt, IoBuffer,
+    Compression, Dev, DevExt,
 };
 
 pub struct BatchMut<K, V>

@@ -25,8 +25,8 @@ use foyer_common::code::{StorageKey, StorageValue};
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
     error::Result,
+    io::bytes::{IoBytes, IoBytesMut},
     serde::{Checksummer, EntryDeserializer},
-    IoBytes, IoBytesMut,
 };
 
 pub type SetId = u64;

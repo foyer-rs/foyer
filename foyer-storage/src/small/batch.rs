@@ -30,11 +30,14 @@ use itertools::Itertools;
 use tokio::sync::oneshot;
 
 use crate::{
-    device::ALIGN,
+    io::{
+        bytes::{IoBuffer, IoBytes},
+        ALIGN,
+    },
     io_buffer_pool::IoBufferPool,
     serde::EntrySerializer,
     small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
-    Compression, IoBuffer, IoBytes,
+    Compression,
 };
 
 type Sequence = usize;

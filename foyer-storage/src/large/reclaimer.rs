@@ -23,8 +23,8 @@ use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
-    device::IO_BUFFER_ALLOCATOR,
     error::Result,
+    io::{bytes::IoBytes, IO_BUFFER_ALLOCATOR},
     large::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
@@ -35,7 +35,6 @@ use crate::{
     region::{Region, RegionManager},
     runtime::Runtime,
     statistics::Statistics,
-    IoBytes,
 };
 
 #[derive(Debug)]

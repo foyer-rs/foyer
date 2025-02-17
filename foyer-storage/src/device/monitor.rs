@@ -24,7 +24,11 @@ use std::{
 use foyer_common::{bits, metrics::Metrics};
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
+use crate::{
+    error::Result,
+    io::bytes::{IoBytes, IoBytesMut},
+    Dev, DevExt, DirectFileDevice, Runtime,
+};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]

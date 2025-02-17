@@ -12,26 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod allocator;
-pub mod bytes;
 pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
 use std::{fmt::Debug, future::Future};
 
-use allocator::AlignedAllocator;
 use direct_file::DirectFileDeviceConfig;
 use direct_fs::DirectFsDeviceConfig;
 use monitor::Monitored;
 
 use crate::{
-    error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
-    IoBytesMut, Runtime,
+    error::Result,
+    io::{
+        bytes::{IoBytes, IoBytesMut},
+        ALIGN,
+    },
+    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
 };
-
-pub const ALIGN: usize = 4096;
-pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new();
 
 pub type RegionId = u32;
 

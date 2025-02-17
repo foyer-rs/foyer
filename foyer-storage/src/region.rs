@@ -37,8 +37,8 @@ use tokio::sync::Semaphore;
 use crate::{
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::Result,
+    io::bytes::{IoBytes, IoBytesMut},
     picker::EvictionPicker,
-    IoBytes, IoBytesMut,
 };
 
 #[derive(Debug, Default)]
