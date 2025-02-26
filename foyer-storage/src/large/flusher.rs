@@ -202,7 +202,7 @@ where
     V: StorageValue,
 {
     rx: flume::Receiver<Submission<K, V>>,
-    batch: BatchMut<K, V>,
+    batch: BatchMut,
     flight: Arc<Semaphore>,
     submit_queue_size: Arc<AtomicUsize>,
 
@@ -252,11 +252,11 @@ where
 
         match submission {
             Submission::CacheEntry {
-                piece: entry,
+                piece,
                 estimated_size,
                 sequence,
             } => {
-                report(self.batch.piece(entry, &self.compression, sequence));
+                report(self.batch.piece(piece, &self.compression, sequence));
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
@@ -266,7 +266,7 @@ where
         }
     }
 
-    async fn commit(&mut self, batch: Batch<K, V>, permit: OwnedSemaphorePermit) {
+    async fn commit(&mut self, batch: Batch, permit: OwnedSemaphorePermit) {
         tracing::trace!("[flusher] commit batch: {batch:?}");
 
         // Write regions concurrently.
@@ -303,8 +303,6 @@ where
                 if group.region.is_full {
                     region_manager.mark_evictable(region.id());
                 }
-                // Make sure entries are dropped after written.
-                drop(group.pieces);
                 tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
                 Ok::<_, Error>(())
             }

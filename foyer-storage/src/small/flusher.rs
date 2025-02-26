@@ -131,7 +131,7 @@ where
     V: StorageValue,
 {
     rx: flume::Receiver<Submission<K, V>>,
-    batch: BatchMut<K, V>,
+    batch: BatchMut,
     flight: Arc<Semaphore>,
 
     set_manager: SetManager,
@@ -174,16 +174,13 @@ where
         };
 
         match submission {
-            Submission::Insertion {
-                piece: entry,
-                estimated_size,
-            } => report(self.batch.insert(entry, estimated_size)),
+            Submission::Insertion { piece, estimated_size } => report(self.batch.insert(piece, estimated_size)),
             Submission::Deletion { hash } => self.batch.delete(hash),
             Submission::Wait { tx } => self.batch.wait(tx),
         }
     }
 
-    pub async fn commit(&self, batch: Batch<K, V>, permit: OwnedSemaphorePermit) {
+    pub async fn commit(&self, batch: Batch, permit: OwnedSemaphorePermit) {
         tracing::trace!("[sodc flusher] commit batch: {batch:?}");
 
         let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {
@@ -206,6 +203,13 @@ where
 
         for waiter in batch.waiters {
             let _ = waiter.send(());
+        }
+
+        if let Some(init) = batch.init.as_ref() {
+            self.metrics.storage_queue_rotate.increase(1);
+            self.metrics
+                .storage_queue_rotate_duration
+                .record(init.elapsed().as_secs_f64());
         }
 
         drop(permit);
