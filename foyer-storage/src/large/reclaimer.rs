@@ -205,7 +205,7 @@ where
                 flusher.submit(Submission::Reinsertion {
                     reinsertion: Reinsertion {
                         hash: info.hash,
-                        sequence: info.sequence,
+                        sequence: info.addr.sequence,
                         buffer,
                     },
                 });

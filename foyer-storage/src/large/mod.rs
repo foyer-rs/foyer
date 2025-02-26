@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod batch;
+pub mod blob;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;

@@ -122,12 +122,12 @@ impl RecoverRunner {
                 evictable_regions.push(region);
             }
 
-            for EntryInfo { hash, sequence, addr } in infos {
-                latest_sequence = latest_sequence.max(sequence);
+            for EntryInfo { hash, addr } in infos {
+                latest_sequence = latest_sequence.max(addr.sequence);
                 indices
                     .entry(hash)
                     .or_default()
-                    .push((sequence, EntryAddressOrTombstone::EntryAddress(addr)));
+                    .push((addr.sequence, EntryAddressOrTombstone::EntryAddress(addr)));
             }
         }
         tombstones.iter().for_each(|tombstone| {
@@ -219,7 +219,9 @@ impl RegionRecoverRunner {
                         break;
                     }
                 }
-                Ok(Some(info)) if info.sequence < infos.last().map(|last: &EntryInfo| last.sequence).unwrap_or(0) => {
+                Ok(Some(info))
+                    if info.addr.sequence < infos.last().map(|last: &EntryInfo| last.addr.sequence).unwrap_or(0) =>
+                {
                     break
                 }
                 Ok(Some(info)) => infos.push(info),
