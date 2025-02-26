@@ -170,11 +170,7 @@ impl SetManager {
         res
     }
 
-    pub async fn update<K, V>(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item<K, V>>) -> Result<()>
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
+    pub async fn update(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item>) -> Result<()> {
         // Acquire set lock.
         let set = self.inner.sets[sid as usize].write().await;
 

@@ -40,14 +40,10 @@ use crate::{
     Compression, Dev, DevExt, IoBuffer,
 };
 
-pub struct BatchMut<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct BatchMut {
     buffer: IoBuffer,
     len: usize,
-    groups: Vec<GroupMut<K, V>>,
+    groups: Vec<GroupMut>,
     tombstones: Vec<TombstoneInfo>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Option<Instant>,
@@ -61,11 +57,7 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V> Debug for BatchMut<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl Debug for BatchMut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchMut")
             .field("len", &self.len)
@@ -77,11 +69,7 @@ where
     }
 }
 
-impl<K, V> BatchMut<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl BatchMut {
     pub fn new(
         buffer_size: usize,
         region_manager: RegionManager,
@@ -107,7 +95,11 @@ where
         batch
     }
 
-    pub fn piece(&mut self, piece: Piece<K, V>, compression: &Compression, sequence: Sequence) -> bool {
+    pub fn piece<K, V>(&mut self, piece: Piece<K, V>, compression: &Compression, sequence: Sequence) -> bool
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
         tracing::trace!("[batch]: append entry with sequence: {sequence}");
 
         self.may_init();
@@ -159,7 +151,6 @@ where
                 sequence,
             },
         });
-        group.pieces.push(piece);
         group.region.len += aligned;
         group.range.end += aligned;
 
@@ -217,7 +208,7 @@ where
         self.waiters.push(tx);
     }
 
-    pub fn rotate(&mut self) -> Option<Batch<K, V>> {
+    pub fn rotate(&mut self) -> Option<Batch> {
         if self.is_empty() {
             return None;
         }
@@ -244,7 +235,6 @@ where
                     is_full: false,
                 },
                 indices: vec![],
-                pieces: vec![],
                 range: 0..0,
             };
             tracing::trace!("[batch]: try to reuse the last region with: {next:?}");
@@ -263,7 +253,6 @@ where
                     region: group.region,
                     bytes: buffer.slice(group.range),
                     indices: group.indices,
-                    pieces: group.pieces,
                 }
             })
             .collect_vec();
@@ -317,7 +306,6 @@ where
                 is_full: false,
             },
             indices: vec![],
-            pieces: vec![],
             range: self.len..self.len,
         })
     }
@@ -350,26 +338,16 @@ impl Debug for RegionHandle {
     }
 }
 
-struct GroupMut<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+struct GroupMut {
     /// Reusable Clean region handle.
     region: RegionHandle,
     /// Entry indices to be inserted.
     indices: Vec<HashedEntryAddress>,
-    /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
-    pieces: Vec<Piece<K, V>>,
     /// Tracks the group bytes range of the batch buffer.
     range: Range<usize>,
 }
 
-impl<K, V> Debug for GroupMut<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl Debug for GroupMut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Group")
             .field("handle", &self.region)
@@ -379,26 +357,16 @@ where
     }
 }
 
-pub struct Group<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+pub struct Group {
     /// Reusable Clean region handle.
     pub region: RegionHandle,
     /// Buffer to flush.
     pub bytes: IoBytes,
     /// Entry indices to be inserted.
     pub indices: Vec<HashedEntryAddress>,
-    /// Hold entries until flush finishes to avoid in-memory cache lookup miss.
-    pub pieces: Vec<Piece<K, V>>,
 }
 
-impl<K, V> Debug for Group<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl Debug for Group {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Group")
             .field("handle", &self.region)
@@ -413,22 +381,14 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
-pub struct Batch<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
-    pub groups: Vec<Group<K, V>>,
+pub struct Batch {
+    pub groups: Vec<Group>,
     pub tombstones: Vec<TombstoneInfo>,
     pub waiters: Vec<oneshot::Sender<()>>,
     pub init: Option<Instant>,
 }
 
-impl<K, V> Debug for Batch<K, V>
-where
-    K: StorageKey,
-    V: StorageValue,
-{
+impl Debug for Batch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Batch")
             .field("groups", &self.groups)

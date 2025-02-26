@@ -44,6 +44,7 @@ pub struct KvInfo {
     pub value_len: usize,
 }
 
+/// A writer wrapper that count how many bytes has been written.
 #[derive(Debug)]
 pub struct TrackedWriter<W> {
     inner: W,

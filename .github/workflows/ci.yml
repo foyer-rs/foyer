@@ -81,6 +81,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
       - name: Run cargo machete
         uses: bnjbvr/cargo-machete@main
   rust-udeps:
