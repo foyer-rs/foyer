@@ -30,7 +30,7 @@
 //！
 //！ On recovery, only the indices needs to be read. The data part can be skipped.
 
-use std::{ops::Range, sync::Arc};
+use std::{fmt::Debug, ops::Range, sync::Arc};
 
 use bytes::{Buf, BufMut};
 use foyer_common::{
@@ -108,21 +108,21 @@ pub struct WindowSpliter {
     /// Windos size.
     window: usize,
     /// Remaining bytes of the current window,
-    current: usize,
+    remain: usize,
 }
 
 impl WindowSpliter {
     pub fn new(window: usize, first: usize) -> Self {
-        Self { window, current: first }
+        Self { window, remain: first }
     }
 
     /// Judge if the blob needs to be split.
-    fn judge(&mut self, blob_size: usize, serialized_len: usize) -> Split {
+    fn judge(&self, blob_size: usize, serialized_len: usize) -> Split {
         let aligned = bits::align_up(ALIGN, serialized_len);
 
         tracing::trace!(
-            "[judge]: blob size: {blob_size}, aligned: {aligned}, current: {}, window: {}",
-            self.current,
+            "[judge]: blob size: {blob_size}, aligned: {aligned}, remain: {}, window: {}",
+            self.remain,
             self.window
         );
 
@@ -130,17 +130,27 @@ impl WindowSpliter {
             return Split::Deny;
         }
 
-        if blob_size + aligned > self.current {
-            self.current = self.window;
+        if blob_size + aligned > self.remain {
             return Split::Need;
         }
 
-        if self.current == 0 {
-            self.current = self.window;
+        if self.remain == 0 {
             return Split::Exact;
         }
 
         Split::NoNeed
+    }
+
+    fn split(&mut self, blob_size: usize) {
+        if self.remain >= blob_size {
+            self.remain -= blob_size;
+        } else {
+            self.remain = self.window - blob_size;
+        }
+    }
+
+    fn split_empty(&mut self) {
+        self.remain = self.window
     }
 }
 
@@ -156,7 +166,6 @@ enum Split {
     Deny,
 }
 
-#[derive(Debug)]
 pub struct MultiBlobWriter<W> {
     writer: W,
 
@@ -170,6 +179,19 @@ pub struct MultiBlobWriter<W> {
     sealed_blobs: Vec<BlobInfo>,
 
     metrics: Arc<Metrics>,
+}
+
+impl<W> Debug for MultiBlobWriter<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiBlobWriter")
+            .field("spliter", &self.spliter)
+            .field("blob_offset", &self.blob_offset)
+            .field("blob_data_len", &self.blob_data_len)
+            .field("blob_entries", &self.blob_entries)
+            .field("sealed_blobs", &self.sealed_blobs)
+            .field("metrics", &self.metrics)
+            .finish()
+    }
 }
 
 impl<W> MultiBlobWriter<W>
@@ -283,6 +305,62 @@ where
         true
     }
 
+    pub fn push_slice(&mut self, slice: &[u8], hash: u64, sequence: Sequence) -> bool {
+        tracing::trace!("try push hash (slice): {hash}");
+
+        // Entry count overflow, split and retry.
+        if self.blob_entries.len() >= BLOB_ENTRY_CAPACITY {
+            self.split();
+            return self.push_slice(slice, hash, sequence);
+        }
+
+        let entry_offset = self.blob_data_offset() + self.blob_data_len;
+
+        let aligned = bits::align_up(ALIGN, slice.len());
+
+        // If there is no space for the entry, skip
+        if entry_offset + aligned > self.writer.as_mut().len() {
+            return false;
+        }
+
+        let split = self.spliter.judge(self.blob_size(), aligned);
+        tracing::trace!("split: {split:?}");
+        let split = match split {
+            Split::Need => {
+                self.split();
+                return self.push_slice(slice, hash, sequence);
+            }
+            Split::NoNeed => false,
+            Split::Exact => true,
+            Split::Deny => return false,
+        };
+
+        tracing::trace!("try write hash (hash): {hash}");
+
+        self.writer.as_mut()[entry_offset..entry_offset + slice.len()].copy_from_slice(slice);
+
+        let blob_entry_offset = entry_offset - self.blob_offset;
+        let index = BlobEntryIndex {
+            offset: blob_entry_offset as _,
+            len: slice.len() as _,
+            sequence,
+        };
+        let index_offset = self.blob_next_entry_index_offset();
+        index.write(&mut self.writer.as_mut()[index_offset..index_offset + BlobEntryIndex::serialized_len()]);
+
+        self.blob_data_len += aligned;
+
+        self.blob_entries.push(BlobEntryInfo { hash, index });
+
+        tracing::trace!("finish write hash (hash): {hash}");
+
+        if split {
+            self.split();
+        }
+
+        true
+    }
+
     /// Seal the current blob and perpare a new one.
     ///
     /// The perparing doesn't write any data. It is okay to be called as the last blob.
@@ -290,11 +368,14 @@ where
         tracing::trace!("split");
 
         if self.blob_entries.is_empty() {
+            self.spliter.split_empty();
             return;
         }
 
         let blob_size = self.blob_size();
         bits::assert_aligned(ALIGN, blob_size);
+
+        self.spliter.split(blob_size);
 
         let range = self.blob_size_range();
         (&mut self.writer.as_mut()[range]).put_u64(blob_size as _);
@@ -542,6 +623,76 @@ mod tests {
         off += size;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
         assert_indices(&buffer[off..], &indices, 5..=6, &metrics);
+
+        off += size;
+        let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
+        assert_indices(&buffer[off..], &indices, 7..=7, &metrics);
+
+        off += size;
+        let (indices, _) = BlobReader::read(&buffer[off..]).unwrap();
+        assert_indices(&buffer[off..], &indices, 8..=8, &metrics);
+
+        // TODO(MrCroxx): check blob infos.
+        drop(blobs);
+    }
+
+    #[test_log::test]
+    fn test_blob_serde_w_split_empty() {
+        const KB: usize = 1024;
+
+        let assert_indices = |blob: &[u8], indices: &[BlobEntryIndex], ids: RangeInclusive<u64>, metrics: &Metrics| {
+            for (index, id) in indices.iter().zip(ids) {
+                let buf = &blob[index.offset as usize..index.offset as usize + index.len as usize];
+                let header = EntryHeader::read(buf).unwrap();
+                let (k, v) = EntryDeserializer::deserialize::<u64, Vec<u8>>(
+                    &buf[EntryHeader::serialized_len()..],
+                    header.key_len as _,
+                    header.value_len as _,
+                    header.compression,
+                    Some(header.checksum),
+                    metrics,
+                )
+                .unwrap();
+                assert_eq!(k, id);
+                assert_eq!(v, vec![id as u8; id as usize * KB]);
+            }
+        };
+
+        let metrics = Arc::new(Metrics::noop());
+
+        let mut buffer = vec![0; 1024 * 1024];
+
+        // window: 20K, remain: 6K
+        //
+        // (split empty)
+        // blob 0: (4K meta) | e1 (4K) | e2 (4K) | e3 (4K)
+        // blob 1: (4K meta) | e4 (8K) | e5 (8K)
+        // blob 2: (4K meta) | e6 (8K)
+        // (force split)
+        // blob 2: (4K meta) | e7 (8K)
+        // blob 2: (4K meta) | e8 (12K)
+
+        let mut w = MultiBlobWriter::new(&mut buffer, WindowSpliter::new(20 * KB, 6 * KB), metrics.clone());
+
+        for i in 1..=8u64 {
+            w.push(&i, &vec![i as u8; i as usize * KB], i, Compression::None, i as _);
+            if i == 6 {
+                w.split();
+            }
+        }
+        let (_, blobs) = w.finish();
+
+        let mut off = 0;
+        let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
+        assert_indices(&buffer[off..], &indices, 1..=3, &metrics);
+
+        off += size;
+        let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
+        assert_indices(&buffer[off..], &indices, 4..=5, &metrics);
+
+        off += size;
+        let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
+        assert_indices(&buffer[off..], &indices, 6..=6, &metrics);
 
         off += size;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
