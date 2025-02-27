@@ -117,7 +117,7 @@ where
     /// Push a entry into the blob.
     ///
     /// Return weather the entry is inserted.
-    pub fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: &Compression, sequence: Sequence) -> bool
+    pub fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: Compression, sequence: Sequence) -> bool
     where
         K: StorageKey,
         V: StorageValue,
@@ -160,7 +160,7 @@ where
             hash,
             sequence,
             checksum,
-            compression: *compression,
+            compression,
         };
         header.write(&mut self.buffer.as_mut()[entry_offset..entry_offset + EntryHeader::serialized_len()]);
 
@@ -342,17 +342,17 @@ mod tests {
         let mut w = BlobWriter::new(&mut buffer, metrics.clone());
 
         for i in 0..10u64 {
-            w.push(&i, &vec![i as u8; i as usize], i, &Compression::None, i as _);
+            w.push(&i, &vec![i as u8; i as usize], i, Compression::None, i as _);
         }
         w.split();
 
         for i in 10..20u64 {
-            w.push(&i, &vec![i as u8; i as usize], i, &Compression::None, i as _);
+            w.push(&i, &vec![i as u8; i as usize], i, Compression::None, i as _);
         }
         w.split();
 
         for i in 20..30u64 {
-            w.push(&i, &vec![i as u8; i as usize], i, &Compression::None, i as _);
+            w.push(&i, &vec![i as u8; i as usize], i, Compression::None, i as _);
         }
         w.split();
 
