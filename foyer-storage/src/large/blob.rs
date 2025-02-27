@@ -63,9 +63,24 @@ const BLOB_DATA_OFFSET: usize = ALIGN;
 
 #[derive(Debug, Clone)]
 pub struct BlobEntryIndex {
+    /// Offset to the blob head.
     pub offset: u32,
+    /// Length of the entry.
     pub len: u32,
+    /// Entry sequence.
     pub sequence: Sequence,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlobEntryInfo {
+    pub hash: u64,
+    pub index: BlobEntryIndex,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlobInfo {
+    pub range: Range<usize>,
+    pub entries: Vec<BlobEntryInfo>,
 }
 
 impl BlobEntryIndex {
@@ -142,30 +157,33 @@ enum Split {
 }
 
 #[derive(Debug)]
-pub struct BlobWriter<W> {
-    buffer: W,
+pub struct MultiBlobWriter<W> {
+    writer: W,
 
     spliter: WindowSpliter,
 
     blob_offset: usize,
 
     blob_data_len: usize,
-    blob_entry_count: u32,
+
+    blob_entries: Vec<BlobEntryInfo>,
+    sealed_blobs: Vec<BlobInfo>,
 
     metrics: Arc<Metrics>,
 }
 
-impl<W> BlobWriter<W>
+impl<W> MultiBlobWriter<W>
 where
     W: AsMut<[u8]>,
 {
     pub fn new(buffer: W, spliter: WindowSpliter, metrics: Arc<Metrics>) -> Self {
         Self {
-            buffer,
+            writer: buffer,
             spliter,
             blob_offset: 0,
             blob_data_len: 0,
-            blob_entry_count: 0,
+            blob_entries: vec![],
+            sealed_blobs: vec![],
             metrics,
         }
     }
@@ -181,7 +199,7 @@ where
         tracing::trace!("try push hash: {hash}");
 
         // Entry count overflow, split and retry.
-        if self.blob_entry_count as usize >= BLOB_ENTRY_CAPACITY {
+        if self.blob_entries.len() >= BLOB_ENTRY_CAPACITY {
             self.split();
             return self.push(key, value, hash, compression, sequence);
         }
@@ -189,7 +207,7 @@ where
         let entry_offset = self.blob_data_offset() + self.blob_data_len;
 
         // If there is no space even for entry header, skip
-        if entry_offset + EntryHeader::serialized_len() >= self.buffer.as_mut().len() {
+        if entry_offset + EntryHeader::serialized_len() >= self.writer.as_mut().len() {
             return false;
         }
 
@@ -200,7 +218,7 @@ where
             key,
             value,
             compression,
-            &mut self.buffer.as_mut()[entry_offset + EntryHeader::serialized_len()..],
+            &mut self.writer.as_mut()[entry_offset + EntryHeader::serialized_len()..],
             &self.metrics,
         ) {
             Ok(info) => info,
@@ -224,7 +242,7 @@ where
         };
 
         let checksum = Checksummer::checksum64(
-            &self.buffer.as_mut()[entry_offset + EntryHeader::serialized_len()
+            &self.writer.as_mut()[entry_offset + EntryHeader::serialized_len()
                 ..entry_offset + EntryHeader::serialized_len() + info.key_len as usize + info.value_len as usize],
         );
         let header = EntryHeader {
@@ -235,7 +253,7 @@ where
             checksum,
             compression,
         };
-        header.write(&mut self.buffer.as_mut()[entry_offset..entry_offset + EntryHeader::serialized_len()]);
+        header.write(&mut self.writer.as_mut()[entry_offset..entry_offset + EntryHeader::serialized_len()]);
 
         let entry_len = EntryHeader::serialized_len() + info.key_len + info.value_len;
         let blob_entry_offset = entry_offset - self.blob_offset;
@@ -246,14 +264,15 @@ where
             sequence,
         };
         let index_offset = self.blob_next_entry_index_offset();
-        index.write(&mut self.buffer.as_mut()[index_offset..index_offset + BlobEntryIndex::serialized_len()]);
+        index.write(&mut self.writer.as_mut()[index_offset..index_offset + BlobEntryIndex::serialized_len()]);
 
         let aligned = bits::align_up(
             ALIGN,
             EntryHeader::serialized_len() + info.key_len as usize + info.value_len as usize,
         );
         self.blob_data_len += aligned;
-        self.blob_entry_count += 1;
+
+        self.blob_entries.push(BlobEntryInfo { hash, index });
 
         tracing::trace!("finish write hash: {hash}");
 
@@ -270,24 +289,32 @@ where
     pub fn split(&mut self) {
         tracing::trace!("split");
 
-        if self.blob_entry_count == 0 {
+        if self.blob_entries.is_empty() {
             return;
         }
 
         let blob_size = self.blob_size();
+        bits::assert_aligned(ALIGN, blob_size);
+
         let range = self.blob_size_range();
-        (&mut self.buffer.as_mut()[range]).put_u64(blob_size as _);
+        (&mut self.writer.as_mut()[range]).put_u64(blob_size as _);
 
         let range = self.blob_entry_count_range();
-        (&mut self.buffer.as_mut()[range]).put_u32(self.blob_entry_count);
+        let entry_count = self.blob_entries.len();
+        (&mut self.writer.as_mut()[range]).put_u32(entry_count as _);
 
         let range = self.blob_checksum_data_range();
-        let checksum = Checksummer::checksum32(&self.buffer.as_mut()[range]);
+        let checksum = Checksummer::checksum32(&self.writer.as_mut()[range]);
         let range = self.blob_checksum_range();
-        (&mut self.buffer.as_mut()[range]).put_u32(checksum);
+        (&mut self.writer.as_mut()[range]).put_u32(checksum);
+
+        let entries = std::mem::replace(&mut self.blob_entries, vec![]);
+        self.sealed_blobs.push(BlobInfo {
+            range: self.blob_offset..self.blob_offset + blob_size,
+            entries,
+        });
 
         self.blob_offset += blob_size;
-        self.blob_entry_count = 0;
         self.blob_data_len = 0;
     }
 
@@ -299,11 +326,10 @@ where
         size
     }
 
-    // pub fn rotate(&mut self) {
-    //     self.split();
-
-    //     todo!()
-    // }
+    pub fn finish(mut self) -> (W, Vec<BlobInfo>) {
+        self.split();
+        (self.writer, self.sealed_blobs)
+    }
 
     #[inline]
     fn blob_checksum_offset(&self) -> usize {
@@ -357,7 +383,7 @@ where
 
     #[inline]
     fn blob_next_entry_index_offset(&self) -> usize {
-        self.blob_entry_index_offset() + self.blob_entry_count as usize * BlobEntryIndex::serialized_len()
+        self.blob_entry_index_offset() + self.blob_entries.len() * BlobEntryIndex::serialized_len()
     }
 }
 
@@ -431,7 +457,7 @@ mod tests {
 
         let mut buffer = vec![0; 1024 * 1024];
 
-        let mut w = BlobWriter::new(&mut buffer, WindowSpliter::new(usize::MAX, usize::MAX), metrics.clone());
+        let mut w = MultiBlobWriter::new(&mut buffer, WindowSpliter::new(usize::MAX, usize::MAX), metrics.clone());
 
         for i in 0..10u64 {
             w.push(&i, &vec![i as u8; i as usize], i, Compression::None, i as _);
@@ -446,7 +472,7 @@ mod tests {
         for i in 20..30u64 {
             w.push(&i, &vec![i as u8; i as usize], i, Compression::None, i as _);
         }
-        w.split();
+        let (_, blobs) = w.finish();
 
         let mut off = 0;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
@@ -459,6 +485,9 @@ mod tests {
         off += size;
         let (indices, _) = BlobReader::read(&buffer[off..]).unwrap();
         assert_indices(&buffer[off..], &indices, 20..30, &metrics);
+
+        // TODO(MrCroxx): check blob infos.
+        drop(blobs);
     }
 
     #[test_log::test]
@@ -495,12 +524,12 @@ mod tests {
         // blob 2: (4K meta) | e7 (8K)
         // blob 2: (4K meta) | e8 (12K)
 
-        let mut w = BlobWriter::new(&mut buffer, WindowSpliter::new(20 * KB, 10 * KB), metrics.clone());
+        let mut w = MultiBlobWriter::new(&mut buffer, WindowSpliter::new(20 * KB, 10 * KB), metrics.clone());
 
         for i in 1..=8u64 {
             w.push(&i, &vec![i as u8; i as usize * KB], i, Compression::None, i as _);
         }
-        w.split();
+        let (_, blobs) = w.finish();
 
         let mut off = 0;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
@@ -521,5 +550,8 @@ mod tests {
         off += size;
         let (indices, _) = BlobReader::read(&buffer[off..]).unwrap();
         assert_indices(&buffer[off..], &indices, 8..=8, &metrics);
+
+        // TODO(MrCroxx): check blob infos.
+        drop(blobs);
     }
 }
