@@ -76,11 +76,11 @@ where
     pub submit_queue_size_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
-    pub marker: PhantomData<V>,
+    pub marker: PhantomData<(K, V)>,
 }
 
 impl<K, V> Debug for GenericLargeStorageConfig<K, V>
@@ -506,8 +506,8 @@ mod tests {
 
     use std::{fs::File, path::Path};
 
-    use ahash::RandomState;
     use bytesize::ByteSize;
+    use foyer_common::hasher::ModRandomState;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
     use itertools::Itertools;
     use tokio::runtime::Handle;
@@ -523,10 +523,11 @@ mod tests {
 
     const KB: usize = 1024;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
         CacheBuilder::new(10)
             .with_shards(1)
             .with_eviction_config(FifoConfig::default())
+            .with_hash_builder(ModRandomState::default())
             .build()
     }
 
@@ -548,12 +549,12 @@ mod tests {
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
     async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>> {
-        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker<u64>>::default()).await
+        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
         dir: impl AsRef<Path>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
+        reinsertion_picker: Arc<dyn ReinsertionPicker>,
     ) -> GenericLargeStorage<u64, Vec<u8>> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
@@ -598,7 +599,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
@@ -609,7 +610,7 @@ mod tests {
         GenericLargeStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
+    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, ModRandomState>) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
         store.enqueue(entry.piece(), estimated_size);
     }
