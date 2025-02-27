@@ -16,17 +16,21 @@ use std::{
     collections::HashSet,
     fmt::Debug,
     ops::Range,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::{Buf, BufMut};
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
 
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
     error::Result,
     serde::{Checksummer, EntryDeserializer},
-    IoBytes, IoBytesMut,
+    Compression, IoBytes, IoBytesMut,
 };
 
 pub type SetId = u64;
@@ -53,6 +57,8 @@ pub struct SetStorage {
     bloom_filter: BloomFilterU64<4>,
 
     buffer: IoBytesMut,
+
+    metrics: Arc<Metrics>,
 }
 
 impl Debug for SetStorage {
@@ -74,7 +80,7 @@ impl SetStorage {
     /// Load the set storage from buffer.
     ///
     /// If `after` is set and the set storage is before the timestamp, load an empty set storage.
-    pub fn load(buffer: IoBytesMut, watermark: u128) -> Self {
+    pub fn load(buffer: IoBytesMut, watermark: u128, metrics: Arc<Metrics>) -> Self {
         assert!(buffer.len() >= Self::SET_HEADER_SIZE);
 
         let checksum = (&buffer[0..4]).get_u32();
@@ -90,6 +96,7 @@ impl SetStorage {
             timestamp,
             bloom_filter,
             buffer,
+            metrics,
         };
 
         this.verify(watermark);
@@ -213,8 +220,14 @@ impl SetStorage {
         }
         for entry in self.iter() {
             if hash == entry.hash {
-                let k = EntryDeserializer::deserialize_key::<K>(entry.key)?;
-                let v = EntryDeserializer::deserialize_value::<V>(entry.value, crate::Compression::None)?;
+                let (k, v) = EntryDeserializer::deserialize(
+                    &entry.buf[EntryHeader::ENTRY_HEADER_SIZE..],
+                    entry.key_len,
+                    entry.value_len,
+                    Compression::None,
+                    None,
+                    &self.metrics,
+                )?;
                 return Ok(Some((k, v)));
             }
         }
@@ -271,15 +284,20 @@ impl SetStorage {
 
 pub struct SetEntry<'a> {
     offset: usize,
-    pub hash: u64,
-    pub key: &'a [u8],
-    pub value: &'a [u8],
+    hash: u64,
+    buf: &'a [u8],
+    key_len: usize,
+    value_len: usize,
 }
 
 impl SetEntry<'_> {
     /// Length of the entry with header, key and value included.
     pub fn len(&self) -> usize {
-        EntryHeader::ENTRY_HEADER_SIZE + self.key.len() + self.value.len()
+        debug_assert_eq!(
+            self.buf.len(),
+            EntryHeader::ENTRY_HEADER_SIZE + self.key_len + self.value_len
+        );
+        self.buf.len()
     }
 
     /// Range of the entry in the set data.
@@ -307,17 +325,14 @@ impl<'a> SetIter<'a> {
         if !self.is_valid() {
             return None;
         }
-        let mut cursor = self.offset;
-        let header = EntryHeader::read(&self.set.data()[cursor..cursor + EntryHeader::ENTRY_HEADER_SIZE]);
-        cursor += EntryHeader::ENTRY_HEADER_SIZE;
-        let value = &self.set.data()[cursor..cursor + header.value_len()];
-        cursor += header.value_len();
-        let key = &self.set.data()[cursor..cursor + header.key_len()];
+        let header = EntryHeader::read(&self.set.data()[self.offset..self.offset + EntryHeader::ENTRY_HEADER_SIZE]);
         let entry = SetEntry {
             offset: self.offset,
             hash: header.hash(),
-            key,
-            value,
+            buf: &self.set.data()
+                [self.offset..self.offset + EntryHeader::ENTRY_HEADER_SIZE + header.key_len() + header.value_len()],
+            key_len: header.key_len(),
+            value_len: header.value_len(),
         };
         self.offset += entry.len();
         Some(entry)
@@ -361,7 +376,7 @@ mod tests {
         let info = EntrySerializer::serialize(
             entry.key(),
             entry.value(),
-            &Compression::None,
+            Compression::None,
             &mut buf,
             &Metrics::noop(),
         )
@@ -393,7 +408,7 @@ mod tests {
     #[should_panic]
     fn test_set_storage_empty() {
         let buffer = IoBytesMut::new();
-        SetStorage::load(buffer, 0);
+        SetStorage::load(buffer, 0, Arc::new(Metrics::noop()));
     }
 
     #[test]
@@ -404,7 +419,7 @@ mod tests {
         unsafe { buf.set_len(PAGE) };
 
         // load will result in an empty set
-        let mut storage = SetStorage::load(buf, 0);
+        let mut storage = SetStorage::load(buf, 0, Arc::new(Metrics::noop()));
         assert!(storage.is_empty());
 
         let e1 = memory.insert(1, vec![b'1'; 42]);
@@ -467,7 +482,7 @@ mod tests {
         let mut buf = IoBytesMut::with_capacity(PAGE);
         unsafe { buf.set_len(PAGE) };
         buf[0..bytes.len()].copy_from_slice(&bytes);
-        let mut storage = SetStorage::load(buf, 0);
+        let mut storage = SetStorage::load(buf, 0, Arc::new(Metrics::noop()));
 
         assert_eq!(storage.len(), b4.len());
         assert_none(&storage, e1.hash());

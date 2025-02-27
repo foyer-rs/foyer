@@ -95,7 +95,7 @@ impl BatchMut {
         batch
     }
 
-    pub fn piece<K, V>(&mut self, piece: Piece<K, V>, compression: &Compression, sequence: Sequence) -> bool
+    pub fn piece<K, V>(&mut self, piece: Piece<K, V>, compression: Compression, sequence: Sequence) -> bool
     where
         K: StorageKey,
         V: StorageValue,
@@ -134,7 +134,7 @@ impl BatchMut {
                 &self.buffer[pos + EntryHeader::serialized_len()
                     ..pos + EntryHeader::serialized_len() + info.key_len + info.value_len],
             ),
-            compression: *compression,
+            compression,
         };
         header.write(&mut self.buffer[pos..pos + EntryHeader::serialized_len()]);
 
@@ -454,7 +454,7 @@ mod tests {
         let mut b = BatchMut::new(64 * 1024, region_manager, device, indexer, metrics);
 
         let e = mem.insert(1, vec![1; 128 * 1024]);
-        let inserted = b.piece(e.piece(), &Compression::None, 1);
+        let inserted = b.piece(e.piece(), Compression::None, 1);
         assert!(!inserted);
     }
 }

@@ -78,7 +78,7 @@ where
 
     engine: EngineEnum<K, V>,
 
-    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    admission_picker: Arc<dyn AdmissionPicker>,
 
     compression: Compression,
 
@@ -131,15 +131,15 @@ where
     }
 
     /// Return if the given key can be picked by the admission picker.
-    pub fn pick(&self, key: &K) -> bool {
-        self.inner.admission_picker.pick(&self.inner.statistics, key)
+    pub fn pick(&self, hash: u64) -> bool {
+        self.inner.admission_picker.pick(&self.inner.statistics, hash)
     }
 
     /// Push a in-memory cache piece to the disk cache write queue.
     pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
         let now = Instant::now();
 
-        if force || self.pick(piece.key()) {
+        if force || self.pick(piece.hash()) {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             self.inner.engine.enqueue(piece, estimated_size);
         }
@@ -357,7 +357,7 @@ where
     engine: Engine,
     runtime_config: RuntimeOptions,
 
-    admission_picker: Arc<dyn AdmissionPicker<Key = K>>,
+    admission_picker: Arc<dyn AdmissionPicker>,
     compression: Compression,
     recover_mode: RecoverMode,
     flush: bool,
@@ -392,7 +392,7 @@ where
             engine,
             runtime_config: RuntimeOptions::Disabled,
 
-            admission_picker: Arc::<AdmitAllPicker<K>>::default(),
+            admission_picker: Arc::<AdmitAllPicker>::default(),
             compression: Compression::None,
             recover_mode: RecoverMode::Quiet,
             flush: false,
@@ -439,7 +439,7 @@ where
     /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
     ///
     /// Default: [`AdmitAllPicker`].
-    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker<Key = K>>) -> Self {
+    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker>) -> Self {
         self.admission_picker = admission_picker;
         self
     }
@@ -671,7 +671,7 @@ where
     submit_queue_size_threshold: Option<usize>,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    reinsertion_picker: Arc<dyn ReinsertionPicker>,
     tombstone_log_config: Option<TombstoneLogConfig>,
 
     _marker: PhantomData<(K, V, S)>,
@@ -705,7 +705,7 @@ where
             submit_queue_size_threshold: None,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
-            reinsertion_picker: Arc::<RejectAllPicker<K>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker>::default(),
             tombstone_log_config: None,
             _marker: PhantomData,
         }
@@ -804,7 +804,7 @@ where
     /// reinsertion will be stuck.
     ///
     /// Default: [`RejectAllPicker`].
-    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>) -> Self {
+    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker>) -> Self {
         self.reinsertion_picker = reinsertion_picker;
         self
     }

@@ -15,7 +15,10 @@
 use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc};
 
 use bytes::{Buf, BufMut};
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -67,6 +70,8 @@ struct SetManagerInner {
     device: MonitoredDevice,
     regions: Range<RegionId>,
     flush: bool,
+
+    metrics: Arc<Metrics>,
 }
 
 #[derive(Clone)]
@@ -86,6 +91,7 @@ impl Debug for SetManager {
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
             .field("flush", &self.inner.flush)
+            .field("metrics", &self.inner.metrics)
             .finish()
     }
 }
@@ -124,6 +130,7 @@ impl SetManager {
             device,
             regions,
             flush: config.flush,
+            metrics: config.device.metrics().clone(),
         };
         let inner = Arc::new(inner);
         Ok(Self { inner })
@@ -224,7 +231,7 @@ impl SetManager {
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
         let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
-        let storage = SetStorage::load(buffer, self.watermark().await);
+        let storage = SetStorage::load(buffer, self.watermark().await, self.inner.metrics.clone());
         Ok(storage)
     }
 

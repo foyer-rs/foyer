@@ -256,7 +256,7 @@ where
                 estimated_size,
                 sequence,
             } => {
-                report(self.batch.piece(piece, &self.compression, sequence));
+                report(self.batch.piece(piece, self.compression, sequence));
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 

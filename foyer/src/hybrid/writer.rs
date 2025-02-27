@@ -69,6 +69,7 @@ where
 {
     hybrid: HybridCache<K, V, S>,
     key: K,
+    hash: u64,
 
     picked: Option<bool>,
     pick_duration: Duration,
@@ -81,9 +82,11 @@ where
     S: HashBuilder + Debug,
 {
     pub(crate) fn new(hybrid: HybridCache<K, V, S>, key: K) -> Self {
+        let hash = hybrid.memory().hash(&key);
         Self {
             hybrid,
             key,
+            hash,
             picked: None,
             pick_duration: Duration::default(),
         }
@@ -99,7 +102,7 @@ where
         }
         let now = Instant::now();
 
-        let picked = self.hybrid.storage().pick(&self.key);
+        let picked = self.hybrid.storage().pick(self.hash);
         self.picked = Some(picked);
 
         self.pick_duration = now.elapsed();
