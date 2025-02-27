@@ -20,14 +20,13 @@ use super::indexer::EntryAddress;
 use crate::{
     device::bytes::IoBytes,
     error::{Error, Result},
-    large::serde::{EntryHeader, Sequence},
+    large::serde::EntryHeader,
     region::Region,
 };
 
 #[derive(Debug)]
 pub struct EntryInfo {
     pub hash: u64,
-    pub sequence: Sequence,
     pub addr: EntryAddress,
 }
 
@@ -131,7 +130,6 @@ impl RegionScanner {
     fn info(&self, header: &EntryHeader) -> EntryInfo {
         EntryInfo {
             hash: header.hash,
-            sequence: header.sequence,
             addr: EntryAddress {
                 region: self.region.id(),
                 offset: self.offset as _,

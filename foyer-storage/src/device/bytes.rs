@@ -63,6 +63,18 @@ impl DerefMut for IoBuffer {
     }
 }
 
+impl AsRef<[u8]> for IoBuffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.inner
+    }
+}
+
+impl AsMut<[u8]> for IoBuffer {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.inner
+    }
+}
+
 impl PartialEq for IoBuffer {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner

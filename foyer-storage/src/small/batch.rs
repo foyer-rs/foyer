@@ -126,7 +126,7 @@ impl BatchMut {
             }
         };
         assert_eq!(info.key_len + info.value_len + EntryHeader::ENTRY_HEADER_SIZE, len);
-        let header = EntryHeader::new(piece.hash(), info.key_len, info.value_len);
+        let header = EntryHeader::new(piece.hash(), info.key_len as usize, info.value_len as usize);
         header.write(&mut self.buffer[self.len..self.len + EntryHeader::ENTRY_HEADER_SIZE]);
 
         set.items.push(ItemMut {
