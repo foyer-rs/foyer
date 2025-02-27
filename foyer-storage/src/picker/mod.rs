@@ -18,20 +18,14 @@ use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 /// The admission picker for the disk cache.
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {
-    /// The key type for the admission picker.
-    type Key;
-
-    /// Decide whether to pick a key.
-    fn pick(&self, stats: &Arc<Statistics>, key: &Self::Key) -> bool;
+    /// Decide whether to pick an entry by hash.
+    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> bool;
 }
 
 /// The reinsertion picker for the disk cache.
 pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
-    /// The key type for the reinsertion picker.
-    type Key;
-
-    /// Decide whether to pick a key.
-    fn pick(&self, stats: &Arc<Statistics>, key: &Self::Key) -> bool;
+    /// Decide whether to pick an entry by hash.
+    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> bool;
 }
 
 /// The eviction picker for the disk cache.

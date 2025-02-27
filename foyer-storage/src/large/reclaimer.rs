@@ -48,7 +48,7 @@ impl Reclaimer {
     pub fn open<K, V>(
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+        reinsertion_picker: Arc<dyn ReinsertionPicker>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V>>,
         stats: Arc<Statistics>,
@@ -95,7 +95,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    reinsertion_picker: Arc<dyn ReinsertionPicker>,
 
     region_manager: RegionManager,
     reclaim_semaphore: Arc<Semaphore>,
@@ -179,7 +179,7 @@ where
         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
         // They will be removed when a query find a mismatch entry.
         'reinsert: loop {
-            let (info, key) = match scanner.next_key().await {
+            let (info, _) = match scanner.next_key::<K>().await {
                 Ok(None) => break 'reinsert,
                 Err(e) => {
                     tracing::warn!(
@@ -190,7 +190,7 @@ where
                 }
                 Ok(Some((info, key))) => (info, key),
             };
-            if self.reinsertion_picker.pick(&self.stats, &key) {
+            if self.reinsertion_picker.pick(&self.stats, info.hash) {
                 let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
                     Err(e) => {
                         tracing::warn!(

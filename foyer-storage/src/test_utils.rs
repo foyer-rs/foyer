@@ -14,9 +14,8 @@
 
 //! Test utils for the `foyer-storage` crate.
 
-use std::{borrow::Borrow, collections::HashSet, fmt::Debug, hash::Hash, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
-use foyer_common::code::StorageKey;
 use parking_lot::Mutex;
 
 use crate::{
@@ -24,87 +23,58 @@ use crate::{
     statistics::Statistics,
 };
 
-/// A picker that only admits key from the given list.
-pub struct BiasedPicker<K> {
-    admits: HashSet<K>,
+/// A picker that only admits hash from the given list.
+#[derive(Debug)]
+pub struct BiasedPicker {
+    admits: HashSet<u64>,
 }
 
-impl<K> Debug for BiasedPicker<K>
-where
-    K: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BiasedPicker").field("admits", &self.admits).finish()
-    }
-}
-
-impl<K> BiasedPicker<K> {
+impl BiasedPicker {
     /// Create a biased picker with the given admit list.
-    pub fn new(admits: impl IntoIterator<Item = K>) -> Self
-    where
-        K: Hash + Eq,
-    {
+    pub fn new(admits: impl IntoIterator<Item = u64>) -> Self {
         Self {
             admits: admits.into_iter().collect(),
         }
     }
 }
 
-impl<K> AdmissionPicker for BiasedPicker<K>
-where
-    K: Send + Sync + 'static + Hash + Eq + Debug,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
-        self.admits.contains(key)
+impl AdmissionPicker for BiasedPicker {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+        self.admits.contains(&hash)
     }
 }
 
-impl<K> ReinsertionPicker for BiasedPicker<K>
-where
-    K: Send + Sync + 'static + Hash + Eq + Debug,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
-        self.admits.contains(key.borrow())
+impl ReinsertionPicker for BiasedPicker {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+        self.admits.contains(&hash)
     }
 }
 
 /// The record entry for admission and eviction.
 #[derive(Debug, Clone)]
-pub enum Record<K> {
-    /// Admission record entry.
-    Admit(K),
-    /// Eviction record entry.
-    Evict(K),
+pub enum Record {
+    /// Admission record entry hash.
+    Admit(u64),
+    /// Eviction record entry hash.
+    Evict(u64),
 }
 
 /// A recorder that records the cache entry admission and eviction of a disk cache.
 ///
 /// [`Recorder`] should be used as both the admission picker and the reinsertion picker to record.
-pub struct Recorder<K> {
-    records: Mutex<Vec<Record<K>>>,
+#[derive(Debug, Default)]
+pub struct Recorder {
+    records: Mutex<Vec<Record>>,
 }
 
-impl<K> Debug for Recorder<K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JudgeRecorder").finish()
-    }
-}
-
-impl<K> Recorder<K>
-where
-    K: StorageKey + Clone,
-{
+impl Recorder {
     /// Dump the record entries of the recorder.
-    pub fn dump(&self) -> Vec<Record<K>> {
+    pub fn dump(&self) -> Vec<Record> {
         self.records.lock().clone()
     }
 
-    /// Get the hash set of the remaining key at the moment.
-    pub fn remains(&self) -> HashSet<K> {
+    /// Get the hash set of the remaining hash at the moment.
+    pub fn remains(&self) -> HashSet<u64> {
         let records = self.dump();
         let mut res = HashSet::default();
         for record in records {
@@ -121,37 +91,16 @@ where
     }
 }
 
-impl<K> Default for Recorder<K>
-where
-    K: StorageKey,
-{
-    fn default() -> Self {
-        Self {
-            records: Mutex::new(Vec::default()),
-        }
-    }
-}
-
-impl<K> AdmissionPicker for Recorder<K>
-where
-    K: StorageKey + Clone,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
-        self.records.lock().push(Record::Admit(key.clone()));
+impl AdmissionPicker for Recorder {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+        self.records.lock().push(Record::Admit(hash));
         true
     }
 }
 
-impl<K> ReinsertionPicker for Recorder<K>
-where
-    K: StorageKey + Clone,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, key: &Self::Key) -> bool {
-        self.records.lock().push(Record::Evict(key.clone()));
+impl ReinsertionPicker for Recorder {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+        self.records.lock().push(Record::Evict(hash));
         false
     }
 }

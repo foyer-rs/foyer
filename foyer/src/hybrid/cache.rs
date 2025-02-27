@@ -521,6 +521,7 @@ mod tests {
 
     use std::{path::Path, sync::Arc};
 
+    use foyer_common::hasher::ModRandomState;
     use storage::test_utils::BiasedPicker;
 
     use crate::*;
@@ -528,10 +529,11 @@ mod tests {
     const KB: usize = 1024;
     const MB: usize = 1024 * 1024;
 
-    async fn open(dir: impl AsRef<Path>) -> HybridCache<u64, Vec<u8>> {
+    async fn open(dir: impl AsRef<Path>) -> HybridCache<u64, Vec<u8>, ModRandomState> {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
+            .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage(Engine::Large)
             .with_device_options(
@@ -547,10 +549,11 @@ mod tests {
     async fn open_with_biased_admission_picker(
         dir: impl AsRef<Path>,
         admits: impl IntoIterator<Item = u64>,
-    ) -> HybridCache<u64, Vec<u8>> {
+    ) -> HybridCache<u64, Vec<u8>, ModRandomState> {
         HybridCacheBuilder::new()
             .with_name("test")
             .memory(4 * MB)
+            .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage(Engine::Large)
             .with_device_options(

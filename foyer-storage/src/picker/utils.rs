@@ -15,7 +15,6 @@
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
-    marker::PhantomData,
     ops::Range,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -23,144 +22,58 @@ use std::{
     },
 };
 
-use foyer_common::{code::StorageKey, rated_ticket::RatedTicket, strict_assert};
+use foyer_common::{rated_ticket::RatedTicket, strict_assert};
 use itertools::Itertools;
 
 use super::{AdmissionPicker, EvictionPicker, ReinsertionPicker};
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
 
 /// A picker that always returns `true`.
-pub struct AdmitAllPicker<K>(PhantomData<K>)
-where
-    K: StorageKey;
 
-impl<K> Debug for AdmitAllPicker<K>
-where
-    K: StorageKey,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AdmitAllPicker").finish()
-    }
-}
+#[derive(Debug, Default)]
+pub struct AdmitAllPicker;
 
-impl<K> Default for AdmitAllPicker<K>
-where
-    K: StorageKey,
-{
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K> AdmissionPicker for AdmitAllPicker<K>
-where
-    K: StorageKey,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl AdmissionPicker for AdmitAllPicker {
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
         true
     }
 }
 
-impl<K> ReinsertionPicker for AdmitAllPicker<K>
-where
-    K: StorageKey,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl ReinsertionPicker for AdmitAllPicker {
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
         true
     }
 }
 
 /// A picker that always returns `false`.
-pub struct RejectAllPicker<K>(PhantomData<K>)
-where
-    K: Send + Sync + 'static;
+#[derive(Debug, Default)]
+pub struct RejectAllPicker;
 
-impl<K> Debug for RejectAllPicker<K>
-where
-    K: Send + Sync + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RejectAllPicker").finish()
-    }
-}
-
-impl<K> Default for RejectAllPicker<K>
-where
-    K: Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<K> AdmissionPicker for RejectAllPicker<K>
-where
-    K: Send + Sync + 'static,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl AdmissionPicker for RejectAllPicker {
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
         false
     }
 }
 
-impl<K> ReinsertionPicker for RejectAllPicker<K>
-where
-    K: Send + Sync + 'static,
-{
-    type Key = K;
-
-    fn pick(&self, _: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl ReinsertionPicker for RejectAllPicker {
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
         false
     }
 }
 
+#[derive(Debug)]
 struct RateLimitPickerInner {
     ticket: RatedTicket,
     last: AtomicUsize,
 }
 
 /// A picker that picks based on the disk statistics and the given rate limit.
-pub struct RateLimitPicker<K>
-where
-    K: StorageKey,
-{
+#[derive(Debug, Clone)]
+pub struct RateLimitPicker {
     inner: Arc<RateLimitPickerInner>,
-    _marker: PhantomData<K>,
 }
 
-impl<K> Debug for RateLimitPicker<K>
-where
-    K: StorageKey,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RateLimitPicker")
-            .field("ticker", &self.inner.ticket)
-            .field("last", &self.inner.last)
-            .finish()
-    }
-}
-
-impl<K> Clone for RateLimitPicker<K>
-where
-    K: StorageKey,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<K> RateLimitPicker<K>
-where
-    K: StorageKey,
-{
+impl RateLimitPicker {
     /// Create a rate limit picker with the given rate limit.
     pub fn new(rate: usize) -> Self {
         let inner = RateLimitPickerInner {
@@ -168,10 +81,7 @@ where
             last: AtomicUsize::default(),
         };
 
-        Self {
-            inner: Arc::new(inner),
-            _marker: PhantomData,
-        }
+        Self { inner: Arc::new(inner) }
     }
 
     fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
@@ -190,24 +100,14 @@ where
     }
 }
 
-impl<K> AdmissionPicker for RateLimitPicker<K>
-where
-    K: StorageKey,
-{
-    type Key = K;
-
-    fn pick(&self, stats: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl AdmissionPicker for RateLimitPicker {
+    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> bool {
         self.pick_inner(stats)
     }
 }
 
-impl<K> ReinsertionPicker for RateLimitPicker<K>
-where
-    K: StorageKey,
-{
-    type Key = K;
-
-    fn pick(&self, stats: &Arc<Statistics>, _: &Self::Key) -> bool {
+impl ReinsertionPicker for RateLimitPicker {
+    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> bool {
         self.pick_inner(stats)
     }
 }
