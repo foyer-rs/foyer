@@ -115,7 +115,7 @@ impl BatchMut {
         let info = match EntrySerializer::serialize(
             piece.key(),
             piece.value(),
-            &Compression::None,
+            Compression::None,
             &mut self.buffer[self.len + EntryHeader::ENTRY_HEADER_SIZE..self.len + len],
             &self.metrics,
         ) {

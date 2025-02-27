@@ -14,12 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::{
-    bits,
-    code::{StorageKey, StorageValue},
-    metrics::Metrics,
-    strict_assert,
-};
+use foyer_common::{bits, metrics::Metrics, strict_assert};
 
 use super::indexer::EntryAddress;
 use crate::{
@@ -27,7 +22,6 @@ use crate::{
     error::{Error, Result},
     large::serde::{EntryHeader, Sequence},
     region::Region,
-    serde::EntryDeserializer,
 };
 
 #[derive(Debug)]
@@ -95,7 +89,7 @@ pub struct RegionScanner {
     region: Region,
     offset: u64,
     cache: CachedRegionReader,
-    metrics: Arc<Metrics>,
+    _metrics: Arc<Metrics>,
 }
 
 impl RegionScanner {
@@ -105,7 +99,7 @@ impl RegionScanner {
             region,
             offset: 0,
             cache,
-            metrics,
+            _metrics: metrics,
         }
     }
 
@@ -159,81 +153,6 @@ impl RegionScanner {
         self.step(&header).await;
 
         Ok(Some(info))
-    }
-
-    pub async fn next_key<K>(&mut self) -> Result<Option<(EntryInfo, K)>>
-    where
-        K: StorageKey,
-    {
-        let header = match self.current().await {
-            Ok(Some(header)) => header,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-
-        let info = self.info(&header);
-
-        let offset = info.addr.offset as u64 + EntryHeader::serialized_len() as u64 + header.value_len as u64;
-        let len = header.key_len as usize;
-        let buf = self.cache.read(offset, len).await?;
-        let key = EntryDeserializer::deserialize_key(buf)?;
-
-        self.step(&header).await;
-
-        Ok(Some((info, key)))
-    }
-
-    #[expect(dead_code)]
-    pub async fn next_value<V>(&mut self) -> Result<Option<(EntryInfo, V)>>
-    where
-        V: StorageValue,
-    {
-        let header = match self.current().await {
-            Ok(Some(header)) => header,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-
-        let info = self.info(&header);
-
-        let offset = info.addr.offset as u64 + EntryHeader::serialized_len() as u64;
-        let len = header.value_len as usize;
-        let buf = self.cache.read(offset, len).await?;
-        let value = EntryDeserializer::deserialize_value(buf, header.compression)?;
-
-        self.step(&header).await;
-
-        Ok(Some((info, value)))
-    }
-
-    #[expect(dead_code)]
-    pub async fn next_kv<K, V>(&mut self) -> Result<Option<(EntryInfo, K, V)>>
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
-        let header = match self.current().await {
-            Ok(Some(header)) => header,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-
-        let info = self.info(&header);
-
-        let buf = self.cache.read(info.addr.offset as _, info.addr.len as _).await?;
-
-        let (key, value) = EntryDeserializer::deserialize(
-            &buf[EntryHeader::serialized_len()..],
-            header.key_len as _,
-            header.value_len as _,
-            header.compression,
-            Some(header.checksum),
-            &self.metrics,
-        )?;
-
-        self.step(&header).await;
-
-        Ok(Some((info, key, value)))
     }
 }
 
