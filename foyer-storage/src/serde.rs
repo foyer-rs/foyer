@@ -56,12 +56,8 @@ impl<W> TrackedWriter<W> {
         Self { inner, written: 0 }
     }
 
-    pub fn written(&self) -> usize {
+    pub fn written(self) -> usize {
         self.written
-    }
-
-    pub fn recount(&mut self) {
-        self.written = 0;
     }
 }
 
@@ -98,11 +94,11 @@ pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
-    pub fn serialize<'a, K, V, W>(
-        key: &'a K,
-        value: &'a V,
-        compression: &'a Compression,
-        writer: W,
+    pub fn serialize<K, V, W>(
+        key: &K,
+        value: &V,
+        compression: Compression,
+        mut writer: W,
         metrics: &Metrics,
     ) -> Result<KvInfo>
     where
@@ -112,9 +108,35 @@ impl EntrySerializer {
     {
         let now = Instant::now();
 
-        let mut writer = TrackedWriter::new(writer);
-
         // serialize value
+        let value_len = Self::serialize_value(value, &mut writer, compression)?;
+
+        // serialize key
+        let key_len = Self::serialize_key(key, &mut writer)?;
+
+        metrics
+            .storage_entry_serialize_duration
+            .record(now.elapsed().as_secs_f64());
+
+        Ok(KvInfo { key_len, value_len })
+    }
+
+    fn serialize_key<K, W>(key: &K, writer: W) -> Result<usize>
+    where
+        K: StorageKey,
+        W: Write,
+    {
+        let mut writer = TrackedWriter::new(writer);
+        bincode::serialize_into(&mut writer, &key).map_err(Error::from)?;
+        Ok(writer.written())
+    }
+
+    fn serialize_value<V, W>(value: &V, writer: W, compression: Compression) -> Result<usize>
+    where
+        V: StorageValue,
+        W: Write,
+    {
+        let mut writer = TrackedWriter::new(writer);
         match compression {
             Compression::None => {
                 bincode::serialize_into(&mut writer, &value).map_err(Error::from)?;
@@ -134,19 +156,7 @@ impl EntrySerializer {
                 bincode::serialize_into(encoder, &value).map_err(Error::from)?;
             }
         }
-
-        let value_len = writer.written();
-        writer.recount();
-
-        // serialize key
-        bincode::serialize_into(&mut writer, &key).map_err(Error::from)?;
-        let key_len = writer.written();
-
-        metrics
-            .storage_entry_serialize_duration
-            .record(now.elapsed().as_secs_f64());
-
-        Ok(KvInfo { key_len, value_len })
+        Ok(writer.written())
     }
 
     pub fn estimated_size<'a, K, V>(key: &'a K, value: &'a V) -> usize
@@ -202,7 +212,7 @@ impl EntryDeserializer {
     }
 
     #[fastrace::trace(name = "foyer::storage::serde::deserialize_key")]
-    pub fn deserialize_key<K>(buf: &[u8]) -> Result<K>
+    fn deserialize_key<K>(buf: &[u8]) -> Result<K>
     where
         K: StorageKey,
     {
@@ -210,7 +220,7 @@ impl EntryDeserializer {
     }
 
     #[fastrace::trace(name = "foyer::storage::serde::deserialize_value")]
-    pub fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
+    fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
     where
         V: StorageValue,
     {

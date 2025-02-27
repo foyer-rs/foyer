@@ -179,7 +179,7 @@ where
         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
         // They will be removed when a query find a mismatch entry.
         'reinsert: loop {
-            let (info, _) = match scanner.next_key::<K>().await {
+            let info = match scanner.next().await {
                 Ok(None) => break 'reinsert,
                 Err(e) => {
                     tracing::warn!(
@@ -188,7 +188,7 @@ where
                     );
                     break 'reinsert;
                 }
-                Ok(Some((info, key))) => (info, key),
+                Ok(Some(info)) => info,
             };
             if self.reinsertion_picker.pick(&self.stats, info.hash) {
                 let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
