@@ -79,6 +79,7 @@ pub struct BlobEntryInfo {
 
 #[derive(Debug, Clone)]
 pub struct BlobInfo {
+    pub window: usize,
     pub range: Range<usize>,
     pub entries: Vec<BlobEntryInfo>,
 }
@@ -105,6 +106,8 @@ impl BlobEntryIndex {
 /// Judge if the blob writer needs to split based on window.
 #[derive(Debug)]
 pub struct WindowSpliter {
+    /// window index
+    id: usize,
     /// Windos size.
     window: usize,
     /// Remaining bytes of the current window,
@@ -113,7 +116,11 @@ pub struct WindowSpliter {
 
 impl WindowSpliter {
     pub fn new(window: usize, first: usize) -> Self {
-        Self { window, remain: first }
+        Self {
+            id: 0,
+            window,
+            remain: first,
+        }
     }
 
     /// Judge if the blob needs to be split.
@@ -146,11 +153,15 @@ impl WindowSpliter {
             self.remain -= blob_size;
         } else {
             self.remain = self.window - blob_size;
+            self.id += 1;
+            tracing::trace!("rotate window {} => {}", self.id - 1, self.id);
         }
     }
 
     fn split_empty(&mut self) {
-        self.remain = self.window
+        self.remain = self.window;
+        self.id += 1;
+        tracing::trace!("rotate window {} => {}", self.id - 1, self.id);
     }
 }
 
@@ -372,6 +383,8 @@ where
             return;
         }
 
+        let window = self.spliter.id;
+
         let blob_size = self.blob_size();
         bits::assert_aligned(ALIGN, blob_size);
 
@@ -391,6 +404,7 @@ where
 
         let entries = std::mem::replace(&mut self.blob_entries, vec![]);
         self.sealed_blobs.push(BlobInfo {
+            window,
             range: self.blob_offset..self.blob_offset + blob_size,
             entries,
         });
@@ -662,21 +676,22 @@ mod tests {
 
         let mut buffer = vec![0; 1024 * 1024];
 
-        // window: 20K, remain: 6K
+        // window: 24K, remain: 6K
         //
+        // [win 0]
         // (split empty)
-        // blob 0: (4K meta) | e1 (4K) | e2 (4K) | e3 (4K)
-        // blob 1: (4K meta) | e4 (8K) | e5 (8K)
-        // blob 2: (4K meta) | e6 (8K)
+        // [win 1] blob 0: (4K meta) | e1 (4K) | e2 (4K) | e3 (4K) | e4 (8K)
+        // [win 2] blob 1: (4K meta) | e5 (8K)
         // (force split)
-        // blob 2: (4K meta) | e7 (8K)
-        // blob 2: (4K meta) | e8 (12K)
+        // [win 2] blob 2: (4K meta) | e6 (8K)
+        // (split exact)
+        // [win 3] blob 3: (4K meta) | e7 (8K) | e8 (12K)
 
-        let mut w = MultiBlobWriter::new(&mut buffer, WindowSpliter::new(20 * KB, 6 * KB), metrics.clone());
+        let mut w = MultiBlobWriter::new(&mut buffer, WindowSpliter::new(24 * KB, 6 * KB), metrics.clone());
 
         for i in 1..=8u64 {
             w.push(&i, &vec![i as u8; i as usize * KB], i, Compression::None, i as _);
-            if i == 6 {
+            if i == 5 || i == 6 {
                 w.split();
             }
         }
@@ -684,23 +699,24 @@ mod tests {
 
         let mut off = 0;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
-        assert_indices(&buffer[off..], &indices, 1..=3, &metrics);
+        assert_indices(&buffer[off..], &indices, 1..=4, &metrics);
 
         off += size;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
-        assert_indices(&buffer[off..], &indices, 4..=5, &metrics);
+        assert_indices(&buffer[off..], &indices, 5..=5, &metrics);
 
         off += size;
         let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
         assert_indices(&buffer[off..], &indices, 6..=6, &metrics);
 
         off += size;
-        let (indices, size) = BlobReader::read(&buffer[off..]).unwrap();
-        assert_indices(&buffer[off..], &indices, 7..=7, &metrics);
-
-        off += size;
         let (indices, _) = BlobReader::read(&buffer[off..]).unwrap();
-        assert_indices(&buffer[off..], &indices, 8..=8, &metrics);
+        assert_indices(&buffer[off..], &indices, 7..=8, &metrics);
+
+        assert_eq!(blobs[0].window, 1);
+        assert_eq!(blobs[1].window, 2);
+        assert_eq!(blobs[2].window, 2);
+        assert_eq!(blobs[3].window, 3);
 
         // TODO(MrCroxx): check blob infos.
         drop(blobs);
