@@ -34,7 +34,10 @@
 //!
 //! A batch may contains data in multiple regions and blobs. Data in the same region is combined into a **Window**.
 
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::{Deref, Range},
+    sync::Arc,
+};
 
 use bytes::{Buf, BufMut};
 use foyer_common::{
@@ -78,6 +81,9 @@ pub trait EntryWriter {
 
     /// Serialize an serialized kv entry slice into the dest.
     fn push_slice(&mut self, slice: &[u8], hash: u64, sequence: Sequence) -> Op;
+
+    /// Return wether there is data needs to be flushed.
+    fn is_empty(&self) -> bool;
 
     /// Finish serializing, return the dest (whole or part, based on the writer impl) and the target.
     fn finish(self) -> (Self::Write, Self::Target);
@@ -146,12 +152,13 @@ impl Blob {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Window {
-    blobs: Vec<Blob>,
+    pub absolute_range: Range<usize>,
+    pub blobs: Vec<Blob>,
 }
 
 impl Window {
-    pub fn empty() -> Self {
-        Self { blobs: vec![] }
+    pub fn is_empty(&self) -> bool {
+        self.blobs.is_empty()
     }
 }
 
@@ -303,6 +310,10 @@ impl EntryWriter for BlobWriter {
         Op::Noop
     }
 
+    fn is_empty(&self) -> bool {
+        self.entry_indices.is_empty()
+    }
+
     /// Return the remaining slice and blob info (if any).
     fn finish(mut self) -> (OwnedIoSlice, Option<Blob>) {
         if self.entry_indices.is_empty() {
@@ -338,6 +349,8 @@ impl EntryWriter for BlobWriter {
 
 #[derive(Debug)]
 pub struct WindowWriter {
+    absolute_range: Range<usize>,
+
     /// NOTE: This is always `Some(..)`.
     blob_writer: Option<BlobWriter>,
     blobs: Vec<Blob>,
@@ -348,7 +361,9 @@ pub struct WindowWriter {
 impl WindowWriter {
     /// The io slice must match the window capacity.
     fn new(io_slice: OwnedIoSlice, metrics: Arc<Metrics>) -> Self {
+        let absolute_range = io_slice.absolute();
         Self {
+            absolute_range,
             blob_writer: Some(BlobWriter::new(io_slice, metrics.clone())),
             blobs: vec![],
             metrics,
@@ -358,7 +373,7 @@ impl WindowWriter {
 
 impl EntryWriter for WindowWriter {
     type Write = OwnedIoSlice;
-    type Target = Option<Window>;
+    type Target = Window;
 
     /// Push an entry into the blob.
     fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: Compression, sequence: Sequence) -> Op
@@ -410,18 +425,21 @@ impl EntryWriter for WindowWriter {
         self.blob_writer.as_mut().unwrap().push_slice(slice, hash, sequence)
     }
 
+    fn is_empty(&self) -> bool {
+        self.blobs.is_empty() && self.blob_writer.as_ref().unwrap().is_empty()
+    }
+
     /// Return the remaining buffer and window info.
-    fn finish(mut self) -> (OwnedIoSlice, Option<Window>) {
+    fn finish(mut self) -> (OwnedIoSlice, Window) {
         let (io_slice, blob) = self.blob_writer.take().unwrap().finish();
 
         if let Some(blob) = blob {
             self.blobs.push(blob);
         }
 
-        let window = if self.blobs.is_empty() {
-            None
-        } else {
-            Some(Window { blobs: self.blobs })
+        let window = Window {
+            absolute_range: self.absolute_range,
+            blobs: self.blobs,
         };
 
         (io_slice, window)
@@ -429,7 +447,7 @@ impl EntryWriter for WindowWriter {
 }
 
 #[derive(Debug)]
-struct BatchWriter {
+pub struct BatchWriter {
     window_size: usize,
     max_absolute_range: Range<usize>,
     current_window_absolute_range: Range<usize>,
@@ -442,7 +460,7 @@ struct BatchWriter {
 }
 
 impl BatchWriter {
-    fn new(io_buffer: IoBuffer, window_size: usize, first_window_size: usize, metrics: Arc<Metrics>) -> Self {
+    pub fn new(io_buffer: IoBuffer, window_size: usize, first_window_size: usize, metrics: Arc<Metrics>) -> Self {
         let max_absolute_range = 0..io_buffer.len();
         let io_slice = io_buffer.into_owned_slice().slice(..first_window_size);
         let current_window_absolute_range = io_slice.absolute();
@@ -484,21 +502,20 @@ impl EntryWriter for BatchWriter {
         }
 
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
-        let new_window_absolute_start = self
-            .current_window_absolute_range
-            .end
-            .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-        let new_window_absolute_end = (new_window_absolute_start + self.window_size)
-            .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-        let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
-        self.current_window_absolute_range = io_slice.absolute();
-        self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
 
-        match window {
-            Some(window) => self.windows.push(window),
-            // Push an empty window to notify sealing the current region.
-            None if self.windows.is_empty() => self.windows.push(Window::empty()),
-            None => {}
+        // Push a non-empty window, or push an empty window to notify sealing the current region.
+        if !window.is_empty() || self.windows.is_empty() {
+            self.windows.push(window);
+
+            let new_window_absolute_start = self
+                .current_window_absolute_range
+                .end
+                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let new_window_absolute_end = (new_window_absolute_start + self.window_size)
+                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
+            self.current_window_absolute_range = io_slice.absolute();
+            self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
         }
 
         if self.current_window_absolute_range.is_empty() {
@@ -532,21 +549,20 @@ impl EntryWriter for BatchWriter {
         }
 
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
-        let new_window_absolute_start = self
-            .current_window_absolute_range
-            .end
-            .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-        let new_window_absolute_end = (new_window_absolute_start + self.window_size)
-            .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-        let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
-        self.current_window_absolute_range = io_slice.absolute();
-        self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
 
-        match window {
-            Some(window) => self.windows.push(window),
-            // Push an empty window to notify sealing the current region.
-            None if self.windows.is_empty() => self.windows.push(Window::empty()),
-            None => {}
+        // Push a non-empty window, or push an empty window to notify sealing the current region.
+        if !window.is_empty() || self.windows.is_empty() {
+            self.windows.push(window);
+
+            let new_window_absolute_start = self
+                .current_window_absolute_range
+                .end
+                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let new_window_absolute_end = (new_window_absolute_start + self.window_size)
+                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
+            self.current_window_absolute_range = io_slice.absolute();
+            self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
         }
 
         if self.current_window_absolute_range.is_empty() {
@@ -562,14 +578,16 @@ impl EntryWriter for BatchWriter {
         }
     }
 
+    fn is_empty(&self) -> bool {
+        self.windows.is_empty() && self.window_writer.as_ref().unwrap().is_empty()
+    }
+
     /// Return the original io slice and the batch.
     fn finish(mut self) -> (IoBuffer, Batch) {
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
-        match window {
-            Some(window) => self.windows.push(window),
-            // Push an empty window to notify sealing the current region.
-            None if self.windows.is_empty() => self.windows.push(Window::empty()),
-            None => {}
+        // Push a non-empty window, or push an empty window to notify sealing the current region.
+        if !window.is_empty() || self.windows.is_empty() {
+            self.windows.push(window);
         }
         let io_buffer = io_slice.into_buffer();
         (io_buffer, Batch { windows: self.windows })
@@ -584,9 +602,9 @@ impl BlobReader {
     /// Return all entry indices in the blob, and the blob size in bytes.
     pub fn read<R>(buffer: R) -> Result<Blob>
     where
-        R: AsRef<[u8]>,
+        R: Deref<Target = [u8]>,
     {
-        let buf = &buffer.as_ref()[..ALIGN];
+        let buf = &buffer[..ALIGN];
 
         // compare checksum
         let get = Checksummer::checksum32(&buf[Blob::META_CHECKSUM_BYTES..ALIGN]);
@@ -645,7 +663,7 @@ mod tests {
         let buf = io_slice.into_buffer();
         let w_blob = blob.unwrap();
 
-        let r_blob = BlobReader::read(&buf).unwrap();
+        let r_blob = BlobReader::read(&buf[..]).unwrap();
 
         assert_eq!(w_blob, r_blob);
     }
@@ -671,15 +689,15 @@ mod tests {
         let op = writer.push(&3, &vec![3u8; 3 * KB], 3, Compression::None, 3);
         assert_eq!(op, Op::Noop);
 
-        let (io_slice, window) = writer.finish();
+        let (io_slice, w_window) = writer.finish();
         assert_eq!(io_slice.len(), 4 * KB);
-        let w_window = window.unwrap();
 
         let buf = io_slice.into_buffer();
 
-        let blob1 = BlobReader::read(&buf).unwrap();
+        let blob1 = BlobReader::read(&buf[..]).unwrap();
         let blob2 = BlobReader::read(&buf[blob1.size..]).unwrap();
         let r_window = Window {
+            absolute_range: 0..64 * KB,
             blobs: vec![blob1, blob2],
         };
         assert_eq!(w_window, r_window);
@@ -702,7 +720,7 @@ mod tests {
 
         let (io_slice, window) = writer.finish();
         assert_eq!(io_slice.len(), 4 * KB);
-        assert!(window.is_none());
+        assert!(window.is_empty());
     }
 
     #[test_log::test]
@@ -768,7 +786,7 @@ mod tests {
 
         let (buf, w_batch) = writer.finish();
 
-        let blob0 = BlobReader::read(&buf).unwrap();
+        let blob0 = BlobReader::read(&buf[..]).unwrap();
         let blob1 = BlobReader::read(&buf[8 * KB..]).unwrap();
         let blob2 = BlobReader::read(&buf[24 * KB..]).unwrap();
         let blob3 = BlobReader::read(&buf[40 * KB..]).unwrap();
@@ -776,11 +794,26 @@ mod tests {
 
         let r_batch = Batch {
             windows: vec![
-                Window { blobs: vec![blob0] },
-                Window { blobs: vec![blob1] },
-                Window { blobs: vec![blob2] },
-                Window { blobs: vec![blob3] },
-                Window { blobs: vec![blob4] },
+                Window {
+                    absolute_range: 0..8 * KB,
+                    blobs: vec![blob0],
+                },
+                Window {
+                    absolute_range: 8 * KB..24 * KB,
+                    blobs: vec![blob1],
+                },
+                Window {
+                    absolute_range: 24 * KB..40 * KB,
+                    blobs: vec![blob2],
+                },
+                Window {
+                    absolute_range: 40 * KB..56 * KB,
+                    blobs: vec![blob3],
+                },
+                Window {
+                    absolute_range: 56 * KB..64 * KB,
+                    blobs: vec![blob4],
+                },
             ],
         };
         assert_eq!(w_batch, r_batch);
@@ -798,7 +831,16 @@ mod tests {
         let blob = BlobReader::read(&buf[8 * KB..]).unwrap();
 
         let r_batch = Batch {
-            windows: vec![Window::empty(), Window { blobs: vec![blob] }],
+            windows: vec![
+                Window {
+                    absolute_range: 0..8 * KB,
+                    blobs: vec![],
+                },
+                Window {
+                    absolute_range: 8 * KB..24 * KB,
+                    blobs: vec![blob],
+                },
+            ],
         };
         assert_eq!(w_batch, r_batch);
     }
