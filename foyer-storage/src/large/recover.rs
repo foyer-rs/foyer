@@ -17,6 +17,7 @@ use std::{
     fmt::Debug,
     ops::Range,
     sync::{atomic::Ordering, Arc},
+    time::Instant,
 };
 
 use clap::ValueEnum;
@@ -74,6 +75,8 @@ impl RecoverRunner {
         K: StorageKey,
         V: StorageValue,
     {
+        let now = Instant::now();
+
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
         let mode = config.recover_mode;
@@ -170,6 +173,8 @@ impl RecoverRunner {
         }
         region_manager.reclaim_semaphore().add_permits(permits);
         region_manager.reclaim_semaphore_countdown().reset(countdown);
+
+        tracing::info!("[recover] finish in {:?}", now.elapsed());
 
         // Note: About reclaim semaphore permits and countdown:
         //
