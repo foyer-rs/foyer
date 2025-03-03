@@ -430,6 +430,7 @@ where
                     let stats = self.stats.clone();
                     let flush = self.flush;
                     let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
+                    let metrics = self.metrics.clone();
 
                     async move {
                         // Wait for region is clean.
@@ -461,6 +462,7 @@ where
                         let mut addrs =
                             Vec::with_capacity(window.blobs.iter().map(|blob| blob.entry_indices.len()).sum());
                         let mut blob_offset = offset as u32;
+                        let blob_count = window.blobs.len();
                         for blob in window.blobs {
                             for index in blob.entry_indices {
                                 let addr = HashedEntryAddress {
@@ -476,7 +478,12 @@ where
                             }
                             blob_offset += blob.size as u32;
                         }
+                        let entry_count = addrs.len();
                         indexer.insert_batch(addrs);
+
+                        let efficiency = entry_count as f64 / blob_count as f64;
+                        tracing::trace!(blob_count, entry_count, efficiency, "[lodc flusher]: blob efficiency");
+                        metrics.storage_blob_efficiency.record(efficiency);
 
                         region_state.remain -= len;
 
