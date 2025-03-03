@@ -20,10 +20,7 @@ use std::{
 };
 
 use clap::ValueEnum;
-use foyer_common::{
-    code::{StorageKey, StorageValue},
-    metrics::Metrics,
-};
+use foyer_common::code::{StorageKey, StorageValue};
 use futures_util::future::try_join_all;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -64,7 +61,6 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    #[expect(clippy::too_many_arguments)]
     pub async fn run<K, V>(
         config: &GenericLargeStorageConfig<K, V>,
         regions: Range<RegionId>,
@@ -72,7 +68,6 @@ impl RecoverRunner {
         indexer: &Indexer,
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
-        metrics: Arc<Metrics>,
         runtime: Runtime,
     ) -> Result<()>
     where
@@ -85,10 +80,9 @@ impl RecoverRunner {
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
-            let metrics = metrics.clone();
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, region, metrics).await;
+                let res = RegionRecoverRunner::run(mode, region).await;
                 drop(permit);
                 res
             })
@@ -199,18 +193,20 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run(mode: RecoverMode, region: Region, metrics: Arc<Metrics>) -> Result<Vec<EntryInfo>> {
+    async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
         if mode == RecoverMode::None {
             return Ok(vec![]);
         }
 
-        let mut infos = vec![];
+        let mut recovered = vec![];
 
         let id = region.id();
-        let mut iter = RegionScanner::new(region, metrics);
-        loop {
+        let mut iter = RegionScanner::new(region);
+        'recover: loop {
             let r = iter.next().await;
-            match r {
+            let infos = match r {
+                Ok(Some(infos)) => infos,
+                Ok(None) => break,
                 Err(e) => {
                     if mode == RecoverMode::Strict {
                         return Err(e);
@@ -219,16 +215,16 @@ impl RegionRecoverRunner {
                         break;
                     }
                 }
-                Ok(Some(info))
-                    if info.addr.sequence < infos.last().map(|last: &EntryInfo| last.addr.sequence).unwrap_or(0) =>
-                {
-                    break
+            };
+
+            for info in infos {
+                if info.addr.sequence < recovered.last().map(|last: &EntryInfo| last.addr.sequence).unwrap_or(0) {
+                    break 'recover;
                 }
-                Ok(Some(info)) => infos.push(info),
-                Ok(None) => break,
+                recovered.push(info);
             }
         }
 
-        Ok(infos)
+        Ok(recovered)
     }
 }

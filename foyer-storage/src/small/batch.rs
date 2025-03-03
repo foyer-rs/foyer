@@ -20,6 +20,7 @@ use std::{
     time::Instant,
 };
 
+use bytes::Bytes;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
@@ -28,13 +29,13 @@ use foyer_common::{
 use foyer_memory::Piece;
 use itertools::Itertools;
 use tokio::sync::oneshot;
+use zstd::zstd_safe::WriteBuf;
 
 use crate::{
-    device::ALIGN,
-    io_buffer_pool::IoBufferPool,
+    io::PAGE,
     serde::EntrySerializer,
     small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
-    Compression, IoBuffer, IoBytes,
+    Compression,
 };
 
 type Sequence = usize;
@@ -55,12 +56,10 @@ struct SetBatchMut {
 #[derive(Debug)]
 pub struct BatchMut {
     sets: HashMap<SetId, SetBatchMut>,
-    buffer: IoBuffer,
+    buffer: Box<[u8]>,
     len: usize,
     sequence: Sequence,
 
-    /// Cache write buffer between rotation to reduce page fault.
-    buffer_pool: IoBufferPool,
     set_picker: SetPicker,
 
     waiters: Vec<oneshot::Sender<()>>,
@@ -72,14 +71,14 @@ pub struct BatchMut {
 
 impl BatchMut {
     pub fn new(sets: usize, buffer_size: usize, metrics: Arc<Metrics>) -> Self {
-        let buffer_size = bits::align_up(ALIGN, buffer_size);
+        let buffer_size = bits::align_up(PAGE, buffer_size);
+        let buffer = vec![0; buffer_size].into_boxed_slice();
 
         Self {
             sets: HashMap::new(),
-            buffer: IoBuffer::new(buffer_size),
+            buffer,
             len: 0,
             sequence: 0,
-            buffer_pool: IoBufferPool::new(buffer_size, 1),
             set_picker: SetPicker::new(sets),
             waiters: vec![],
             init: None,
@@ -173,12 +172,13 @@ impl BatchMut {
             return None;
         }
 
-        let mut buffer = self.buffer_pool.acquire();
+        // TODO(MrCroxx): use a buffer pool to reduce page fault?
+        let mut buffer = vec![0; self.buffer.capacity()].into_boxed_slice();
         std::mem::swap(&mut self.buffer, &mut buffer);
         self.len = 0;
         self.sequence = 0;
-        let buffer = IoBytes::from(buffer);
-        self.buffer_pool.release(buffer.clone());
+
+        let buffer = Bytes::from(buffer);
 
         let sets = self
             .sets
@@ -189,7 +189,7 @@ impl BatchMut {
                     .into_iter()
                     .filter(|item| item.sequence >= batch.deletes.get(&item.hash).copied().unwrap_or_default())
                     .map(|item| Item {
-                        buffer: buffer.slice(item.range),
+                        slice: buffer.slice(item.range),
                         hash: item.hash,
                     })
                     .collect_vec();
@@ -212,7 +212,7 @@ impl BatchMut {
 }
 
 pub struct Item {
-    pub buffer: IoBytes,
+    pub slice: Bytes,
     pub hash: u64,
 }
 

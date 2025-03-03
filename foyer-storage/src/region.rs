@@ -37,8 +37,8 @@ use tokio::sync::Semaphore;
 use crate::{
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::Result,
+    io::{IoBuf, IoBufMut},
     picker::EvictionPicker,
-    IoBytes, IoBytesMut,
 };
 
 #[derive(Debug, Default)]
@@ -81,13 +81,19 @@ impl Region {
         &self.stats
     }
 
-    pub async fn write(&self, buf: IoBytes, offset: u64) -> Result<()> {
+    pub async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         self.device.write(buf, self.id, offset).await
     }
 
-    pub async fn read(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
+    pub async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         self.stats.access.fetch_add(1, Ordering::Relaxed);
-        self.device.read(self.id, offset, len).await
+        self.device.read(buf, self.id, offset).await
     }
 
     pub async fn flush(&self) -> Result<()> {
@@ -96,10 +102,6 @@ impl Region {
 
     pub fn size(&self) -> usize {
         self.device.region_size()
-    }
-
-    pub fn align(&self) -> usize {
-        self.device.align()
     }
 }
 

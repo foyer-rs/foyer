@@ -15,6 +15,7 @@
 use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::{
+    bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
@@ -23,8 +24,8 @@ use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
-    device::IO_BUFFER_ALLOCATOR,
     error::Result,
+    io::{IoBuffer, OwnedSlice, PAGE},
     large::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
@@ -35,7 +36,6 @@ use crate::{
     region::{Region, RegionManager},
     runtime::Runtime,
     statistics::Statistics,
-    IoBytes,
 };
 
 #[derive(Debug)]
@@ -70,7 +70,7 @@ impl Reclaimer {
             reinsertion_picker,
             stats,
             flush,
-            metrics,
+            _metrics: metrics,
             wait_rx,
             runtime: runtime.clone(),
         };
@@ -108,7 +108,7 @@ where
 
     flush: bool,
 
-    metrics: Arc<Metrics>,
+    _metrics: Arc<Metrics>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
@@ -168,7 +168,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone(), self.metrics.clone());
+        let mut scanner = RegionScanner::new(region.clone());
         let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:
@@ -179,7 +179,7 @@ where
         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
         // They will be removed when a query find a mismatch entry.
         'reinsert: loop {
-            let info = match scanner.next().await {
+            let infos = match scanner.next().await {
                 Ok(None) => break 'reinsert,
                 Err(e) => {
                     tracing::warn!(
@@ -188,30 +188,33 @@ where
                     );
                     break 'reinsert;
                 }
-                Ok(Some(info)) => info,
+                Ok(Some(infos)) => infos,
             };
-            if self.reinsertion_picker.pick(&self.stats, info.hash) {
-                let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
-                    Err(e) => {
+            for info in infos {
+                if self.reinsertion_picker.pick(&self.stats, info.hash) {
+                    let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
+                    let (buf, res) = region.read(buf, info.addr.offset as _).await;
+                    if let Err(e) = res {
                         tracing::warn!(
-                            "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                            id = region.id()
-                        );
+                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                        id = region.id()
+                    );
                         break 'reinsert;
                     }
-                    Ok(buf) => buf.freeze(),
-                };
-                let flusher = self.flushers[picked_count % self.flushers.len()].clone();
-                flusher.submit(Submission::Reinsertion {
-                    reinsertion: Reinsertion {
-                        hash: info.hash,
-                        sequence: info.addr.sequence,
-                        buffer,
-                    },
-                });
-                picked_count += 1;
-            } else {
-                unpicked.push(info.hash);
+
+                    let slice = buf.into_owned_slice().slice(..info.addr.len as usize);
+                    let flusher = self.flushers[picked_count % self.flushers.len()].clone();
+                    flusher.submit(Submission::Reinsertion {
+                        reinsertion: Reinsertion {
+                            hash: info.hash,
+                            sequence: info.addr.sequence,
+                            slice,
+                        },
+                    });
+                    picked_count += 1;
+                } else {
+                    unpicked.push(info.hash);
+                }
             }
         }
 
@@ -251,8 +254,10 @@ pub struct RegionCleaner;
 
 impl RegionCleaner {
     pub async fn clean(region: &Region, flush: bool) -> Result<()> {
-        let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR).into();
-        region.write(buf, 0).await?;
+        let mut page = IoBuffer::new(PAGE);
+        page.fill(0);
+        let (_, res) = region.write(page, 0).await;
+        res?;
         if flush {
             region.flush().await?;
         }
@@ -264,5 +269,5 @@ impl RegionCleaner {
 pub struct Reinsertion {
     pub hash: u64,
     pub sequence: Sequence,
-    pub buffer: IoBytes,
+    pub slice: OwnedSlice,
 }

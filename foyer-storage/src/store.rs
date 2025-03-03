@@ -38,10 +38,11 @@ use crate::{
     compress::Compression,
     device::{
         monitor::{DeviceStats, Monitored, MonitoredConfig},
-        DeviceConfig, RegionId, ALIGN,
+        DeviceConfig, RegionId,
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
+    io::PAGE,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
@@ -871,7 +872,7 @@ where
     ///
     /// Default: 16 KiB
     pub fn with_set_size(mut self, set_size: usize) -> Self {
-        bits::assert_aligned(ALIGN, set_size);
+        bits::assert_aligned(PAGE, set_size);
         self.set_size = set_size;
         self
     }

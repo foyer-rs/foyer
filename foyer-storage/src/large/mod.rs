@@ -13,8 +13,6 @@
 // limitations under the License.
 
 pub mod batch;
-pub mod blob;
-pub mod batch_v2;
 pub mod flusher;
 pub mod generic;
 pub mod indexer;
@@ -23,3 +21,6 @@ pub mod recover;
 pub mod scanner;
 pub mod serde;
 pub mod tombstone;
+
+#[cfg(test)]
+pub mod test_utils;

@@ -19,7 +19,7 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
+use foyer_common::{bits, metrics::Metrics};
 use futures_util::future::try_join_all;
 use tokio::sync::Mutex;
 
@@ -30,7 +30,8 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    DirectFileDeviceOptions, IoBytesMut, Runtime,
+    io::{IoBuffer, PAGE},
+    DirectFileDeviceOptions, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -154,7 +155,9 @@ impl TombstoneLog {
             let len = std::cmp::min(offset + Self::RECOVER_IO_SIZE, capacity) - offset;
             let device = device.clone();
             async move {
-                let buffer = device.pread(offset as _, len).await?;
+                let buf = IoBuffer::new(len);
+                let (buffer, res) = device.pread(buf, offset as _).await;
+                res?;
 
                 let mut seq = 0;
                 let mut addr = 0;
@@ -162,11 +165,7 @@ impl TombstoneLog {
                 let mut tombstones = vec![];
 
                 // TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
-                for (slot, buf) in buffer
-                    .as_slice()
-                    .array_chunks_ext::<{ Tombstone::serialized_len() }>()
-                    .enumerate()
-                {
+                for (slot, buf) in buffer.array_chunks_ext::<{ Tombstone::serialized_len() }>().enumerate() {
                     let tombstone = Tombstone::read(&buf[..]);
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
@@ -228,7 +227,8 @@ impl TombstoneLog {
 pub struct PageBuffer<D> {
     region: RegionId,
     idx: u32,
-    buffer: IoBytesMut,
+    // NOTE: This is always `Some(..)`.
+    buffer: Option<IoBuffer>,
 
     device: D,
 
@@ -237,13 +237,13 @@ pub struct PageBuffer<D> {
 
 impl<D> AsRef<[u8]> for PageBuffer<D> {
     fn as_ref(&self) -> &[u8] {
-        &self.buffer
+        self.buffer.as_ref().unwrap()
     }
 }
 
 impl<D> AsMut<[u8]> for PageBuffer<D> {
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer
+        self.buffer.as_mut().unwrap()
     }
 }
 
@@ -255,7 +255,7 @@ where
         let mut this = Self {
             region,
             idx,
-            buffer: IoBytesMut::new(),
+            buffer: Some(IoBuffer::new(PAGE)),
             device,
             sync,
         };
@@ -266,18 +266,13 @@ where
     }
 
     pub async fn update(&mut self) -> Result<()> {
-        self.buffer = self
+        let buf = self.buffer.take().unwrap();
+        let (buf, res) = self
             .device
-            .read(
-                self.region,
-                Self::offset(self.device.align(), self.idx),
-                self.device.align(),
-            )
-            .await?;
-
-        strict_assert_eq!(self.buffer.len(), self.device.align());
-        strict_assert_eq!(self.buffer.capacity(), self.device.align());
-
+            .read(buf, self.region, Self::offset(self.device.align(), self.idx))
+            .await;
+        self.buffer = Some(buf);
+        res?;
         Ok(())
     }
 
@@ -287,14 +282,14 @@ where
         self.update().await
     }
 
-    pub async fn flush(&self) -> Result<()> {
-        self.device
-            .write(
-                self.buffer.clone().freeze(),
-                self.region,
-                Self::offset(self.device.align(), self.idx),
-            )
-            .await?;
+    pub async fn flush(&mut self) -> Result<()> {
+        let buf = self.buffer.take().unwrap();
+        let (buf, res) = self
+            .device
+            .write(buf, self.region, Self::offset(self.device.align(), self.idx))
+            .await;
+        self.buffer = Some(buf);
+        res?;
         if self.sync {
             self.device.flush(Some(self.region)).await?;
         }

@@ -42,10 +42,6 @@ impl EntryHeader {
         4 + 4 + 8 + 8 + 8 + 4 /* magic & compression */
     }
 
-    pub fn entry_len(&self) -> usize {
-        Self::serialized_len() + self.key_len as usize + self.value_len as usize
-    }
-
     pub fn write(&self, mut buf: impl BufMut) {
         buf.put_u32(self.key_len);
         buf.put_u32(self.value_len);

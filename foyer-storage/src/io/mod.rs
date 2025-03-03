@@ -16,12 +16,19 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
     slice::{from_raw_parts, from_raw_parts_mut},
+    sync::Arc,
 };
 
 use allocator_api2::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use foyer_common::bits;
 
-pub const ALIGN: usize = 4096;
+pub const PAGE: usize = 4096;
+
+/// 4K-aligned immutable buf for direct I/O.
+pub trait IoBuf: Deref<Target = [u8]> + Send + Sync + 'static {}
+
+/// 4K-aligned mutable buf for direct I/O.
+pub trait IoBufMut: DerefMut<Target = [u8]> + Send + Sync + 'static {}
 
 /// 4K-aligned capacity-fixed buffer.
 #[derive(Debug)]
@@ -36,8 +43,8 @@ unsafe impl Sync for IoBuffer {}
 impl IoBuffer {
     /// Allocate an 4K-aligned [`IoBuffer`] with at least `capacity` bytes.
     pub fn new(capacity: usize) -> Self {
-        let capacity = bits::align_up(ALIGN, capacity);
-        let layout = unsafe { Layout::from_size_align_unchecked(capacity, ALIGN) };
+        let capacity = bits::align_up(PAGE, capacity);
+        let layout = unsafe { Layout::from_size_align_unchecked(capacity, PAGE) };
         let mut nonnull = match Global.allocate(layout) {
             Ok(nonnull) => nonnull,
             Err(_) => handle_alloc_error(layout),
@@ -69,9 +76,29 @@ impl IoBuffer {
     }
 
     /// Convert into [`OwnedIoSlice`].
-    pub fn into_owned_slice(self) -> OwnedIoSlice {
+    pub fn into_owned_io_slice(self) -> OwnedIoSlice {
         let end = self.len();
         OwnedIoSlice {
+            buffer: self,
+            start: 0,
+            end,
+        }
+    }
+
+    /// Convert into [`SharedIoSlice`].
+    pub fn into_shared_io_slice(self) -> SharedIoSlice {
+        let end = self.len();
+        SharedIoSlice {
+            buffer: Arc::new(self),
+            start: 0,
+            end,
+        }
+    }
+
+    /// Convert into [`OwnedSlice`].
+    pub fn into_owned_slice(self) -> OwnedSlice {
+        let end = self.len();
+        OwnedSlice {
             buffer: self,
             start: 0,
             end,
@@ -81,8 +108,17 @@ impl IoBuffer {
 
 impl Drop for IoBuffer {
     fn drop(&mut self) {
-        let layout = unsafe { Layout::from_size_align_unchecked(self.cap, ALIGN) };
+        let layout = unsafe { Layout::from_size_align_unchecked(self.cap, PAGE) };
         unsafe { Global.deallocate(NonNull::new_unchecked(self.ptr), layout) };
+    }
+}
+
+impl Clone for IoBuffer {
+    fn clone(&self) -> Self {
+        let mut buf = IoBuffer::new(self.cap);
+        assert_eq!(buf.len(), self.cap);
+        buf.copy_from_slice(self);
+        buf
     }
 }
 
@@ -102,7 +138,7 @@ impl DerefMut for IoBuffer {
 
 impl AsRef<[u8]> for IoBuffer {
     fn as_ref(&self) -> &[u8] {
-        &*self
+        self
     }
 }
 
@@ -112,7 +148,10 @@ impl AsMut<[u8]> for IoBuffer {
     }
 }
 
-/// A slice on the io buffer with ownership.
+impl IoBuf for IoBuffer {}
+impl IoBufMut for IoBuffer {}
+
+/// A 4K-aligned slice on the io buffer with ownership.
 ///
 /// [`OwnedIoSlice`] can convert from or convert to an [`IoBuffer`].
 #[derive(Debug)]
@@ -124,10 +163,15 @@ pub struct OwnedIoSlice {
 
 impl OwnedIoSlice {
     /// Convert into [`IoBuffer`].
-    pub fn into_buffer(self) -> IoBuffer {
+    pub fn into_io_buffer(self) -> IoBuffer {
         self.buffer
     }
 
+    /// Slice the [`OwnedIoSlice`] with relative range.
+    ///
+    /// # Safety
+    ///
+    /// The range start and end must be 4K-aligned.
     pub fn slice(self, range: impl RangeBounds<usize>) -> Self {
         let s = match range.start_bound() {
             std::ops::Bound::Included(i) => self.start + *i,
@@ -145,13 +189,21 @@ impl OwnedIoSlice {
             panic!("slice index starts at {s} but ends at {e}");
         }
 
-        OwnedIoSlice {
+        bits::assert_aligned(PAGE, s);
+        bits::assert_aligned(PAGE, e);
+
+        Self {
             buffer: self.buffer,
             start: s,
             end: e,
         }
     }
 
+    /// Slice the [`OwnedIoSlice`] with absolute range.
+    ///
+    /// # Safety
+    ///
+    /// The range start and end must be 4K-aligned.
     pub fn absolute_slice(self, range: impl RangeBounds<usize>) -> Self {
         let s = match range.start_bound() {
             std::ops::Bound::Included(i) => *i,
@@ -169,7 +221,10 @@ impl OwnedIoSlice {
             panic!("slice index starts at {s} but ends at {e}");
         }
 
-        OwnedIoSlice {
+        bits::assert_aligned(PAGE, s);
+        bits::assert_aligned(PAGE, e);
+
+        Self {
             buffer: self.buffer,
             start: s,
             end: e,
@@ -198,7 +253,7 @@ impl DerefMut for OwnedIoSlice {
 
 impl AsRef<[u8]> for OwnedIoSlice {
     fn as_ref(&self) -> &[u8] {
-        &*self
+        self
     }
 }
 
@@ -208,9 +263,204 @@ impl AsMut<[u8]> for OwnedIoSlice {
     }
 }
 
+impl IoBuf for OwnedIoSlice {}
+impl IoBufMut for OwnedIoSlice {}
+
+/// A 4K-aligned slice on the io buffer that can be shared.
+#[derive(Debug, Clone)]
+pub struct SharedIoSlice {
+    buffer: Arc<IoBuffer>,
+    start: usize,
+    end: usize,
+}
+
+impl SharedIoSlice {
+    /// Slice the [`SharedIoSlice`] with relative range.
+    ///
+    /// # Safety
+    ///
+    /// The range start and end must be 4K-aligned.
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
+        let s = match range.start_bound() {
+            std::ops::Bound::Included(i) => self.start + *i,
+            std::ops::Bound::Excluded(_) => unreachable!(),
+            std::ops::Bound::Unbounded => self.start,
+        };
+
+        let e = match range.end_bound() {
+            std::ops::Bound::Included(i) => self.start + *i + 1,
+            std::ops::Bound::Excluded(i) => self.start + *i,
+            std::ops::Bound::Unbounded => self.end,
+        };
+
+        if s > e {
+            panic!("slice index starts at {s} but ends at {e}");
+        }
+
+        bits::assert_aligned(PAGE, s);
+        bits::assert_aligned(PAGE, e);
+
+        Self {
+            buffer: self.buffer.clone(),
+            start: s,
+            end: e,
+        }
+    }
+
+    /// Slice the [`SharedIoSlice`] with absolute range.
+    ///
+    /// # Safety
+    ///
+    /// The range start and end must be 4K-aligned.
+    pub fn absolute_slice(&self, range: impl RangeBounds<usize>) -> Self {
+        let s = match range.start_bound() {
+            std::ops::Bound::Included(i) => *i,
+            std::ops::Bound::Excluded(_) => unreachable!(),
+            std::ops::Bound::Unbounded => 0,
+        };
+
+        let e = match range.end_bound() {
+            std::ops::Bound::Included(i) => *i + 1,
+            std::ops::Bound::Excluded(i) => *i,
+            std::ops::Bound::Unbounded => self.buffer.len(),
+        };
+
+        if s > e {
+            panic!("slice index starts at {s} but ends at {e}");
+        }
+
+        bits::assert_aligned(PAGE, s);
+        bits::assert_aligned(PAGE, e);
+
+        Self {
+            buffer: self.buffer.clone(),
+            start: s,
+            end: e,
+        }
+    }
+
+    /// Get the absolute range of the [`OwnedIoSlice`] over a [`IoBuffer`].
+    pub fn absolute(&self) -> Range<usize> {
+        self.start..self.end
+    }
+}
+
+impl Deref for SharedIoSlice {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer[self.start..self.end]
+    }
+}
+
+impl AsRef<[u8]> for SharedIoSlice {
+    fn as_ref(&self) -> &[u8] {
+        self
+    }
+}
+
+impl IoBuf for SharedIoSlice {}
+
+/// A slice on the io buffer with ownership.
+///
+/// [`OwnedSlice`] can convert from or convert to an [`IoBuffer`].
+#[derive(Debug)]
+pub struct OwnedSlice {
+    buffer: IoBuffer,
+    start: usize,
+    end: usize,
+}
+
+impl OwnedSlice {
+    /// Convert into [`IoBuffer`].
+    pub fn into_io_buffer(self) -> IoBuffer {
+        self.buffer
+    }
+
+    /// Slice the [`OwnedIoSlice`] with relative range.
+    pub fn slice(self, range: impl RangeBounds<usize>) -> Self {
+        let s = match range.start_bound() {
+            std::ops::Bound::Included(i) => self.start + *i,
+            std::ops::Bound::Excluded(_) => unreachable!(),
+            std::ops::Bound::Unbounded => self.start,
+        };
+
+        let e = match range.end_bound() {
+            std::ops::Bound::Included(i) => self.start + *i + 1,
+            std::ops::Bound::Excluded(i) => self.start + *i,
+            std::ops::Bound::Unbounded => self.end,
+        };
+
+        if s > e {
+            panic!("slice index starts at {s} but ends at {e}");
+        }
+
+        Self {
+            buffer: self.buffer,
+            start: s,
+            end: e,
+        }
+    }
+
+    /// Slice the [`OwnedIoSlice`] with absolute range.
+    pub fn absolute_slice(self, range: impl RangeBounds<usize>) -> Self {
+        let s = match range.start_bound() {
+            std::ops::Bound::Included(i) => *i,
+            std::ops::Bound::Excluded(_) => unreachable!(),
+            std::ops::Bound::Unbounded => 0,
+        };
+
+        let e = match range.end_bound() {
+            std::ops::Bound::Included(i) => *i + 1,
+            std::ops::Bound::Excluded(i) => *i,
+            std::ops::Bound::Unbounded => self.buffer.len(),
+        };
+
+        if s > e {
+            panic!("slice index starts at {s} but ends at {e}");
+        }
+
+        Self {
+            buffer: self.buffer,
+            start: s,
+            end: e,
+        }
+    }
+
+    /// Get the absolute range of the [`OwnedIoSlice`] over a [`IoBuffer`].
+    pub fn absolute(&self) -> Range<usize> {
+        self.start..self.end
+    }
+}
+
+impl Deref for OwnedSlice {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer[self.start..self.end]
+    }
+}
+
+impl DerefMut for OwnedSlice {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.buffer[self.start..self.end]
+    }
+}
+
+impl AsRef<[u8]> for OwnedSlice {
+    fn as_ref(&self) -> &[u8] {
+        self
+    }
+}
+
+impl AsMut<[u8]> for OwnedSlice {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut *self
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use bytes::BufMut;
 
     use super::*;
 
@@ -233,30 +483,40 @@ mod tests {
 
     #[test]
     fn test_owned_io_slice() {
-        let buf = IoBuffer::new(4096);
+        let buf = IoBuffer::new(PAGE * 3);
 
-        let mut slice = buf.into_owned_slice();
-        assert_eq!(slice.len(), 4096);
+        let slice = buf.into_owned_io_slice();
+        assert_eq!(slice.len(), PAGE * 3);
 
-        (&mut slice[..]).put_bytes(1, 1777);
+        let mut s23 = slice.slice(PAGE..);
+        s23.fill(45);
 
-        let mut slice = slice.slice(1024..);
-        assert_eq!(slice.len(), 3072);
+        let mut s3 = s23.slice(PAGE..);
+        s3.fill(14);
 
-        (&mut slice[2048..]).put_bytes(4, 1024);
+        let mut s1 = s3.absolute_slice(..PAGE);
+        s1.fill(11);
 
-        let mut slice = slice.slice(..=2047);
-        assert_eq!(slice.len(), 2048);
+        let buf = s1.into_io_buffer();
 
-        (&mut slice[1024..]).put_bytes(3, 1024);
-
-        let mut slice = slice.slice(..1024);
-        assert_eq!(slice.len(), 1024);
-
-        (&mut slice[..]).put_bytes(2, 1024);
-
-        let buf = slice.into_buffer();
-        let expected = [vec![1u8; 1024], vec![2u8; 1024], vec![3u8; 1024], vec![4u8; 1024]].concat();
+        let expected = [vec![11u8; PAGE], vec![45u8; PAGE], vec![14u8; PAGE]].concat();
         assert_eq!(&buf[..], &expected);
+    }
+
+    #[test]
+    fn test_shared_io_slice() {
+        let mut buf = IoBuffer::new(3 * PAGE);
+        buf.fill(11);
+        buf[PAGE..].fill(45);
+        buf[PAGE * 2..].fill(14);
+
+        let buf = buf.into_shared_io_slice();
+        let s1 = buf.slice(0..PAGE);
+        let s2 = buf.slice(PAGE..PAGE * 2);
+        let s3 = buf.slice(PAGE * 2..PAGE * 3);
+
+        assert_eq!(&s1[..], &[11u8; PAGE]);
+        assert_eq!(&s2[..], &[45u8; PAGE]);
+        assert_eq!(&s3[..], &[14u8; PAGE]);
     }
 }
