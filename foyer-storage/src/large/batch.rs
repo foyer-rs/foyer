@@ -455,7 +455,7 @@ impl EntryWriter for WindowWriter {
 #[derive(Debug)]
 pub struct BatchWriter {
     window_size: usize,
-    max_absolute_range: Range<usize>,
+    capacity: usize,
     current_window_absolute_range: Range<usize>,
 
     /// NOTE: This is always `Some(..)`.
@@ -467,15 +467,15 @@ pub struct BatchWriter {
 
 impl BatchWriter {
     pub fn new(io_buffer: IoBuffer, window_size: usize, first_window_size: usize, metrics: Arc<Metrics>) -> Self {
-        let max_absolute_range = 0..io_buffer.len();
+        let capacity = io_buffer.len();
         let io_slice = io_buffer
             .into_owned_io_slice()
-            .slice(..std::cmp::min(first_window_size, max_absolute_range.end));
+            .slice(..std::cmp::min(first_window_size, capacity));
         let current_window_absolute_range = io_slice.absolute();
         let window_writer = Some(WindowWriter::new(io_slice, metrics.clone()));
         Self {
             window_size,
-            max_absolute_range,
+            capacity,
             current_window_absolute_range,
             window_writer,
             windows: vec![],
@@ -495,7 +495,7 @@ impl EntryWriter for BatchWriter {
     {
         tracing::trace!(hash, sequence, "[batch writer] push");
 
-        if self.current_window_absolute_range.start == self.max_absolute_range.end {
+        if self.current_window_absolute_range.start == self.capacity {
             // No space in the batch, skip.
             return Op::Skip;
         }
@@ -519,18 +519,14 @@ impl EntryWriter for BatchWriter {
 
             self.windows.push(window);
 
-            let new_window_absolute_start = self
-                .current_window_absolute_range
-                .end
-                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-            let new_window_absolute_end = (new_window_absolute_start + self.window_size)
-                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
+            let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
             let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
             self.current_window_absolute_range = io_slice.absolute();
             self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
         }
 
-        if self.current_window_absolute_range.start == self.max_absolute_range.end {
+        if self.current_window_absolute_range.start == self.capacity {
             // No space in the batch, skip.
             return Op::Skip;
         }
@@ -551,7 +547,7 @@ impl EntryWriter for BatchWriter {
     fn push_slice(&mut self, slice: &[u8], hash: u64, sequence: Sequence) -> Op {
         tracing::trace!(hash, sequence, "[batch writer] push (slice)");
 
-        if self.current_window_absolute_range.start == self.max_absolute_range.end {
+        if self.current_window_absolute_range.start == self.capacity {
             // No space in the batch, skip.
             return Op::Skip;
         }
@@ -570,18 +566,14 @@ impl EntryWriter for BatchWriter {
 
             self.windows.push(window);
 
-            let new_window_absolute_start = self
-                .current_window_absolute_range
-                .end
-                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
-            let new_window_absolute_end = (new_window_absolute_start + self.window_size)
-                .clamp(self.max_absolute_range.start, self.max_absolute_range.end);
+            let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
+            let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
             let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
             self.current_window_absolute_range = io_slice.absolute();
             self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
         }
 
-        if self.current_window_absolute_range.start == self.max_absolute_range.end {
+        if self.current_window_absolute_range.start == self.capacity {
             // No space in the batch, skip.
             return Op::Skip;
         }
