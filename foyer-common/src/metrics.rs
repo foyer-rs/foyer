@@ -179,7 +179,7 @@ impl Metrics {
         let foyer_storage_blob_efficiency = registry.register_histogram_vec(
             "foyer_storage_blob_efficiency".into(),
             "foyer large object disk cache entry count in a blob".into(),
-            &[],
+            &["name"],
         );
 
         let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
@@ -220,7 +220,7 @@ impl Metrics {
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
 
-        let storage_blob_efficiency = foyer_storage_blob_efficiency.histogram(&[]);
+        let storage_blob_efficiency = foyer_storage_blob_efficiency.histogram(&[name.clone()]);
 
         /* hybrid cache metrics */
 
