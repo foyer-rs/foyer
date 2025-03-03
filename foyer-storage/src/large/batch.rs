@@ -35,6 +35,7 @@
 //! A batch may contains data in multiple regions and blobs. Data in the same region is combined into a **Window**.
 
 use std::{
+    fmt::Debug,
     ops::{Deref, Range},
     sync::Arc,
 };
@@ -467,7 +468,9 @@ pub struct BatchWriter {
 impl BatchWriter {
     pub fn new(io_buffer: IoBuffer, window_size: usize, first_window_size: usize, metrics: Arc<Metrics>) -> Self {
         let max_absolute_range = 0..io_buffer.len();
-        let io_slice = io_buffer.into_owned_io_slice().slice(..first_window_size);
+        let io_slice = io_buffer
+            .into_owned_io_slice()
+            .slice(..std::cmp::min(first_window_size, max_absolute_range.end));
         let current_window_absolute_range = io_slice.absolute();
         let window_writer = Some(WindowWriter::new(io_slice, metrics.clone()));
         Self {
@@ -598,8 +601,7 @@ impl EntryWriter for BatchWriter {
     /// Return the original io slice and the batch.
     fn finish(mut self) -> (IoBuffer, Batch) {
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
-        // Push a non-empty window, or push an empty window to notify sealing the current region.
-        if !window.is_empty() || self.windows.is_empty() {
+        if !window.is_empty() {
             self.windows.push(window);
         }
         let io_buffer = io_slice.into_io_buffer();
@@ -860,6 +862,39 @@ mod tests {
                     blobs: vec![blob],
                 },
             ],
+        };
+        assert_eq!(w_batch, r_batch);
+    }
+
+    #[test]
+    fn test_buffer_smaller_than_window() {
+        let buf = IoBuffer::new(8 * KB);
+
+        // windows:
+        //
+        // 8 KB | 16 KB | 16 KB | 16 KB | 8 KB
+
+        // w0: 4K (meta) | ..
+        let mut writer = BatchWriter::new(buf, 64 * KB, 16 * KB, Arc::new(Metrics::noop()));
+
+        // w0: 4K (meta) | 4K |
+        let op = writer.push(&1, &vec![1u8; 3 * KB], 1, Compression::None, 1);
+        assert_eq!(op, Op::Noop);
+
+        // (deny)
+        let op = writer.push(&2, &vec![2u8; 3 * KB], 2, Compression::None, 2);
+        assert_eq!(op, Op::Skip);
+
+        let (buf, w_batch) = writer.finish();
+
+        let blob = BlobReader::read(&buf[..]).unwrap();
+
+        let r_batch = Batch {
+            windows: vec![Window {
+                absolute_window_range: 0..8 * KB,
+                absolute_dirty_range: 0..8 * KB,
+                blobs: vec![blob],
+            }],
         };
         assert_eq!(w_batch, r_batch);
     }

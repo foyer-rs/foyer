@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 
 use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
 
 #[expect(missing_docs)]
-#[derive(Debug)]
 pub struct Metrics {
     /* in-memory cache metrics */
     pub memory_insert: BoxedCounter,
@@ -79,6 +78,12 @@ pub struct Metrics {
     pub hybrid_miss_duration: BoxedHistogram,
     pub hybrid_remove_duration: BoxedHistogram,
     pub hybrid_fetch_duration: BoxedHistogram,
+}
+
+impl Debug for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Metrics").finish()
+    }
 }
 
 impl Metrics {

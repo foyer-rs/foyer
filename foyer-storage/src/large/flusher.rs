@@ -19,6 +19,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use foyer_common::{
@@ -163,6 +164,7 @@ where
             writer,
             tombstone_infos: vec![],
             waiters: vec![],
+            queue_init: None,
             buffer_size,
             flight: Arc::new(Semaphore::new(1)),
             submit_queue_size: submit_queue_size.clone(),
@@ -250,6 +252,7 @@ where
     writer: Option<BatchWriter>,
     tombstone_infos: Vec<TombstoneInfo>,
     waiters: Vec<oneshot::Sender<()>>,
+    queue_init: Option<Instant>,
 
     flight: Arc<Semaphore>,
     submit_queue_size: Arc<AtomicUsize>,
@@ -278,7 +281,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    fn dirty(&self) -> bool {
+    fn is_dirty(&self) -> bool {
         !self.writer.as_ref().unwrap().is_empty() || !self.tombstone_infos.is_empty() || !self.waiters.is_empty()
     }
 
@@ -293,7 +296,7 @@ where
 
             tokio::select! {
                 biased;
-                Ok(permit) = flight.acquire_owned(), if self.dirty() && can_flush => {
+                Ok(permit) = flight.acquire_owned(), if self.is_dirty() && can_flush => {
                     let (buf, batch) = self.writer.take().unwrap().finish();
 
                     let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
@@ -322,6 +325,10 @@ where
 
     fn submit(&mut self, submission: Submission<K, V>) {
         tracing::trace!(?submission, "[lodc flush runner]: recv submission");
+
+        if self.queue_init.is_none() {
+            self.queue_init = Some(Instant::now());
+        }
 
         let report = |op: Op| {
             if matches! {op, Op::Skip} {
@@ -375,19 +382,40 @@ where
             "[flusher] commit batch"
         );
 
+        let capacity = buf.len();
+        let used = batch
+            .windows
+            .last()
+            .as_ref()
+            .map(|window| window.absolute_dirty_range.end)
+            .unwrap_or_default();
+        let efficiency = used as f64 / capacity as f64;
+
+        tracing::debug!(
+            capacity,
+            used,
+            efficiency,
+            windows = batch.windows.len(),
+            tombstones = self.tombstone_infos.len(),
+            waiters = self.waiters.len(),
+            current_region_remain = self.current_region_state.remain,
+            "[lodc flusher] buffer efficiency"
+        );
+
         let shared = buf.into_shared_io_slice();
 
-        let region_states_iter =
-            std::iter::once(self.current_region_state.clone()).chain((0..batch.windows.len() - 1).map(|_| {
-                CleanRegionState {
+        let region_states_iter = if batch.windows.is_empty() {
+            vec![]
+        } else {
+            std::iter::once(self.current_region_state.clone())
+                .chain((0..batch.windows.len() - 1).map(|_| CleanRegionState {
                     handle: self.region_manager.get_clean_region(),
                     remain: self.device.region_size(),
-                }
-            }));
+                }))
+                .collect_vec()
+        };
 
         let window_count = batch.windows.len();
-
-        tracing::trace!(current_region_state = ?self.current_region_state,"[lodc flusher]: pre flush");
 
         // Write regions concurrently.
         let futures =
@@ -502,13 +530,12 @@ where
             let _ = waiter.send(());
         }
 
-        // TODO(MrCroxx): Fix the metrics.
-        // if let Some(init) = batch.init.as_ref() {
-        //     self.metrics.storage_queue_rotate.increase(1);
-        //     self.metrics
-        //         .storage_queue_rotate_duration
-        //         .record(init.elapsed().as_secs_f64());
-        // }
+        if let Some(init) = self.queue_init.take() {
+            self.metrics.storage_queue_rotate.increase(1);
+            self.metrics
+                .storage_queue_rotate_duration
+                .record(init.elapsed().as_secs_f64());
+        }
 
         drop(permit);
     }

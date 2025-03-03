@@ -172,7 +172,7 @@ impl OwnedIoSlice {
     /// # Safety
     ///
     /// The range start and end must be 4K-aligned.
-    pub fn slice(self, range: impl RangeBounds<usize>) -> Self {
+    pub fn slice(self, range: impl RangeBounds<usize> + std::fmt::Debug) -> Self {
         let s = match range.start_bound() {
             std::ops::Bound::Included(i) => self.start + *i,
             std::ops::Bound::Excluded(_) => unreachable!(),
