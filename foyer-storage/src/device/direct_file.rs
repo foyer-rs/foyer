@@ -96,9 +96,12 @@ impl DirectFileDevice {
 
         // Assert region capacity bound if region is given.
         if region.is_some() && len != 0 {
+            let start_region = offset as usize / self.region_size;
+            let end_region = (offset as usize + len - 1) / self.region_size;
             assert_eq!(
-                offset as usize / self.region_size,
-                (offset as usize + len - 1) / self.region_size
+                start_region, end_region,
+                "io range are not in the same region, region_size: {region_size}, offset: {offset}, len: {len}, start region: {start_region}, end region: {end_region}",
+                region_size = self.region_size,
             );
         }
     }

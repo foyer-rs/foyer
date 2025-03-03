@@ -482,6 +482,14 @@ impl BatchWriter {
             metrics,
         }
     }
+
+    fn is_empty(&self) -> bool {
+        self.windows.is_empty() && self.window_writer.as_ref().unwrap().is_empty()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.window_writer.as_ref().unwrap().absolute_window_range.start == self.capacity
+    }
 }
 
 impl EntryWriter for BatchWriter {
@@ -513,23 +521,13 @@ impl EntryWriter for BatchWriter {
 
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
 
-        // Push a non-empty window, or push an empty window to notify sealing the current region.
-        if !window.is_empty() || self.windows.is_empty() {
-            tracing::trace!("[batch writer] rotate window");
+        self.windows.push(window);
 
-            self.windows.push(window);
-
-            let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
-            let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
-            let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
-            self.current_window_absolute_range = io_slice.absolute();
-            self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
-        }
-
-        if self.current_window_absolute_range.start == self.capacity {
-            // No space in the batch, skip.
-            return Op::Skip;
-        }
+        let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
+        let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
+        let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
+        self.current_window_absolute_range = io_slice.absolute();
+        self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
 
         // retry, proxy the op
         match self
@@ -560,23 +558,13 @@ impl EntryWriter for BatchWriter {
 
         let (io_slice, window) = self.window_writer.take().unwrap().finish();
 
-        // Push a non-empty window, or push an empty window to notify sealing the current region.
-        if !window.is_empty() || self.windows.is_empty() {
-            tracing::trace!("[batch writer] rotate window");
+        self.windows.push(window);
 
-            self.windows.push(window);
-
-            let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
-            let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
-            let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
-            self.current_window_absolute_range = io_slice.absolute();
-            self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
-        }
-
-        if self.current_window_absolute_range.start == self.capacity {
-            // No space in the batch, skip.
-            return Op::Skip;
-        }
+        let new_window_absolute_start = std::cmp::min(self.current_window_absolute_range.end, self.capacity);
+        let new_window_absolute_end = std::cmp::min(new_window_absolute_start + self.window_size, self.capacity);
+        let io_slice = io_slice.absolute_slice(new_window_absolute_start..new_window_absolute_end);
+        self.current_window_absolute_range = io_slice.absolute();
+        self.window_writer = Some(WindowWriter::new(io_slice, self.metrics.clone()));
 
         // retry, proxy the op
         match self.window_writer.as_mut().unwrap().push_slice(slice, hash, sequence) {
@@ -587,7 +575,7 @@ impl EntryWriter for BatchWriter {
     }
 
     fn is_empty(&self) -> bool {
-        self.windows.is_empty() && self.window_writer.as_ref().unwrap().is_empty()
+        self.is_empty()
     }
 
     /// Return the original io slice and the batch.

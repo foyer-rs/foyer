@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::{
+    collections::VecDeque,
     fmt::Debug,
-    future::Future,
+    future::{poll_fn, Future},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    task::{ready, Poll},
     time::Instant,
 };
 
@@ -28,9 +30,13 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::Piece;
-use futures_util::future::{try_join, try_join_all};
+use futures_core::future::BoxFuture;
+use futures_util::{
+    future::{try_join, try_join_all},
+    FutureExt,
+};
 use itertools::Itertools;
-use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::oneshot;
 
 use super::{
     batch::{Batch, BatchWriter, EntryWriter, Op},
@@ -158,15 +164,15 @@ where
             handle: region_manager.get_clean_region(),
             remain: device.region_size(),
         };
+        let remain = device.region_size();
 
         let runner = Runner {
-            rx,
+            rx: Some(rx),
             writer,
             tombstone_infos: vec![],
             waiters: vec![],
             queue_init: None,
             buffer_size,
-            flight: Arc::new(Semaphore::new(1)),
             submit_queue_size: submit_queue_size.clone(),
             current_region_state,
             region_manager,
@@ -175,8 +181,11 @@ where
             tombstone_log,
             compression: config.compression,
             flush: config.flush,
+            runtime: runtime.clone(),
             stats,
             metrics: metrics.clone(),
+            io_tasks: VecDeque::with_capacity(1),
+            remain,
             #[cfg(test)]
             flush_holder,
         };
@@ -241,12 +250,18 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
+struct IoTaskCtx {
+    state: Option<CleanRegionState>,
+    waiters: Vec<oneshot::Sender<()>>,
+    init: Instant,
+}
+
 struct Runner<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
-    rx: flume::Receiver<Submission<K, V>>,
+    rx: Option<flume::Receiver<Submission<K, V>>>,
 
     // NOTE: writer is always `Some(..)`.
     writer: Option<BatchWriter>,
@@ -254,7 +269,6 @@ where
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
-    flight: Arc<Semaphore>,
     submit_queue_size: Arc<AtomicUsize>,
 
     current_region_state: CleanRegionState,
@@ -269,8 +283,14 @@ where
 
     device: MonitoredDevice,
 
+    runtime: Runtime,
+
     stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
+
+    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
+    // TODO(MrCroxx): refine it.
+    remain: usize,
 
     #[cfg(test)]
     flush_holder: FlushHolder,
@@ -281,40 +301,86 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    fn is_dirty(&self) -> bool {
-        !self.writer.as_ref().unwrap().is_empty() || !self.tombstone_infos.is_empty() || !self.waiters.is_empty()
+    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + use<'_, K, V> {
+        poll_fn(|cx| {
+            if let Some(io_task) = self.io_tasks.front_mut() {
+                let res = ready!(io_task.poll_unpin(cx));
+                drop(self.io_tasks.pop_front().unwrap());
+                return Poll::Ready(res);
+            }
+            Poll::Pending
+        })
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        loop {
-            let flight = self.flight.clone();
+    // impl CacheRefiller {
+    //     pub(crate) fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
+    //         poll_fn(|cx| {
+    //             if let Some(item) = self.queue.front_mut() {
+    //                 ready!(item.handle.poll_unpin(cx)).unwrap();
+    //                 let item = self.queue.pop_front().unwrap();
+    //                 GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
+    //                 return Poll::Ready(item.event);
+    //             }
+    //             Poll::Pending
+    //         })
+    //     }
+    // }
 
+    pub async fn run(mut self) -> Result<()> {
+        let rx = self.rx.take().unwrap();
+
+        loop {
             #[cfg(not(test))]
             let can_flush = true;
             #[cfg(test)]
-            let can_flush = !self.flush_holder.is_held() && self.rx.is_empty();
+            let can_flush = !self.flush_holder.is_held() && rx.is_empty();
+
+            let is_full = self.writer.as_ref().unwrap().is_full();
+            let force = !self.waiters.is_empty();
+            let no_io_task = self.io_tasks.is_empty();
+
+            if ((is_full && can_flush) || force) && no_io_task {
+                let (buf, batch) = self.writer.take().unwrap().finish();
+
+                let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
+                let waiters = std::mem::take(&mut self.waiters);
+
+                let remain = match batch.windows.len() {
+                    0 => self.current_region_state.remain,
+                    1 => {
+                        self.current_region_state.remain
+                            - batch.windows.first().as_ref().unwrap().absolute_dirty_range.len()
+                    }
+                    _ => self.device.region_size() - batch.windows.last().as_ref().unwrap().absolute_dirty_range.len(),
+                };
+
+                let init = self.queue_init.take().unwrap();
+
+                let io_task = self.submit_io_task(buf, batch, tombstone_infos, waiters, init);
+                self.io_tasks.push_back(io_task);
+
+                let writer = create_writer(
+                    self.buffer_size,
+                    self.device.region_size(),
+                    remain,
+                    // self.current_region_state.remain,
+                    self.metrics.clone(),
+                );
+                self.writer = Some(writer);
+                self.remain = remain;
+            }
 
             tokio::select! {
                 biased;
-                Ok(permit) = flight.acquire_owned(), if self.is_dirty() && can_flush => {
-                    let (buf, batch) = self.writer.take().unwrap().finish();
-
-                    let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
-                    let waiters = std::mem::take(&mut self.waiters);
-
-                    self.commit(buf, batch, tombstone_infos, waiters, permit).await;
-
-                    let writer = create_writer(
-                        self.buffer_size,
-                        self.device.region_size(),
-                        self.current_region_state.remain,
-                        self.metrics.clone()
-                    );
-                    self.writer = Some(writer);
-
+                IoTaskCtx { state, waiters, init } = self.next_io_task_finish() => {
+                    if let Some(state) = state {
+                        assert_eq!(state.remain, self.remain);
+                        self.current_region_state = state;
+                    }
+                    self.handle_io_complete(waiters, init);
                 }
-                Ok(submission) = self.rx.recv_async() => {
-                    self.submit(submission);
+                Ok(submission) = rx.recv_async() => {
+                    self.recv(submission);
                 }
                 // Graceful shutdown.
                 else => break,
@@ -323,7 +389,7 @@ where
         Ok(())
     }
 
-    fn submit(&mut self, submission: Submission<K, V>) {
+    fn recv(&mut self, submission: Submission<K, V>) {
         tracing::trace!(?submission, "[lodc flush runner]: recv submission");
 
         if self.queue_init.is_none() {
@@ -367,14 +433,15 @@ where
         }
     }
 
-    async fn commit(
-        &mut self,
+    fn submit_io_task(
+        &self,
         buf: IoBuffer,
         batch: Batch,
         tombstone_infos: Vec<TombstoneInfo>,
         waiters: Vec<oneshot::Sender<()>>,
-        permit: OwnedSemaphorePermit,
-    ) {
+        init: Instant,
+    ) -> BoxFuture<'static, IoTaskCtx> {
+        // ) {
         tracing::trace!(
             ?batch,
             ?tombstone_infos,
@@ -391,7 +458,7 @@ where
             .unwrap_or_default();
         let efficiency = used as f64 / capacity as f64;
 
-        tracing::debug!(
+        tracing::trace!(
             capacity,
             used,
             efficiency,
@@ -418,88 +485,83 @@ where
         let window_count = batch.windows.len();
 
         // Write regions concurrently.
-        let futures =
-            batch
-                .windows
-                .into_iter()
-                .zip_eq(region_states_iter)
-                .enumerate()
-                .map(|(i, (window, mut region_state))| {
-                    let indexer = self.indexer.clone();
-                    let region_manager = self.region_manager.clone();
-                    let stats = self.stats.clone();
-                    let flush = self.flush;
-                    let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
-                    let metrics = self.metrics.clone();
+        let futures = batch
+            .windows
+            .into_iter()
+            .zip_eq(region_states_iter)
+            .enumerate()
+            .map(|(i, (window, mut region_state))| {
+                let indexer = self.indexer.clone();
+                let region_manager = self.region_manager.clone();
+                let stats = self.stats.clone();
+                let flush = self.flush;
+                let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
+                let metrics = self.metrics.clone();
 
-                    async move {
-                        // Wait for region is clean.
-                        let region = region_state.handle.clone().await;
+                async move {
+                    // Wait for region is clean.
+                    let region = region_state.handle.clone().await;
 
-                        let offset = region.size() - region_state.remain;
-                        let len = slice.len();
+                    let offset = region.size() - region_state.remain;
+                    let len = slice.len();
 
-                        bits::assert_aligned(PAGE, offset);
-                        bits::assert_aligned(PAGE, len);
+                    bits::assert_aligned(PAGE, offset);
+                    bits::assert_aligned(PAGE, len);
 
-                        tracing::trace!(region = region.id(), offset, len, "[flusher]: prepare to write region");
+                    tracing::trace!(region = region.id(), offset, len, "[flusher]: prepare to write region");
 
-                        if !window.is_empty() {
-                            let (_, res) = region.write(slice, offset as _).await;
-                            res?;
+                    if !window.is_empty() {
+                        let (_, res) = region.write(slice, offset as _).await;
+                        res?;
 
-                            if flush {
-                                region.flush().await?;
-                            }
-                            stats.cache_write_bytes.fetch_add(len, Ordering::Relaxed);
-                        } else {
-                            tracing::trace!(
-                                region = region.id(),
-                                "[flusher]: skip write region, because the window is empty"
-                            );
+                        if flush {
+                            region.flush().await?;
                         }
-
-                        let mut addrs =
-                            Vec::with_capacity(window.blobs.iter().map(|blob| blob.entry_indices.len()).sum());
-                        let mut blob_offset = offset as u32;
-                        let blob_count = window.blobs.len();
-                        for blob in window.blobs {
-                            for index in blob.entry_indices {
-                                let addr = HashedEntryAddress {
-                                    hash: index.hash,
-                                    address: EntryAddress {
-                                        region: region.id(),
-                                        offset: blob_offset + index.offset,
-                                        len: index.len,
-                                        sequence: index.sequence,
-                                    },
-                                };
-                                addrs.push(addr);
-                            }
-                            blob_offset += blob.size as u32;
-                        }
-                        let entry_count = addrs.len();
-                        indexer.insert_batch(addrs);
-
-                        let efficiency = entry_count as f64 / blob_count as f64;
-                        tracing::trace!(blob_count, entry_count, efficiency, "[lodc flusher]: blob efficiency");
-                        metrics.storage_blob_efficiency.record(efficiency);
-
-                        region_state.remain -= len;
-
-                        // Window expect window is full, make it evictable.
-                        if i != window_count - 1 {
-                            region_manager.mark_evictable(region.id());
-                        }
-                        tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
-
-                        // region_state.remain -= len;
-                        // if region_state.remain == 0 {
-                        //     region_manager.mark_evictable(region.id());
-                        // }
-                        Ok::<_, Error>(region_state)
+                        stats.cache_write_bytes.fetch_add(len, Ordering::Relaxed);
+                    } else {
+                        tracing::trace!(
+                            region = region.id(),
+                            "[flusher]: skip write region, because the window is empty"
+                        );
                     }
-                });
+
+                    let mut addrs = Vec::with_capacity(window.blobs.iter().map(|blob| blob.entry_indices.len()).sum());
+                    let mut blob_offset = offset as u32;
+                    let blob_count = window.blobs.len();
+                    for blob in window.blobs {
+                        for index in blob.entry_indices {
+                            let addr = HashedEntryAddress {
+                                hash: index.hash,
+                                address: EntryAddress {
+                                    region: region.id(),
+                                    offset: blob_offset + index.offset,
+                                    len: index.len,
+                                    sequence: index.sequence,
+                                },
+                            };
+                            addrs.push(addr);
+                        }
+                        blob_offset += blob.size as u32;
+                    }
+                    let entry_count = addrs.len();
+                    indexer.insert_batch(addrs);
+
+                    let efficiency = entry_count as f64 / blob_count as f64;
+                    tracing::trace!(blob_count, entry_count, efficiency, "[lodc flusher]: blob efficiency");
+                    metrics.storage_blob_efficiency.record(efficiency);
+
+                    region_state.remain -= len;
+
+                    // Window expect window is full, make it evictable.
+                    if i != window_count - 1 {
+                        region_manager.mark_evictable(region.id());
+                    }
+                    tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
+
+                    Ok::<_, Error>(region_state)
+                }
+            })
+            .collect_vec();
 
         let future = {
             let region_manager = self.region_manager.clone();
@@ -521,29 +583,50 @@ where
             }
         };
 
-        let state = match try_join(try_join_all(futures), future).await {
-            Ok((mut states, _)) => states.pop(),
-            Err(e) => {
-                tracing::error!("[flusher]: error raised when committing batch, error: {e}");
-                None
-            }
-        };
+        // let f: BoxFuture<'_, Result<Vec<CleanRegionState>>> = try_join_all(futures).boxed();
+        let f: BoxFuture<'_, Result<(Vec<CleanRegionState>, ())>> = try_join(try_join_all(futures), future).boxed();
+        let handle = self
+            .runtime
+            .write()
+            .spawn(f)
+            .map(move |jres| match jres {
+                Ok(Ok((mut states, ()))) => IoTaskCtx {
+                    state: states.pop(),
+                    waiters,
+                    init,
+                },
+                Ok(Err(e)) => {
+                    tracing::error!(?e, "[lodc flusher]: io task error");
+                    IoTaskCtx {
+                        state: None,
+                        waiters,
+                        init,
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(?e, "[lodc flusher]: join io task error");
+                    IoTaskCtx {
+                        state: None,
+                        waiters,
+                        init,
+                    }
+                }
+            })
+            .boxed();
 
-        if let Some(state) = state {
-            self.current_region_state = state;
-        }
+        // self.io_tasks.push_back(handle);
 
+        handle
+    }
+
+    fn handle_io_complete(&self, waiters: Vec<oneshot::Sender<()>>, init: Instant) {
         for waiter in waiters {
             let _ = waiter.send(());
         }
 
-        if let Some(init) = self.queue_init.take() {
-            self.metrics.storage_queue_rotate.increase(1);
-            self.metrics
-                .storage_queue_rotate_duration
-                .record(init.elapsed().as_secs_f64());
-        }
-
-        drop(permit);
+        self.metrics.storage_queue_rotate.increase(1);
+        self.metrics
+            .storage_queue_rotate_duration
+            .record(init.elapsed().as_secs_f64());
     }
 }
