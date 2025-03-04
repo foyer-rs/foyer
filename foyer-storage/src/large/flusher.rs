@@ -312,20 +312,6 @@ where
         })
     }
 
-    // impl CacheRefiller {
-    //     pub(crate) fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
-    //         poll_fn(|cx| {
-    //             if let Some(item) = self.queue.front_mut() {
-    //                 ready!(item.handle.poll_unpin(cx)).unwrap();
-    //                 let item = self.queue.pop_front().unwrap();
-    //                 GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-    //                 return Poll::Ready(item.event);
-    //             }
-    //             Poll::Pending
-    //         })
-    //     }
-    // }
-
     pub async fn run(mut self) -> Result<()> {
         let rx = self.rx.take().unwrap();
 
