@@ -310,7 +310,6 @@ impl Metadata {
     }
 
     async fn flush(&self, device: &MonitoredDevice) -> Result<()> {
-        // TODO(MrCroxx): Review me!
         let mut buf = IoBuffer::new(PAGE);
         self.write(&mut buf[..]);
         let (_, res) = device.write(buf, 0, 0).await;

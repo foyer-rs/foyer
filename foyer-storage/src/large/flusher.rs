@@ -160,10 +160,7 @@ where
         let writer = create_writer(buffer_size, device.region_size(), device.region_size(), metrics.clone());
         let writer = Some(writer);
 
-        let current_region_state = CleanRegionState {
-            handle: region_manager.get_clean_region(),
-            remain: device.region_size(),
-        };
+        let current_region_handle = region_manager.get_clean_region();
         let remain = device.region_size();
 
         let runner = Runner {
@@ -174,7 +171,6 @@ where
             queue_init: None,
             buffer_size,
             submit_queue_size: submit_queue_size.clone(),
-            current_region_state,
             region_manager,
             device,
             indexer,
@@ -185,6 +181,7 @@ where
             stats,
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
+            current_region_handle,
             remain,
             #[cfg(test)]
             flush_holder,
@@ -232,12 +229,6 @@ fn create_writer(
     BatchWriter::new(IoBuffer::new(capacity), region_size, current_region_remain, metrics)
 }
 
-#[derive(Debug, Clone)]
-struct CleanRegionState {
-    handle: GetCleanRegionHandle,
-    remain: usize,
-}
-
 #[derive(Debug)]
 pub struct InvalidStats {
     pub region: RegionId,
@@ -251,7 +242,7 @@ pub struct TombstoneInfo {
 }
 
 struct IoTaskCtx {
-    state: Option<CleanRegionState>,
+    handle: Option<GetCleanRegionHandle>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Instant,
 }
@@ -271,7 +262,7 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
 
-    current_region_state: CleanRegionState,
+    current_region_handle: GetCleanRegionHandle,
     buffer_size: usize,
 
     region_manager: RegionManager,
@@ -332,11 +323,8 @@ where
                 let waiters = std::mem::take(&mut self.waiters);
 
                 let remain = match batch.windows.len() {
-                    0 => self.current_region_state.remain,
-                    1 => {
-                        self.current_region_state.remain
-                            - batch.windows.first().as_ref().unwrap().absolute_dirty_range.len()
-                    }
+                    0 => self.remain,
+                    1 => self.remain - batch.windows.first().as_ref().unwrap().absolute_dirty_range.len(),
                     _ => self.device.region_size() - batch.windows.last().as_ref().unwrap().absolute_dirty_range.len(),
                 };
 
@@ -358,10 +346,9 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { state, waiters, init } = self.next_io_task_finish() => {
-                    if let Some(state) = state {
-                        assert_eq!(state.remain, self.remain);
-                        self.current_region_state = state;
+                IoTaskCtx { handle, waiters, init } = self.next_io_task_finish() => {
+                    if let Some(handle) = handle {
+                        self.current_region_handle = handle;
                     }
                     self.handle_io_complete(waiters, init);
                 }
@@ -451,7 +438,7 @@ where
             windows = batch.windows.len(),
             tombstones = self.tombstone_infos.len(),
             waiters = self.waiters.len(),
-            current_region_remain = self.current_region_state.remain,
+            current_region_remain = self.remain,
             "[lodc flusher] buffer efficiency"
         );
 
@@ -460,11 +447,11 @@ where
         let region_states_iter = if batch.windows.is_empty() {
             vec![]
         } else {
-            std::iter::once(self.current_region_state.clone())
-                .chain((0..batch.windows.len() - 1).map(|_| CleanRegionState {
-                    handle: self.region_manager.get_clean_region(),
-                    remain: self.device.region_size(),
-                }))
+            std::iter::once((self.current_region_handle.clone(), self.remain))
+                .chain(
+                    (0..batch.windows.len() - 1)
+                        .map(|_| (self.region_manager.get_clean_region(), self.device.region_size())),
+                )
                 .collect_vec()
         };
 
@@ -476,7 +463,7 @@ where
             .into_iter()
             .zip_eq(region_states_iter)
             .enumerate()
-            .map(|(i, (window, mut region_state))| {
+            .map(|(i, (window, (region_handle, remain)))| {
                 let indexer = self.indexer.clone();
                 let region_manager = self.region_manager.clone();
                 let stats = self.stats.clone();
@@ -486,9 +473,9 @@ where
 
                 async move {
                     // Wait for region is clean.
-                    let region = region_state.handle.clone().await;
+                    let region = region_handle.clone().await;
 
-                    let offset = region.size() - region_state.remain;
+                    let offset = region.size() - remain;
                     let len = slice.len();
 
                     bits::assert_aligned(PAGE, offset);
@@ -536,15 +523,13 @@ where
                     tracing::trace!(blob_count, entry_count, efficiency, "[lodc flusher]: blob efficiency");
                     metrics.storage_blob_efficiency.record(efficiency);
 
-                    region_state.remain -= len;
-
                     // Window expect window is full, make it evictable.
                     if i != window_count - 1 {
                         region_manager.mark_evictable(region.id());
                     }
                     tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
 
-                    Ok::<_, Error>(region_state)
+                    Ok::<_, Error>(region_handle)
                 }
             })
             .collect_vec();
@@ -570,21 +555,21 @@ where
         };
 
         // let f: BoxFuture<'_, Result<Vec<CleanRegionState>>> = try_join_all(futures).boxed();
-        let f: BoxFuture<'_, Result<(Vec<CleanRegionState>, ())>> = try_join(try_join_all(futures), future).boxed();
+        let f: BoxFuture<'_, Result<(Vec<GetCleanRegionHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
             .runtime
             .write()
             .spawn(f)
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {
-                    state: states.pop(),
+                    handle: states.pop(),
                     waiters,
                     init,
                 },
                 Ok(Err(e)) => {
                     tracing::error!(?e, "[lodc flusher]: io task error");
                     IoTaskCtx {
-                        state: None,
+                        handle: None,
                         waiters,
                         init,
                     }
@@ -592,7 +577,7 @@ where
                 Err(e) => {
                     tracing::error!(?e, "[lodc flusher]: join io task error");
                     IoTaskCtx {
-                        state: None,
+                        handle: None,
                         waiters,
                         init,
                     }
