@@ -12,27 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
+#[derive(Debug, Clone, Default)]
+pub struct FlushHolder {
+    hold: Arc<AtomicBool>,
+}
 
-mod compress;
-mod device;
-mod engine;
-mod error;
-mod io;
-mod large;
-mod picker;
-mod region;
-mod runtime;
-mod serde;
-mod small;
-mod statistics;
-mod storage;
-mod store;
+impl FlushHolder {
+    pub fn is_held(&self) -> bool {
+        self.hold.load(Ordering::Relaxed)
+    }
 
-mod prelude;
-pub use prelude::*;
+    pub fn hold(&self) {
+        self.hold.store(true, Ordering::Relaxed);
+    }
 
-pub mod test_utils;
+    pub fn unhold(&self) {
+        self.hold.store(false, Ordering::Relaxed);
+    }
+}

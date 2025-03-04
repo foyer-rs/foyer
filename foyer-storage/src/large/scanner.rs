@@ -12,155 +12,81 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use foyer_common::{bits, metrics::Metrics, strict_assert};
+use itertools::Itertools;
 
 use super::indexer::EntryAddress;
 use crate::{
-    device::bytes::IoBytes,
-    error::{Error, Result},
-    large::serde::{EntryHeader, Sequence},
+    error::Result,
+    io::{IoBuffer, PAGE},
+    large::batch::BlobReader,
     region::Region,
 };
 
 #[derive(Debug)]
 pub struct EntryInfo {
     pub hash: u64,
-    pub sequence: Sequence,
     pub addr: EntryAddress,
-}
-
-#[derive(Debug)]
-struct CachedRegionReader {
-    region: Region,
-    offset: u64,
-    buffer: IoBytes,
-}
-
-impl CachedRegionReader {
-    const IO_SIZE_HINT: usize = 16 * 1024;
-
-    fn new(region: Region) -> Self {
-        Self {
-            region,
-            offset: 0,
-            buffer: IoBytes::new(),
-        }
-    }
-
-    async fn read(&mut self, offset: u64, len: usize) -> Result<&[u8]> {
-        if offset as usize + len >= self.region.size() {
-            return Err(Error::OutOfRange {
-                valid: 0..self.region.size(),
-                get: offset as usize..offset as usize + len,
-            });
-        }
-
-        if offset >= self.offset && offset as usize + len <= self.offset as usize + self.buffer.len() {
-            let start = (offset - self.offset) as usize;
-            let end = start + len;
-            return Ok(&self.buffer[start..end]);
-        }
-
-        // Move forward.
-        self.offset = bits::align_down(self.region.align() as u64, offset);
-        let end = bits::align_up(
-            self.region.align(),
-            std::cmp::max(offset as usize + len, offset as usize + Self::IO_SIZE_HINT),
-        );
-        let end = std::cmp::min(self.region.size(), end);
-
-        let read_len = end - self.offset as usize;
-        assert!(bits::is_aligned(self.region.align(), read_len));
-        assert!(read_len >= len);
-
-        let buffer = self.region.read(self.offset, read_len).await?.freeze();
-        self.buffer = buffer;
-
-        let start = (offset - self.offset) as usize;
-        let end = start + len;
-        Ok(&self.buffer[start..end])
-    }
 }
 
 #[derive(Debug)]
 pub struct RegionScanner {
     region: Region,
     offset: u64,
-    cache: CachedRegionReader,
-    _metrics: Arc<Metrics>,
 }
 
 impl RegionScanner {
-    pub fn new(region: Region, metrics: Arc<Metrics>) -> Self {
-        let cache = CachedRegionReader::new(region.clone());
-        Self {
-            region,
-            offset: 0,
-            cache,
-            _metrics: metrics,
-        }
+    pub fn new(region: Region) -> Self {
+        Self { region, offset: 0 }
     }
 
-    async fn current(&mut self) -> Result<Option<EntryHeader>> {
-        strict_assert!(bits::is_aligned(self.region.align() as u64, self.offset));
-
-        if self.offset as usize >= self.region.size() {
-            // reach region EOF
+    pub async fn next(&mut self) -> Result<Option<Vec<EntryInfo>>> {
+        if self.offset as usize + PAGE > self.region.size() {
             return Ok(None);
         }
 
-        // load entry header buf
-        let buf = self.cache.read(self.offset, EntryHeader::serialized_len()).await?;
-
-        if buf.len() < EntryHeader::serialized_len() {
-            return Ok(None);
-        }
-
-        let res = EntryHeader::read(buf).ok();
-
-        Ok(res)
-    }
-
-    async fn step(&mut self, header: &EntryHeader) {
-        let aligned = bits::align_up(self.region.align(), header.entry_len());
-        self.offset += aligned as u64;
-    }
-
-    fn info(&self, header: &EntryHeader) -> EntryInfo {
-        EntryInfo {
-            hash: header.hash,
-            sequence: header.sequence,
-            addr: EntryAddress {
-                region: self.region.id(),
-                offset: self.offset as _,
-                len: header.entry_len() as _,
-                sequence: header.sequence,
-            },
-        }
-    }
-
-    pub async fn next(&mut self) -> Result<Option<EntryInfo>> {
-        let header = match self.current().await {
-            Ok(Some(header)) => header,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
+        let page = IoBuffer::new(PAGE);
+        let (page, res) = self.region.read(page, self.offset).await;
+        res?;
+        let blob = match BlobReader::read(page) {
+            Ok(blob) => blob,
+            Err(e) => {
+                tracing::trace!(
+                    ?e,
+                    region_id = self.region.id(),
+                    "[region blob scanner]: error to parse a blob, skip the remaining region"
+                );
+                return Ok(None);
+            }
         };
 
-        let info = self.info(&header);
+        let infos = blob
+            .entry_indices
+            .into_iter()
+            .map(|entry_index| EntryInfo {
+                hash: entry_index.hash,
+                addr: EntryAddress {
+                    region: self.region.id(),
+                    offset: self.offset as u32 + entry_index.offset,
+                    len: entry_index.len,
+                    sequence: entry_index.sequence,
+                },
+            })
+            .inspect(|info| tracing::trace!(?info, "[scanner] extract entry info"))
+            .collect_vec();
 
-        self.step(&header).await;
+        self.offset += blob.size as u64;
 
-        Ok(Some(info))
+        Ok(Some(infos))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
     use bytesize::ByteSize;
+    use foyer_common::metrics::Metrics;
+    use tempfile::tempdir;
 
     use super::*;
     use crate::{
@@ -168,9 +94,12 @@ mod tests {
             monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice,
         },
+        large::batch::{BatchWriter, EntryIndex, EntryWriter, Op},
         region::RegionStats,
-        DirectFsDeviceOptions, Runtime,
+        Compression, DirectFsDeviceOptions, Runtime,
     };
+
+    const KB: usize = 1024;
 
     async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
         let runtime = Runtime::current();
@@ -188,21 +117,56 @@ mod tests {
         .unwrap()
     }
 
-    #[tokio::test]
-    async fn test_cached_region_reader_overflow() {
-        let dir = tempfile::tempdir().unwrap();
+    #[test_log::test(tokio::test)]
+    async fn test_region_scanner() {
+        let tempdir = tempdir().unwrap();
+        let dev = device_for_test(tempdir.path()).await;
 
-        let device = device_for_test(dir.path()).await;
-        let region = Region::new_for_test(0, device, Arc::<RegionStats>::default());
+        let buf = IoBuffer::new(16 * KB);
 
-        let mut cached = CachedRegionReader::new(region.clone());
+        // 4K (meta)
+        let mut writer = BatchWriter::new(buf, 16 * KB, 16 * KB, Arc::new(Metrics::noop()));
+        // 4K
+        let op = writer.push(&1, &vec![1u8; 3 * KB], 1, Compression::None, 1);
+        assert_eq!(op, Op::Noop);
+        // 8K
+        let op = writer.push(&3, &vec![3u8; 7 * KB], 3, Compression::None, 3);
+        assert_eq!(op, Op::Noop);
+        let (buf, batch) = writer.finish();
 
-        cached.read(0, region.size() / 2).await.unwrap();
-        let res = cached.read(region.size() as u64 / 2, region.size()).await;
-        assert!(
-            matches!(res, Err(Error::OutOfRange { valid, get }) if valid == (0..region.size()) && get == (
-                region.size() / 2..region.size() / 2 + region.size()
-            ))
-        );
+        let (_, res) = dev.write(buf, 0, 0).await;
+        res.unwrap();
+
+        let mut w_entries = vec![];
+        let mut blob_offset = 0;
+        for window in batch.windows {
+            for blob in window.blobs {
+                for e in blob.entry_indices {
+                    let ei = EntryIndex {
+                        hash: e.hash,
+                        sequence: e.sequence,
+                        offset: blob_offset as u32 + e.offset,
+                        len: e.len,
+                    };
+                    w_entries.push(ei);
+                }
+                blob_offset += blob.size;
+            }
+        }
+
+        let mut r_entries = vec![];
+        let mut scanner = RegionScanner::new(Region::new_for_test(0, dev, Arc::<RegionStats>::default()));
+
+        while let Some(es) = scanner.next().await.unwrap() {
+            for e in es {
+                let ei = EntryIndex {
+                    hash: e.hash,
+                    sequence: e.addr.sequence,
+                    offset: e.addr.offset,
+                    len: e.addr.len,
+                };
+                r_entries.push(ei);
+            }
+        }
     }
 }

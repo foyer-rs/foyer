@@ -22,11 +22,11 @@ use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
 use serde::{Deserialize, Serialize};
 
-use super::{Dev, DevExt, RegionId};
+use super::{Dev, RegionId};
 use crate::{
-    device::ALIGN,
     error::{Error, Result},
-    IoBytes, IoBytesMut, Runtime,
+    io::{IoBuf, IoBufMut, PAGE},
+    Runtime,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,9 +38,9 @@ pub struct DirectFileDeviceConfig {
 
 impl DirectFileDeviceConfig {
     fn verify(&self) -> Result<()> {
-        if self.region_size == 0 || self.region_size % ALIGN != 0 {
+        if self.region_size == 0 || self.region_size % PAGE != 0 {
             return Err(anyhow::anyhow!(
-                "region size ({region_size}) must be a multiplier of ALIGN ({ALIGN})",
+                "region size ({region_size}) must be a multiplier of PAGE ({PAGE})",
                 region_size = self.region_size,
             )
             .into());
@@ -60,6 +60,10 @@ impl DirectFileDeviceConfig {
 }
 
 /// A device that uses a single direct i/o file.
+///
+/// # Safety
+///
+/// Reads and writes MUST be 4K-aligned.
 #[derive(Debug, Clone)]
 pub struct DirectFileDevice {
     file: Arc<File>,
@@ -71,87 +75,119 @@ pub struct DirectFileDevice {
 }
 
 impl DirectFileDevice {
-    /// Positioned write API for the direct file device.
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
-    pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
-        let aligned = buf.as_aligned().len();
+    fn assert_io_range(&self, region: Option<RegionId>, offset: u64, len: usize) {
+        let offset = if let Some(region) = region {
+            self.region_size as u64 * region as u64 + offset
+        } else {
+            offset
+        };
 
+        // Assert alignment.
+        bits::assert_aligned(PAGE, offset as _);
+        bits::assert_aligned(PAGE, len);
+
+        // Assert file capacity bound.
         assert!(
-            offset as usize + aligned <= self.capacity(),
-            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= capacity ({capacity})",
-            total = offset as usize + aligned,
+            offset as usize + len <= self.capacity(),
+            "offset ({offset}) + len ({len}) = total ({total}) <= capacity ({capacity})",
+            total = offset as usize + len,
             capacity = self.capacity,
         );
 
-        let file = self.file.clone();
+        // Assert region capacity bound if region is given.
+        if region.is_some() && len != 0 {
+            let start_region = offset as usize / self.region_size;
+            let end_region = (offset as usize + len - 1) / self.region_size;
+            assert_eq!(
+                start_region, end_region,
+                "io range are not in the same region, region_size: {region_size}, offset: {offset}, len: {len}, start region: {start_region}, end region: {end_region}",
+                region_size = self.region_size,
+            );
+        }
+    }
 
+    /// Positioned write API for the direct file device.
+    ///
+    /// # Safety
+    ///
+    /// Reads and writes MUST be 4K-aligned.
+    #[fastrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
+    pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
+        let len = buf.len();
+        self.assert_io_range(None, offset, len);
+
+        let file = self.file.clone();
         asyncify_with_runtime(self.runtime.write(), move || {
             #[cfg(target_family = "windows")]
             let written = {
                 use std::os::windows::fs::FileExt;
-                file.seek_write(buf.as_aligned(), offset)?
+                match file.seek_write(&buf, offset) {
+                    Ok(v) => v,
+                    Err(e) => return (buf, Err(e.into())),
+                }
             };
 
             #[cfg(target_family = "unix")]
             let written = {
                 use std::os::unix::fs::FileExt;
-                file.write_at(buf.as_aligned(), offset)?
+                match file.write_at(&buf, offset) {
+                    Ok(v) => v,
+                    Err(e) => return (buf, Err(e.into())),
+                }
             };
 
-            if written != aligned {
-                return Err(anyhow::anyhow!("written {written}, expected: {aligned}").into());
+            if written != len {
+                return (buf, Err(anyhow::anyhow!("written {written}, expected: {len}").into()));
             }
 
-            Ok(())
+            (buf, Ok(()))
         })
         .await
     }
 
     /// Positioned read API for the direct file device.
+    ///
+    /// # Safety
+    ///
+    /// Reads and writes MUST be 4K-aligned.
     #[fastrace::trace(name = "foyer::storage::device::direct_file::pread")]
-    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
-        bits::assert_aligned(self.align() as u64, offset);
-
-        let aligned = bits::align_up(self.align(), len);
-
-        assert!(
-            offset as usize + aligned <= self.capacity(),
-            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= capacity ({capacity})",
-            total = offset as usize + aligned,
-            capacity = self.capacity,
-        );
-
-        let mut buf = IoBytesMut::with_capacity(aligned);
-        unsafe {
-            buf.set_len(aligned);
-        }
+    pub async fn pread<B>(&self, mut buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
+        let len = buf.len();
+        self.assert_io_range(None, offset, len);
 
         let file = self.file.clone();
-
-        let mut buffer = asyncify_with_runtime(self.runtime.read(), move || {
+        asyncify_with_runtime(self.runtime.read(), move || {
             #[cfg(target_family = "windows")]
             let read = {
                 use std::os::windows::fs::FileExt;
-                file.seek_read(buf.as_mut(), offset)?
+                match file.seek_read(&mut buf, offset) {
+                    Ok(v) => v,
+                    Err(e) => return (buf, Err(e.into())),
+                }
             };
 
             #[cfg(target_family = "unix")]
             let read = {
                 use std::os::unix::fs::FileExt;
-                file.read_at(buf.as_mut(), offset)?
+                match file.read_at(&mut buf, offset) {
+                    Ok(v) => v,
+                    Err(e) => return (buf, Err(e.into())),
+                }
             };
 
-            if read != aligned {
-                return Err(anyhow::anyhow!("read {read}, expected: {aligned}").into());
+            if read != len {
+                return (buf, Err(anyhow::anyhow!("read {read}, expected: {len}").into()));
             }
 
-            Ok::<_, Error>(buf)
+            (buf, Ok(()))
         })
-        .await?;
-
-        buffer.truncate(len);
-
-        Ok(buffer)
+        .await
     }
 }
 
@@ -212,35 +248,27 @@ impl Dev for DirectFileDevice {
     }
 
     #[fastrace::trace(name = "foyer::storage::device::direct_file::write")]
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
-        let aligned = buf.as_aligned().len();
-
-        assert!(
-            offset as usize + aligned <= self.region_size(),
-            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= region size ({region_size})",
-            total = offset as usize + aligned,
-            region_size = self.region_size(),
-        );
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
+        let len = buf.len();
+        self.assert_io_range(Some(region), offset, len);
 
         let poffset = offset + region as u64 * self.region_size as u64;
         self.pwrite(buf, poffset).await
     }
 
     #[fastrace::trace(name = "foyer::storage::device::direct_file::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
-        bits::assert_aligned(self.align() as u64, offset);
-
-        let aligned = bits::align_up(self.align(), len);
-
-        assert!(
-            offset as usize + aligned <= self.region_size(),
-            "offset ({offset}) + aligned ({aligned}) = total ({total}) <= region size ({region_size})",
-            total = offset as usize + aligned,
-            region_size = self.region_size(),
-        );
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
+        let len = buf.len();
+        self.assert_io_range(Some(region), offset, len);
 
         let poffset = offset + region as u64 * self.region_size as u64;
-        self.pread(poffset, len).await
+        self.pread(buf, poffset).await
     }
 
     #[fastrace::trace(name = "foyer::storage::device::direct_file::flush")]
@@ -307,13 +335,13 @@ impl From<DirectFileDeviceOptions> for DirectFileDeviceConfig {
             create_dir_all(&dir).unwrap();
             free_space(&dir).unwrap() as usize / 10 * 8
         });
-        let capacity = align_v(capacity, ALIGN);
+        let capacity = align_v(capacity, PAGE);
 
         let region_size = options
             .region_size
             .unwrap_or(DirectFileDeviceOptions::DEFAULT_FILE_SIZE)
             .min(capacity);
-        let region_size = align_v(region_size, ALIGN);
+        let region_size = align_v(region_size, PAGE);
 
         let capacity = align_v(capacity, region_size);
 
@@ -327,9 +355,10 @@ impl From<DirectFileDeviceOptions> for DirectFileDeviceConfig {
 
 #[cfg(test)]
 mod tests {
-    use itertools::repeat_n;
+    use bytes::BufMut;
 
     use super::*;
+    use crate::io::IoBuffer;
 
     #[test_log::test]
     fn test_options_builder() {
@@ -369,14 +398,17 @@ mod tests {
 
         let device = DirectFileDevice::open(config.clone(), runtime.clone()).await.unwrap();
 
-        let mut buf = IoBytesMut::with_capacity(64 * 1024);
-        buf.extend(repeat_n(b'x', 64 * 1024 - 100));
-        let buf = buf.freeze();
+        let mut buf = IoBuffer::new(64 * 1024);
+        (&mut buf[..]).put_bytes(b'x', 64 * 1024 - 100);
+        let buf = buf.into_shared_io_slice();
 
-        device.write(buf.clone(), 0, 4096).await.unwrap();
+        let (_, res) = device.write(buf.clone(), 0, 4096).await;
+        res.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
-        assert_eq!(buf, b);
+        let b = IoBuffer::new(64 * 1024);
+        let (b, res) = device.read(b, 0, 4096).await;
+        res.unwrap();
+        assert_eq!(&buf[..], &b[..]);
 
         device.flush(None).await.unwrap();
 
@@ -384,7 +416,9 @@ mod tests {
 
         let device = DirectFileDevice::open(config, runtime).await.unwrap();
 
-        let b = device.read(0, 4096, 64 * 1024 - 100).await.unwrap().freeze();
-        assert_eq!(buf, b);
+        let b = IoBuffer::new(64 * 1024);
+        let (b, res) = device.read(b, 0, 4096).await;
+        res.unwrap();
+        assert_eq!(&buf[..], &b[..]);
     }
 }

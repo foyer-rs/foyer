@@ -33,7 +33,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    IoBytesMut,
+    io::{IoBuffer, PAGE},
 };
 
 /// # Lock Order
@@ -189,9 +189,10 @@ impl SetManager {
 
         *self.inner.loose_bloom_filters[sid as usize].write() = storage.bloom_filter().clone();
 
-        let buffer = storage.freeze();
+        let buffer = storage.into_io_buffer();
         let (region, offset) = self.locate(sid);
-        self.inner.device.write(buffer, region, offset).await?;
+        let (_, res) = self.inner.device.write(buffer, region, offset).await;
+        res?;
         if self.inner.flush {
             self.inner.device.flush(Some(region)).await?;
         }
@@ -230,8 +231,10 @@ impl SetManager {
 
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
-        let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
-        let storage = SetStorage::load(buffer, self.watermark().await, self.inner.metrics.clone());
+        let buf = IoBuffer::new(self.inner.set_size);
+        let (buf, res) = self.inner.device.read(buf, region, offset).await;
+        res?;
+        let storage = SetStorage::load(buf, self.watermark().await, self.inner.metrics.clone());
         Ok(storage)
     }
 
@@ -307,15 +310,18 @@ impl Metadata {
     }
 
     async fn flush(&self, device: &MonitoredDevice) -> Result<()> {
-        let mut buf = IoBytesMut::with_capacity(Self::SIZE);
-        self.write(&mut buf);
-        let buf = buf.freeze();
-        device.write(buf, 0, 0).await?;
+        let mut buf = IoBuffer::new(PAGE);
+        self.write(&mut buf[..]);
+        let (_, res) = device.write(buf, 0, 0).await;
+        res?;
         Ok(())
     }
 
     async fn load(device: &MonitoredDevice) -> Result<Self> {
-        let buf = device.read(0, 0, Metadata::SIZE).await?;
+        let buf = IoBuffer::new(PAGE);
+
+        let (buf, res) = device.read(buf, 0, 0).await;
+        res?;
         let metadata = Metadata::read(&buf[..Metadata::SIZE]);
         Ok(metadata)
     }

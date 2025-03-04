@@ -21,3 +21,6 @@ pub mod recover;
 pub mod scanner;
 pub mod serde;
 pub mod tombstone;
+
+#[cfg(test)]
+pub mod test_utils;

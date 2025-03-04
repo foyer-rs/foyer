@@ -15,13 +15,13 @@
 pub use crate::{
     compress::Compression,
     device::{
-        bytes::{IoBuffer, IoBytes, IoBytesMut},
         direct_file::{DirectFileDevice, DirectFileDeviceOptions},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
         Dev, DevConfig, DevExt,
     },
     error::{Error, Result},
+    io::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
     large::{
         recover::RecoverMode,
         tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},

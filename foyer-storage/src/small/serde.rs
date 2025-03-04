@@ -80,7 +80,6 @@ impl EntryHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::IoBytesMut;
 
     #[test]
     fn test_entry_header_serde() {
@@ -89,7 +88,7 @@ mod tests {
             key_len: 114,
             value_len: 514,
         };
-        let mut buf = IoBytesMut::new();
+        let mut buf = vec![];
         header.write(&mut buf);
         let h = EntryHeader::read(&buf[..]);
         assert_eq!(header, h);

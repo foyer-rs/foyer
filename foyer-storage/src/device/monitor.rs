@@ -21,10 +21,14 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::{bits, metrics::Metrics};
+use foyer_common::metrics::Metrics;
 
 use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
+use crate::{
+    error::Result,
+    io::{IoBuf, IoBufMut},
+    Dev, DirectFileDevice, Runtime,
+};
 
 /// The statistics information of the device.
 #[derive(Debug, Default)]
@@ -88,10 +92,13 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::write")]
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), buf.len());
+        let bytes = buf.len();
         self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
@@ -107,14 +114,17 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), len);
+        let bytes = buf.len();
         self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        let res = self.device.read(region, offset, len).await;
+        let res = self.device.read(buf, region, offset).await;
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);
@@ -160,12 +170,18 @@ where
         Self::open(config, runtime).await
     }
 
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         self.write(buf, region, offset).await
     }
 
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
-        self.read(region, offset, len).await
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
+        self.read(buf, region, offset).await
     }
 
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
@@ -175,10 +191,13 @@ where
 
 impl Monitored<DirectFileDevice> {
     #[fastrace::trace(name = "foyer::storage::device::monitor::pwrite")]
-    pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
+    pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), buf.len());
+        let bytes = buf.len();
         self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
@@ -194,14 +213,17 @@ impl Monitored<DirectFileDevice> {
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::pread")]
-    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
+    pub async fn pread<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), len);
+        let bytes = buf.len();
         self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
         self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        let res = self.device.pread(offset, len).await;
+        let res = self.device.pread(buf, offset).await;
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);

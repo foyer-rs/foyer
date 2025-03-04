@@ -13,25 +13,21 @@
 // limitations under the License.
 
 pub mod allocator;
-pub mod bytes;
 pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
 use std::{fmt::Debug, future::Future};
 
-use allocator::AlignedAllocator;
 use direct_file::DirectFileDeviceConfig;
 use direct_fs::DirectFsDeviceConfig;
 use monitor::Monitored;
 
 use crate::{
-    error::Result, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBytes,
-    IoBytesMut, Runtime,
+    error::Result,
+    io::{IoBuf, IoBufMut, PAGE},
+    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
 };
-
-pub const ALIGN: usize = 4096;
-pub const IO_BUFFER_ALLOCATOR: AlignedAllocator<ALIGN> = AlignedAllocator::new();
 
 pub type RegionId = u32;
 
@@ -59,11 +55,15 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
 
     /// Write API for the device.
     #[must_use]
-    fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> impl Future<Output = Result<()>> + Send;
+    fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
+    where
+        B: IoBuf;
 
     /// Read API for the device.
     #[must_use]
-    fn read(&self, region: RegionId, offset: u64, len: usize) -> impl Future<Output = Result<IoBytesMut>> + Send;
+    fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
+    where
+        B: IoBufMut;
 
     /// Flush the device, make sure all modifications are persisted safely on the device.
     #[must_use]
@@ -74,7 +74,7 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
 pub trait DevExt: Dev {
     /// Get the align size of the device.
     fn align(&self) -> usize {
-        ALIGN
+        PAGE
     }
 
     /// Get the region count of the device.
@@ -133,17 +133,23 @@ impl Dev for Device {
         }
     }
 
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         match self {
             Device::DirectFile(dev) => dev.write(buf, region, offset).await,
             Device::DirectFs(dev) => dev.write(buf, region, offset).await,
         }
     }
 
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         match self {
-            Device::DirectFile(dev) => dev.read(region, offset, len).await,
-            Device::DirectFs(dev) => dev.read(region, offset, len).await,
+            Device::DirectFile(dev) => dev.read(buf, region, offset).await,
+            Device::DirectFs(dev) => dev.read(buf, region, offset).await,
         }
     }
 

@@ -245,6 +245,9 @@ struct Args {
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
+    #[arg(long, default_value_t = ByteSize::mib(16))]
+    buffer_pool_size: ByteSize,
+
     #[arg(long, default_value_t = ByteSize::kib(16))]
     set_size: ByteSize,
 
@@ -513,7 +516,8 @@ async fn benchmark(args: Args) {
         .with_eviction_pickers(vec![
             Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
             Box::<FifoPicker>::default(),
-        ]);
+        ])
+        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _);
 
     let small = SmallEngineOptions::new()
         .with_flushers(args.flushers)

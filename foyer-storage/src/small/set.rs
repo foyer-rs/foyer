@@ -29,8 +29,9 @@ use foyer_common::{
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
     error::Result,
+    io::IoBuffer,
     serde::{Checksummer, EntryDeserializer},
-    Compression, IoBytes, IoBytesMut,
+    Compression,
 };
 
 pub type SetId = u64;
@@ -56,7 +57,7 @@ pub struct SetStorage {
     /// Set bloom filter.
     bloom_filter: BloomFilterU64<4>,
 
-    buffer: IoBytesMut,
+    buffer: IoBuffer,
 
     metrics: Arc<Metrics>,
 }
@@ -80,7 +81,7 @@ impl SetStorage {
     /// Load the set storage from buffer.
     ///
     /// If `after` is set and the set storage is before the timestamp, load an empty set storage.
-    pub fn load(buffer: IoBytesMut, watermark: u128, metrics: Arc<Metrics>) -> Self {
+    pub fn load(buffer: IoBuffer, watermark: u128, metrics: Arc<Metrics>) -> Self {
         assert!(buffer.len() >= Self::SET_HEADER_SIZE);
 
         let checksum = (&buffer[0..4]).get_u32();
@@ -145,8 +146,8 @@ impl SetStorage {
         self.bloom_filter.clear();
     }
 
-    pub fn freeze(self) -> IoBytes {
-        self.buffer.freeze()
+    pub fn into_io_buffer(self) -> IoBuffer {
+        self.buffer
     }
 
     pub fn apply(&mut self, deletions: &HashSet<u64>, items: Vec<Item>) {
@@ -192,9 +193,9 @@ impl SetStorage {
             .iter()
             .rev()
             .fold((items.len(), 0, true), |(skip, size, proceed), item| {
-                let proceed = proceed && size + item.buffer.len() <= self.size - Self::SET_HEADER_SIZE;
+                let proceed = proceed && size + item.slice.len() <= self.size - Self::SET_HEADER_SIZE;
                 if proceed {
-                    (skip - 1, size + item.buffer.len(), proceed)
+                    (skip - 1, size + item.slice.len(), proceed)
                 } else {
                     (skip, size, proceed)
                 }
@@ -203,9 +204,9 @@ impl SetStorage {
         self.reserve(size);
         let mut cursor = Self::SET_HEADER_SIZE + self.len;
         for item in items.iter().skip(skip) {
-            self.buffer[cursor..cursor + item.buffer.len()].copy_from_slice(&item.buffer);
+            self.buffer[cursor..cursor + item.slice.len()].copy_from_slice(&item.slice);
             self.bloom_filter.insert(item.hash);
-            cursor += item.buffer.len();
+            cursor += item.slice.len();
         }
         self.len = cursor - Self::SET_HEADER_SIZE;
     }
@@ -358,16 +359,15 @@ impl SetTimestamp {
 #[cfg(test)]
 mod tests {
 
+    use bytes::Bytes;
     use foyer_common::metrics::Metrics;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry};
 
     use super::*;
-    use crate::{serde::EntrySerializer, Compression};
+    use crate::{io::PAGE, serde::EntrySerializer, Compression};
 
-    const PAGE: usize = 4096;
-
-    fn buffer(entry: &CacheEntry<u64, Vec<u8>>) -> IoBytes {
-        let mut buf = IoBytesMut::new();
+    fn to_bytes(entry: &CacheEntry<u64, Vec<u8>>) -> Bytes {
+        let mut buf = vec![];
 
         // reserve header
         let header = EntryHeader::new(0, 0, 0);
@@ -385,7 +385,7 @@ mod tests {
         let header = EntryHeader::new(entry.hash(), info.key_len, info.value_len);
         header.write(&mut buf[0..EntryHeader::ENTRY_HEADER_SIZE]);
 
-        buf.freeze()
+        Bytes::from(buf)
     }
 
     fn assert_some(storage: &SetStorage, entry: &CacheEntry<u64, Vec<u8>>) {
@@ -405,72 +405,63 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_set_storage_empty() {
-        let buffer = IoBytesMut::new();
-        SetStorage::load(buffer, 0, Arc::new(Metrics::noop()));
-    }
-
-    #[test]
     fn test_set_storage_basic() {
         let memory = memory_for_test();
 
-        let mut buf = IoBytesMut::with_capacity(PAGE);
-        unsafe { buf.set_len(PAGE) };
-
         // load will result in an empty set
+        let buf = IoBuffer::new(PAGE);
         let mut storage = SetStorage::load(buf, 0, Arc::new(Metrics::noop()));
         assert!(storage.is_empty());
 
         let e1 = memory.insert(1, vec![b'1'; 42]);
-        let b1 = buffer(&e1);
+        let s1 = to_bytes(&e1);
         storage.apply(
             &HashSet::from_iter([2, 4]),
             vec![Item {
-                buffer: b1.clone(),
+                slice: s1.clone(),
                 hash: e1.hash(),
             }],
         );
-        assert_eq!(storage.len(), b1.len());
+        assert_eq!(storage.len(), s1.len());
         assert_some(&storage, &e1);
 
         let e2 = memory.insert(2, vec![b'2'; 97]);
-        let b2 = buffer(&e2);
+        let s2 = to_bytes(&e2);
         storage.apply(
             &HashSet::from_iter([e1.hash(), 3, 5]),
             vec![Item {
-                buffer: b2.clone(),
+                slice: s2.clone(),
                 hash: e2.hash(),
             }],
         );
-        assert_eq!(storage.len(), b2.len());
+        assert_eq!(storage.len(), s2.len());
         assert_none(&storage, e1.hash());
         assert_some(&storage, &e2);
 
         let e3 = memory.insert(3, vec![b'3'; 211]);
-        let b3 = buffer(&e3);
+        let s3 = to_bytes(&e3);
         storage.apply(
             &HashSet::from_iter([e1.hash()]),
             vec![Item {
-                buffer: b3.clone(),
+                slice: s3.clone(),
                 hash: e3.hash(),
             }],
         );
-        assert_eq!(storage.len(), b2.len() + b3.len());
+        assert_eq!(storage.len(), s2.len() + s3.len());
         assert_none(&storage, e1.hash());
         assert_some(&storage, &e2);
         assert_some(&storage, &e3);
 
         let e4 = memory.insert(4, vec![b'4'; 3800]);
-        let b4 = buffer(&e4);
+        let s4 = to_bytes(&e4);
         storage.apply(
             &HashSet::from_iter([e1.hash()]),
             vec![Item {
-                buffer: b4.clone(),
+                slice: s4.clone(),
                 hash: e4.hash(),
             }],
         );
-        assert_eq!(storage.len(), b4.len());
+        assert_eq!(storage.len(), s4.len());
         assert_none(&storage, e1.hash());
         assert_none(&storage, e2.hash());
         assert_none(&storage, e3.hash());
@@ -478,13 +469,12 @@ mod tests {
 
         // test recovery
         storage.update();
-        let bytes = storage.freeze();
-        let mut buf = IoBytesMut::with_capacity(PAGE);
-        unsafe { buf.set_len(PAGE) };
+        let bytes = storage.into_io_buffer();
+        let mut buf = IoBuffer::new(PAGE);
         buf[0..bytes.len()].copy_from_slice(&bytes);
         let mut storage = SetStorage::load(buf, 0, Arc::new(Metrics::noop()));
 
-        assert_eq!(storage.len(), b4.len());
+        assert_eq!(storage.len(), s4.len());
         assert_none(&storage, e1.hash());
         assert_none(&storage, e2.hash());
         assert_none(&storage, e3.hash());
@@ -492,15 +482,15 @@ mod tests {
 
         // test oversize entry
         let e5 = memory.insert(5, vec![b'5'; 20 * 1024]);
-        let b5 = buffer(&e5);
+        let s5 = to_bytes(&e5);
         storage.apply(
             &HashSet::new(),
             vec![Item {
-                buffer: b5.clone(),
+                slice: s5.clone(),
                 hash: e5.hash(),
             }],
         );
-        assert_eq!(storage.len(), b4.len());
+        assert_eq!(storage.len(), s4.len());
         assert_none(&storage, e1.hash());
         assert_none(&storage, e2.hash());
         assert_none(&storage, e3.hash());

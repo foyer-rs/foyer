@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 
 use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
 
 #[expect(missing_docs)]
-#[derive(Debug)]
 pub struct Metrics {
     /* in-memory cache metrics */
     pub memory_insert: BoxedCounter,
@@ -68,6 +67,8 @@ pub struct Metrics {
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
+    pub storage_blob_efficiency: BoxedHistogram,
+
     /* hybrid cache metrics */
     pub hybrid_insert: BoxedCounter,
     pub hybrid_hit: BoxedCounter,
@@ -79,6 +80,12 @@ pub struct Metrics {
     pub hybrid_miss_duration: BoxedHistogram,
     pub hybrid_remove_duration: BoxedHistogram,
     pub hybrid_fetch_duration: BoxedHistogram,
+}
+
+impl Debug for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Metrics").finish()
+    }
 }
 
 impl Metrics {
@@ -169,6 +176,12 @@ impl Metrics {
             &["name", "op"],
         );
 
+        let foyer_storage_blob_efficiency = registry.register_histogram_vec(
+            "foyer_storage_blob_efficiency".into(),
+            "foyer large object disk cache entry count in a blob".into(),
+            &["name"],
+        );
+
         let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
         let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
         let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
@@ -206,6 +219,8 @@ impl Metrics {
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
+
+        let storage_blob_efficiency = foyer_storage_blob_efficiency.histogram(&[name.clone()]);
 
         /* hybrid cache metrics */
 
@@ -269,6 +284,7 @@ impl Metrics {
             storage_region_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
+            storage_blob_efficiency,
 
             hybrid_insert,
             hybrid_hit,
