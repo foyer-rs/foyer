@@ -301,7 +301,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + use<'_, K, V> {
+    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + '_ {
         poll_fn(|cx| {
             if let Some(io_task) = self.io_tasks.front_mut() {
                 let res = ready!(io_task.poll_unpin(cx));
