@@ -554,7 +554,6 @@ where
             }
         };
 
-        // let f: BoxFuture<'_, Result<Vec<CleanRegionState>>> = try_join_all(futures).boxed();
         let f: BoxFuture<'_, Result<(Vec<GetCleanRegionHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
             .runtime
@@ -584,8 +583,6 @@ where
                 }
             })
             .boxed();
-
-        // self.io_tasks.push_back(handle);
 
         handle
     }
