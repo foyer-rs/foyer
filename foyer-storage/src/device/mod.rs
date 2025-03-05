@@ -48,7 +48,6 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
     /// The region size of the device, must be 4K aligned.
     fn region_size(&self) -> usize;
 
-    // TODO(MrCroxx): Refactor the builder.
     /// Open the device with the given config.
     #[must_use]
     fn open(config: Self::Config, runtime: Runtime) -> impl Future<Output = Result<Self>> + Send;

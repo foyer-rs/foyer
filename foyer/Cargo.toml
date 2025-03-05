@@ -61,7 +61,6 @@ strict_assertions = [
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
 ]
-sanity = ["strict_assertions", "foyer-memory/sanity"]
 tracing = [
   "fastrace/enable",
   "foyer-common/tracing",

@@ -273,6 +273,7 @@ where
     submit_queue_size: Arc<AtomicUsize>,
 
     current_region_handle: GetCleanRegionHandle,
+    remain: usize,
 
     region_manager: RegionManager,
     indexer: Indexer,
@@ -289,8 +290,6 @@ where
     metrics: Arc<Metrics>,
 
     io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
-    // TODO(MrCroxx): refine it.
-    remain: usize,
 
     #[cfg(test)]
     flush_holder: FlushHolder,

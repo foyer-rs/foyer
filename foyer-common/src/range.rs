@@ -48,10 +48,6 @@ mod private {
 
 use private::ZeroOne;
 
-// TODO(MrCroxx): Use `trait_alias` after stable.
-// pub trait Idx =
-//     PartialOrd<Self> + Add<Output = Self> + Sub<Output = Self> + Clone + Copy + Send + Sync + 'static + ZeroOne;
-
 /// The range extensions.
 pub trait RangeBoundsExt<
     T: PartialOrd<T> + Add<Output = T> + Sub<Output = T> + Clone + Copy + Send + Sync + 'static + ZeroOne,

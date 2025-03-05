@@ -62,8 +62,6 @@ tokio = { package = "tokio", version = "1", features = [
 [features]
 nightly = ["hashbrown/nightly"]
 deadlock = ["parking_lot/deadlock_detection"]
-# FIXME: remove sanity feature
-sanity = []
 strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
 
