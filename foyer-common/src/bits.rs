@@ -31,19 +31,6 @@ use std::{
     ops::{Add, BitAnd, Not, Sub},
 };
 
-// TODO(MrCroxx): Use `trait_alias` after stable.
-// pub trait UnsignedTrait = Add<Output = Self>
-//     + Sub<Output = Self>
-//     + BitAnd<Output = Self>
-//     + Not<Output = Self>
-//     + Sized
-//     + From<u8>
-//     + Eq
-//     + Debug
-//     + Display
-//     + Clone
-//     + Copy;
-
 /// An unsigned trait that used by the utils.
 pub trait Unsigned:
     Add<Output = Self>

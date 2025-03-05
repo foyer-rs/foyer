@@ -910,7 +910,6 @@ where
     }
 }
 
-// TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
 impl<E, S, I> RawCache<E, S, I>
 where
     E: Eviction,

@@ -131,8 +131,6 @@ impl Dev for DirectFsDevice {
     async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         options.verify()?;
 
-        // TODO(MrCroxx): write and read options to a manifest file for pinning
-
         let regions = options.capacity / options.file_size;
 
         if !options.dir.exists() {
