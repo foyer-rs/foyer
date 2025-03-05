@@ -343,6 +343,11 @@ impl SharedIoSlice {
     pub fn absolute(&self) -> Range<usize> {
         self.start..self.end
     }
+
+    /// Convert into [`IoBuffer`], if the [`SharedIoSlice`] has exactly one reference.
+    pub fn try_into_io_buffer(self) -> Option<IoBuffer> {
+        Arc::into_inner(self.buffer)
+    }
 }
 
 impl Deref for SharedIoSlice {

@@ -55,7 +55,7 @@ use crate::{
     large::indexer::{EntryAddress, HashedEntryAddress},
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
-    Compression, Dev, Statistics,
+    Compression, Dev, SharedIoSlice, Statistics,
 };
 
 pub enum Submission<K, V>
@@ -157,7 +157,11 @@ where
         let (tx, rx) = flume::unbounded();
 
         let buffer_size = config.buffer_pool_size / config.flushers;
-        let writer = create_writer(buffer_size, device.region_size(), device.region_size(), metrics.clone());
+
+        let buffer = IoBuffer::new(buffer_size);
+        let rotate_buffer = Some(IoBuffer::new(buffer_size));
+
+        let writer = create_writer(buffer, device.region_size(), device.region_size(), metrics.clone());
         let writer = Some(writer);
 
         let current_region_handle = region_manager.get_clean_region();
@@ -168,8 +172,8 @@ where
             writer,
             tombstone_infos: vec![],
             waiters: vec![],
+            rotate_buffer,
             queue_init: None,
-            buffer_size,
             submit_queue_size: submit_queue_size.clone(),
             region_manager,
             device,
@@ -220,13 +224,13 @@ where
 }
 
 fn create_writer(
-    capacity: usize,
+    buffer: IoBuffer,
     region_size: usize,
     current_region_remain: usize,
     metrics: Arc<Metrics>,
 ) -> BatchWriter {
     // TODO(MrCroxx): optimize buffer allocation.
-    BatchWriter::new(IoBuffer::new(capacity), region_size, current_region_remain, metrics)
+    BatchWriter::new(buffer, region_size, current_region_remain, metrics)
 }
 
 #[derive(Debug)]
@@ -245,6 +249,7 @@ struct IoTaskCtx {
     handle: Option<GetCleanRegionHandle>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Instant,
+    io_slice: SharedIoSlice,
 }
 
 struct Runner<K, V>
@@ -260,10 +265,14 @@ where
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
+    /// IoBuffer rotates between writer and inflight io task.
+    ///
+    /// Use this field to avoid allocation.
+    rotate_buffer: Option<IoBuffer>,
+
     submit_queue_size: Arc<AtomicUsize>,
 
     current_region_handle: GetCleanRegionHandle,
-    buffer_size: usize,
 
     region_manager: RegionManager,
     indexer: Indexer,
@@ -333,8 +342,9 @@ where
                 let io_task = self.submit_io_task(buf, batch, tombstone_infos, waiters, init);
                 self.io_tasks.push_back(io_task);
 
+                let buffer = self.rotate_buffer.take().unwrap();
                 let writer = create_writer(
-                    self.buffer_size,
+                    buffer,
                     self.device.region_size(),
                     remain,
                     // self.current_region_state.remain,
@@ -346,11 +356,13 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_region_handle = handle;
                     }
                     self.handle_io_complete(waiters, init);
+                    // `try_into_io_buffer` must return `Some(..)` here.
+                    self.rotate_buffer = io_slice.try_into_io_buffer();
                 }
                 Ok(submission) = rx.recv_async() => {
                     self.recv(submission);
@@ -564,6 +576,7 @@ where
                     handle: states.pop(),
                     waiters,
                     init,
+                    io_slice: shared,
                 },
                 Ok(Err(e)) => {
                     tracing::error!(?e, "[lodc flusher]: io task error");
@@ -571,6 +584,7 @@ where
                         handle: None,
                         waiters,
                         init,
+                        io_slice: shared,
                     }
                 }
                 Err(e) => {
@@ -579,6 +593,7 @@ where
                         handle: None,
                         waiters,
                         init,
+                        io_slice: shared,
                     }
                 }
             })
