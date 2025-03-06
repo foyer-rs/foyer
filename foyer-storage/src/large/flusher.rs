@@ -36,7 +36,7 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 
 use super::{
     batch::{Batch, BatchWriter, EntryWriter, Op},
@@ -152,6 +152,7 @@ where
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
+        flush_io_semaphore: Arc<Semaphore>,
         #[cfg(test)] flush_holder: FlushHolder,
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
@@ -178,6 +179,7 @@ where
             queue_init: None,
             submit_queue_size: submit_queue_size.clone(),
             flush_io_size,
+            flush_io_semaphore,
             region_manager,
             device,
             indexer,
@@ -274,6 +276,7 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
     flush_io_size: usize,
+    flush_io_semaphore: Arc<Semaphore>,
 
     current_region_handle: GetCleanRegionHandle,
     remain: usize,
@@ -428,7 +431,6 @@ where
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
     ) -> BoxFuture<'static, IoTaskCtx> {
-        // ) {
         tracing::trace!(
             ?batch,
             ?tombstone_infos,
@@ -485,6 +487,7 @@ where
                 let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
                 let metrics = self.metrics.clone();
                 let flush_io_size = self.flush_io_size;
+                let flush_io_semaphore = self.flush_io_semaphore.clone();
 
                 async move {
                     // Wait for region is clean.
@@ -504,7 +507,14 @@ where
                             let start = i * flush_io_size;
                             let end = std::cmp::min(start + flush_io_size, len);
                             let io_slice = slice.slice(start..end);
-                            region.write(io_slice, (offset + start) as _)
+                            let region = region.clone();
+                            let flush_io_semaphore = flush_io_semaphore.clone();
+                            async move {
+                                let guard = flush_io_semaphore.acquire_owned().await.unwrap();
+                                let res = region.write(io_slice, (offset + start) as _).await;
+                                drop(guard);
+                                res
+                            }
                         });
                         let res = join_all(ios).await;
                         let mut errs = vec![];
