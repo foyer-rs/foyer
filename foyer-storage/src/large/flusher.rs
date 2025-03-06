@@ -32,7 +32,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
+    future::{join_all, try_join, try_join_all},
     FutureExt,
 };
 use itertools::Itertools;
@@ -167,6 +167,8 @@ where
         let current_region_handle = region_manager.get_clean_region();
         let remain = device.region_size();
 
+        let flush_io_size = bits::align_up(PAGE, config.flush_io_size);
+
         let runner = Runner {
             rx: Some(rx),
             writer,
@@ -175,6 +177,7 @@ where
             rotate_buffer,
             queue_init: None,
             submit_queue_size: submit_queue_size.clone(),
+            flush_io_size,
             region_manager,
             device,
             indexer,
@@ -229,7 +232,6 @@ fn create_writer(
     current_region_remain: usize,
     metrics: Arc<Metrics>,
 ) -> BatchWriter {
-    // TODO(MrCroxx): optimize buffer allocation.
     BatchWriter::new(buffer, region_size, current_region_remain, metrics)
 }
 
@@ -271,6 +273,7 @@ where
     rotate_buffer: Option<IoBuffer>,
 
     submit_queue_size: Arc<AtomicUsize>,
+    flush_io_size: usize,
 
     current_region_handle: GetCleanRegionHandle,
     remain: usize,
@@ -481,6 +484,7 @@ where
                 let flush = self.flush;
                 let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
                 let metrics = self.metrics.clone();
+                let flush_io_size = self.flush_io_size;
 
                 async move {
                     // Wait for region is clean.
@@ -495,8 +499,23 @@ where
                     tracing::trace!(region = region.id(), offset, len, "[flusher]: prepare to write region");
 
                     if !window.is_empty() {
-                        let (_, res) = region.write(slice, offset as _).await;
-                        res?;
+                        let ios = len / flush_io_size + if len % flush_io_size == 0 { 0 } else { 1 };
+                        let ios = (0..ios).map(|i| {
+                            let start = i * flush_io_size;
+                            let end = std::cmp::min(start + flush_io_size, len);
+                            let io_slice = slice.slice(start..end);
+                            region.write(io_slice, (offset + start) as _)
+                        });
+                        let res = join_all(ios).await;
+                        let mut errs = vec![];
+                        for (_, r) in res {
+                            if let Err(e) = r {
+                                errs.push(e);
+                            }
+                        }
+                        if !errs.is_empty() {
+                            return Err(Error::multiple(errs));
+                        }
 
                         if flush {
                             region.flush().await?;

@@ -76,6 +76,7 @@ where
     pub reclaimers: usize,
     pub buffer_pool_size: usize,
     pub submit_queue_size_threshold: usize,
+    pub flush_io_size: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
@@ -102,6 +103,7 @@ where
             .field("reclaimers", &self.reclaimers)
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
+            .field("flush_io_size", &self.flush_io_size)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
@@ -597,6 +599,7 @@ mod tests {
             tombstone_log_config: None,
             buffer_pool_size: 16 * 1024 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_io_size: 128 * 1024,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
@@ -626,6 +629,7 @@ mod tests {
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_io_size: 128 * 1024,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,

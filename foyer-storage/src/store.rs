@@ -563,6 +563,7 @@ where
                                 tombstone_log_config: self.large.tombstone_log_config,
                                 buffer_pool_size: self.large.buffer_pool_size,
                                 submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                flush_io_size: self.large.flush_io_size,
                                 statistics: statistics.clone(),
                                 runtime,
                                 marker: PhantomData,
@@ -621,6 +622,7 @@ where
                                     tombstone_log_config: self.large.tombstone_log_config,
                                     buffer_pool_size: self.large.buffer_pool_size,
                                     submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                    flush_io_size: self.large.flush_io_size,
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
@@ -670,6 +672,7 @@ where
     reclaimers: usize,
     buffer_pool_size: usize,
     submit_queue_size_threshold: Option<usize>,
+    flush_io_size: usize,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
@@ -704,6 +707,7 @@ where
             reclaimers: 1,
             buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
             submit_queue_size_threshold: None,
+            flush_io_size: 128 * 1024, // 128 KiB
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
