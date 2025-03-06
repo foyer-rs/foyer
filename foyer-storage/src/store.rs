@@ -826,6 +826,28 @@ where
         self.tombstone_log_config = Some(tombstone_log_config);
         self
     }
+
+    /// Limit the maximum flush io size.
+    ///
+    /// One larger disk write while flusing will be split into multiple disk writes based on this value.
+    ///
+    /// The value will be align to 4K if it is not.
+    ///
+    /// Default: 128 * 1024
+    pub fn with_flush_io_size(mut self, flush_io_size: usize) -> Self {
+        self.flush_io_size = flush_io_size;
+        self
+    }
+
+    /// Limit the flush io depth.
+    ///
+    /// Limit the disk writes submitted to the disk based on this value.
+    ///
+    /// Default: 256.
+    pub fn with_flush_io_depth(mut self, flush_io_depth: usize) -> Self {
+        self.flush_io_depth = flush_io_depth;
+        self
+    }
 }
 
 /// Small object disk cache engine default options.
