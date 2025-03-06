@@ -28,6 +28,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    rate::RateLimiter,
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
@@ -152,7 +153,8 @@ where
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
-        flush_io_semaphore: Arc<Semaphore>,
+        flush_io_depth_limiter: Arc<Semaphore>,
+        flush_io_throughput_limiter: Option<Arc<RateLimiter>>,
         #[cfg(test)] flush_holder: FlushHolder,
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
@@ -179,7 +181,8 @@ where
             queue_init: None,
             submit_queue_size: submit_queue_size.clone(),
             flush_io_size,
-            flush_io_semaphore,
+            flush_io_depth_limiter,
+            flush_io_throughput_limiter,
             region_manager,
             device,
             indexer,
@@ -276,7 +279,8 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
     flush_io_size: usize,
-    flush_io_semaphore: Arc<Semaphore>,
+    flush_io_depth_limiter: Arc<Semaphore>,
+    flush_io_throughput_limiter: Option<Arc<RateLimiter>>,
 
     current_region_handle: GetCleanRegionHandle,
     remain: usize,
@@ -487,7 +491,8 @@ where
                 let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
                 let metrics = self.metrics.clone();
                 let flush_io_size = self.flush_io_size;
-                let flush_io_semaphore = self.flush_io_semaphore.clone();
+                let flush_io_depth_limiter = self.flush_io_depth_limiter.clone();
+                let flush_io_throughput_limiter = self.flush_io_throughput_limiter.clone();
 
                 async move {
                     // Wait for region is clean.
@@ -508,9 +513,15 @@ where
                             let end = std::cmp::min(start + flush_io_size, len);
                             let io_slice = slice.slice(start..end);
                             let region = region.clone();
-                            let flush_io_semaphore = flush_io_semaphore.clone();
+                            let flush_io_depth_limiter = flush_io_depth_limiter.clone();
+                            let flush_io_throughput_limiter = flush_io_throughput_limiter.clone();
                             async move {
-                                let guard = flush_io_semaphore.acquire_owned().await.unwrap();
+                                let guard = flush_io_depth_limiter.acquire_owned().await.unwrap();
+                                if let Some(limiter) = flush_io_throughput_limiter {
+                                    if let Some(duration) = limiter.consume(io_slice.len() as _) {
+                                        tokio::time::sleep(duration).await;
+                                    }
+                                }
                                 let res = region.write(io_slice, (offset + start) as _).await;
                                 drop(guard);
                                 res

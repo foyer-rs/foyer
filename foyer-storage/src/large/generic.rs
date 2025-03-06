@@ -29,6 +29,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    rate::RateLimiter,
 };
 use foyer_memory::Piece;
 use futures_util::future::{join_all, try_join_all};
@@ -78,6 +79,7 @@ where
     pub submit_queue_size_threshold: usize,
     pub flush_io_size: usize,
     pub flush_io_depth: usize,
+    pub flush_io_throughput: Option<usize>,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
@@ -106,6 +108,7 @@ where
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("flush_io_size", &self.flush_io_size)
             .field("flush_io_depth", &self.flush_io_depth)
+            .field("flush_io_throughput", &self.flush_io_throughput)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
@@ -242,7 +245,8 @@ where
         #[cfg(test)]
         let flush_holder = FlushHolder::default();
 
-        let flush_io_semaphore = Arc::new(Semaphore::new(config.flush_io_depth));
+        let flush_io_depth_limiter = Arc::new(Semaphore::new(config.flush_io_depth));
+        let flush_io_throughput_limiter = config.flush_io_throughput.map(|v| Arc::new(RateLimiter::new(v as _)));
         let flushers = try_join_all((0..config.flushers).map(|_| async {
             Flusher::open(
                 &config,
@@ -254,7 +258,8 @@ where
                 stats.clone(),
                 metrics.clone(),
                 &config.runtime,
-                flush_io_semaphore.clone(),
+                flush_io_depth_limiter.clone(),
+                flush_io_throughput_limiter.clone(),
                 #[cfg(test)]
                 flush_holder.clone(),
             )
@@ -605,6 +610,7 @@ mod tests {
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             flush_io_size: 128 * 1024,
             flush_io_depth: 256,
+            flush_io_throughput: None,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
@@ -636,6 +642,7 @@ mod tests {
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             flush_io_size: 128 * 1024,
             flush_io_depth: 256,
+            flush_io_throughput: None,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
