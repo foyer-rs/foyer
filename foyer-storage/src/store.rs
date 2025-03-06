@@ -563,6 +563,9 @@ where
                                 tombstone_log_config: self.large.tombstone_log_config,
                                 buffer_pool_size: self.large.buffer_pool_size,
                                 submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                flush_io_size: self.large.flush_io_size,
+                                flush_io_depth: self.large.flush_io_depth,
+                                flush_io_throughput: self.large.flush_io_throughput,
                                 statistics: statistics.clone(),
                                 runtime,
                                 marker: PhantomData,
@@ -621,6 +624,9 @@ where
                                     tombstone_log_config: self.large.tombstone_log_config,
                                     buffer_pool_size: self.large.buffer_pool_size,
                                     submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                    flush_io_size: self.large.flush_io_size,
+                                    flush_io_depth: self.large.flush_io_depth,
+                                    flush_io_throughput: self.large.flush_io_throughput,
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
@@ -670,6 +676,9 @@ where
     reclaimers: usize,
     buffer_pool_size: usize,
     submit_queue_size_threshold: Option<usize>,
+    flush_io_size: usize,
+    flush_io_depth: usize,
+    flush_io_throughput: Option<usize>,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
@@ -704,6 +713,9 @@ where
             reclaimers: 1,
             buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
             submit_queue_size_threshold: None,
+            flush_io_size: 128 * 1024, // 128 KiB
+            flush_io_depth: 256,
+            flush_io_throughput: None,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
@@ -816,6 +828,38 @@ where
     /// phantom entries after reopen.
     pub fn with_tombstone_log_config(mut self, tombstone_log_config: TombstoneLogConfig) -> Self {
         self.tombstone_log_config = Some(tombstone_log_config);
+        self
+    }
+
+    /// Limit the maximum flush io size.
+    ///
+    /// One larger disk write while flushing will be split into multiple disk writes based on this value.
+    ///
+    /// The value will be align to 4K if it is not.
+    ///
+    /// Default: 128 * 1024
+    pub fn with_flush_io_size(mut self, flush_io_size: usize) -> Self {
+        self.flush_io_size = flush_io_size;
+        self
+    }
+
+    /// Limit the flush io depth.
+    ///
+    /// Limit the disk writes submitted to the disk based on this value.
+    ///
+    /// Default: 256.
+    pub fn with_flush_io_depth(mut self, flush_io_depth: usize) -> Self {
+        self.flush_io_depth = flush_io_depth;
+        self
+    }
+
+    /// Limit the flush io throughput.
+    ///
+    /// Limit the disk write throughput submitted to the disk based on this value.
+    ///
+    /// Default: Unlimited.
+    pub fn with_flush_io_throughput(mut self, flush_io_throughput: usize) -> Self {
+        self.flush_io_throughput = Some(flush_io_throughput);
         self
     }
 }

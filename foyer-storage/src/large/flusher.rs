@@ -28,15 +28,16 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    rate::RateLimiter,
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
+    future::{join_all, try_join, try_join_all},
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 
 use super::{
     batch::{Batch, BatchWriter, EntryWriter, Op},
@@ -152,6 +153,8 @@ where
         stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
+        flush_io_depth_limiter: Arc<Semaphore>,
+        flush_io_throughput_limiter: Option<Arc<RateLimiter>>,
         #[cfg(test)] flush_holder: FlushHolder,
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
@@ -167,6 +170,8 @@ where
         let current_region_handle = region_manager.get_clean_region();
         let remain = device.region_size();
 
+        let flush_io_size = bits::align_up(PAGE, config.flush_io_size);
+
         let runner = Runner {
             rx: Some(rx),
             writer,
@@ -175,6 +180,9 @@ where
             rotate_buffer,
             queue_init: None,
             submit_queue_size: submit_queue_size.clone(),
+            flush_io_size,
+            flush_io_depth_limiter,
+            flush_io_throughput_limiter,
             region_manager,
             device,
             indexer,
@@ -229,7 +237,6 @@ fn create_writer(
     current_region_remain: usize,
     metrics: Arc<Metrics>,
 ) -> BatchWriter {
-    // TODO(MrCroxx): optimize buffer allocation.
     BatchWriter::new(buffer, region_size, current_region_remain, metrics)
 }
 
@@ -271,6 +278,9 @@ where
     rotate_buffer: Option<IoBuffer>,
 
     submit_queue_size: Arc<AtomicUsize>,
+    flush_io_size: usize,
+    flush_io_depth_limiter: Arc<Semaphore>,
+    flush_io_throughput_limiter: Option<Arc<RateLimiter>>,
 
     current_region_handle: GetCleanRegionHandle,
     remain: usize,
@@ -425,7 +435,6 @@ where
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
     ) -> BoxFuture<'static, IoTaskCtx> {
-        // ) {
         tracing::trace!(
             ?batch,
             ?tombstone_infos,
@@ -481,6 +490,9 @@ where
                 let flush = self.flush;
                 let slice = shared.absolute_slice(window.absolute_dirty_range.clone());
                 let metrics = self.metrics.clone();
+                let flush_io_size = self.flush_io_size;
+                let flush_io_depth_limiter = self.flush_io_depth_limiter.clone();
+                let flush_io_throughput_limiter = self.flush_io_throughput_limiter.clone();
 
                 async move {
                     // Wait for region is clean.
@@ -495,8 +507,36 @@ where
                     tracing::trace!(region = region.id(), offset, len, "[flusher]: prepare to write region");
 
                     if !window.is_empty() {
-                        let (_, res) = region.write(slice, offset as _).await;
-                        res?;
+                        let ios = len / flush_io_size + if len % flush_io_size == 0 { 0 } else { 1 };
+                        let ios = (0..ios).map(|i| {
+                            let start = i * flush_io_size;
+                            let end = std::cmp::min(start + flush_io_size, len);
+                            let io_slice = slice.slice(start..end);
+                            let region = region.clone();
+                            let flush_io_depth_limiter = flush_io_depth_limiter.clone();
+                            let flush_io_throughput_limiter = flush_io_throughput_limiter.clone();
+                            async move {
+                                let guard = flush_io_depth_limiter.acquire_owned().await.unwrap();
+                                if let Some(limiter) = flush_io_throughput_limiter {
+                                    if let Some(duration) = limiter.consume(io_slice.len() as _) {
+                                        tokio::time::sleep(duration).await;
+                                    }
+                                }
+                                let res = region.write(io_slice, (offset + start) as _).await;
+                                drop(guard);
+                                res
+                            }
+                        });
+                        let res = join_all(ios).await;
+                        let mut errs = vec![];
+                        for (_, r) in res {
+                            if let Err(e) = r {
+                                errs.push(e);
+                            }
+                        }
+                        if !errs.is_empty() {
+                            return Err(Error::multiple(errs));
+                        }
 
                         if flush {
                             region.flush().await?;
