@@ -97,10 +97,6 @@ impl BlobIndex {
         (self.io_buffer.len() - BlobIndex::INDEX_OFFSET) / BlobEntryIndex::serialized_len()
     }
 
-    pub fn size(&self) -> usize {
-        self.io_buffer.len()
-    }
-
     pub fn is_full(&self) -> bool {
         self.count >= self.capacity()
     }
@@ -124,7 +120,7 @@ impl BlobIndex {
         self.io_buffer.clone()
     }
 
-    pub fn clear(&mut self) {
+    pub fn reset(&mut self) {
         self.count = 0;
     }
 }
@@ -331,16 +327,18 @@ impl Splitter {
             let split_blob = ctx.current_blob_index.is_full() || split_region;
 
             if split_blob {
-                tracing::trace!("[splitter]; split blob");
+                tracing::trace!("[splitter]: split blob");
 
                 if indices.is_empty() {
-                    // The blob is empty, only need to reset the state.
-                    ctx.current_blob_index.clear();
+                    assert_eq!(size, 0);
+                    // The blob part is empty, only need to set the state.
+                    ctx.current_blob_index.reset();
+                    ctx.current_blob_region_offset += ctx.current_part_blob_offset;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
                 } else {
                     // Seal and clear the blob index to prepare for the next blob.
                     let index = ctx.current_blob_index.seal();
-                    ctx.current_blob_index.clear();
+                    ctx.current_blob_index.reset();
 
                     let indices = std::mem::take(&mut indices);
 
@@ -352,8 +350,9 @@ impl Splitter {
                         indices,
                     };
 
+                    ctx.current_blob_region_offset =
+                        ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
-                    ctx.current_blob_region_offset += size + ctx.current_blob_index.size();
                     shared_io_slice = shared_io_slice.slice(size..);
                     size = 0;
 
@@ -374,6 +373,8 @@ impl Splitter {
                 offset: ctx.current_part_blob_offset as u32 + size as u32,
                 len: info.len as u32,
             };
+
+            tracing::trace!(?index, ?info, "[splitter]: append entry");
 
             ctx.current_blob_index.write(&index);
             indices.push(index);
@@ -397,9 +398,9 @@ impl Splitter {
             if ctx.current_blob_index.is_full() {
                 tracing::trace!("[splitter]; split blob");
 
-                ctx.current_blob_index.clear();
+                ctx.current_blob_index.reset();
+                ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                 ctx.current_part_blob_offset = ctx.blob_index_size;
-                ctx.current_blob_region_offset += size + ctx.current_blob_index.size();
             } else {
                 ctx.current_part_blob_offset += size;
             }

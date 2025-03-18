@@ -83,9 +83,10 @@ impl RecoverRunner {
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
+            let blob_index_size = config.blob_index_size;
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, region).await;
+                let res = RegionRecoverRunner::run(mode, region, blob_index_size).await;
                 drop(permit);
                 res
             })
@@ -198,7 +199,7 @@ impl RecoverRunner {
 struct RegionRecoverRunner;
 
 impl RegionRecoverRunner {
-    async fn run(mode: RecoverMode, region: Region) -> Result<Vec<EntryInfo>> {
+    async fn run(mode: RecoverMode, region: Region, blob_index_size: usize) -> Result<Vec<EntryInfo>> {
         if mode == RecoverMode::None {
             return Ok(vec![]);
         }
@@ -206,7 +207,7 @@ impl RegionRecoverRunner {
         let mut recovered = vec![];
 
         let id = region.id();
-        let mut iter = RegionScanner::new(region);
+        let mut iter = RegionScanner::new(region, blob_index_size);
         'recover: loop {
             let r = iter.next().await;
             let infos = match r {

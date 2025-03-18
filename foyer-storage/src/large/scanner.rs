@@ -15,12 +15,7 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{
-    error::Result,
-    io::{IoBuffer, PAGE},
-    large::buffer::BlobIndexReader,
-    region::Region,
-};
+use crate::{error::Result, io::IoBuffer, large::buffer::BlobIndexReader, region::Region};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {
@@ -32,22 +27,28 @@ pub struct EntryInfo {
 pub struct RegionScanner {
     region: Region,
     offset: u64,
+
+    blob_index_size: usize,
 }
 
 impl RegionScanner {
-    pub fn new(region: Region) -> Self {
-        Self { region, offset: 0 }
+    pub fn new(region: Region, blob_index_size: usize) -> Self {
+        Self {
+            region,
+            offset: 0,
+            blob_index_size,
+        }
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<EntryInfo>>> {
-        if self.offset as usize + PAGE > self.region.size() {
+        if self.offset as usize + self.blob_index_size > self.region.size() {
             return Ok(None);
         }
 
-        let page = IoBuffer::new(PAGE);
-        let (page, res) = self.region.read(page, self.offset).await;
+        let io_buffer = IoBuffer::new(self.blob_index_size);
+        let (io_buffer, res) = self.region.read(io_buffer, self.offset).await;
         res?;
-        let indices = match BlobIndexReader::read(&page) {
+        let indices = match BlobIndexReader::read(&io_buffer) {
             Some(indices) => indices,
             None => {
                 tracing::trace!(
@@ -103,6 +104,7 @@ mod tests {
             monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice, RegionId,
         },
+        io::PAGE,
         large::{
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
             serde::Sequence,
@@ -206,8 +208,10 @@ mod tests {
 
         async fn extract(dev: &MonitoredDevice, region: RegionId) -> Vec<EntryInfo> {
             let mut infos = vec![];
-            let mut scanner =
-                RegionScanner::new(Region::new_for_test(region, dev.clone(), Arc::<RegionStats>::default()));
+            let mut scanner = RegionScanner::new(
+                Region::new_for_test(region, dev.clone(), Arc::<RegionStats>::default()),
+                BLOB_INDEX_SIZE,
+            );
             while let Some(mut es) = scanner.next().await.unwrap() {
                 infos.append(&mut es);
             }

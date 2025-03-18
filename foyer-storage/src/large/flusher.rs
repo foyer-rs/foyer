@@ -157,6 +157,7 @@ where
 
         let io_buffer_size = config.buffer_pool_size / config.flushers;
         bits::assert_aligned(PAGE, io_buffer_size);
+        bits::assert_aligned(PAGE, config.blob_index_size);
 
         let max_entry_size = device.region_size() - config.blob_index_size;
 
@@ -500,9 +501,11 @@ where
                                     sequence: index.sequence,
                                 },
                             };
+                            tracing::trace!(?addr, "[flusher]: append address");
                             addrs.push(addr);
                         }
                     }
+
                     indexer.insert_batch(addrs);
 
                     // Window expect window is full, make it evictable.

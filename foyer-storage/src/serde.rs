@@ -204,6 +204,22 @@ impl EntryDeserializer {
     {
         let now = Instant::now();
 
+        if buffer.len() < value_len + ken_len {
+            tracing::error!(
+                buffer_len = buffer.len(),
+                ken_len,
+                value_len,
+                ?compression,
+                checksum,
+                "[entry serde]: buffer too small",
+            );
+
+            return Err(Error::OutOfRange {
+                valid: 0..buffer.len(),
+                get: 0..value_len + ken_len,
+            });
+        }
+
         // deserialize value
         let buf = &buffer[..value_len];
         let value = Self::deserialize_value(buf, compression)?;

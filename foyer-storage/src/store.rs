@@ -764,6 +764,20 @@ where
         self
     }
 
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE: The size will be aligned up to a multiplier of 4K.
+    ///
+    /// Default: 4 KiB
+    pub fn with_blob_index_size(mut self, blob_index_size: usize) -> Self {
+        let blob_index_size = bits::align_up(PAGE, blob_index_size);
+        self.blob_index_size = blob_index_size;
+        self
+    }
+
     /// Set the submit queue size threshold.
     ///
     /// If the total entry estimated size in the submit queue exceeds the threshold, the further entries will be

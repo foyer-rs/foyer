@@ -259,15 +259,13 @@ where
 
         let reclaimers = join_all((0..config.reclaimers).map(|_| async {
             Reclaimer::open(
+                &config,
                 region_manager.clone(),
                 reclaim_semaphore.clone(),
-                config.reinsertion_picker.clone(),
                 indexer.clone(),
                 flushers.clone(),
                 stats.clone(),
-                config.flush,
                 metrics.clone(),
-                &config.runtime,
             )
         }))
         .await;
@@ -366,7 +364,11 @@ where
                 Err(e @ Error::MagicMismatch { .. })
                 | Err(e @ Error::ChecksumMismatch { .. })
                 | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
-                    tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
+                    tracing::trace!(
+                        hash,
+                        ?addr,
+                        "deserialize entry header error: {e}, remove this entry and skip"
+                    );
                     indexer.remove(hash);
                     metrics.storage_miss.increase(1);
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
@@ -385,13 +387,23 @@ where
             ) {
                 Ok(res) => res,
                 Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
-                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
+                    tracing::trace!(
+                        hash,
+                        ?addr,
+                        ?header,
+                        "deserialize read buffer raise error: {e}, remove this entry and skip"
+                    );
                     indexer.remove(hash);
                     metrics.storage_miss.increase(1);
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // FIXME(MrCroxx): Return None on out of range because it is checked before checksum. Or fix the
+                    // order.
+                    tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
+                    return Err(e);
+                }
             };
 
             metrics.storage_hit.increase(1);

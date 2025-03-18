@@ -28,6 +28,7 @@ use crate::{
     io::{IoBuffer, OwnedSlice, PAGE},
     large::{
         flusher::{Flusher, Submission},
+        generic::GenericLargeStorageConfig,
         indexer::Indexer,
         scanner::RegionScanner,
         serde::Sequence,
@@ -44,17 +45,14 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    #[expect(clippy::too_many_arguments)]
     pub fn open<K, V>(
+        config: &GenericLargeStorageConfig<K, V>,
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V>>,
         stats: Arc<Statistics>,
-        flush: bool,
         metrics: Arc<Metrics>,
-        runtime: &Runtime,
     ) -> Self
     where
         K: StorageKey,
@@ -67,15 +65,16 @@ impl Reclaimer {
             reclaim_semaphore,
             indexer,
             flushers,
-            reinsertion_picker,
+            reinsertion_picker: config.reinsertion_picker.clone(),
             stats,
-            flush,
+            blob_index_size: config.blob_index_size,
+            flush: config.flush,
             _metrics: metrics,
             wait_rx,
-            runtime: runtime.clone(),
+            runtime: config.runtime.clone(),
         };
 
-        let _handle = runtime.write().spawn(async move { runner.run().await });
+        let _handle = config.runtime.write().spawn(async move { runner.run().await });
 
         Self { wait_tx }
     }
@@ -106,6 +105,7 @@ where
 
     stats: Arc<Statistics>,
 
+    blob_index_size: usize,
     flush: bool,
 
     _metrics: Arc<Metrics>,
@@ -168,7 +168,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone());
+        let mut scanner = RegionScanner::new(region.clone(), self.blob_index_size);
         let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:
