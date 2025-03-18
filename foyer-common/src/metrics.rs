@@ -67,8 +67,6 @@ pub struct Metrics {
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
-    pub storage_blob_efficiency: BoxedHistogram,
-
     /* hybrid cache metrics */
     pub hybrid_insert: BoxedCounter,
     pub hybrid_hit: BoxedCounter,
@@ -176,12 +174,6 @@ impl Metrics {
             &["name", "op"],
         );
 
-        let foyer_storage_blob_efficiency = registry.register_histogram_vec(
-            "foyer_storage_blob_efficiency".into(),
-            "foyer large object disk cache entry count in a blob".into(),
-            &["name"],
-        );
-
         let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
         let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
         let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
@@ -219,8 +211,6 @@ impl Metrics {
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
-
-        let storage_blob_efficiency = foyer_storage_blob_efficiency.histogram(&[name.clone()]);
 
         /* hybrid cache metrics */
 
@@ -284,7 +274,6 @@ impl Metrics {
             storage_region_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
-            storage_blob_efficiency,
 
             hybrid_insert,
             hybrid_hit,

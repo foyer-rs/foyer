@@ -75,6 +75,7 @@ where
     pub flushers: usize,
     pub reclaimers: usize,
     pub buffer_pool_size: usize,
+    pub blob_index_size: usize,
     pub submit_queue_size_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
@@ -101,6 +102,7 @@ where
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("blob_index_size", &self.blob_index_size)
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
@@ -373,7 +375,7 @@ where
                 Err(e) => return Err(e),
             };
 
-            let (k, v) = match EntryDeserializer::deserialize::<K, V>(
+            let (k, v) = match EntryDeserializer::deserialize_old::<K, V>(
                 &buf[EntryHeader::serialized_len()..],
                 header.key_len as _,
                 header.value_len as _,
@@ -596,6 +598,7 @@ mod tests {
             reinsertion_picker,
             tombstone_log_config: None,
             buffer_pool_size: 16 * 1024 * 1024,
+            blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
@@ -625,6 +628,7 @@ mod tests {
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
+            blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
             statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
@@ -869,25 +873,26 @@ mod tests {
 
         let es = (0..15).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
-        // [[(0), (1)], [(2), (3)], [(4), (5)], []]
-        for e in es.iter().take(6).cloned() {
+        // [[(0), (1), (2)], [(3), (4), (5)], [(6), (7), (8)], []]
+        for e in es.iter().take(9).cloned() {
             enqueue(&store, e);
             store.wait().await;
         }
 
-        for i in 0..6 {
+        for i in 0..9 {
             let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
             assert_eq!(r, (i, vec![i as u8; 3 * KB]));
         }
 
-        // [[], [(2), (3)], [(4), (5)], [(6), (1)]]
-        enqueue(&store, es[6].clone());
+        // [[], [(3), (4), (5)], [(6), (7), (8)], [(9), (10), (1)]]
+        enqueue(&store, es[9].clone());
+        enqueue(&store, es[10].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..7 {
+        for i in 0..11 {
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
@@ -895,22 +900,26 @@ mod tests {
             vec![
                 None,
                 Some((1, vec![1; 3 * KB])),
-                Some((2, vec![2; 3 * KB])),
+                None,
                 Some((3, vec![3; 3 * KB])),
                 Some((4, vec![4; 3 * KB])),
                 Some((5, vec![5; 3 * KB])),
                 Some((6, vec![6; 3 * KB])),
+                Some((7, vec![7; 3 * KB])),
+                Some((8, vec![8; 3 * KB])),
+                Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
             ]
         );
 
-        // [[(7), (3)], [], [(4), (5)], [(6), (1)]]
-        enqueue(&store, es[7].clone());
+        // [[(11), (3), (5)], [], [(6), (7), (8)], [(9), (10), (1)]]
+        enqueue(&store, es[11].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..8 {
+        for i in 0..12 {
             tracing::trace!("==========> {i}");
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
@@ -921,25 +930,31 @@ mod tests {
                 Some((1, vec![1; 3 * KB])),
                 None,
                 Some((3, vec![3; 3 * KB])),
-                Some((4, vec![4; 3 * KB])),
+                None,
                 Some((5, vec![5; 3 * KB])),
                 Some((6, vec![6; 3 * KB])),
                 Some((7, vec![7; 3 * KB])),
+                Some((8, vec![8; 3 * KB])),
+                Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
+                Some((11, vec![11; 3 * KB])),
             ]
         );
 
-        // [[(7), (3)], [(8), (9)], [], [(6), (1)]]
-        store.delete(memory.hash(&5));
+        // [[(11), (3), (5)], [(12), (13), (14)], [], [(9), (10), (1)]]
+        store.delete(memory.hash(&7));
         store.wait().await;
-        enqueue(&store, es[8].clone());
+        enqueue(&store, es[12].clone());
         store.wait().await;
-        enqueue(&store, es[9].clone());
+        enqueue(&store, es[13].clone());
+        store.wait().await;
+        enqueue(&store, es[14].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..10 {
+        for i in 0..15 {
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
@@ -950,11 +965,16 @@ mod tests {
                 None,
                 Some((3, vec![3; 3 * KB])),
                 None,
+                Some((5, vec![5; 3 * KB])),
                 None,
-                Some((6, vec![6; 3 * KB])),
-                Some((7, vec![7; 3 * KB])),
-                Some((8, vec![8; 3 * KB])),
+                None,
+                None,
                 Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
+                Some((11, vec![11; 3 * KB])),
+                Some((12, vec![12; 3 * KB])),
+                Some((13, vec![13; 3 * KB])),
+                Some((14, vec![14; 3 * KB])),
             ]
         );
     }

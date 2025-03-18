@@ -111,7 +111,7 @@ impl BatchMut {
             return false;
         }
 
-        let info = match EntrySerializer::serialize(
+        let info = match EntrySerializer::serialize_old(
             piece.key(),
             piece.value(),
             Compression::None,
