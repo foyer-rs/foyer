@@ -206,7 +206,7 @@ where
             Poll::Pending => return Poll::Pending,
         };
 
-        let mut root = this.root.take().unwrap();
+        let root = this.root.take().unwrap();
 
         if let (Some(elapsed), Some(threshold)) = (root.elapsed(), this.threshold.as_ref()) {
             if &elapsed < threshold {
