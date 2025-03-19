@@ -402,10 +402,12 @@ where
                         indexer.remove(hash);
                         metrics.storage_miss.increase(1);
                         metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                        metrics.storage_error.increase(1);
                         return Ok(None);
                     }
                     Err(e) => {
                         tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
+                        metrics.storage_error.increase(1);
                         return Err(e);
                     }
                 };
