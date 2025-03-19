@@ -15,14 +15,9 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{
-    error::Result,
-    io::{IoBuffer, PAGE},
-    large::batch::BlobReader,
-    region::Region,
-};
+use crate::{error::Result, io::IoBuffer, large::buffer::BlobIndexReader, region::Region};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {
     pub hash: u64,
     pub addr: EntryAddress,
@@ -32,49 +27,65 @@ pub struct EntryInfo {
 pub struct RegionScanner {
     region: Region,
     offset: u64,
+
+    blob_index_size: usize,
 }
 
 impl RegionScanner {
-    pub fn new(region: Region) -> Self {
-        Self { region, offset: 0 }
+    pub fn new(region: Region, blob_index_size: usize) -> Self {
+        Self {
+            region,
+            offset: 0,
+            blob_index_size,
+        }
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<EntryInfo>>> {
-        if self.offset as usize + PAGE > self.region.size() {
+        if self.offset as usize + self.blob_index_size > self.region.size() {
             return Ok(None);
         }
 
-        let page = IoBuffer::new(PAGE);
-        let (page, res) = self.region.read(page, self.offset).await;
+        let io_buffer = IoBuffer::new(self.blob_index_size);
+        let (io_buffer, res) = self.region.read(io_buffer, self.offset).await;
         res?;
-        let blob = match BlobReader::read(page) {
-            Ok(blob) => blob,
-            Err(e) => {
+        let indices = match BlobIndexReader::read(&io_buffer) {
+            Some(indices) => indices,
+            None => {
                 tracing::trace!(
-                    ?e,
                     region_id = self.region.id(),
-                    "[region blob scanner]: error to parse a blob, skip the remaining region"
+                    "[region blob scanner]: cannot parse a blob, skip the remaining region"
                 );
                 return Ok(None);
             }
         };
 
-        let infos = blob
-            .entry_indices
+        let step = indices
+            .last()
+            .map(|index| index.offset as u64 + index.aligned() as u64)
+            .unwrap_or(self.region.size() as u64);
+
+        tracing::trace!(
+            region = self.region.id(),
+            offset = self.offset,
+            step,
+            "[scanner] calculate next position"
+        );
+
+        let infos = indices
             .into_iter()
-            .map(|entry_index| EntryInfo {
-                hash: entry_index.hash,
+            .map(|index| EntryInfo {
+                hash: index.hash,
                 addr: EntryAddress {
                     region: self.region.id(),
-                    offset: self.offset as u32 + entry_index.offset,
-                    len: entry_index.len,
-                    sequence: entry_index.sequence,
+                    offset: self.offset as u32 + index.offset,
+                    len: index.len,
+                    sequence: index.sequence,
                 },
             })
             .inspect(|info| tracing::trace!(?info, "[scanner] extract entry info"))
             .collect_vec();
 
-        self.offset += blob.size as u64;
+        self.offset += step;
 
         Ok(Some(infos))
     }
@@ -84,7 +95,6 @@ impl RegionScanner {
 mod tests {
     use std::{path::Path, sync::Arc};
 
-    use bytesize::ByteSize;
     use foyer_common::metrics::Metrics;
     use tempfile::tempdir;
 
@@ -92,22 +102,26 @@ mod tests {
     use crate::{
         device::{
             monitor::{Monitored, MonitoredConfig},
-            Dev, MonitoredDevice,
+            Dev, MonitoredDevice, RegionId,
         },
-        large::batch::{BatchWriter, EntryIndex, EntryWriter, Op},
+        io::PAGE,
+        large::{
+            buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
+            serde::Sequence,
+        },
         region::RegionStats,
         Compression, DirectFsDeviceOptions, Runtime,
     };
 
     const KB: usize = 1024;
 
-    async fn device_for_test(dir: impl AsRef<Path>) -> MonitoredDevice {
+    async fn device_for_test(dir: impl AsRef<Path>, file_size: usize, files: usize) -> MonitoredDevice {
         let runtime = Runtime::current();
         Monitored::open(
             MonitoredConfig {
                 config: DirectFsDeviceOptions::new(dir)
-                    .with_capacity(ByteSize::kib(64).as_u64() as _)
-                    .with_file_size(ByteSize::kib(16).as_u64() as _)
+                    .with_capacity(file_size * files)
+                    .with_file_size(file_size)
                     .into(),
                 metrics: Arc::new(Metrics::noop()),
             },
@@ -119,54 +133,97 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn test_region_scanner() {
+        const BLOB_INDEX_SIZE: usize = 4 * KB;
+        const BLOB_INDEX_CAPACITY: usize =
+            (BLOB_INDEX_SIZE - BlobIndex::INDEX_OFFSET) / BlobEntryIndex::serialized_len();
+        const REGION_SIZE: usize = (BLOB_INDEX_CAPACITY * PAGE + BLOB_INDEX_SIZE) * 2;
+        const BATCH_SIZE: usize = REGION_SIZE * 3;
+        const MAX_ENTRY_SIZE: usize = REGION_SIZE - BLOB_INDEX_SIZE;
+
         let tempdir = tempdir().unwrap();
-        let dev = device_for_test(tempdir.path()).await;
+        let dev = device_for_test(tempdir.path(), REGION_SIZE, 4).await;
 
-        let buf = IoBuffer::new(16 * KB);
+        let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
+        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE);
 
-        // 4K (meta)
-        let mut writer = BatchWriter::new(buf, 16 * KB, 16 * KB, Arc::new(Metrics::noop()));
-        // 4K
-        let op = writer.push(&1, &vec![1u8; 3 * KB], 1, Compression::None, 1);
-        assert_eq!(op, Op::Noop);
-        // 8K
-        let op = writer.push(&3, &vec![3u8; 7 * KB], 3, Compression::None, 3);
-        assert_eq!(op, Op::Noop);
-        let (buf, batch) = writer.finish();
+        for i in 0..BLOB_INDEX_CAPACITY * 5 {
+            buffer.push(
+                &(i as u64),
+                &vec![i as u8; 3 * 1024],
+                i as u64,
+                Compression::None,
+                i as Sequence,
+            );
+        }
+        let (io_buffer, infos) = buffer.finish();
+        let shared_io_slice = io_buffer.into_shared_io_slice();
+        let batch = Splitter::split(&mut ctx, shared_io_slice, infos.clone());
 
-        let (_, res) = dev.write(buf, 0, 0).await;
-        res.unwrap();
+        assert_eq!(batch.regions.len(), 3);
+        assert_eq!(batch.regions[0].blob_parts.len(), 2);
+        assert_eq!(batch.regions[1].blob_parts.len(), 2);
+        assert_eq!(batch.regions[2].blob_parts.len(), 1);
 
-        let mut w_entries = vec![];
-        let mut blob_offset = 0;
-        for window in batch.windows {
-            for blob in window.blobs {
-                for e in blob.entry_indices {
-                    let ei = EntryIndex {
-                        hash: e.hash,
-                        sequence: e.sequence,
-                        offset: blob_offset as u32 + e.offset,
-                        len: e.len,
-                    };
-                    w_entries.push(ei);
-                }
-                blob_offset += blob.size;
-            }
+        async fn flush<'a>(dev: &'a MonitoredDevice, region: &'a RegionId, part: &'a BlobPart) {
+            let (_, res) = dev
+                .write(
+                    part.data.clone(),
+                    *region,
+                    part.blob_region_offset as u64 + part.part_blob_offset as u64,
+                )
+                .await;
+            res.unwrap();
+            let (_, res) = dev
+                .write(part.index.clone(), *region, part.blob_region_offset as u64)
+                .await;
+            res.unwrap();
         }
 
-        let mut r_entries = vec![];
-        let mut scanner = RegionScanner::new(Region::new_for_test(0, dev, Arc::<RegionStats>::default()));
+        flush(&dev, &0, &batch.regions[0].blob_parts[0]).await;
+        flush(&dev, &0, &batch.regions[0].blob_parts[1]).await;
+        flush(&dev, &1, &batch.regions[1].blob_parts[0]).await;
+        flush(&dev, &1, &batch.regions[1].blob_parts[1]).await;
+        flush(&dev, &2, &batch.regions[2].blob_parts[0]).await;
 
-        while let Some(es) = scanner.next().await.unwrap() {
-            for e in es {
-                let ei = EntryIndex {
-                    hash: e.hash,
-                    sequence: e.addr.sequence,
-                    offset: e.addr.offset,
-                    len: e.addr.len,
-                };
-                r_entries.push(ei);
-            }
+        fn cal(region: RegionId, part: &BlobPart) -> Vec<EntryInfo> {
+            part.indices
+                .iter()
+                .map(|index| EntryInfo {
+                    hash: index.hash,
+                    addr: EntryAddress {
+                        region,
+                        offset: part.blob_region_offset as u32 + index.offset,
+                        len: index.len,
+                        sequence: index.sequence,
+                    },
+                })
+                .collect_vec()
         }
+
+        let mut r0 = cal(0, &batch.regions[0].blob_parts[0]);
+        r0.append(&mut cal(0, &batch.regions[0].blob_parts[1]));
+        let mut r1 = cal(1, &batch.regions[1].blob_parts[0]);
+        r1.append(&mut cal(1, &batch.regions[1].blob_parts[1]));
+        let r2 = cal(2, &batch.regions[2].blob_parts[0]);
+
+        async fn extract(dev: &MonitoredDevice, region: RegionId) -> Vec<EntryInfo> {
+            let mut infos = vec![];
+            let mut scanner = RegionScanner::new(
+                Region::new_for_test(region, dev.clone(), Arc::<RegionStats>::default()),
+                BLOB_INDEX_SIZE,
+            );
+            while let Some(mut es) = scanner.next().await.unwrap() {
+                infos.append(&mut es);
+            }
+            infos
+        }
+
+        let rr0 = extract(&dev, 0).await;
+        let rr1 = extract(&dev, 1).await;
+        let rr2 = extract(&dev, 2).await;
+
+        assert_eq!(r0, rr0);
+        assert_eq!(r1, rr1);
+        assert_eq!(r2, rr2);
     }
 }

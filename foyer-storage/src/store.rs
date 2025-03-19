@@ -562,6 +562,7 @@ where
                                 reinsertion_picker: self.large.reinsertion_picker,
                                 tombstone_log_config: self.large.tombstone_log_config,
                                 buffer_pool_size: self.large.buffer_pool_size,
+                                blob_index_size: self.large.blob_index_size,
                                 submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
                                 statistics: statistics.clone(),
                                 runtime,
@@ -620,6 +621,7 @@ where
                                     reinsertion_picker: self.large.reinsertion_picker,
                                     tombstone_log_config: self.large.tombstone_log_config,
                                     buffer_pool_size: self.large.buffer_pool_size,
+                                    blob_index_size: self.large.blob_index_size,
                                     submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
                                     statistics: statistics.clone(),
                                     runtime,
@@ -669,6 +671,7 @@ where
     flushers: usize,
     reclaimers: usize,
     buffer_pool_size: usize,
+    blob_index_size: usize,
     submit_queue_size_threshold: Option<usize>,
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
@@ -703,6 +706,7 @@ where
             flushers: 1,
             reclaimers: 1,
             buffer_pool_size: 16 * 1024 * 1024, // 16 MiB
+            blob_index_size: 4 * 1024,          // 4 KiB
             submit_queue_size_threshold: None,
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
@@ -757,6 +761,20 @@ where
     /// Default: 16 MiB.
     pub fn with_buffer_pool_size(mut self, buffer_pool_size: usize) -> Self {
         self.buffer_pool_size = buffer_pool_size;
+        self
+    }
+
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE: The size will be aligned up to a multiplier of 4K.
+    ///
+    /// Default: 4 KiB
+    pub fn with_blob_index_size(mut self, blob_index_size: usize) -> Self {
+        let blob_index_size = bits::align_up(PAGE, blob_index_size);
+        self.blob_index_size = blob_index_size;
         self
     }
 

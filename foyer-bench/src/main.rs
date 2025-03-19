@@ -248,6 +248,9 @@ struct Args {
     #[arg(long, default_value_t = ByteSize::mib(16))]
     buffer_pool_size: ByteSize,
 
+    #[arg(long, default_value_t = ByteSize::kib(4))]
+    blob_index_size: ByteSize,
+
     #[arg(long, default_value_t = ByteSize::kib(16))]
     set_size: ByteSize,
 
@@ -517,7 +520,8 @@ async fn benchmark(args: Args) {
             Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
             Box::<FifoPicker>::default(),
         ])
-        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _);
+        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
+        .with_blob_index_size(args.blob_index_size.as_u64() as _);
 
     let small = SmallEngineOptions::new()
         .with_flushers(args.flushers)

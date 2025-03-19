@@ -221,7 +221,7 @@ impl SetStorage {
         }
         for entry in self.iter() {
             if hash == entry.hash {
-                let (k, v) = EntryDeserializer::deserialize(
+                let (k, v) = EntryDeserializer::deserialize_old(
                     &entry.buf[EntryHeader::ENTRY_HEADER_SIZE..],
                     entry.key_len,
                     entry.value_len,
@@ -373,7 +373,7 @@ mod tests {
         let header = EntryHeader::new(0, 0, 0);
         header.write(&mut buf);
 
-        let info = EntrySerializer::serialize(
+        let info = EntrySerializer::serialize_old(
             entry.key(),
             entry.value(),
             Compression::None,

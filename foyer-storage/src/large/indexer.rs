@@ -28,7 +28,7 @@ pub struct HashedEntryAddress {
     pub address: EntryAddress,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryAddress {
     pub region: RegionId,
     pub offset: u32,

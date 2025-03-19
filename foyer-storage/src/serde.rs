@@ -94,7 +94,7 @@ pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
-    pub fn serialize<K, V, W>(
+    pub fn serialize_old<K, V, W>(
         key: &K,
         value: &V,
         compression: Compression,
@@ -117,6 +117,22 @@ impl EntrySerializer {
         metrics
             .storage_entry_serialize_duration
             .record(now.elapsed().as_secs_f64());
+
+        Ok(KvInfo { key_len, value_len })
+    }
+
+    #[fastrace::trace(name = "foyer::storage::serde::serialize")]
+    pub fn serialize<K, V, W>(key: &K, value: &V, compression: Compression, mut writer: W) -> Result<KvInfo>
+    where
+        K: StorageKey,
+        V: StorageValue,
+        W: Write,
+    {
+        // serialize value
+        let value_len = Self::serialize_value(value, &mut writer, compression)?;
+
+        // serialize key
+        let key_len = Self::serialize_key(key, &mut writer)?;
 
         Ok(KvInfo { key_len, value_len })
     }
@@ -174,7 +190,7 @@ pub struct EntryDeserializer;
 
 impl EntryDeserializer {
     #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
-    pub fn deserialize<K, V>(
+    pub fn deserialize_old<K, V>(
         buffer: &[u8],
         ken_len: usize,
         value_len: usize,
@@ -187,6 +203,22 @@ impl EntryDeserializer {
         V: StorageValue,
     {
         let now = Instant::now();
+
+        if buffer.len() < value_len + ken_len {
+            tracing::error!(
+                buffer_len = buffer.len(),
+                ken_len,
+                value_len,
+                ?compression,
+                checksum,
+                "[entry serde]: buffer too small",
+            );
+
+            return Err(Error::OutOfRange {
+                valid: 0..buffer.len(),
+                get: 0..value_len + ken_len,
+            });
+        }
 
         // deserialize value
         let buf = &buffer[..value_len];
@@ -207,6 +239,37 @@ impl EntryDeserializer {
         metrics
             .storage_entry_deserialize_duration
             .record(now.elapsed().as_secs_f64());
+
+        Ok((key, value))
+    }
+
+    #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
+    pub fn deserialize<K, V>(
+        buffer: &[u8],
+        ken_len: usize,
+        value_len: usize,
+        compression: Compression,
+        checksum: Option<u64>,
+    ) -> Result<(K, V)>
+    where
+        K: StorageKey,
+        V: StorageValue,
+    {
+        // deserialize value
+        let buf = &buffer[..value_len];
+        let value = Self::deserialize_value(buf, compression)?;
+
+        // deserialize key
+        let buf = &buffer[value_len..value_len + ken_len];
+        let key = Self::deserialize_key(buf)?;
+
+        // calculate checksum if needed
+        if let Some(expected) = checksum {
+            let get = Checksummer::checksum64(&buffer[..value_len + ken_len]);
+            if expected != get {
+                return Err(Error::ChecksumMismatch { expected, get });
+            }
+        }
 
         Ok((key, value))
     }
