@@ -23,7 +23,10 @@ use std::{
     },
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use foyer_memory::Piece;
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -91,6 +94,7 @@ where
 
     active: AtomicBool,
 
+    metrics: Arc<Metrics>,
     stats: Arc<Statistics>,
     _runtime: Runtime,
 }
@@ -151,6 +155,7 @@ where
             device: config.device,
             set_manager,
             active: AtomicBool::new(true),
+            metrics,
             stats,
             _runtime: config.runtime,
         };
@@ -186,13 +191,17 @@ where
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
         let stats = self.inner.stats.clone();
+        let metrics = self.inner.metrics.clone();
 
         async move {
             stats
                 .cache_read_bytes
                 .fetch_add(set_manager.set_size(), Ordering::Relaxed);
 
-            set_manager.load(hash).await
+            set_manager.load(hash).await.inspect_err(|e| {
+                tracing::error!(hash, ?e, "[sodc load]: fail to load");
+                metrics.storage_error.increase(1);
+            })
         }
     }
 
