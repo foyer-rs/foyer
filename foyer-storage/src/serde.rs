@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, io::Write, time::Instant};
+use std::{fmt::Debug, io::Write};
 
-use foyer_common::{
-    code::{StorageKey, StorageValue},
-    metrics::Metrics,
-};
+use foyer_common::code::{StorageKey, StorageValue};
 use twox_hash::{XxHash32, XxHash64};
 
 use crate::{
@@ -94,34 +91,6 @@ pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
-    pub fn serialize_old<K, V, W>(
-        key: &K,
-        value: &V,
-        compression: Compression,
-        mut writer: W,
-        metrics: &Metrics,
-    ) -> Result<KvInfo>
-    where
-        K: StorageKey,
-        V: StorageValue,
-        W: Write,
-    {
-        let now = Instant::now();
-
-        // serialize value
-        let value_len = Self::serialize_value(value, &mut writer, compression)?;
-
-        // serialize key
-        let key_len = Self::serialize_key(key, &mut writer)?;
-
-        metrics
-            .storage_entry_serialize_duration
-            .record(now.elapsed().as_secs_f64());
-
-        Ok(KvInfo { key_len, value_len })
-    }
-
-    #[fastrace::trace(name = "foyer::storage::serde::serialize")]
     pub fn serialize<K, V, W>(key: &K, value: &V, compression: Compression, mut writer: W) -> Result<KvInfo>
     where
         K: StorageKey,
@@ -189,60 +158,6 @@ impl EntrySerializer {
 pub struct EntryDeserializer;
 
 impl EntryDeserializer {
-    #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
-    pub fn deserialize_old<K, V>(
-        buffer: &[u8],
-        ken_len: usize,
-        value_len: usize,
-        compression: Compression,
-        checksum: Option<u64>,
-        metrics: &Metrics,
-    ) -> Result<(K, V)>
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
-        let now = Instant::now();
-
-        if buffer.len() < value_len + ken_len {
-            tracing::error!(
-                buffer_len = buffer.len(),
-                ken_len,
-                value_len,
-                ?compression,
-                checksum,
-                "[entry serde]: buffer too small",
-            );
-
-            return Err(Error::OutOfRange {
-                valid: 0..buffer.len(),
-                get: 0..value_len + ken_len,
-            });
-        }
-
-        // deserialize value
-        let buf = &buffer[..value_len];
-        let value = Self::deserialize_value(buf, compression)?;
-
-        // deserialize key
-        let buf = &buffer[value_len..value_len + ken_len];
-        let key = Self::deserialize_key(buf)?;
-
-        // calculate checksum if needed
-        if let Some(expected) = checksum {
-            let get = Checksummer::checksum64(&buffer[..value_len + ken_len]);
-            if expected != get {
-                return Err(Error::ChecksumMismatch { expected, get });
-            }
-        }
-
-        metrics
-            .storage_entry_deserialize_duration
-            .record(now.elapsed().as_secs_f64());
-
-        Ok((key, value))
-    }
-
     #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
     pub fn deserialize<K, V>(
         buffer: &[u8],

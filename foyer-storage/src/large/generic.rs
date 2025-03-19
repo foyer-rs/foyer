@@ -363,11 +363,13 @@ where
                 Ok(header) => header,
                 Err(e @ Error::MagicMismatch { .. })
                 | Err(e @ Error::ChecksumMismatch { .. })
-                | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
+                | Err(e @ Error::CompressionAlgorithmNotSupported(_))
+                | Err(e @ Error::OutOfRange { .. }) => {
                     tracing::trace!(
                         hash,
                         ?addr,
-                        "deserialize entry header error: {e}, remove this entry and skip"
+                        ?e,
+                        "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
                     );
                     indexer.remove(hash);
                     metrics.storage_miss.increase(1);
@@ -377,33 +379,40 @@ where
                 Err(e) => return Err(e),
             };
 
-            let (k, v) = match EntryDeserializer::deserialize_old::<K, V>(
-                &buf[EntryHeader::serialized_len()..],
-                header.key_len as _,
-                header.value_len as _,
-                header.compression,
-                Some(header.checksum),
-                &metrics,
-            ) {
-                Ok(res) => res,
-                Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
-                    tracing::trace!(
-                        hash,
-                        ?addr,
-                        ?header,
-                        "deserialize read buffer raise error: {e}, remove this entry and skip"
-                    );
-                    indexer.remove(hash);
-                    metrics.storage_miss.increase(1);
-                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
-                    return Ok(None);
-                }
-                Err(e) => {
-                    // FIXME(MrCroxx): Return None on out of range because it is checked before checksum. Or fix the
-                    // order.
-                    tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
-                    return Err(e);
-                }
+            let (k, v) = {
+                let now = Instant::now();
+                let res = match EntryDeserializer::deserialize::<K, V>(
+                    &buf[EntryHeader::serialized_len()..],
+                    header.key_len as _,
+                    header.value_len as _,
+                    header.compression,
+                    Some(header.checksum),
+                ) {
+                    Ok(res) => res,
+                    Err(e @ Error::MagicMismatch { .. })
+                    | Err(e @ Error::ChecksumMismatch { .. })
+                    | Err(e @ Error::OutOfRange { .. }) => {
+                        tracing::trace!(
+                            hash,
+                            ?addr,
+                            ?header,
+                            ?e,
+                            "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                        );
+                        indexer.remove(hash);
+                        metrics.storage_miss.increase(1);
+                        metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                        return Ok(None);
+                    }
+                    Err(e) => {
+                        tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
+                        return Err(e);
+                    }
+                };
+                metrics
+                    .storage_entry_deserialize_duration
+                    .record(now.elapsed().as_secs_f64());
+                res
             };
 
             metrics.storage_hit.increase(1);

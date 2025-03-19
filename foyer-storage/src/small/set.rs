@@ -17,7 +17,7 @@ use std::{
     fmt::Debug,
     ops::Range,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::{Buf, BufMut};
@@ -221,14 +221,17 @@ impl SetStorage {
         }
         for entry in self.iter() {
             if hash == entry.hash {
-                let (k, v) = EntryDeserializer::deserialize_old(
+                let now = Instant::now();
+                let (k, v) = EntryDeserializer::deserialize(
                     &entry.buf[EntryHeader::ENTRY_HEADER_SIZE..],
                     entry.key_len,
                     entry.value_len,
                     Compression::None,
                     None,
-                    &self.metrics,
                 )?;
+                self.metrics
+                    .storage_entry_deserialize_duration
+                    .record(now.elapsed().as_secs_f64());
                 return Ok(Some((k, v)));
             }
         }
@@ -373,14 +376,7 @@ mod tests {
         let header = EntryHeader::new(0, 0, 0);
         header.write(&mut buf);
 
-        let info = EntrySerializer::serialize_old(
-            entry.key(),
-            entry.value(),
-            Compression::None,
-            &mut buf,
-            &Metrics::noop(),
-        )
-        .unwrap();
+        let info = EntrySerializer::serialize(entry.key(), entry.value(), Compression::None, &mut buf).unwrap();
 
         let header = EntryHeader::new(entry.hash(), info.key_len, info.value_len);
         header.write(&mut buf[0..EntryHeader::ENTRY_HEADER_SIZE]);
