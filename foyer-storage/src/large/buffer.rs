@@ -150,7 +150,7 @@ impl BlobIndexReader {
 pub struct BufferEntryInfo {
     pub hash: u64,
     pub sequence: Sequence,
-    pub _offset: usize,
+    pub offset: usize,
     pub len: usize,
 }
 
@@ -231,7 +231,7 @@ impl Buffer {
         let info = BufferEntryInfo {
             hash,
             sequence,
-            _offset: offset,
+            offset,
             len,
         };
         self.entry_infos.push(info);
@@ -261,7 +261,7 @@ impl Buffer {
         let info = BufferEntryInfo {
             hash,
             sequence,
-            _offset: offset,
+            offset,
             len,
         };
         self.entry_infos.push(info);
