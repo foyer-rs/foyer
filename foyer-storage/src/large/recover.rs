@@ -175,7 +175,13 @@ impl RecoverRunner {
         region_manager.reclaim_semaphore().add_permits(permits);
         region_manager.reclaim_semaphore_countdown().reset(countdown);
 
-        tracing::info!("[recover] finish in {:?}", now.elapsed());
+        let elapsed = now.elapsed();
+        tracing::info!("[recover] finish in {:?}", elapsed);
+        config
+            .device
+            .metrics()
+            .storage_lodc_recover_duration
+            .record(elapsed.as_secs_f64());
 
         // Note: About reclaim semaphore permits and countdown:
         //
