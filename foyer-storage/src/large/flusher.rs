@@ -324,6 +324,11 @@ where
 
             if can_flush && need_flush && no_io_task {
                 let (io_buffer, infos) = self.buffer.take().unwrap().finish();
+
+                let efficiency =
+                    infos.last().map(|info| info.offset + info.len).unwrap_or_default() as f64 / io_buffer.len() as f64;
+                self.metrics.storage_lodc_buffer_efficiency.record(efficiency);
+
                 let shared_io_slice = io_buffer.into_shared_io_slice();
                 let batch = Splitter::split(&mut self.ctx, shared_io_slice, infos);
 
