@@ -56,6 +56,7 @@ Feel free to open a PR and add your projects here:
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 - [SlateDB](https://github.com/slatedb/slatedb): A cloud native embedded storage engine built on object storage.
+- [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services. 
 
 ## Quick Start
 
