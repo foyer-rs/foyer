@@ -44,7 +44,7 @@ test-log = { version = "0.2", default-features = false, features = [
 thiserror = "2"
 tracing = "0.1"
 prometheus = "0.13"
-mixtrics = "0.0.3"
+mixtrics = "0.0.4"
 
 # foyer components
 foyer-common = { version = "0.14.1", path = "foyer-common" }
