@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-03-24
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.0 |
+| foyer-common | 0.15.0 |
+| foyer-memory | 0.15.0 |
+| foyer-storage | 0.15.0 |
+| foyer-bench | 0.15.0 |
+
+### Changes
+
+- Support blob file format to speed up disk cache recovery and reduce reclaim overhead.
+- Refine redundant codes.
+
 ## 2025-02-08
 
 ### Releases
