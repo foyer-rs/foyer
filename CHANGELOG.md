@@ -24,7 +24,9 @@ date: 2023-05-12T11:02:09+08:00
 ### Changes
 
 - Support blob file format to speed up disk cache recovery and reduce reclaim overhead.
+- Make histogram metrics more precise.
 - Refine redundant codes.
+- Refine dependencies.
 
 ## 2025-02-08
 
