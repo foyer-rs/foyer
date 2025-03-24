@@ -14,7 +14,7 @@ publish = false
 
 [dependencies]
 ahash = { workspace = true }
-anyhow = "1"
+anyhow = { workspace = true }
 chrono = "0.4"
 equivalent = { workspace = true }
 fastrace = { workspace = true }

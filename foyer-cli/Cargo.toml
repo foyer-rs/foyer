@@ -13,7 +13,7 @@ readme = { workspace = true }
 publish = false
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }

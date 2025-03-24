@@ -23,6 +23,8 @@ readme = "README.md"
 
 [workspace.dependencies]
 ahash = "0.8"
+anyhow = "1"
+bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
 equivalent = "1"

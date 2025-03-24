@@ -20,14 +20,14 @@ anyhow = "1.0"
 array-util = "1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 bincode = "1"
-bytes = "1"
+bytes = { workspace = true }
 clap = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 flume = "0.11"
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-fs4 = { version = "0.12", default-features = false }
+fs4 = { version = "0.13", default-features = false }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
