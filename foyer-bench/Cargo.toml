@@ -12,7 +12,7 @@ license = { workspace = true }
 readme = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
