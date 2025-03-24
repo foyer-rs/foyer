@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::{sync::Arc, time::Instant};
+
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    metrics::Metrics,
 };
 
 use crate::{
@@ -167,15 +170,18 @@ pub struct Buffer {
     entry_infos: Vec<BufferEntryInfo>,
 
     max_entry_size: usize,
+
+    metrics: Arc<Metrics>,
 }
 
 impl Buffer {
-    pub fn new(io_buffer: IoBuffer, max_entry_size: usize) -> Self {
+    pub fn new(io_buffer: IoBuffer, max_entry_size: usize, metrics: Arc<Metrics>) -> Self {
         Self {
             io_buffer,
             written: 0,
             entry_infos: vec![],
             max_entry_size,
+            metrics,
         }
     }
 
@@ -197,6 +203,8 @@ impl Buffer {
         if buf.len() < EntryHeader::serialized_len() {
             return false;
         }
+
+        let ser = Instant::now();
 
         let info = match EntrySerializer::serialize(key, value, compression, &mut buf[EntryHeader::serialized_len()..])
         {
@@ -220,6 +228,10 @@ impl Buffer {
             compression,
         };
         header.write(&mut buf[..EntryHeader::serialized_len()]);
+
+        self.metrics
+            .storage_entry_serialize_duration
+            .record(ser.elapsed().as_secs_f64());
 
         let len = EntryHeader::serialized_len() + info.key_len as usize + info.value_len as usize;
         let aligned = bits::align_up(PAGE, len);
@@ -477,7 +489,7 @@ mod tests {
 
         // 1. Test write single blob part.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE);
+        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K
         assert!(buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, 1));
@@ -523,7 +535,7 @@ mod tests {
 
         // 2. Test continue to write blob part and region split.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE);
+        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K, region split
         assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4));
@@ -591,7 +603,7 @@ mod tests {
 
         // 3. Test leave first region empty.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE);
+        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 8K, region split
         assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7));

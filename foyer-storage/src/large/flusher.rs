@@ -164,7 +164,7 @@ where
         let io_buffer = IoBuffer::new(io_buffer_size);
         let rotate_buffer = Some(IoBuffer::new(io_buffer_size));
 
-        let buffer = Buffer::new(io_buffer, max_entry_size);
+        let buffer = Buffer::new(io_buffer, max_entry_size, metrics.clone());
         let buffer = Some(buffer);
 
         let current_region_handle = region_manager.get_clean_region();
@@ -341,7 +341,7 @@ where
                 self.io_tasks.push_back(io_task);
 
                 let io_buffer = self.rotate_buffer.take().unwrap();
-                let buffer = Buffer::new(io_buffer, self.max_entry_size);
+                let buffer = Buffer::new(io_buffer, self.max_entry_size, self.metrics.clone());
                 self.buffer = Some(buffer);
             }
 
