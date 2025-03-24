@@ -111,28 +111,28 @@ impl BatchMut {
             return false;
         }
 
-        let info = {
-            let now = Instant::now();
-            let res = match EntrySerializer::serialize(
-                piece.key(),
-                piece.value(),
-                Compression::None,
-                &mut self.buffer[self.len + EntryHeader::ENTRY_HEADER_SIZE..self.len + len],
-            ) {
-                Ok(info) => info,
-                Err(e) => {
-                    tracing::warn!("[sodc batch]: serialize entry error: {e}");
-                    return false;
-                }
-            };
-            self.metrics
-                .storage_entry_serialize_duration
-                .record(now.elapsed().as_secs_f64());
-            res
+        let ser = Instant::now();
+
+        let info = match EntrySerializer::serialize(
+            piece.key(),
+            piece.value(),
+            Compression::None,
+            &mut self.buffer[self.len + EntryHeader::ENTRY_HEADER_SIZE..self.len + len],
+        ) {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::warn!("[sodc batch]: serialize entry error: {e}");
+                return false;
+            }
         };
+
         assert_eq!(info.key_len + info.value_len + EntryHeader::ENTRY_HEADER_SIZE, len);
         let header = EntryHeader::new(piece.hash(), info.key_len as usize, info.value_len as usize);
         header.write(&mut self.buffer[self.len..self.len + EntryHeader::ENTRY_HEADER_SIZE]);
+
+        self.metrics
+            .storage_entry_serialize_duration
+            .record(ser.elapsed().as_secs_f64());
 
         set.items.push(ItemMut {
             range: self.len..self.len + len,

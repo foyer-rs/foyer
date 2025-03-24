@@ -144,7 +144,7 @@ mod tests {
         let dev = device_for_test(tempdir.path(), REGION_SIZE, 4).await;
 
         let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE);
+        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         for i in 0..BLOB_INDEX_CAPACITY * 5 {
             buffer.push(

@@ -14,7 +14,7 @@
 
 use std::{borrow::Cow, fmt::Debug};
 
-use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
+use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry, Buckets};
 
 #[expect(missing_docs)]
 pub struct Metrics {
@@ -128,10 +128,12 @@ impl Metrics {
             "foyer disk cache operations".into(),
             &["name", "op"],
         );
-        let foyer_storage_op_duration = registry.register_histogram_vec(
+        let foyer_storage_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_op_duration".into(),
             "foyer disk cache op durations".into(),
             &["name", "op"],
+            // 1us ~ 4s
+            Buckets::exponential(0.000_001, 2.0, 23),
         );
 
         let foyer_storage_inner_op_total = registry.register_counter_vec(
@@ -139,10 +141,12 @@ impl Metrics {
             "foyer disk cache inner operations".into(),
             &["name", "op"],
         );
-        let foyer_storage_inner_op_duration = registry.register_histogram_vec(
+        let foyer_storage_inner_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_inner_op_duration".into(),
             "foyer disk cache inner op durations".into(),
             &["name", "op"],
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
 
         let foyer_storage_disk_io_total = registry.register_counter_vec(
@@ -155,10 +159,12 @@ impl Metrics {
             "foyer disk cache disk io bytes".into(),
             &["name", "op"],
         );
-        let foyer_storage_disk_io_duration = registry.register_histogram_vec(
+        let foyer_storage_disk_io_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_disk_io_duration".into(),
             "foyer disk cache disk io duration".into(),
             &["name", "op"],
+            // 1us ~ 4s
+            Buckets::exponential(0.000_001, 2.0, 23),
         );
 
         let foyer_storage_region = registry.register_gauge_vec(
@@ -172,22 +178,28 @@ impl Metrics {
             &["name"],
         );
 
-        let foyer_storage_entry_serde_duration = registry.register_histogram_vec(
+        let foyer_storage_entry_serde_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_entry_serde_duration".into(),
             "foyer disk cache entry serde durations".into(),
             &["name", "op"],
+            // 10ns ~ 40ms
+            Buckets::exponential(0.000_000_01, 2.0, 23),
         );
 
-        let foyer_storage_lodc_buffer_efficiency = registry.register_histogram_vec(
+        let foyer_storage_lodc_buffer_efficiency = registry.register_histogram_vec_with_buckets(
             "foyer_storage_lodc_buffer_efficiency".into(),
             "foyer large object disk cache buffer efficiency".into(),
             &["name"],
+            // 0% ~ 100%
+            Buckets::linear(0.1, 0.1, 10),
         );
 
-        let foyer_storage_lodc_recover_duration = registry.register_histogram_vec(
+        let foyer_storage_lodc_recover_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_lodc_recover_duration".into(),
             "foyer large object disk cache recover duration".into(),
             &["name"],
+            // 1ms ~ 1000s
+            Buckets::exponential(0.001, 2.0, 21),
         );
 
         let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
