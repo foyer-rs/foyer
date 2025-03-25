@@ -34,6 +34,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
 itertools = "0.14"
 parking_lot = { version = "0.12" }
+pin-project = "1"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
 serde = { version = "1", features = ["derive", "rc"] }

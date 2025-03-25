@@ -22,7 +22,7 @@ pub use crate::{
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-        cache::{HybridCache, HybridCacheEntry, HybridFetch},
+        cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridFetch},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
