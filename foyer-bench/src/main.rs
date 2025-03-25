@@ -39,8 +39,9 @@ use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
     Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
+    HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
+    RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
+    TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -245,6 +246,9 @@ struct Args {
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
+    #[arg(long, value_parser = PossibleValuesParser::new(["eviction", "insertion"]), default_value = "eviction")]
+    policy: String,
+
     #[arg(long, default_value_t = ByteSize::mib(16))]
     buffer_pool_size: ByteSize,
 
@@ -443,7 +447,15 @@ async fn benchmark(args: Args) {
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
         .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
-    let builder = HybridCacheBuilder::new().with_tracing_options(tracing_options);
+    let policy = match args.policy.as_str() {
+        "eviction" => HybridCachePolicy::WriteOnInsertion,
+        "insertion" => HybridCachePolicy::WriteOnInsertion,
+        _ => panic!("unsupported policy: {}", args.policy),
+    };
+
+    let builder = HybridCacheBuilder::new()
+        .with_tracing_options(tracing_options)
+        .with_policy(policy);
 
     let builder = if args.metrics {
         let registry = Registry::new();
