@@ -276,6 +276,12 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
+      - name: Build foyer-bench
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- -h
       - name: Run foyer-bench with coverage (large, eviction)
         env:
           RUST_BACKTRACE: 1
