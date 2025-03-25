@@ -45,3 +45,6 @@ mod record;
 
 mod prelude;
 pub use prelude::*;
+
+#[cfg(test)]
+pub mod test_utils;
