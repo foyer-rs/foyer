@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-03-25
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.1 |
+| foyer-common | 0.15.1 |
+| foyer-memory | 0.15.1 |
+| foyer-storage | 0.15.1 |
+| foyer-bench | 0.15.1 |
+
+### Changes
+
+- Support either write disk cache on in-memory cache evction or on insertion with `HybridCacheBuilder::with_policy()`.
+
 ## 2025-03-24
 
 ### Releases
