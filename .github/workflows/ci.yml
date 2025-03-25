@@ -17,8 +17,8 @@ concurrency:
 env:
   RUST_TOOLCHAIN_NIGHTLY: nightly-2024-08-30
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20250118v2
-  CARGO_UDEPS_KEY_SUFFIX: 20251020
+  CACHE_KEY_SUFFIX: 20250325
+  CARGO_UDEPS_KEY_SUFFIX: 20250325
 
 jobs:
   misc-check:
@@ -235,8 +235,48 @@ jobs:
           cargo llvm-cov --no-report run --features "tracing,ot" --example tail_based_tracing
           cargo llvm-cov --no-report run --example equivalent
           cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
+      - name: Generate codecov report
+        run: |
+          cargo llvm-cov report --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v4
+        if: runner.os == 'Linux' && runner.arch == 'X64' && matrix.rust_toolchain == 'stable'
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          verbose: true
+  foyer-bench-fuzzy-test:
+    name: foyer bench fuzzy test with codecov
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        rust_toolchain: [stable, 1.81.0]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust_toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+      - name: Cache Cargo home
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-foyer-bench-fuzzy-test
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
       - name: Run foyer-bench with coverage
-        if: runner.os == 'Linux' && runner.arch == 'X64'
         env:
           RUST_BACKTRACE: 1
           CI: true
