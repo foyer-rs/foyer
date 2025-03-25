@@ -276,17 +276,47 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@nextest
-      - name: Run foyer-bench with coverage
+      - name: Run foyer-bench with coverage (large, eviction)
         env:
           RUST_BACKTRACE: 1
           CI: true
         run: |
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction
+      - name: Run foyer-bench with coverage (large, insertion)
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion
+      - name: Run foyer-bench with coverage (small, eviction)
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy eviction
+      - name: Run foyer-bench with coverage (small, insertion)
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy insertion
+      - name: Run foyer-bench with coverage (mixed, eviction)
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy eviction
+      - name: Run foyer-bench with coverage (mixed, insertion)
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --admission-rate-limit 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy insertion
       - name: Generate codecov report
         run: |
