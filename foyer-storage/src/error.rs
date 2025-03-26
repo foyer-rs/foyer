@@ -56,6 +56,16 @@ pub enum Error {
         /// Gotten range.
         get: Range<usize>,
     },
+    /// Invalid I/O range.
+    #[error("invalid io range: {range:?}, region size: {region_size}, capacity: {capacity}")]
+    InvalidIoRange {
+        /// I/O range
+        range: Range<usize>,
+        /// Region size
+        region_size: usize,
+        /// Capacity
+        capacity: usize,
+    },
     /// Compression algorithm not supported.
     #[error("compression algorithm not supported: {0}")]
     CompressionAlgorithmNotSupported(u8),

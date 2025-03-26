@@ -353,7 +353,21 @@ where
 
             let buf = IoBuffer::new(bits::align_up(PAGE, addr.len as _));
             let (buf, res) = device.read(buf, addr.region, addr.offset as _).await;
-            res?;
+            match res {
+                Ok(_) => {}
+                Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(?e, "[lodc load]: invalid io range, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                    return Ok(None);
+                }
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
+            }
 
             stats
                 .cache_read_bytes
@@ -364,8 +378,9 @@ where
                 Err(e @ Error::MagicMismatch { .. })
                 | Err(e @ Error::ChecksumMismatch { .. })
                 | Err(e @ Error::CompressionAlgorithmNotSupported(_))
-                | Err(e @ Error::OutOfRange { .. }) => {
-                    tracing::trace!(
+                | Err(e @ Error::OutOfRange { .. })
+                | Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(
                         hash,
                         ?addr,
                         ?e,
@@ -376,7 +391,11 @@ where
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
             };
 
             let (k, v) = {
@@ -391,8 +410,9 @@ where
                     Ok(res) => res,
                     Err(e @ Error::MagicMismatch { .. })
                     | Err(e @ Error::ChecksumMismatch { .. })
-                    | Err(e @ Error::OutOfRange { .. }) => {
-                        tracing::trace!(
+                    | Err(e @ Error::OutOfRange { .. })
+                    | Err(e @ Error::InvalidIoRange { .. }) => {
+                        tracing::warn!(
                             hash,
                             ?addr,
                             ?header,
