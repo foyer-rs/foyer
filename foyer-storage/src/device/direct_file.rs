@@ -75,7 +75,7 @@ pub struct DirectFileDevice {
 }
 
 impl DirectFileDevice {
-    fn assert_io_range(&self, region: Option<RegionId>, offset: u64, len: usize) {
+    fn check_io_range(&self, region: Option<RegionId>, offset: u64, len: usize) -> Result<()> {
         let offset = if let Some(region) = region {
             self.region_size as u64 * region as u64 + offset
         } else {
@@ -86,24 +86,29 @@ impl DirectFileDevice {
         bits::assert_aligned(PAGE, offset as _);
         bits::assert_aligned(PAGE, len);
 
+        let e = Error::InvalidIoRange {
+            range: offset as usize..offset as usize + len,
+            region_size: self.region_size(),
+            capacity: self.capacity(),
+        };
+
         // Assert file capacity bound.
-        assert!(
-            offset as usize + len <= self.capacity(),
-            "offset ({offset}) + len ({len}) = total ({total}) <= capacity ({capacity})",
-            total = offset as usize + len,
-            capacity = self.capacity,
-        );
+        if offset as usize + len > self.capacity() {
+            tracing::error!(?e, "[direct fs]: io range out of capacity");
+            return Err(e);
+        }
 
         // Assert region capacity bound if region is given.
         if region.is_some() && len != 0 {
             let start_region = offset as usize / self.region_size;
             let end_region = (offset as usize + len - 1) / self.region_size;
-            assert_eq!(
-                start_region, end_region,
-                "io range are not in the same region, region_size: {region_size}, offset: {offset}, len: {len}, start region: {start_region}, end region: {end_region}",
-                region_size = self.region_size,
-            );
+            if start_region != end_region {
+                tracing::error!(?e, "[direct fs]: io range not in the same region");
+                return Err(e);
+            }
         }
+
+        Ok(())
     }
 
     /// Positioned write API for the direct file device.
@@ -117,7 +122,9 @@ impl DirectFileDevice {
         B: IoBuf,
     {
         let len = buf.len();
-        self.assert_io_range(None, offset, len);
+        if let Err(e) = self.check_io_range(None, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file.clone();
         asyncify_with_runtime(self.runtime.write(), move || {
@@ -159,7 +166,9 @@ impl DirectFileDevice {
         B: IoBufMut,
     {
         let len = buf.len();
-        self.assert_io_range(None, offset, len);
+        if let Err(e) = self.check_io_range(None, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file.clone();
         asyncify_with_runtime(self.runtime.read(), move || {
@@ -253,7 +262,9 @@ impl Dev for DirectFileDevice {
         B: IoBuf,
     {
         let len = buf.len();
-        self.assert_io_range(Some(region), offset, len);
+        if let Err(e) = self.check_io_range(Some(region), offset, len) {
+            return (buf, Err(e));
+        }
 
         let poffset = offset + region as u64 * self.region_size as u64;
         self.pwrite(buf, poffset).await
@@ -265,7 +276,9 @@ impl Dev for DirectFileDevice {
         B: IoBufMut,
     {
         let len = buf.len();
-        self.assert_io_range(Some(region), offset, len);
+        if let Err(e) = self.check_io_range(Some(region), offset, len) {
+            return (buf, Err(e));
+        }
 
         let poffset = offset + region as u64 * self.region_size as u64;
         self.pread(buf, poffset).await

@@ -88,31 +88,36 @@ impl DirectFsDevice {
         &self.inner.files[region as usize]
     }
 
-    fn assert_io_range(&self, region: RegionId, offset: u64, len: usize) {
+    fn check_io_range(&self, region: RegionId, offset: u64, len: usize) -> Result<()> {
         let offset = self.inner.file_size as u64 * region as u64 + offset;
 
         // Assert alignment.
         bits::assert_aligned(PAGE, offset as _);
         bits::assert_aligned(PAGE, len);
 
+        let e = Error::InvalidIoRange {
+            range: offset as usize..offset as usize + len,
+            region_size: self.region_size(),
+            capacity: self.capacity(),
+        };
+
         // Assert file capacity bound.
-        assert!(
-            offset as usize + len <= self.capacity(),
-            "offset ({offset}) + len ({len}) = total ({total}) <= capacity ({capacity})",
-            total = offset as usize + len,
-            capacity = self.inner.capacity,
-        );
+        if offset as usize + len > self.capacity() {
+            tracing::error!(?e, "[direct fs]: io range out of capacity");
+            return Err(e);
+        }
 
         // Assert region capacity bound if region is given.
         if len != 0 {
             let start_region = offset as usize / self.inner.file_size;
             let end_region = (offset as usize + len - 1) / self.inner.file_size;
-            assert_eq!(
-                start_region, end_region,
-                "io range are not in the same region, region_size: {region_size}, offset: {offset}, len: {len}, start region: {start_region}, end region: {end_region}",
-                region_size = self.inner.file_size,
-            );
+            if start_region != end_region {
+                tracing::error!(?e, "[direct fs]: io range not in the same region");
+                return Err(e);
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -177,7 +182,9 @@ impl Dev for DirectFsDevice {
         B: IoBuf,
     {
         let len = buf.len();
-        self.assert_io_range(region, offset, len);
+        if let Err(e) = self.check_io_range(region, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file(region).clone();
         asyncify_with_runtime(self.inner.runtime.write(), move || {
@@ -214,7 +221,9 @@ impl Dev for DirectFsDevice {
         B: IoBufMut,
     {
         let len = buf.len();
-        self.assert_io_range(region, offset, len);
+        if let Err(e) = self.check_io_range(region, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file(region).clone();
         asyncify_with_runtime(self.inner.runtime.read(), move || {
