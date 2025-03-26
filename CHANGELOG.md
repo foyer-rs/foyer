@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-03-26
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.2 |
+| foyer-common | 0.15.2 |
+| foyer-memory | 0.15.2 |
+| foyer-storage | 0.15.2 |
+| foyer-bench | 0.15.2 |
+
+### Changes
+
+- Mitigate low-priority errors. Refine error handling.
+
 ## 2025-03-25
 
 ### Releases
