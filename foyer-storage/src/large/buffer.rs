@@ -345,6 +345,12 @@ impl Splitter {
                     assert_eq!(size, 0);
                     // The blob part is empty, only need to set the state.
                     ctx.current_blob_index.reset();
+                    tracing::warn!(
+                        current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                        current_blob_region_offset_post = ctx.current_blob_region_offset + ctx.current_part_blob_offset,
+                        current_part_blob_offset = ctx.current_part_blob_offset,
+                        "[(debug) splitter]: pos 1"
+                    );
                     ctx.current_blob_region_offset += ctx.current_part_blob_offset;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
                 } else {
@@ -362,6 +368,14 @@ impl Splitter {
                         indices,
                     };
 
+                    tracing::warn!(
+                        current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                        current_blob_region_offset_post =
+                            ctx.current_blob_region_offset + ctx.current_part_blob_offset + size,
+                        current_part_blob_offset = ctx.current_part_blob_offset,
+                        size,
+                        "[(debug) splitter]: pos 2"
+                    );
                     ctx.current_blob_region_offset =
                         ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
@@ -376,6 +390,11 @@ impl Splitter {
                 tracing::trace!("[splitter]; split region");
 
                 batch.regions.push(Region { blob_parts: vec![] });
+                tracing::warn!(
+                    current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                    current_blob_region_offset_post = 0,
+                    "[(debug) splitter]: pos 3"
+                );
                 ctx.current_blob_region_offset = 0;
             }
 
@@ -411,6 +430,14 @@ impl Splitter {
                 tracing::trace!("[splitter]; split blob");
 
                 ctx.current_blob_index.reset();
+                tracing::warn!(
+                    current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                    current_blob_region_offset_post =
+                        ctx.current_blob_region_offset + ctx.current_part_blob_offset + size,
+                    current_part_blob_offset = ctx.current_part_blob_offset,
+                    size,
+                    "[(debug) splitter]: pos 4"
+                );
                 ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                 ctx.current_part_blob_offset = ctx.blob_index_size;
             } else {
