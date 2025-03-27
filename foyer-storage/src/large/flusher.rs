@@ -470,11 +470,29 @@ where
                                     tracing::trace!(region = region.id(), offset, len, "[flusher]: write blob data");
 
                                     let (_, res) = region.write(data, offset as _).await;
+                                    if matches! { res, Err(Error::InvalidIoRange { .. }) } {
+                                        tracing::error!(
+                                            blob_region_offset,
+                                            part_blob_offset,
+                                            ?indices,
+                                            ?res,
+                                            "[(debug) flusher data error]"
+                                        );
+                                    }
                                     res?;
 
                                     tracing::trace!(offset = blob_region_offset, "[flusher]: write blob index");
 
                                     let (_, res) = region.write(index, blob_region_offset as _).await;
+                                    if matches! { res, Err(Error::InvalidIoRange { .. }) } {
+                                        tracing::error!(
+                                            blob_region_offset,
+                                            part_blob_offset,
+                                            ?indices,
+                                            ?res,
+                                            "[(debug) flusher index error]"
+                                        );
+                                    }
                                     res?;
 
                                     if flush {

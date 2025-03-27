@@ -354,7 +354,7 @@ impl Splitter {
 
                     let indices = std::mem::take(&mut indices);
 
-                    let blob = BlobPart {
+                    let part = BlobPart {
                         blob_region_offset: ctx.current_blob_region_offset,
                         index,
                         part_blob_offset: ctx.current_part_blob_offset,
@@ -368,7 +368,7 @@ impl Splitter {
                     shared_io_slice = shared_io_slice.slice(size..);
                     size = 0;
 
-                    batch.regions.last_mut().unwrap().blob_parts.push(blob);
+                    batch.regions.last_mut().unwrap().blob_parts.push(part);
                 }
             }
 
@@ -399,7 +399,7 @@ impl Splitter {
 
             let indices = std::mem::take(&mut indices);
 
-            let blob = BlobPart {
+            let part = BlobPart {
                 blob_region_offset: ctx.current_blob_region_offset,
                 index,
                 part_blob_offset: ctx.current_part_blob_offset,
@@ -417,7 +417,7 @@ impl Splitter {
                 ctx.current_part_blob_offset += size;
             }
 
-            batch.regions.last_mut().unwrap().blob_parts.push(blob);
+            batch.regions.last_mut().unwrap().blob_parts.push(part);
         }
 
         batch
