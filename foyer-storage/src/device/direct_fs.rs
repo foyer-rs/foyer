@@ -89,8 +89,6 @@ impl DirectFsDevice {
     }
 
     fn check_io_range(&self, region: RegionId, offset: u64, len: usize) -> Result<()> {
-        let offset = self.inner.file_size as u64 * region as u64 + offset;
-
         // Assert alignment.
         bits::assert_aligned(PAGE, offset as _);
         bits::assert_aligned(PAGE, len);
@@ -101,20 +99,10 @@ impl DirectFsDevice {
             capacity: self.capacity(),
         };
 
-        // Assert file capacity bound.
-        if offset as usize + len > self.capacity() {
-            tracing::error!(?e, "[direct fs]: io range out of capacity");
-            return Err(e);
-        }
-
         // Assert region capacity bound if region is given.
-        if len != 0 {
-            let start_region = offset as usize / self.inner.file_size;
-            let end_region = (offset as usize + len - 1) / self.inner.file_size;
-            if start_region != end_region {
-                tracing::error!(?e, "[direct fs]: io range not in the same region");
-                return Err(e);
-            }
+        if offset as usize + len > self.inner.file_size {
+            tracing::error!(region, ?e, "[direct fs]: io range out of region capacity");
+            return Err(e);
         }
 
         Ok(())
