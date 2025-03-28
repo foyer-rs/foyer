@@ -489,14 +489,15 @@ where
                                     );
 
                                     let (_, res) = region.write(data, offset as _).await;
-                                    if matches! { res, Err(Error::InvalidIoRange { .. }) } {
+                                    if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
                                             blob_region_offset,
                                             part_blob_offset,
                                             ?indices,
                                             ?res,
-                                            "[(debug) flusher data error]"
+                                            ?e,
+                                            "[flusher]: flush data error"
                                         );
                                     }
                                     res?;
@@ -504,14 +505,15 @@ where
                                     tracing::trace!(id, offset = blob_region_offset, "[flusher]: write blob index");
 
                                     let (_, res) = region.write(index, blob_region_offset as _).await;
-                                    if matches! { res, Err(Error::InvalidIoRange { .. }) } {
+                                    if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
                                             blob_region_offset,
                                             part_blob_offset,
                                             ?indices,
                                             ?res,
-                                            "[(debug) flusher index error]"
+                                            ?e,
+                                            "[flusher]: flush data error"
                                         );
                                     }
                                     res?;
