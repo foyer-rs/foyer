@@ -240,20 +240,33 @@ where
         #[cfg(test)]
         let flush_holder = FlushHolder::default();
 
-        let flushers = try_join_all((0..config.flushers).map(|_| async {
-            Flusher::open(
-                &config,
-                indexer.clone(),
-                region_manager.clone(),
-                device.clone(),
-                submit_queue_size.clone(),
-                tombstone_log.clone(),
-                stats.clone(),
-                metrics.clone(),
-                &config.runtime,
-                #[cfg(test)]
-                flush_holder.clone(),
-            )
+        let flushers = try_join_all((0..config.flushers).map(|id| {
+            let config = &config;
+            let indexer = indexer.clone();
+            let region_manager = region_manager.clone();
+            let device = device.clone();
+            let submit_queue_size = submit_queue_size.clone();
+            let tombstone_log = tombstone_log.clone();
+            let stats = stats.clone();
+            let metrics = metrics.clone();
+            #[cfg(test)]
+            let flush_holder = flush_holder.clone();
+            async move {
+                Flusher::open(
+                    id,
+                    config,
+                    indexer,
+                    region_manager,
+                    device,
+                    submit_queue_size,
+                    tombstone_log,
+                    stats,
+                    metrics,
+                    &config.runtime,
+                    #[cfg(test)]
+                    flush_holder,
+                )
+            }
         }))
         .await?;
 
