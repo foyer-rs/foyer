@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-03-28
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.3 |
+| foyer-common | 0.15.3 |
+| foyer-memory | 0.15.3 |
+| foyer-storage | 0.15.3 |
+| foyer-bench | 0.15.3 |
+
+### Changes
+
+- Fix lodc flush buffer split condition calculation error.
+
 ## 2025-03-26
 
 ### Releases
