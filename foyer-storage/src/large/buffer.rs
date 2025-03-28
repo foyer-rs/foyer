@@ -345,6 +345,12 @@ impl Splitter {
                     assert_eq!(size, 0);
                     // The blob part is empty, only need to set the state.
                     ctx.current_blob_index.reset();
+                    tracing::warn!(
+                        current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                        current_blob_region_offset_post = ctx.current_blob_region_offset + ctx.current_part_blob_offset,
+                        current_part_blob_offset = ctx.current_part_blob_offset,
+                        "[(debug) splitter]: pos 1"
+                    );
                     ctx.current_blob_region_offset += ctx.current_part_blob_offset;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
                 } else {
@@ -354,7 +360,7 @@ impl Splitter {
 
                     let indices = std::mem::take(&mut indices);
 
-                    let blob = BlobPart {
+                    let part = BlobPart {
                         blob_region_offset: ctx.current_blob_region_offset,
                         index,
                         part_blob_offset: ctx.current_part_blob_offset,
@@ -362,13 +368,21 @@ impl Splitter {
                         indices,
                     };
 
+                    tracing::warn!(
+                        current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                        current_blob_region_offset_post =
+                            ctx.current_blob_region_offset + ctx.current_part_blob_offset + size,
+                        current_part_blob_offset = ctx.current_part_blob_offset,
+                        size,
+                        "[(debug) splitter]: pos 2"
+                    );
                     ctx.current_blob_region_offset =
                         ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                     ctx.current_part_blob_offset = ctx.blob_index_size;
                     shared_io_slice = shared_io_slice.slice(size..);
                     size = 0;
 
-                    batch.regions.last_mut().unwrap().blob_parts.push(blob);
+                    batch.regions.last_mut().unwrap().blob_parts.push(part);
                 }
             }
 
@@ -376,6 +390,11 @@ impl Splitter {
                 tracing::trace!("[splitter]; split region");
 
                 batch.regions.push(Region { blob_parts: vec![] });
+                tracing::warn!(
+                    current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                    current_blob_region_offset_post = 0,
+                    "[(debug) splitter]: pos 3"
+                );
                 ctx.current_blob_region_offset = 0;
             }
 
@@ -399,7 +418,7 @@ impl Splitter {
 
             let indices = std::mem::take(&mut indices);
 
-            let blob = BlobPart {
+            let part = BlobPart {
                 blob_region_offset: ctx.current_blob_region_offset,
                 index,
                 part_blob_offset: ctx.current_part_blob_offset,
@@ -411,13 +430,21 @@ impl Splitter {
                 tracing::trace!("[splitter]; split blob");
 
                 ctx.current_blob_index.reset();
+                tracing::warn!(
+                    current_blob_region_offset_prev = ctx.current_blob_region_offset,
+                    current_blob_region_offset_post =
+                        ctx.current_blob_region_offset + ctx.current_part_blob_offset + size,
+                    current_part_blob_offset = ctx.current_part_blob_offset,
+                    size,
+                    "[(debug) splitter]: pos 4"
+                );
                 ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
                 ctx.current_part_blob_offset = ctx.blob_index_size;
             } else {
                 ctx.current_part_blob_offset += size;
             }
 
-            batch.regions.last_mut().unwrap().blob_parts.push(blob);
+            batch.regions.last_mut().unwrap().blob_parts.push(part);
         }
 
         batch
