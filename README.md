@@ -26,6 +26,7 @@
 [![CI](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/ci.yml)
 [![License Checker](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml)
 [![codecov](https://codecov.io/github/foyer-rs/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/foyer-rs/foyer)
+[![libs.tech recommends](https://libs.tech/project/639698167/badge.svg)](https://libs.tech/project/639698167/foyer)
 
 *foyer* aims to be an efficient and user-friendly hybrid cache lib in Rust. 
 
