@@ -169,7 +169,7 @@ where
     fn submit(&mut self, submission: Submission<K, V>) {
         let report = |enqueued: bool| {
             if !enqueued {
-                self.metrics.storage_queue_drop.increase(1);
+                self.metrics.storage_queue_buffer_overflow.increase(1);
             }
         };
 
