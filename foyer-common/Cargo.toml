@@ -13,6 +13,7 @@ readme = { workspace = true }
 
 [dependencies]
 ahash = { workspace = true }
+bincode = "1"
 bytes = { workspace = true }
 cfg-if = "1"
 fastrace = { workspace = true }
