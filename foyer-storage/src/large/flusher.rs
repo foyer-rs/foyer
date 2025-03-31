@@ -384,7 +384,7 @@ where
 
         let report = |written: bool| {
             if !written {
-                self.metrics.storage_queue_drop.increase(1);
+                self.metrics.storage_queue_buffer_overflow.increase(1);
             }
         };
 

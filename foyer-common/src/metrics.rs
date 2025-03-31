@@ -46,7 +46,8 @@ pub struct Metrics {
 
     pub storage_queue_rotate: BoxedCounter,
     pub storage_queue_rotate_duration: BoxedHistogram,
-    pub storage_queue_drop: BoxedCounter,
+    pub storage_queue_buffer_overflow: BoxedCounter,
+    pub storage_queue_channel_overflow: BoxedCounter,
 
     pub storage_disk_write: BoxedCounter,
     pub storage_disk_read: BoxedCounter,
@@ -214,7 +215,10 @@ impl Metrics {
         let storage_delete_duration = foyer_storage_op_duration.histogram(&[name.clone(), "delete".into()]);
 
         let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_rotate".into()]);
-        let storage_queue_drop = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_drop".into()]);
+        let storage_queue_buffer_overflow =
+            foyer_storage_inner_op_total.counter(&[name.clone(), "buffer_overflow".into()]);
+        let storage_queue_channel_overflow =
+            foyer_storage_inner_op_total.counter(&[name.clone(), "channel_overflow".into()]);
 
         let storage_queue_rotate_duration =
             foyer_storage_inner_op_duration.histogram(&[name.clone(), "queue_rotate".into()]);
@@ -293,7 +297,8 @@ impl Metrics {
             storage_delete_duration,
             storage_queue_rotate,
             storage_queue_rotate_duration,
-            storage_queue_drop,
+            storage_queue_buffer_overflow,
+            storage_queue_channel_overflow,
             storage_disk_write,
             storage_disk_read,
             storage_disk_flush,

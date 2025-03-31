@@ -327,11 +327,7 @@ where
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
-            tracing::warn!(
-                "[lodc] {} {}",
-                "submit queue overflow, new entry ignored.",
-                "Hint: set an appropriate rate limiter as the admission picker or scale out flushers."
-            );
+            self.inner.metrics.storage_queue_channel_overflow.increase(1);
             return;
         }
 
