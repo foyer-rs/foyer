@@ -17,9 +17,14 @@ use std::{
     ops::Range,
 };
 
+use foyer_common::code::CodeError;
+
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Code error.
+    #[error("code error: {0}")]
+    Code(#[from] CodeError),
     /// I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

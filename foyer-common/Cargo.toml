@@ -22,6 +22,7 @@ mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 futures-util = { workspace = true }

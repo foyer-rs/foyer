@@ -112,7 +112,7 @@ impl EntrySerializer {
         W: Write,
     {
         let mut writer = TrackedWriter::new(writer);
-        key.serialize(&mut writer).map_err(Error::from)?;
+        key.encode(&mut writer).map_err(Error::from)?;
         Ok(writer.written())
     }
 
@@ -124,12 +124,12 @@ impl EntrySerializer {
         let mut writer = TrackedWriter::new(writer);
         match compression {
             Compression::None => {
-                value.serialize(&mut writer).map_err(Error::from)?;
+                value.encode(&mut writer).map_err(Error::from)?;
             }
             Compression::Zstd => {
                 // Do not use `auto_finish()` here, for we will lost `ZeroWrite` error.
                 let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::from)?;
-                value.serialize(&mut encoder).map_err(Error::from)?;
+                value.encode(&mut encoder).map_err(Error::from)?;
                 encoder.finish().map_err(Error::from)?;
             }
             Compression::Lz4 => {
@@ -138,7 +138,7 @@ impl EntrySerializer {
                     .auto_flush(true)
                     .build(&mut writer)
                     .map_err(Error::from)?;
-                value.serialize(&mut encoder).map_err(Error::from)?;
+                value.encode(&mut encoder).map_err(Error::from)?;
             }
         }
         Ok(writer.written())
@@ -193,7 +193,7 @@ impl EntryDeserializer {
     where
         K: StorageKey,
     {
-        K::deserialize(&mut &buf[..]).map_err(Error::from)
+        K::decode(&mut &buf[..]).map_err(Error::from)
     }
 
     #[fastrace::trace(name = "foyer::storage::serde::deserialize_value")]
@@ -202,14 +202,14 @@ impl EntryDeserializer {
         V: StorageValue,
     {
         match compression {
-            Compression::None => V::deserialize(&mut &buf[..]).map_err(Error::from),
+            Compression::None => V::decode(&mut &buf[..]).map_err(Error::from),
             Compression::Zstd => {
                 let mut decoder = zstd::Decoder::new(buf).map_err(Error::from)?;
-                V::deserialize(&mut decoder).map_err(Error::from)
+                V::decode(&mut decoder).map_err(Error::from)
             }
             Compression::Lz4 => {
                 let mut decoder = lz4::Decoder::new(buf).map_err(Error::from)?;
-                V::deserialize(&mut decoder).map_err(Error::from)
+                V::decode(&mut decoder).map_err(Error::from)
             }
         }
     }

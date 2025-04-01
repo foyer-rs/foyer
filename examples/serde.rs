@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 
 use foyer::{
-    Deserialize, DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder, HybridCachePolicy, Serialize,
+    CodeResult, Decode, DirectFsDeviceOptions, Encode, Engine, HybridCache, HybridCacheBuilder, HybridCachePolicy,
     StorageValue,
 };
 
@@ -31,8 +31,8 @@ struct Bar {
     b: String,
 }
 
-impl Serialize for Bar {
-    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+impl Encode for Bar {
+    fn encode(&self, writer: &mut impl std::io::Write) -> CodeResult<()> {
         writer.write_all(&self.a.to_le_bytes())?;
         writer.write_all(&(self.b.len() as u64).to_le_bytes())?;
         writer.write_all(self.b.as_bytes())?;
@@ -44,8 +44,8 @@ impl Serialize for Bar {
     }
 }
 
-impl Deserialize for Bar {
-    fn deserialize(reader: &mut impl std::io::Read) -> std::io::Result<Self>
+impl Decode for Bar {
+    fn decode(reader: &mut impl std::io::Read) -> CodeResult<Self>
     where
         Self: Sized,
     {
