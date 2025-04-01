@@ -22,7 +22,6 @@ use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
 use futures_util::future::try_join_all;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 
 use super::{Dev, DevExt, RegionId};
 use crate::{
@@ -31,7 +30,8 @@ use crate::{
     Runtime,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DirectFsDeviceConfig {
     dir: PathBuf,
     capacity: usize,

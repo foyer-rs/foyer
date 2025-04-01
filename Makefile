@@ -23,6 +23,7 @@ check-all:
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features tracing
 	cargo clippy --all-targets
+	cargo clippy --all-targets --features serde
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions"
@@ -47,7 +48,7 @@ example:
 	cargo run --features "tracing,ot" --example tail_based_tracing
 	cargo run --example equivalent
 	cargo run --example export_metrics_prometheus_hyper
-	cargo run --example serde
+	cargo run --features serde --example serde
 
 full: check-all test-all example machete udeps
 

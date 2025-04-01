@@ -23,7 +23,6 @@ use std::{
 
 use fastrace::prelude::*;
 use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
 
 /// Configurations for tracing.
 #[derive(Debug, Default)]
@@ -96,7 +95,8 @@ impl TracingConfig {
 }
 
 /// Options for tracing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TracingOptions {
     /// Threshold for recording the hybrid cache `insert` and `insert_with_context` operation.
     record_hybrid_insert_threshold: Option<Duration>,

@@ -15,10 +15,10 @@
 use std::fmt::Debug;
 
 use foyer::{
-    CodeResult, Decode, DirectFsDeviceOptions, Encode, Engine, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    StorageValue,
+    Code, CodeResult, DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder, HybridCachePolicy, StorageValue,
 };
 
+#[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct Foo {
     a: u64,
@@ -31,7 +31,7 @@ struct Bar {
     b: String,
 }
 
-impl Encode for Bar {
+impl Code for Bar {
     fn encode(&self, writer: &mut impl std::io::Write) -> CodeResult<()> {
         writer.write_all(&self.a.to_le_bytes())?;
         writer.write_all(&(self.b.len() as u64).to_le_bytes())?;
@@ -39,12 +39,6 @@ impl Encode for Bar {
         Ok(())
     }
 
-    fn estimated_size(&self) -> usize {
-        8 + 8 + self.b.len()
-    }
-}
-
-impl Decode for Bar {
     fn decode(reader: &mut impl std::io::Read) -> CodeResult<Self>
     where
         Self: Sized,
@@ -57,6 +51,10 @@ impl Decode for Bar {
         let bytes = vec![0u8; b_len];
         let b = String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self { a, b })
+    }
+
+    fn estimated_size(&self) -> usize {
+        8 + 8 + self.b.len()
     }
 }
 
@@ -81,6 +79,7 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
 async fn main() -> anyhow::Result<()> {
     case("The answer to life, the universe, and everything.".to_string()).await?;
 
+    #[cfg(feature = "serde")]
     case(Foo {
         a: 42,
         b: "The answer to life, the universe, and everything.".to_string(),

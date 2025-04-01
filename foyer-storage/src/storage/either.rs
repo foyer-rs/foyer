@@ -26,12 +26,12 @@ use futures_util::{
     future::{join, select, try_join, Either as EitherFuture},
     FutureExt,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::{error::Result, storage::Storage, DeviceStats};
 
 /// Order of ops.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Order {
     /// Use the left engine first.
     ///

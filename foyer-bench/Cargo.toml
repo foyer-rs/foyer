@@ -34,8 +34,6 @@ parking_lot = { workspace = true }
 prometheus = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
-serde = { workspace = true }
-serde_bytes = "0.11.15"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
