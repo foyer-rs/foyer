@@ -46,6 +46,7 @@ thiserror = "2"
 tracing = "0.1"
 prometheus = "0.13"
 mixtrics = "0.0.4"
+criterion = "0.5"
 
 # foyer components
 foyer-common = { version = "0.15.3", path = "foyer-common" }
