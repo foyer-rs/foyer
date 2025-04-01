@@ -47,6 +47,7 @@ example:
 	cargo run --features "tracing,ot" --example tail_based_tracing
 	cargo run --example equivalent
 	cargo run --example export_metrics_prometheus_hyper
+	cargo run --example serde
 
 full: check-all test-all example machete udeps
 

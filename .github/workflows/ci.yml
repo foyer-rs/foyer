@@ -235,6 +235,7 @@ jobs:
           cargo llvm-cov --no-report run --features "tracing,ot" --example tail_based_tracing
           cargo llvm-cov --no-report run --example equivalent
           cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
+          cargo llvm-cov --no-report run --example serde
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
