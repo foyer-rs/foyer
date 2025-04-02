@@ -13,7 +13,7 @@ readme = { workspace = true }
 
 [dependencies]
 ahash = { workspace = true }
-bincode = "1"
+bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = "1"
 fastrace = { workspace = true }
@@ -21,7 +21,7 @@ itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = "1"
-serde = { workspace = true }
+serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -29,6 +29,7 @@ bytes = { version = "1", features = ["serde"] }
 criterion = { workspace = true }
 futures-util = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
+paste = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11"
@@ -56,6 +57,7 @@ tokio = { package = "tokio", version = "1", features = [
 ] }
 
 [features]
+serde = ["dep:serde", "dep:bincode"]
 strict_assertions = []
 tracing = ["fastrace/enable"]
 
@@ -65,3 +67,7 @@ workspace = true
 [[bench]]
 name = "bench_serde"
 harness = false
+
+[package.metadata.cargo-udeps.ignore]
+# Only used in benches and with `serde` feature enabled.
+development = ["criterion", "serde_bytes"]

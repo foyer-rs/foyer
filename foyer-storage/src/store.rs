@@ -31,7 +31,6 @@ use foyer_common::{
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
-use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 
 use crate::{
@@ -233,7 +232,8 @@ impl From<DirectFsDeviceOptions> for DeviceOptions {
 /// If [`Engine::Mixed`] is used, it will use the `Either` engine
 /// with the small object disk cache as the left engine,
 /// and the large object disk cache as the right engine.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Engine {
     /// All space are used as the large object disk cache.
     Large,
@@ -309,7 +309,8 @@ impl FromStr for Engine {
 }
 
 /// Tokio runtime configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TokioRuntimeOptions {
     /// Dedicated runtime worker threads.
     ///
@@ -328,7 +329,8 @@ pub struct TokioRuntimeOptions {
 }
 
 /// Options for the dedicated runtime.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RuntimeOptions {
     /// Disable dedicated runtime. The runtime which foyer is built on will be used.
     Disabled,

@@ -56,6 +56,7 @@ tokio = { package = "tokio", version = "1", features = [
 
 [features]
 default = []
+serde = ["foyer-common/serde", "foyer-storage/serde"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [

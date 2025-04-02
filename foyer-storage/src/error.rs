@@ -28,12 +28,6 @@ pub enum Error {
     /// I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// If (de)serializing a message takes more than the provided size limit, this error is returned.
-    #[error("size limit")]
-    SizeLimit,
-    /// Encoding/decoding error with `bincode`.
-    #[error("bincode error: {0}")]
-    Bincode(bincode::Error),
     #[error(transparent)]
     /// Multiple error list.
     Multiple(MultipleError),
@@ -77,16 +71,6 @@ pub enum Error {
     /// Other error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-impl From<bincode::Error> for Error {
-    fn from(err: bincode::Error) -> Self {
-        match err.as_ref() {
-            bincode::ErrorKind::SizeLimit => Self::SizeLimit,
-            bincode::ErrorKind::Io(e) if e.kind() == std::io::ErrorKind::WriteZero => Self::SizeLimit,
-            _ => Self::Bincode(err),
-        }
-    }
 }
 
 impl Error {

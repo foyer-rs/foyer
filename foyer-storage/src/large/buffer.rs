@@ -17,7 +17,7 @@ use std::{sync::Arc, time::Instant};
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{StorageKey, StorageValue},
+    code::{CodeError, StorageKey, StorageValue},
     metrics::Metrics,
 };
 
@@ -209,7 +209,7 @@ impl Buffer {
         let info = match EntrySerializer::serialize(key, value, compression, &mut buf[EntryHeader::serialized_len()..])
         {
             Ok(info) => info,
-            Err(Error::SizeLimit) => return false,
+            Err(Error::Code(CodeError::SizeLimit)) => return false,
             Err(e) => {
                 tracing::warn!(?e, "[blob writer]: serialize entry kv error");
                 return false;

@@ -24,6 +24,7 @@ readme = "README.md"
 [workspace.dependencies]
 ahash = "0.8"
 anyhow = "1"
+bincode = "1"
 bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
@@ -34,10 +35,11 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
 itertools = "0.14"
 parking_lot = { version = "0.12" }
+paste = "1"
 pin-project = "1"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
-serde = { version = "1", features = ["derive", "rc"] }
+serde = { version = "1", features = ["derive"] }
 test-log = { version = "0.2", default-features = false, features = [
   "trace",
   "color",

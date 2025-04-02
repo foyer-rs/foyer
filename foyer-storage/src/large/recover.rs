@@ -24,7 +24,6 @@ use clap::ValueEnum;
 use foyer_common::code::{StorageKey, StorageValue};
 use futures_util::future::try_join_all;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
 use super::{
@@ -45,7 +44,8 @@ use crate::{
 };
 
 /// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RecoverMode {
     /// Do not recover disk cache.
     ///

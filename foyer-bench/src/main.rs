@@ -38,8 +38,8 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
+    Code, CodeError, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
+    HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
     RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
     TracingOptions,
 };
@@ -49,7 +49,6 @@ use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
 use rate::RateLimiter;
-use serde::{Deserialize, Serialize};
 use text::text;
 use tokio::sync::{broadcast, oneshot};
 
@@ -325,10 +324,8 @@ struct Context {
     metrics: Metrics,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct Value {
-    // https://github.com/serde-rs/bytes/issues/43
-    #[serde(with = "arc_bytes")]
     inner: Arc<Vec<u8>>,
 }
 
@@ -340,25 +337,29 @@ impl Deref for Value {
     }
 }
 
-mod arc_bytes {
-    use std::sync::Arc;
-
-    use serde::{Deserialize, Deserializer, Serializer};
-    use serde_bytes::ByteBuf;
-
-    pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(data.as_slice())
+impl Code for Value {
+    fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), foyer::CodeError> {
+        self.len().encode(writer)?;
+        writer.write_all(self).map_err(CodeError::from)
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+    #[expect(clippy::uninit_vec)]
+    fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer::CodeError>
     where
-        D: Deserializer<'de>,
+        Self: Sized,
     {
-        let buf = ByteBuf::deserialize(deserializer)?;
-        Ok(Arc::new(buf.into_vec()))
+        let len = usize::decode(reader)?;
+        let mut v = Vec::with_capacity(len);
+        unsafe {
+            v.set_len(len);
+        }
+        reader.read_exact(&mut v).map_err(CodeError::from)?;
+        let this = Self { inner: Arc::new(v) };
+        Ok(this)
+    }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<usize>() + self.len()
     }
 }
 

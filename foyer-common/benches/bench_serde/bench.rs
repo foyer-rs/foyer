@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(missing_docs)]
-
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
-use criterion::{criterion_group, criterion_main, Bencher, Criterion};
-use foyer_common::code::{Decode, Encode, StorageValue};
+use criterion::{Bencher, Criterion};
+use foyer_common::code::{Code, StorageValue};
 
 const K: usize = 1 << 10;
 const M: usize = 1 << 20;
@@ -56,19 +54,13 @@ impl VecU8Value {
     }
 }
 
-impl Encode for VecU8Value {
+impl Code for VecU8Value {
     fn encode(&self, writer: &mut impl std::io::Write) -> foyer_common::code::CodeResult<()> {
         writer.write_all(&self.0.len().to_le_bytes())?;
         writer.write_all(&self.0)?;
         Ok(())
     }
 
-    fn estimated_size(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl Decode for VecU8Value {
     #[expect(clippy::uninit_vec)]
     fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer_common::code::CodeError>
     where
@@ -81,6 +73,10 @@ impl Decode for VecU8Value {
         unsafe { v.set_len(len) };
         reader.read_exact(&mut v)?;
         Ok(Self(v))
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -106,19 +102,13 @@ impl BytesValue {
     }
 }
 
-impl Encode for BytesValue {
+impl Code for BytesValue {
     fn encode(&self, writer: &mut impl std::io::Write) -> foyer_common::code::CodeResult<()> {
         writer.write_all(&self.0.len().to_le_bytes())?;
         writer.write_all(&self.0)?;
         Ok(())
     }
 
-    fn estimated_size(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl Decode for BytesValue {
     fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer_common::code::CodeError>
     where
         Self: Sized,
@@ -130,6 +120,10 @@ impl Decode for BytesValue {
         unsafe { v.set_len(len) };
         reader.read_exact(&mut v)?;
         Ok(Self(v.freeze()))
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -156,7 +150,7 @@ fn decode<V: StorageValue>(b: &mut Bencher, v: V, size: usize) {
     });
 }
 
-fn bench_encode(c: &mut Criterion) {
+pub fn bench_encode(c: &mut Criterion) {
     for (s, size) in [("64K", 64 * K), ("4M", 4 * M)] {
         c.bench_function(&format!("Vec<u8> value encode - {}", s), |b| {
             encode(b, VecU8Value::new(size), size);
@@ -176,7 +170,7 @@ fn bench_encode(c: &mut Criterion) {
     }
 }
 
-fn bench_decode(c: &mut Criterion) {
+pub fn bench_decode(c: &mut Criterion) {
     for (s, size) in [("64K", 64 * K), ("4M", 4 * M)] {
         c.bench_function(&format!("Vec<u8> value decode - {}", s), |b| {
             decode(b, VecU8Value::new(size), size);
@@ -195,6 +189,3 @@ fn bench_decode(c: &mut Criterion) {
         });
     }
 }
-
-criterion_group!(benches, bench_encode, bench_decode);
-criterion_main!(benches);
