@@ -17,8 +17,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy, LargeEngineOptions,
+    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions,
+    TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -27,6 +28,8 @@ async fn main() -> Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
+        .with_name("my-hybrid-cache")
+        .with_policy(HybridCachePolicy::WriteOnEviction)
         .memory(1024)
         .with_shards(4)
         .with_eviction_config(LruConfig {

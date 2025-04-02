@@ -79,6 +79,14 @@ pub trait StorageValue: Value + 'static + Code {}
 impl<T> StorageValue for T where T: Value + Code {}
 
 /// Encode/decode trait for key and value.
+///
+/// [`Code`] is required while working with foyer hybrid cache.
+///
+/// Some general types has already implemented [`Code`] by foyer, but the user needs to implement it for complex types.
+///
+/// Or, the user can enable `serde` feature for foyer.
+/// Then all types that implements `serde::Serialize` and `serde::de::DeserializeOwned` will be automatically
+/// implemented for [`Code`].
 pub trait Code {
     /// Encode the object into a writer.
     fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), CodeError>;

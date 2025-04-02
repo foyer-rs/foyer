@@ -76,6 +76,8 @@ foyer = { version = "0.15", features = ["nightly"] }
 
 ### Out-of-the-box In-memory Cache
 
+The in-memory cache setup is extremely easy and can be setup in at least 1 line.
+
 ```rust
 use foyer::{Cache, CacheBuilder};
 
@@ -90,6 +92,8 @@ fn main() {
 ```
 
 ### Easy-to-use Hybrid Cache
+
+The setup of a hybrid cache is extremely easy.
 
 ```rust
 use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
@@ -117,14 +121,31 @@ async fn main() -> anyhow::Result<()> {
 
 ### Fully Configured Hybrid Cache
 
+Here is an example of a hybrid cache setup with almost all configurations to show th possibilities of tuning.
+
 ```rust
+// Copyright 2025 foyer Project Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy, LargeEngineOptions,
+    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions,
+    TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -133,6 +154,8 @@ async fn main() -> Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
+        .with_name("my-hybrid-cache")
+        .with_policy(HybridCachePolicy::WriteOnEviction)
         .memory(1024)
         .with_shards(4)
         .with_eviction_config(LruConfig {
@@ -214,8 +237,27 @@ async fn mock() -> Result<String> {
 }
 ```
 
+### `serde` Support
+
+***foyer*** needs to serialize/deserialize entries between memory and disk with hybrid cache. Cached keys and values need to implement the `Code` trait when using hybrid cache.
+
+The `Code` trait has already been implemented for general types, such as:
+- Numeric types: `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`, `i64`, `i128`, `isize`, `f32`, `f64`.
+- Buffer: `Vec<u8>`.
+- String: `String`.
+- Other general types: `bool`.
+
+For more complex types, you need to implement the Code trait yourself.
+
+To make things easier, ***foyer*** provides support for the `serde` ecosystem. Types implement `serde::Serialize` and `serde::DeserializeOwned`, ***foyer*** will automatically implement the `Code` trait. This feature requires enabling the `serde` feature for foyer.
+
+```toml
+foyer = { version = "*", features = ["serde"] }
+```
+
 ### Other Examples
 
+- [Serialize/Deserialize w/wo serde](https://github.com/foyer-rs/foyer/tree/main/examples/serde.rs)
 - [Export Metrics with `prometheus` and `hyper`](https://github.com/foyer-rs/foyer/tree/main/examples/export_metrics_prometheus_hyper.rs)
 - [Tail-based Tracing](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs)
 

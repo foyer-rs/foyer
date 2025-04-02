@@ -9,6 +9,16 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## Unreleased
+
+### Changes
+
+- Refine the cache key/value serialization and deserializaion.
+  - Support customized serialization and deserialization.
+  - Support serialization and deserialization with `serde` and `bincode`. (optional)
+- Make `serde` and `bincode` optional, and disabled by default. You can enable it with `serde` feature.
+- Reduce verbose warning logs.
+
 ## 2025-03-28
 
 ### Releases
