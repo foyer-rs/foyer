@@ -22,8 +22,8 @@ check-all:
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features tracing
-	cargo clippy --all-targets
 	cargo clippy --all-targets --features serde
+	cargo clippy --all-targets
 
 test:
 	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions"
