@@ -169,6 +169,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
         rust_toolchain: [stable, 1.81.0]
+        serde: ["", "--features serde"]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -198,14 +199,14 @@ jobs:
         uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Run rust format check
         run: |
-          cargo fmt --all -- --check
+          cargo fmt --all ${{ matrix.serde }} -- --check
       - name: Run rust clippy check (stable)
         if: matrix.rust_toolchain == 'stable'
         run: |
-          cargo clippy --all-targets --features tokio-console -- -D warnings
-          cargo clippy --all-targets --features deadlock -- -D warnings
-          cargo clippy --all-targets --features tracing -- -D warnings
-          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets ${{ matrix.serde }} --features tokio-console -- -D warnings
+          cargo clippy --all-targets ${{ matrix.serde }} --features deadlock -- -D warnings
+          cargo clippy --all-targets ${{ matrix.serde }} --features tracing -- -D warnings
+          cargo clippy --all-targets ${{ matrix.serde }} -- -D warnings
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
       - if: steps.cache.outputs.cache-hit != 'true'
@@ -215,7 +216,7 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace --features "strict_assertions"
+          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace ${{ matrix.serde }} --features "strict_assertions"
       - name: Run rust test with coverage
         env:
           RUST_BACKTRACE: 1
@@ -227,18 +228,18 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report run --example memory
-          cargo llvm-cov --no-report run --example hybrid
-          cargo llvm-cov --no-report run --example hybrid_full
-          cargo llvm-cov --no-report run --example event_listener
-          cargo llvm-cov --no-report run --features "tracing,jaeger" --example tail_based_tracing
-          cargo llvm-cov --no-report run --features "tracing,ot" --example tail_based_tracing
-          cargo llvm-cov --no-report run --example equivalent
-          cargo llvm-cov --no-report run --example export_metrics_prometheus_hyper
-          cargo llvm-cov --no-report run --example serde
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example memory
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example hybrid
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example hybrid_full
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example event_listener
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --features "tracing,jaeger" --example tail_based_tracing
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --features "tracing,ot" --example tail_based_tracing
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example equivalent
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example export_metrics_prometheus_hyper
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --example serde
       - name: Generate codecov report
         run: |
-          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov report ${{ matrix.serde }} --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
         if: runner.os == 'Linux' && runner.arch == 'X64' && matrix.rust_toolchain == 'stable'
         env:
