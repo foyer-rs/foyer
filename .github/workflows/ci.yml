@@ -199,7 +199,7 @@ jobs:
         uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Run rust format check
         run: |
-          cargo fmt --all ${{ matrix.serde }} -- --check
+          cargo fmt --all -- --check
       - name: Run rust clippy check (stable)
         if: matrix.rust_toolchain == 'stable'
         run: |
