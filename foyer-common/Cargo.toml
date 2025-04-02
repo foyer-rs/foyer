@@ -29,6 +29,7 @@ bytes = { version = "1", features = ["serde"] }
 criterion = { workspace = true }
 futures-util = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
+paste = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11"

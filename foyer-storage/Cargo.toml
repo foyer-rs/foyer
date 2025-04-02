@@ -34,7 +34,7 @@ libc = "0.2"
 lz4 = "1.24"
 ordered_hash_map = "0.4"
 parking_lot = { workspace = true }
-paste = "1"
+paste = { workspace = true }
 pin-project = "1"
 rand = { workspace = true }
 serde = { workspace = true, optional = true }

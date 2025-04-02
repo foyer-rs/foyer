@@ -226,16 +226,72 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "serde")]
-    #[test]
-    fn test_encode_overflow() {
-        let mut buf = [0u8; 4];
-        assert!(matches! {1u64.encode(&mut buf.as_mut()), Err(CodeError::SizeLimit)});
+    mod serde {
+        use super::*;
+
+        #[test]
+        fn test_encode_overflow() {
+            let mut buf = [0u8; 4];
+            assert!(matches! {1u64.encode(&mut buf.as_mut()), Err(CodeError::SizeLimit)});
+        }
     }
 
     #[cfg(not(feature = "serde"))]
-    #[test]
-    fn test_encode_overflow() {
-        let mut buf = [0u8; 4];
-        assert!(matches! {1u64.encode(&mut buf.as_mut()), Err(CodeError::SizeLimit)});
+    mod non_serde {
+        use super::*;
+
+        #[test]
+        fn test_encode_overflow() {
+            let mut buf = [0u8; 4];
+            assert!(matches! {1u64.encode(&mut buf.as_mut()), Err(CodeError::SizeLimit)});
+        }
+
+        macro_rules! impl_serde_test_for_numeric_types {
+            ($($t:ty),*) => {
+                paste::paste! {
+                    $(
+                        #[test]
+                        fn [<test_ $t _serde>]() {
+                            for a in [0 as $t, <$t>::MIN, <$t>::MAX] {
+                                let mut buf = vec![0xffu8; a.estimated_size()];
+                                a.encode(&mut buf.as_mut_slice()).unwrap();
+                                let b = <$t>::decode(&mut buf.as_slice()).unwrap();
+                                assert_eq!(a, b);
+                            }
+                        }
+                    )*
+                }
+            };
+        }
+
+        for_all_numeric_types! { impl_serde_test_for_numeric_types }
+
+        #[test]
+        fn test_bool_serde() {
+            let a = true;
+            let mut buf = vec![0xffu8; a.estimated_size()];
+            a.encode(&mut buf.as_mut_slice()).unwrap();
+            let b = bool::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(a, b);
+        }
+
+        #[test]
+        fn test_vec_u8_serde() {
+            let mut a = vec![0u8; 42];
+            rand::fill(&mut a[..]);
+            let mut buf = vec![0xffu8; a.estimated_size()];
+            a.encode(&mut buf.as_mut_slice()).unwrap();
+            let b = Vec::<u8>::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(a, b);
+        }
+
+        #[test]
+        fn test_string_serde() {
+            let a = "hello world".to_string();
+            let mut buf = vec![0xffu8; a.estimated_size()];
+            a.encode(&mut buf.as_mut_slice()).unwrap();
+            let b = String::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(a, b);
+        }
     }
 }
