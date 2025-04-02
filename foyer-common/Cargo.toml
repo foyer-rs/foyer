@@ -66,3 +66,7 @@ workspace = true
 [[bench]]
 name = "bench_serde"
 harness = false
+
+[package.metadata.cargo-udeps.ignore]
+# Only used in benches and with `serde` feature enabled.
+development = ["criterion", "serde_bytes"]
