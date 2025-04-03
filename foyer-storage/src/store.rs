@@ -457,7 +457,7 @@ where
     ///
     /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
     pub fn with_large_object_disk_cache_options(mut self, options: LargeEngineOptions<K, V, S>) -> Self {
-        if matches!(self.engine, Engine::Small { .. }) {
+        if matches!(self.engine, Engine::Small) {
             tracing::warn!("[store builder]: Setting up large object disk cache options, but only small object disk cache is enabled.");
         }
         self.large = options;
@@ -468,7 +468,7 @@ where
     ///
     /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
     pub fn with_small_object_disk_cache_options(mut self, options: SmallEngineOptions<K, V, S>) -> Self {
-        if matches!(self.engine, Engine::Large { .. }) {
+        if matches!(self.engine, Engine::Large) {
             tracing::warn!("[store builder]: Setting up small object disk cache options, but only large object disk cache is enabled.");
         }
         self.small = options;
