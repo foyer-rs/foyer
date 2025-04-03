@@ -111,6 +111,8 @@ where
     }
 
     /// Force the disk cache to admit the writer.
+    ///
+    /// Note: There is still chance that the entry is ignored because of the storage engine buffer full.
     pub fn force(mut self) -> Self {
         self.picked = Some(true);
         self

@@ -700,6 +700,19 @@ where
             Cache::Lfu(cache) => cache.set_pipe(pipe),
         }
     }
+
+    /// Evict all entries from the in-memory cache.
+    ///
+    /// Instead of [`Cache::clear`], [`Cache::evict_all`] will send the evicted pipe to the pipe.
+    /// It is useful when the cache is used as a hybrid cache.
+    pub fn evict_all(&self) {
+        match self {
+            Cache::Fifo(cache) => cache.evict_all(),
+            Cache::S3Fifo(cache) => cache.evict_all(),
+            Cache::Lru(cache) => cache.evict_all(),
+            Cache::Lfu(cache) => cache.evict_all(),
+        }
+    }
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
