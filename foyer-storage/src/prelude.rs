@@ -18,7 +18,7 @@ pub use crate::{
         direct_file::{DirectFileDevice, DirectFileDeviceOptions},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
-        Dev, DevConfig, DevExt,
+        Dev, DevConfig, DevExt, Throttle,
     },
     error::{Error, Result},
     io::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},

@@ -33,7 +33,7 @@ pub use crate::{
         AdmissionPicker, AdmitAllPicker, Compression, Dev, DevConfig, DevExt, DeviceStats, DirectFileDevice,
         DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine, EvictionPicker, FifoPicker,
         InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker,
-        Runtime, RuntimeOptions, SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeOptions,
+        Runtime, RuntimeOptions, SmallEngineOptions, Storage, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
         TombstoneLogConfigBuilder,
     },
 };
