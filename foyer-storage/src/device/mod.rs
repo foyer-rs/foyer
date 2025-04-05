@@ -17,7 +17,7 @@ pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
-use std::{fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, num::NonZeroUsize};
 
 use direct_file::DirectFileDeviceConfig;
 use direct_fs::DirectFsDeviceConfig;
@@ -35,6 +35,56 @@ pub type RegionId = u32;
 pub trait DevConfig: Send + Sync + 'static + Debug {}
 impl<T: Send + Sync + 'static + Debug> DevConfig for T {}
 
+/// Throttle config for the device.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Throttle {
+    /// The maximum write iops for the device.
+    pub write_iops: Option<NonZeroUsize>,
+    /// The maximum read iops for the device.
+    pub read_iops: Option<NonZeroUsize>,
+    /// The maximum write throughput for the device.
+    pub write_throughput: Option<NonZeroUsize>,
+    /// The maximum read throughput for the device.
+    pub read_throughput: Option<NonZeroUsize>,
+}
+
+impl Throttle {
+    /// Create a new unlimited throttle config.
+    pub fn new() -> Self {
+        Self {
+            write_iops: None,
+            read_iops: None,
+            write_throughput: None,
+            read_throughput: None,
+        }
+    }
+
+    /// Set the maximum write iops for the device.
+    pub fn write_iops(mut self, iops: usize) -> Self {
+        self.write_iops = NonZeroUsize::new(iops);
+        self
+    }
+
+    /// Set the maximum read iops for the device.
+    pub fn read_iops(mut self, iops: usize) -> Self {
+        self.read_iops = NonZeroUsize::new(iops);
+        self
+    }
+
+    /// Set the maximum write throughput for the device.
+    pub fn write_throughput(mut self, throughput: usize) -> Self {
+        self.write_throughput = NonZeroUsize::new(throughput);
+        self
+    }
+
+    /// Set the maximum read throughput for the device.
+    pub fn read_throughput(mut self, throughput: usize) -> Self {
+        self.read_throughput = NonZeroUsize::new(throughput);
+        self
+    }
+}
+
 /// [`Dev`] represents 4K aligned block device.
 ///
 /// Both i/o block and i/o buffer must be aligned to 4K.
@@ -47,6 +97,9 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
 
     /// The region size of the device, must be 4K aligned.
     fn region_size(&self) -> usize;
+
+    /// The throttle config for the device.
+    fn throttle(&self) -> &Throttle;
 
     /// Open the device with the given config.
     #[must_use]
@@ -129,6 +182,13 @@ impl Dev for Device {
         match options {
             DeviceConfig::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts, runtime).await?)),
             DeviceConfig::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts, runtime).await?)),
+        }
+    }
+
+    fn throttle(&self) -> &Throttle {
+        match self {
+            Device::DirectFile(dev) => dev.throttle(),
+            Device::DirectFs(dev) => dev.throttle(),
         }
     }
 

@@ -23,7 +23,7 @@ use fs4::free_space;
 use futures_util::future::try_join_all;
 use itertools::Itertools;
 
-use super::{Dev, DevExt, RegionId};
+use super::{Dev, DevExt, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
     io::{IoBuf, IoBufMut, PAGE},
@@ -36,6 +36,7 @@ pub struct DirectFsDeviceConfig {
     dir: PathBuf,
     capacity: usize,
     file_size: usize,
+    throttle: Throttle,
 }
 
 impl DirectFsDeviceConfig {
@@ -73,6 +74,8 @@ struct DirectFsDeviceInner {
 
     capacity: usize,
     file_size: usize,
+
+    throttle: Throttle,
 
     runtime: Runtime,
 }
@@ -120,6 +123,10 @@ impl Dev for DirectFsDevice {
         self.inner.file_size
     }
 
+    fn throttle(&self) -> &Throttle {
+        &self.inner.throttle
+    }
+
     #[fastrace::trace(name = "foyer::storage::device::direct_fs::open")]
     async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         options.verify()?;
@@ -159,6 +166,7 @@ impl Dev for DirectFsDevice {
                 files,
                 capacity: options.capacity,
                 file_size: options.file_size,
+                throttle: options.throttle,
                 runtime,
             }),
         })
@@ -269,6 +277,7 @@ pub struct DirectFsDeviceOptions {
     dir: PathBuf,
     capacity: Option<usize>,
     file_size: Option<usize>,
+    throttle: Throttle,
 }
 
 impl DirectFsDeviceOptions {
@@ -280,6 +289,7 @@ impl DirectFsDeviceOptions {
             dir: dir.as_ref().into(),
             capacity: None,
             file_size: None,
+            throttle: Throttle::default(),
         }
     }
 
@@ -300,6 +310,12 @@ impl DirectFsDeviceOptions {
     /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
     pub fn with_file_size(mut self, file_size: usize) -> Self {
         self.file_size = Some(file_size);
+        self
+    }
+
+    /// Set the throttle of the direct file device.
+    pub fn with_throttle(mut self, throttle: Throttle) -> Self {
+        self.throttle = throttle;
         self
     }
 }
@@ -325,10 +341,13 @@ impl From<DirectFsDeviceOptions> for DirectFsDeviceConfig {
 
         let capacity = align_v(capacity, file_size);
 
+        let throttle = options.throttle;
+
         DirectFsDeviceConfig {
             dir,
             capacity,
             file_size,
+            throttle,
         }
     }
 }
