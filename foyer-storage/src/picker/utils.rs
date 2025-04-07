@@ -15,6 +15,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
+    num::NonZeroUsize,
     ops::Range,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -109,8 +110,8 @@ pub struct IoThrottlerPicker {
 impl IoThrottlerPicker {
     /// Create a rate limit picker with the given rate limit.
     ///
-    /// Note: Zero stands for unlimited.
-    pub fn new(throughput: f64, iops: f64) -> Self {
+    /// Note: `None` stands for unlimited.
+    pub fn new(throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
         let inner = IoThrottlerPickerInner {
             throttler: IoThrottler::new(throughput, iops),
             bytes_last: AtomicUsize::default(),

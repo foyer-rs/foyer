@@ -378,10 +378,7 @@ where
                 }
             }
 
-            stats
-                .cache_read_bytes
-                .fetch_add(bits::align_up(device.align(), buf.len()), Ordering::Relaxed);
-            stats.cache_read_ios.fetch_add(1, Ordering::Relaxed);
+            stats.record_read_io(buf.len());
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
@@ -596,7 +593,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
+        DirectFsDeviceOptions, IopsCounter, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -653,7 +650,7 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
+            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
@@ -683,7 +680,7 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
+            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

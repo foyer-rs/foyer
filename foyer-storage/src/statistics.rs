@@ -14,16 +14,31 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::IopsCounter;
+
 /// The statistics of the disk cache, which is used by the pickers.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Statistics {
-    pub(crate) cache_write_bytes: AtomicUsize,
-    pub(crate) cache_read_bytes: AtomicUsize,
-    pub(crate) cache_write_ios: AtomicUsize,
-    pub(crate) cache_read_ios: AtomicUsize,
+    iops_counter: IopsCounter,
+
+    cache_write_bytes: AtomicUsize,
+    cache_read_bytes: AtomicUsize,
+    cache_write_ios: AtomicUsize,
+    cache_read_ios: AtomicUsize,
 }
 
 impl Statistics {
+    /// Create a new statistics.
+    pub fn new(iops_counter: IopsCounter) -> Self {
+        Self {
+            iops_counter,
+            cache_write_bytes: AtomicUsize::new(0),
+            cache_read_bytes: AtomicUsize::new(0),
+            cache_write_ios: AtomicUsize::new(0),
+            cache_read_ios: AtomicUsize::new(0),
+        }
+    }
+
     /// Get the disk cache written bytes.
     pub fn cache_write_bytes(&self) -> usize {
         self.cache_write_bytes.load(Ordering::Relaxed)
@@ -42,5 +57,19 @@ impl Statistics {
     /// Get the disk cache read bytes.
     pub fn cache_read_ios(&self) -> usize {
         self.cache_read_ios.load(Ordering::Relaxed)
+    }
+
+    /// Record the write IO and update the statistics.
+    pub fn record_write_io(&self, bytes: usize) {
+        self.cache_write_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.cache_write_ios
+            .fetch_add(self.iops_counter.count(bytes), Ordering::Relaxed);
+    }
+
+    /// Record the read IO and update the statistics.
+    pub fn record_read_io(&self, bytes: usize) {
+        self.cache_read_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.cache_read_ios
+            .fetch_add(self.iops_counter.count(bytes), Ordering::Relaxed);
     }
 }

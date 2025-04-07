@@ -521,7 +521,7 @@ where
                                     if flush {
                                         region.flush().await?;
                                     }
-                                    stats.cache_write_bytes.fetch_add(len, Ordering::Relaxed);
+                                    stats.record_write_io(len);
                                 } else {
                                     tracing::trace!(
                                         id,

@@ -151,12 +151,12 @@ struct Args {
     disk_read_iops: usize,
 
     /// Disk write throughput throttle.
-    #[arg(long, default_value_t = 0)]
-    disk_write_throughput: usize,
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    disk_write_throughput: ByteSize,
 
     /// Disk read throughput throttle.
-    #[arg(long, default_value_t = 0)]
-    disk_read_throughput: usize,
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    disk_read_throughput: ByteSize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -496,8 +496,8 @@ async fn benchmark(args: Args) {
     let throttle = Throttle::default()
         .with_read_iops(args.disk_read_iops)
         .with_write_iops(args.disk_write_iops)
-        .with_read_throughput(args.disk_read_throughput)
-        .with_write_throughput(args.disk_write_throughput);
+        .with_read_throughput(args.disk_read_throughput.as_u64() as _)
+        .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_options(

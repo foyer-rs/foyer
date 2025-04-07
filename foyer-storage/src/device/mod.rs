@@ -45,7 +45,17 @@ pub enum IopsCounter {
     /// Count 1 iops for each read/write.
     PerIo,
     /// Count 1 iops for each read/write with the size of the i/o.
-    PerIoSize(usize),
+    PerIoSize(NonZeroUsize),
+}
+
+impl IopsCounter {
+    /// Count io(s) by io size in bytes.
+    pub fn count(&self, bytes: usize) -> usize {
+        match self {
+            IopsCounter::PerIo => 1,
+            IopsCounter::PerIoSize(size) => bytes / *size + if bytes % *size != 0 { 1 } else { 0 },
+        }
+    }
 }
 
 /// Throttle config for the device.

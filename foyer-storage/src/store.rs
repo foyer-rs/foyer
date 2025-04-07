@@ -55,7 +55,8 @@ use crate::{
         either::{EitherConfig, Order},
         Storage,
     },
-    Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions,
+    ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
+    IopsCounter, Throttle,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -479,9 +480,7 @@ where
     pub async fn build(self) -> Result<Store<K, V, S>> {
         let memory = self.memory.clone();
         let metrics = self.metrics.clone();
-        let admission_picker = self.admission_picker.clone();
-
-        let statistics = Arc::<Statistics>::default();
+        let mut admission_picker = self.admission_picker.clone();
 
         let compression = self.compression;
 
@@ -524,93 +523,35 @@ where
         };
         let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
-        let engine = {
-            let statistics = statistics.clone();
+        let (engine, throttle, statistics) = {
             let metrics = metrics.clone();
             let runtime = runtime.clone();
             // Use the user runtime to open engine.
             tokio::spawn(async move {
-            match self.device_options {
-                DeviceOptions::None => {
-                    tracing::warn!(
-                        "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
-                    );
-                    EngineEnum::open(EngineConfig::Noop).await
-                }
-                DeviceOptions::DeviceConfig(options) => {
-                    let device = match Monitored::open(MonitoredConfig {
-                        config: options,
-                        metrics: metrics.clone(),
-                    }, runtime.clone())
-                    .await {
-                        Ok(device) => device,
-                        Err(e) =>return Err(e),
-                    };
-                    match self.engine {
-                        Engine::Large => {
-                            let regions = 0..device.regions() as RegionId;
-                            EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
-                                device,
-                                regions,
-                                compression: self.compression,
-                                flush: self.flush,
-                                indexer_shards: self.large.indexer_shards,
-                                recover_mode: self.recover_mode,
-                                recover_concurrency: self.large.recover_concurrency,
-                                flushers: self.large.flushers,
-                                reclaimers: self.large.reclaimers,
-                                clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
-                                eviction_pickers: self.large.eviction_pickers,
-                                reinsertion_picker: self.large.reinsertion_picker,
-                                tombstone_log_config: self.large.tombstone_log_config,
-                                buffer_pool_size: self.large.buffer_pool_size,
-                                blob_index_size: self.large.blob_index_size,
-                                submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
-                                statistics: statistics.clone(),
-                                runtime,
-                                marker: PhantomData,
-                            }))
-                            .await
-                        }
-                        Engine::Small => {
-                            let regions = 0..device.regions() as RegionId;
-                            EngineEnum::open(EngineConfig::Small(GenericSmallStorageConfig {
-                                set_size: self.small.set_size,
-                                set_cache_capacity: self.small.set_cache_capacity,
-                                set_cache_shards: self.small.set_cache_shards,
-                                device,
-                                regions,
-                                flush: self.flush,
-                                flushers: self.small.flushers,
-                                buffer_pool_size: self.small.buffer_pool_size,
-                                statistics: statistics.clone(),
-                                runtime,
-                                marker: PhantomData,
-                            }))
-                            .await
-                        }
-                        Engine::Mixed(ratio) => {
-                            let small_region_count = std::cmp::max((device.regions() as f64 * ratio) as usize,1);
-                            let small_regions = 0..small_region_count as RegionId;
-                            let large_regions = small_region_count as RegionId..device.regions() as RegionId;
-                            EngineEnum::open(EngineConfig::Mixed(EitherConfig {
-                                selector: SizeSelector::new(Engine::OBJECT_SIZE_THRESHOLD),
-                                left: GenericSmallStorageConfig {
-                                    set_size: self.small.set_size,
-                                    set_cache_capacity: self.small.set_cache_capacity,
-                                    set_cache_shards: self.small.set_cache_shards,
-                                    device: device.clone(),
-                                    regions: small_regions,
-                                    flush: self.flush,
-                                    flushers: self.small.flushers,
-                                    buffer_pool_size: self.small.buffer_pool_size,
-                                    statistics: statistics.clone(),
-                                    runtime: runtime.clone(),
-                                    marker: PhantomData,
-                                },
-                                right: GenericLargeStorageConfig {
+                match self.device_options {
+                    DeviceOptions::None => {
+                        tracing::warn!(
+                            "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
+                        );
+                        Ok((EngineEnum::open(EngineConfig::Noop).await?, Throttle::default(), Arc::new(Statistics::new(IopsCounter::PerIo))))
+                    }
+                    DeviceOptions::DeviceConfig(options) => {
+                        let device = match Monitored::open(MonitoredConfig {
+                            config: options,
+                            metrics: metrics.clone(),
+                        }, runtime.clone())
+                        .await {
+                            Ok(device) => device,
+                            Err(e) =>return Err(e),
+                        };
+                        let throttle = device.throttle().clone();
+                        let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
+                        let engine = match self.engine {
+                            Engine::Large => {
+                                let regions = 0..device.regions() as RegionId;
+                                EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
                                     device,
-                                    regions: large_regions,
+                                    regions,
                                     compression: self.compression,
                                     flush: self.flush,
                                     indexer_shards: self.large.indexer_shards,
@@ -628,16 +569,89 @@ where
                                     statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
-                                },
-                                load_order: Engine::MIXED_LOAD_ORDER,
-                            }))
-                            .await
-                        }
+                                }))
+                                .await
+                            }
+                            Engine::Small => {
+                                let regions = 0..device.regions() as RegionId;
+                                EngineEnum::open(EngineConfig::Small(GenericSmallStorageConfig {
+                                    set_size: self.small.set_size,
+                                    set_cache_capacity: self.small.set_cache_capacity,
+                                    set_cache_shards: self.small.set_cache_shards,
+                                    device,
+                                    regions,
+                                    flush: self.flush,
+                                    flushers: self.small.flushers,
+                                    buffer_pool_size: self.small.buffer_pool_size,
+                                    statistics: statistics.clone(),
+                                    runtime,
+                                    marker: PhantomData,
+                                }))
+                                .await
+                            }
+                            Engine::Mixed(ratio) => {
+                                let small_region_count = std::cmp::max((device.regions() as f64 * ratio) as usize,1);
+                                let small_regions = 0..small_region_count as RegionId;
+                                let large_regions = small_region_count as RegionId..device.regions() as RegionId;
+                                EngineEnum::open(EngineConfig::Mixed(EitherConfig {
+                                    selector: SizeSelector::new(Engine::OBJECT_SIZE_THRESHOLD),
+                                    left: GenericSmallStorageConfig {
+                                        set_size: self.small.set_size,
+                                        set_cache_capacity: self.small.set_cache_capacity,
+                                        set_cache_shards: self.small.set_cache_shards,
+                                        device: device.clone(),
+                                        regions: small_regions,
+                                        flush: self.flush,
+                                        flushers: self.small.flushers,
+                                        buffer_pool_size: self.small.buffer_pool_size,
+                                        statistics: statistics.clone(),
+                                        runtime: runtime.clone(),
+                                        marker: PhantomData,
+                                    },
+                                    right: GenericLargeStorageConfig {
+                                        device,
+                                        regions: large_regions,
+                                        compression: self.compression,
+                                        flush: self.flush,
+                                        indexer_shards: self.large.indexer_shards,
+                                        recover_mode: self.recover_mode,
+                                        recover_concurrency: self.large.recover_concurrency,
+                                        flushers: self.large.flushers,
+                                        reclaimers: self.large.reclaimers,
+                                        clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
+                                        eviction_pickers: self.large.eviction_pickers,
+                                        reinsertion_picker: self.large.reinsertion_picker,
+                                        tombstone_log_config: self.large.tombstone_log_config,
+                                        buffer_pool_size: self.large.buffer_pool_size,
+                                        blob_index_size: self.large.blob_index_size,
+                                        submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                        statistics: statistics.clone(),
+                                        runtime,
+                                        marker: PhantomData,
+                                    },
+                                    load_order: Engine::MIXED_LOAD_ORDER,
+                                }))
+                                .await
+                            }
+                        }?;
+                        Ok((engine, throttle, statistics))
                     }
                 }
-            }
-        }).await.unwrap()?
+            }).await.unwrap()?
         };
+
+        if throttle.write_throughput.is_some() || throttle.write_iops.is_some() {
+            tracing::debug!(?throttle, "[store builder]: Device is throttled.");
+            admission_picker = Arc::new(
+                ChainedAdmissionPickerBuilder::default()
+                    .chain(Arc::new(IoThrottlerPicker::new(
+                        throttle.write_throughput,
+                        throttle.write_iops,
+                    )))
+                    .chain(admission_picker)
+                    .build(),
+            );
+        }
 
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {

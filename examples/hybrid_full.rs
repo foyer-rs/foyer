@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use chrono::Datelike;
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
                         .with_write_iops(2000)
                         .with_write_throughput(100 * 1024 * 1024)
                         .with_read_throughput(800 * 1024 * 1024)
-                        .with_iops_counter(IopsCounter::PerIoSize(128 * 1024)),
+                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
                 ),
         )
         .with_flush(true)

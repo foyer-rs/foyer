@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Instant;
+use std::{num::NonZeroUsize, time::Instant};
 
 use parking_lot::Mutex;
 
@@ -36,13 +36,15 @@ pub struct IoThrottler {
 impl IoThrottler {
     /// Create a new [`IoThrottler`] with the given throughput and iops.
     ///
-    /// Note: Zero stands for umlimited.
-    pub fn new(throughput: f64, iops: f64) -> Self {
+    /// Note: `None` stands for umlimited.
+    pub fn new(throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
         let inner = Inner {
             throughput_quota: 0.0,
             iops_quota: 0.0,
             last: Instant::now(),
         };
+        let throughput = throughput.map(|v| v.get() as f64).unwrap_or_default();
+        let iops = iops.map(|v| v.get() as f64).unwrap_or_default();
         Self {
             inner: Mutex::new(inner),
             throughput,
@@ -232,14 +234,14 @@ mod tests {
         F: Fn(f64, f64, &Arc<AtomicUsize>, &Arc<AtomicUsize>, &Arc<IoThrottler>, Target) + Send + Sync + Copy + 'static,
     {
         const THREADS: usize = 8;
-        const THROUGHPUT: f64 = (250 * 1024 * 1024) as f64;
-        const IOPS: f64 = 100000.0;
+        const THROUGHPUT: usize = 250 * 1024 * 1024;
+        const IOPS: usize = 100000;
         const DURATION: Duration = Duration::from_secs(10);
 
         let bytes = Arc::new(AtomicUsize::new(0));
         let ios = Arc::new(AtomicUsize::new(0));
 
-        let throttler = Arc::new(IoThrottler::new(THROUGHPUT, IOPS));
+        let throttler = Arc::new(IoThrottler::new(NonZeroUsize::new(THROUGHPUT), NonZeroUsize::new(IOPS)));
         let task = |throughput: f64,
                     iops: f64,
                     bytes: Arc<AtomicUsize>,
@@ -263,7 +265,7 @@ mod tests {
                 let bytes = bytes.clone();
                 let ios = ios.clone();
                 let throttler = throttler.clone();
-                move || task(THROUGHPUT, IOPS, bytes, ios, throttler, f, target)
+                move || task(THROUGHPUT as _, IOPS as _, bytes, ios, throttler, f, target)
             });
             handles.push(handle);
         }
@@ -274,11 +276,11 @@ mod tests {
 
         let throughput_error =
             (bytes.load(Ordering::Relaxed) as isize - THROUGHPUT as isize * DURATION.as_secs() as isize).unsigned_abs();
-        let throughput_error_ratio = throughput_error as f64 / (THROUGHPUT * DURATION.as_secs_f64());
+        let throughput_error_ratio = throughput_error as f64 / (THROUGHPUT as f64 * DURATION.as_secs_f64());
 
         let iops_error =
             (ios.load(Ordering::Relaxed) as isize - IOPS as isize * DURATION.as_secs() as isize).unsigned_abs();
-        let iops_error_ratio = iops_error as f64 / (IOPS * DURATION.as_secs_f64());
+        let iops_error_ratio = iops_error as f64 / (IOPS as f64 * DURATION.as_secs_f64());
 
         match target {
             Target::Throughput => throughput_error_ratio,

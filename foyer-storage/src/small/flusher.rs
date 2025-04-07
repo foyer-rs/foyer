@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    future::Future,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{fmt::Debug, future::Future, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
@@ -189,10 +185,7 @@ where
             async move {
                 set_manager.update(sid, &deletions, items).await?;
 
-                stats
-                    .cache_write_bytes
-                    .fetch_add(set_manager.set_size(), Ordering::Relaxed);
-                stats.cache_write_ios.fetch_add(1, Ordering::Relaxed);
+                stats.record_write_io(set_manager.set_size());
 
                 Ok::<_, Error>(())
             }
