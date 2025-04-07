@@ -18,16 +18,19 @@ pub use crate::{
         direct_file::{DirectFileDevice, DirectFileDeviceOptions},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         monitor::DeviceStats,
-        Dev, DevConfig, DevExt, Throttle,
+        Dev, DevConfig, DevExt, IopsCounter, Throttle,
     },
     error::{Error, Result},
-    io::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
+    io::buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
     large::{
         recover::RecoverMode,
         tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
     },
     picker::{
-        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RateLimitPicker, RejectAllPicker},
+        utils::{
+            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
+            IoThrottlerPicker, RejectAllPicker,
+        },
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     runtime::Runtime,

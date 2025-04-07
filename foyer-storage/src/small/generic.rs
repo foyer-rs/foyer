@@ -197,6 +197,7 @@ where
             stats
                 .cache_read_bytes
                 .fetch_add(set_manager.set_size(), Ordering::Relaxed);
+            stats.cache_read_ios.fetch_add(1, Ordering::Relaxed);
 
             set_manager.load(hash).await.inspect_err(|e| {
                 tracing::error!(hash, ?e, "[sodc load]: fail to load");

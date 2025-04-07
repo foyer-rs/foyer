@@ -25,7 +25,10 @@ use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
     error::Result,
-    io::{IoBuffer, OwnedSlice, PAGE},
+    io::{
+        buffer::{IoBuffer, OwnedSlice},
+        PAGE,
+    },
     large::{
         flusher::{Flusher, Submission},
         generic::GenericLargeStorageConfig,

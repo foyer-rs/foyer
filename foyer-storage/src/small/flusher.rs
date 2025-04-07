@@ -192,6 +192,7 @@ where
                 stats
                     .cache_write_bytes
                     .fetch_add(set_manager.set_size(), Ordering::Relaxed);
+                stats.cache_write_ios.fetch_add(1, Ordering::Relaxed);
 
                 Ok::<_, Error>(())
             }

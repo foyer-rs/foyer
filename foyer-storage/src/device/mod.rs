@@ -25,7 +25,10 @@ use monitor::Monitored;
 
 use crate::{
     error::Result,
-    io::{IoBuf, IoBufMut, PAGE},
+    io::{
+        buffer::{IoBuf, IoBufMut},
+        PAGE,
+    },
     DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
 };
 
@@ -35,8 +38,18 @@ pub type RegionId = u32;
 pub trait DevConfig: Send + Sync + 'static + Debug {}
 impl<T: Send + Sync + 'static + Debug> DevConfig for T {}
 
+/// Device iops counter.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum IopsCounter {
+    /// Count 1 iops for each read/write.
+    PerIo,
+    /// Count 1 iops for each read/write with the size of the i/o.
+    PerIoSize(usize),
+}
+
 /// Throttle config for the device.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Throttle {
     /// The maximum write iops for the device.
@@ -47,6 +60,14 @@ pub struct Throttle {
     pub write_throughput: Option<NonZeroUsize>,
     /// The maximum read throughput for the device.
     pub read_throughput: Option<NonZeroUsize>,
+    /// The iops counter for the device.
+    pub iops_counter: IopsCounter,
+}
+
+impl Default for Throttle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Throttle {
@@ -57,30 +78,37 @@ impl Throttle {
             read_iops: None,
             write_throughput: None,
             read_throughput: None,
+            iops_counter: IopsCounter::PerIo,
         }
     }
 
     /// Set the maximum write iops for the device.
-    pub fn write_iops(mut self, iops: usize) -> Self {
+    pub fn with_write_iops(mut self, iops: usize) -> Self {
         self.write_iops = NonZeroUsize::new(iops);
         self
     }
 
     /// Set the maximum read iops for the device.
-    pub fn read_iops(mut self, iops: usize) -> Self {
+    pub fn with_read_iops(mut self, iops: usize) -> Self {
         self.read_iops = NonZeroUsize::new(iops);
         self
     }
 
     /// Set the maximum write throughput for the device.
-    pub fn write_throughput(mut self, throughput: usize) -> Self {
+    pub fn with_write_throughput(mut self, throughput: usize) -> Self {
         self.write_throughput = NonZeroUsize::new(throughput);
         self
     }
 
     /// Set the maximum read throughput for the device.
-    pub fn read_throughput(mut self, throughput: usize) -> Self {
+    pub fn with_read_throughput(mut self, throughput: usize) -> Self {
         self.read_throughput = NonZeroUsize::new(throughput);
+        self
+    }
+
+    /// Set the iops counter for the device.
+    pub fn with_iops_counter(mut self, counter: IopsCounter) -> Self {
+        self.iops_counter = counter;
         self
     }
 }

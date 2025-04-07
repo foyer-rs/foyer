@@ -26,7 +26,7 @@ use foyer_common::metrics::Metrics;
 use super::{RegionId, Throttle};
 use crate::{
     error::Result,
-    io::{IoBuf, IoBufMut},
+    io::buffer::{IoBuf, IoBufMut},
     Dev, DirectFileDevice, Runtime,
 };
 

@@ -19,6 +19,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct Statistics {
     pub(crate) cache_write_bytes: AtomicUsize,
     pub(crate) cache_read_bytes: AtomicUsize,
+    pub(crate) cache_write_ios: AtomicUsize,
+    pub(crate) cache_read_ios: AtomicUsize,
 }
 
 impl Statistics {
@@ -30,5 +32,15 @@ impl Statistics {
     /// Get the disk cache read bytes.
     pub fn cache_read_bytes(&self) -> usize {
         self.cache_read_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Get the disk cache written ios.
+    pub fn cache_write_ios(&self) -> usize {
+        self.cache_write_ios.load(Ordering::Relaxed)
+    }
+
+    /// Get the disk cache read bytes.
+    pub fn cache_read_ios(&self) -> usize {
+        self.cache_read_ios.load(Ordering::Relaxed)
     }
 }

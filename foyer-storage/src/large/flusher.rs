@@ -43,7 +43,7 @@ use crate::large::test_utils::*;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         generic::GenericLargeStorageConfig,

@@ -46,7 +46,7 @@ use crate::{
     compress::Compression,
     device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
@@ -381,6 +381,7 @@ where
             stats
                 .cache_read_bytes
                 .fetch_add(bits::align_up(device.align(), buf.len()), Ordering::Relaxed);
+            stats.cache_read_ios.fetch_add(1, Ordering::Relaxed);
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,

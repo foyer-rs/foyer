@@ -26,7 +26,10 @@ use itertools::Itertools;
 use super::{Dev, DevExt, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
-    io::{IoBuf, IoBufMut, PAGE},
+    io::{
+        buffer::{IoBuf, IoBufMut},
+        PAGE,
+    },
     Runtime,
 };
 
@@ -357,7 +360,7 @@ mod tests {
     use bytes::BufMut;
 
     use super::*;
-    use crate::io::IoBuffer;
+    use crate::io::buffer::IoBuffer;
 
     #[test_log::test]
     fn test_options_builder() {
