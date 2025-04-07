@@ -175,7 +175,13 @@ mod tests {
         let mut eratios = vec![];
         for handle in handles {
             let eratio = handle.join().unwrap();
-            assert!(eratio < ERATIO, "eratio: {} < ERATIO: {}", eratio, ERATIO);
+            assert!(
+                eratio.abs() < ERATIO,
+                "eratio: {}, eratio (abs): {} < ERATIO: {}",
+                eratio,
+                eratio.abs(),
+                ERATIO
+            );
             eratios.push(eratio);
         }
         println!("========== RatedTicket error ratio begin ==========");
@@ -278,11 +284,10 @@ mod tests {
         }
 
         let throughput_error =
-            (bytes.load(Ordering::Relaxed) as isize - THROUGHPUT as isize * DURATION.as_secs() as isize).unsigned_abs();
+            (bytes.load(Ordering::Relaxed) as isize - THROUGHPUT as isize * DURATION.as_secs() as isize).abs();
         let throughput_error_ratio = throughput_error as f64 / (THROUGHPUT as f64 * DURATION.as_secs_f64());
 
-        let iops_error =
-            (ios.load(Ordering::Relaxed) as isize - IOPS as isize * DURATION.as_secs() as isize).unsigned_abs();
+        let iops_error = (ios.load(Ordering::Relaxed) as isize - IOPS as isize * DURATION.as_secs() as isize).abs();
         let iops_error_ratio = iops_error as f64 / (IOPS as f64 * DURATION.as_secs_f64());
 
         match target {
