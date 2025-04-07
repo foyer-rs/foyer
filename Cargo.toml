@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.3"
+version = "0.16.0"
 edition = "2021"
 rust-version = "1.81.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -51,10 +51,10 @@ mixtrics = "0.0.6"
 criterion = "0.5"
 
 # foyer components
-foyer-common = { version = "0.15.3", path = "foyer-common" }
-foyer-memory = { version = "0.15.3", path = "foyer-memory" }
-foyer-storage = { version = "0.15.3", path = "foyer-storage" }
-foyer = { version = "0.15.3", path = "foyer" }
+foyer-common = { version = "0.16.0", path = "foyer-common" }
+foyer-memory = { version = "0.16.0", path = "foyer-memory" }
+foyer-storage = { version = "0.16.0", path = "foyer-storage" }
+foyer = { version = "0.16.0", path = "foyer" }
 
 [workspace.lints.rust]
 missing_docs = "warn"
