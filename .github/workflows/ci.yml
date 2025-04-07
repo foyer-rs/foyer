@@ -216,7 +216,7 @@ jobs:
           RUST_BACKTRACE: 1
           CI: true
         run: |
-          cargo llvm-cov --no-report nextest --run-ignored ignored-only --no-capture --workspace ${{ matrix.serde }} --features "strict_assertions"
+          cargo llvm-cov --no-report nextest --run-ignored only --no-capture --workspace ${{ matrix.serde }} --features "strict_assertions"
       - name: Run rust test with coverage
         env:
           RUST_BACKTRACE: 1

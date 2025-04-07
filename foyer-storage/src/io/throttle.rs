@@ -57,8 +57,9 @@ impl IoThrottler {
         let mut inner = self.inner.lock();
 
         let now = Instant::now();
-        let throughput_refill = now.duration_since(inner.last).as_secs_f64() * self.throughput;
-        let iops_refill = now.duration_since(inner.last).as_secs_f64() * self.iops;
+        let dur = now.duration_since(inner.last).as_secs_f64();
+        let throughput_refill = dur * self.throughput;
+        let iops_refill = dur * self.iops;
         inner.last = now;
         inner.throughput_quota = f64::min(inner.throughput_quota + throughput_refill, self.throughput);
         inner.iops_quota = f64::min(inner.iops_quota + iops_refill, self.iops);
@@ -68,8 +69,9 @@ impl IoThrottler {
 
     /// Reduce some throughput and iops quota manually.
     pub fn reduce(&self, throughput: f64, iops: f64) {
-        self.inner.lock().throughput_quota -= throughput;
-        self.inner.lock().iops_quota -= iops;
+        let mut inner = self.inner.lock();
+        inner.throughput_quota -= throughput;
+        inner.iops_quota -= iops;
     }
 
     /// Consume some throughput and iops quota from the rate limiter.
@@ -80,8 +82,9 @@ impl IoThrottler {
         let mut inner = self.inner.lock();
 
         let now = Instant::now();
-        let throughput_refill = now.duration_since(inner.last).as_secs_f64() * self.throughput;
-        let iops_refill = now.duration_since(inner.last).as_secs_f64() * self.iops;
+        let dur = now.duration_since(inner.last).as_secs_f64();
+        let throughput_refill = dur * self.throughput;
+        let iops_refill = dur * self.iops;
         inner.last = now;
         inner.throughput_quota = f64::min(inner.throughput_quota + throughput_refill, self.throughput);
         inner.iops_quota = f64::min(inner.iops_quota + iops_refill, self.iops);
@@ -137,25 +140,25 @@ mod tests {
 
     #[ignore]
     #[test]
-    fn test_rated_ticket_consume_throughput() {
+    fn test_io_throttler_consume_throughput() {
         test(consume, Target::Throughput)
     }
 
     #[ignore]
     #[test]
-    fn test_rated_ticket_consume_iops() {
+    fn test_io_throttler_consume_iops() {
         test(consume, Target::Iops)
     }
 
     #[ignore]
     #[test]
-    fn test_rated_ticket_probe_reduce_throughput() {
+    fn test_io_throttler_probe_reduce_throughput() {
         test(probe_reduce, Target::Throughput)
     }
 
     #[ignore]
     #[test]
-    fn test_rated_ticket_probe_reduce_iops() {
+    fn test_io_throttler_probe_reduce_iops() {
         test(probe_reduce, Target::Iops)
     }
 
