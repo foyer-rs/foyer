@@ -258,7 +258,7 @@ mod tests {
                 if start.elapsed() >= DURATION {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(rng.random_range(1..10)));
+                std::thread::sleep(Duration::from_micros(rng.random_range(10..100)));
                 f(throughput, iops, &bytes, &ios, &limiter, target)
             }
         };
