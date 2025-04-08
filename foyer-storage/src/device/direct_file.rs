@@ -14,14 +14,17 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
+    future::Future,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::Arc,
 };
 
 use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
+use futures_util::FutureExt;
 
-use super::{Dev, RegionId, Throttle};
+use super::{Dev, DynDevV2, IoBufMutEnum, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
     io::{
@@ -299,6 +302,27 @@ impl Dev for DirectFileDevice {
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
         asyncify_with_runtime(self.runtime.write(), move || file.sync_all().map_err(Error::from)).await
+    }
+}
+
+impl DynDevV2 for DirectFileDevice {
+    fn dyn_read(
+        &self,
+        buf: IoBufMutEnum,
+        region: RegionId,
+        offset: u64,
+    ) -> Pin<Box<dyn Future<Output = (IoBufMutEnum, Result<()>)> + Send + 'static>> {
+        let this = self.clone();
+        async move {
+            let len = buf.len();
+            if let Err(e) = this.check_io_range(Some(region), offset, len) {
+                return (buf, Err(e));
+            }
+
+            let poffset = offset + region as u64 * this.region_size as u64;
+            this.pread(buf, poffset).await
+        }
+        .boxed()
     }
 }
 

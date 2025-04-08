@@ -17,10 +17,18 @@ pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
-use std::{fmt::Debug, future::Future, num::NonZeroUsize};
+use std::{
+    any::TypeId,
+    fmt::Debug,
+    future::Future,
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+};
 
 use direct_file::DirectFileDeviceConfig;
 use direct_fs::DirectFsDeviceConfig;
+use futures_util::FutureExt;
 use monitor::Monitored;
 
 use crate::{
@@ -29,7 +37,8 @@ use crate::{
         buffer::{IoBuf, IoBufMut},
         PAGE,
     },
-    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
+    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, IoBuffer, OwnedIoSlice, Runtime,
+    SharedIoSlice,
 };
 
 pub type RegionId = u32;
@@ -259,3 +268,169 @@ impl Dev for Device {
 }
 
 pub type MonitoredDevice = Monitored<Device>;
+
+// trait DynDevV2 {
+//     fn dyn_read(
+//         &self,
+//         buf: Box<dyn IoBufMut>,
+//         region: RegionId,
+//         offset: u64,
+//     ) -> Pin<Box<dyn Future<Output = (Box<dyn IoBufMut>, Result<()>)> + Send>>;
+// }
+
+// impl dyn DevV2 {
+//     fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> Pin<Box<dyn Future<Output = (B, Result<()>)> + Send>>
+//     where
+//         B: IoBufMut,
+//     {
+//         self.dyn_read(Box::new(buf), region, offset)
+//     }
+// }
+
+// trait DevV2Erasured {
+
+// }
+
+// const _: Option<&dyn DynDevV2> = None;
+
+// /// Write API for the device.
+// #[must_use]
+// fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
+// where
+//     B: IoBuf;
+
+//  /// Read API for the device.
+//  #[must_use]
+//  fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
+//  where
+//      B: IoBufMut;
+
+// #[async_trait::async_trait]
+// pub trait DevV2 {
+//     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+//     where
+//         B: IoBufMut;
+
+//     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+//     where
+//         B: IoBuf;
+// }
+
+// const _: Option<&dyn DevV2> = None;
+
+// #[cfg(test)]
+// mod tests {
+//     use std::sync::Arc;
+
+//     use super::*;
+
+//     fn dev() -> Arc<dyn DevV2> {
+//         todo!()
+//     }
+
+//     #[tokio::test]
+//     async fn test() {}
+// }
+
+pub enum IoBufEnum {
+    IoBuffer(IoBuffer),
+    OwnedIoSlice(OwnedIoSlice),
+    SharedIoSlice(SharedIoSlice),
+}
+
+pub enum IoBufMutEnum {
+    IoBuffer(IoBuffer),
+    OwnedIoSlice(OwnedIoSlice),
+}
+
+impl Deref for IoBufMutEnum {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            IoBufMutEnum::IoBuffer(buf) => buf.deref(),
+            IoBufMutEnum::OwnedIoSlice(buf) => buf.deref(),
+        }
+    }
+}
+
+impl DerefMut for IoBufMutEnum {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            IoBufMutEnum::IoBuffer(buf) => buf.deref_mut(),
+            IoBufMutEnum::OwnedIoSlice(buf) => buf.deref_mut(),
+        }
+    }
+}
+
+impl IoBufMut for IoBufMutEnum {}
+
+impl From<IoBuffer> for IoBufMutEnum {
+    fn from(io_buffer: IoBuffer) -> Self {
+        IoBufMutEnum::IoBuffer(io_buffer)
+    }
+}
+
+impl From<OwnedIoSlice> for IoBufMutEnum {
+    fn from(owned_io_slice: OwnedIoSlice) -> Self {
+        IoBufMutEnum::OwnedIoSlice(owned_io_slice)
+    }
+}
+
+impl From<IoBufMutEnum> for IoBuffer {
+    fn from(io_buf_mut_enum: IoBufMutEnum) -> Self {
+        match io_buf_mut_enum {
+            IoBufMutEnum::IoBuffer(io_buffer) => io_buffer,
+            _ => panic!("IoBufMutEnum::IoBuffer expected"),
+        }
+    }
+}
+
+impl From<IoBufMutEnum> for OwnedIoSlice {
+    fn from(io_buf_mut_enum: IoBufMutEnum) -> Self {
+        match io_buf_mut_enum {
+            IoBufMutEnum::OwnedIoSlice(owned_io_slice) => owned_io_slice,
+            _ => panic!("IoBufMutEnum::OwnedIoSlice expected"),
+        }
+    }
+}
+
+pub trait DynDevV2 {
+    fn dyn_read(
+        &self,
+        buf: IoBufMutEnum,
+        region: RegionId,
+        offset: u64,
+    ) -> Pin<Box<dyn Future<Output = (IoBufMutEnum, Result<()>)> + Send>>;
+}
+
+const _: Option<&dyn DynDevV2> = None;
+
+impl dyn DynDevV2 {
+    fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
+    where
+        B: IoBufMut + Into<IoBufMutEnum> + From<IoBufMutEnum>,
+    {
+        self.dyn_read(buf.into(), region, offset).map(|(b, r)| (b.into(), r))
+    }
+}
+
+const _: Option<&dyn DynDevV2> = None;
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    fn dev() -> Arc<dyn DynDevV2> {
+        todo!()
+    }
+
+    #[tokio::test]
+    async fn test() {
+        let d = dev();
+        let mut buf = IoBuffer::new(4096);
+        let (b, r) = d.read(buf, 0, 0).await;
+    }
+}
