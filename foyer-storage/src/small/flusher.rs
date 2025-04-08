@@ -27,10 +27,7 @@ use super::{
     generic::GenericSmallStorageConfig,
     set_manager::SetManager,
 };
-use crate::{
-    error::{Error, Result},
-    Statistics,
-};
+use crate::error::{Error, Result};
 
 pub enum Submission<K, V>
 where
@@ -75,12 +72,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn open(
-        config: &GenericSmallStorageConfig<K, V>,
-        set_manager: SetManager,
-        stats: Arc<Statistics>,
-        metrics: Arc<Metrics>,
-    ) -> Self {
+    pub fn open(config: &GenericSmallStorageConfig<K, V>, set_manager: SetManager, metrics: Arc<Metrics>) -> Self {
         let (tx, rx) = flume::unbounded();
 
         let buffer_size = config.buffer_pool_size / config.flushers;
@@ -92,7 +84,6 @@ where
             batch,
             flight: Arc::new(Semaphore::new(1)),
             set_manager,
-            stats,
             metrics,
         };
 
@@ -132,7 +123,6 @@ where
 
     set_manager: SetManager,
 
-    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -181,11 +171,8 @@ where
 
         let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {
             let set_manager = self.set_manager.clone();
-            let stats = self.stats.clone();
             async move {
                 set_manager.update(sid, &deletions, items).await?;
-
-                stats.record_write_io(set_manager.set_size());
 
                 Ok::<_, Error>(())
             }

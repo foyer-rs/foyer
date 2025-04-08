@@ -54,7 +54,7 @@ use crate::{
     },
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
-    Compression, Dev, SharedIoSlice, Statistics,
+    Compression, Dev, SharedIoSlice,
 };
 
 pub enum Submission<K, V>
@@ -151,7 +151,6 @@ where
         device: MonitoredDevice,
         submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
-        stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
         #[cfg(test)] flush_holder: FlushHolder,
@@ -191,7 +190,6 @@ where
             compression: config.compression,
             flush: config.flush,
             runtime: runtime.clone(),
-            stats,
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
             current_region_handle,
@@ -291,7 +289,6 @@ where
 
     runtime: Runtime,
 
-    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 
     io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
@@ -455,7 +452,6 @@ where
             .map(|(i, (Region { blob_parts }, region_handle))| {
                 let indexer = self.indexer.clone();
                 let region_manager = self.region_manager.clone();
-                let stats = self.stats.clone();
                 let flush = self.flush;
 
                 async move {
@@ -477,7 +473,6 @@ where
                             bits::assert_aligned(PAGE, len);
 
                             let region = region.clone();
-                            let stats = stats.clone();
                             async move {
                                 if len > 0 {
                                     tracing::trace!(
@@ -521,7 +516,6 @@ where
                                     if flush {
                                         region.flush().await?;
                                     }
-                                    stats.record_write_io(len);
                                 } else {
                                     tracing::trace!(
                                         id,

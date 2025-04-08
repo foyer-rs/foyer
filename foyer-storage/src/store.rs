@@ -36,7 +36,7 @@ use tokio::runtime::Handle;
 use crate::{
     compress::Compression,
     device::{
-        monitor::{DeviceStats, Monitored, MonitoredConfig},
+        monitor::{Monitored, MonitoredConfig},
         DeviceConfig, RegionId,
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
@@ -192,8 +192,8 @@ where
     }
 
     /// Get the statistics information of the disk cache.
-    pub fn stats(&self) -> Arc<DeviceStats> {
-        self.inner.engine.stats()
+    pub fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.engine.statistics()
     }
 
     /// Get the runtime.

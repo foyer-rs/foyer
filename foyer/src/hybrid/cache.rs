@@ -36,7 +36,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState, Piece, Pipe};
-use foyer_storage::{DeviceStats, Store};
+use foyer_storage::{Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -426,8 +426,8 @@ where
     }
 
     /// Return the statistics information of the hybrid cache.
-    pub fn stats(&self) -> Arc<DeviceStats> {
-        self.storage.stats()
+    pub fn statistics(&self) -> &Arc<Statistics> {
+        self.storage.statistics()
     }
 
     /// Create a new [`HybridCacheWriter`].

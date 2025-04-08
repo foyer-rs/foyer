@@ -20,7 +20,7 @@ use std::{fmt::Debug, future::Future, sync::Arc};
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
 
-use crate::{device::monitor::DeviceStats, error::Result};
+use crate::{error::Result, Statistics, Throttle};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
@@ -64,7 +64,10 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn destroy(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Get the statistics information of the disk cache.
-    fn stats(&self) -> Arc<DeviceStats>;
+    fn statistics(&self) -> &Arc<Statistics>;
+
+    /// Get the throttle of the disk cache.
+    fn throttle(&self) -> &Throttle;
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
     #[must_use]

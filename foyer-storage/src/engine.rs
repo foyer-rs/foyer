@@ -26,7 +26,7 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    DeviceStats, Storage,
+    Statistics, Storage,
 };
 
 pub struct SizeSelector<K, V>
@@ -226,12 +226,21 @@ where
         }
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
+    fn throttle(&self) -> &crate::Throttle {
         match self {
-            EngineEnum::Noop(storage) => storage.stats(),
-            EngineEnum::Large(storage) => storage.stats(),
-            EngineEnum::Small(storage) => storage.stats(),
-            EngineEnum::Mixed(storage) => storage.stats(),
+            EngineEnum::Noop(storage) => storage.throttle(),
+            EngineEnum::Large(storage) => storage.throttle(),
+            EngineEnum::Small(storage) => storage.throttle(),
+            EngineEnum::Mixed(storage) => storage.throttle(),
+        }
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        match self {
+            EngineEnum::Noop(storage) => storage.statistics(),
+            EngineEnum::Large(storage) => storage.statistics(),
+            EngineEnum::Small(storage) => storage.statistics(),
+            EngineEnum::Mixed(storage) => storage.statistics(),
         }
     }
 
