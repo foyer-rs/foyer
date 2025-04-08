@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{num::NonZeroUsize, time::Instant};
+use std::{
+    num::NonZeroUsize,
+    time::{Duration, Instant},
+};
 
 use parking_lot::Mutex;
 
@@ -52,8 +55,10 @@ impl IoThrottler {
         }
     }
 
-    /// Check if there is still some quota left.
-    pub fn probe(&self) -> bool {
+    /// Get the nearest time to retry to check if an io can be submitted.
+    ///
+    /// Return `Duration::ZERO` if no need to wait.
+    pub fn probe(&self) -> Duration {
         let mut inner = self.inner.lock();
 
         let now = Instant::now();
@@ -64,10 +69,20 @@ impl IoThrottler {
         inner.throughput_quota = f64::min(inner.throughput_quota + throughput_refill, self.throughput);
         inner.iops_quota = f64::min(inner.iops_quota + iops_refill, self.iops);
 
-        (self.throughput == 0.0 || inner.throughput_quota > 0.0) && (self.iops == 0.0 || inner.iops_quota > 0.0)
+        let throughput_refill_duration = if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
+        };
+        let iops_refill_duration = if self.iops == 0.0 || inner.iops_quota >= 0.0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(-inner.iops_quota / self.iops)
+        };
+        std::cmp::max(throughput_refill_duration, iops_refill_duration)
     }
 
-    /// Reduce some throughput and iops quota manually.
+    /// Submit io that consumes the given throughput and iops qutoa.
     pub fn reduce(&self, throughput: f64, iops: f64) {
         let mut inner = self.inner.lock();
         inner.throughput_quota -= throughput;
@@ -222,7 +237,7 @@ mod tests {
         throttler: &Arc<IoThrottler>,
         target: Target,
     ) {
-        if throttler.probe() {
+        if throttler.probe().is_zero() {
             let mut rng = rng();
             let t = match target {
                 Target::Throughput => rng.random_range(throughput * 0.0008..throughput * 0.0016),

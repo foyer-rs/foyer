@@ -44,7 +44,7 @@ use crate::{
     io::PAGE,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
-        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, RejectAllPicker},
+        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     runtime::Runtime,
@@ -79,6 +79,7 @@ where
     engine: EngineEnum<K, V>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
+    load_throttler: Option<IoThrottlerPicker>,
 
     compression: Compression,
 
@@ -98,6 +99,7 @@ where
         f.debug_struct("Store")
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
+            .field("load_throttler", &self.inner.load_throttler)
             .field("compression", &self.inner.compression)
             .field("runtimes", &self.inner.runtime)
             .finish()
@@ -157,6 +159,16 @@ where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         let hash = self.inner.hasher.hash_one(key);
+
+        // FIXME(MrCroxx): Return `Some(None)` here will be treated as a disk cache miss, then trigger a cache refill.
+        // We need to skip it if we know it is not necessary.
+
+        if let Some(throttler) = self.inner.load_throttler.as_ref() {
+            if !throttler.pick(&self.inner.statistics, hash) {
+                return Ok(None);
+            }
+        }
+
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
             Ok(Some((k, v))) if key.equivalent(&k) => Ok(Some((k, v))),
@@ -640,6 +652,7 @@ where
             admission_picker = Arc::new(
                 ChainedAdmissionPickerBuilder::default()
                     .chain(Arc::new(IoThrottlerPicker::new(
+                        IoThrottlerTarget::Write,
                         throttle.write_throughput,
                         throttle.write_iops,
                     )))
@@ -647,12 +660,16 @@ where
                     .build(),
             );
         }
+        let load_throttler = (throttle.read_throughput.is_some() || throttle.read_iops.is_some()).then_some(
+            IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
+        );
 
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
             hasher,
             engine,
             admission_picker,
+            load_throttler,
             compression,
             runtime,
             statistics,
