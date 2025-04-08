@@ -33,7 +33,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
 };
 
 /// # Lock Order

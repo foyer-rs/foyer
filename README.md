@@ -124,28 +124,14 @@ async fn main() -> anyhow::Result<()> {
 Here is an example of a hybrid cache setup with almost all configurations to show th possibilities of tuning.
 
 ```rust
-// Copyright 2025 foyer Project Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy, LargeEngineOptions,
-    LruConfig, RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions,
-    TombstoneLogConfigBuilder,
+    AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
+    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -167,11 +153,19 @@ async fn main() -> Result<()> {
         .with_device_options(
             DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024),
+                .with_file_size(4 * 1024 * 1024)
+                .with_throttle(
+                    Throttle::new()
+                        .with_read_iops(4000)
+                        .with_write_iops(2000)
+                        .with_write_throughput(100 * 1024 * 1024)
+                        .with_read_throughput(800 * 1024 * 1024)
+                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+                ),
         )
         .with_flush(true)
         .with_recover_mode(RecoverMode::Quiet)
-        .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
+        .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
         .with_runtime_options(RuntimeOptions::Separated {
             read_runtime_options: TokioRuntimeOptions {
@@ -192,7 +186,7 @@ async fn main() -> Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_region_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
+                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
                 .with_tombstone_log_config(
                     TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
                         .with_flush(true)

@@ -40,8 +40,7 @@ use exporter::PrometheusExporter;
 use foyer::{
     Code, CodeError, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
     HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions,
-    TracingOptions,
+    RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, Throttle, TokioRuntimeOptions, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -143,13 +142,21 @@ struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// Enable rated ticket admission picker if `admission_rate_limit > 0`.
-    #[arg(long, default_value_t = ByteSize::b(0))]
-    admission_rate_limit: ByteSize,
+    /// Disk write iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_write_iops: usize,
 
-    /// Enable rated ticket reinsertion picker if `reinsertion_rate_limit > 0`.
+    /// Disk read iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_read_iops: usize,
+
+    /// Disk write throughput throttle.
     #[arg(long, default_value_t = ByteSize::b(0))]
-    reinsertion_rate_limit: ByteSize,
+    disk_write_throughput: ByteSize,
+
+    /// Disk read throughput throttle.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    disk_read_throughput: ByteSize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -486,16 +493,24 @@ async fn benchmark(args: Args) {
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage(args.engine);
 
+    let throttle = Throttle::default()
+        .with_read_iops(args.disk_read_iops)
+        .with_write_iops(args.disk_write_iops)
+        .with_read_throughput(args.disk_read_throughput.as_u64() as _)
+        .with_write_throughput(args.disk_write_throughput.as_u64() as _);
+
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_options(
             DirectFileDeviceOptions::new(file)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _),
+                .with_region_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, Some(dir)) => builder.with_device_options(
             DirectFsDeviceOptions::new(dir)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _),
+                .with_file_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, None) => builder,
         _ => unreachable!(),
@@ -540,14 +555,6 @@ async fn benchmark(args: Args) {
         .with_flushers(args.flushers)
         .with_set_size(args.set_size.as_u64() as _)
         .with_set_cache_capacity(args.set_cache_capacity);
-
-    if args.admission_rate_limit.as_u64() > 0 {
-        builder =
-            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
-    if args.reinsertion_rate_limit.as_u64() > 0 {
-        large = large.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
 
     if args.clean_region_threshold > 0 {
         large = large.with_clean_region_threshold(args.clean_region_threshold);

@@ -43,7 +43,7 @@ use crate::large::test_utils::*;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         generic::GenericLargeStorageConfig,
@@ -521,7 +521,7 @@ where
                                     if flush {
                                         region.flush().await?;
                                     }
-                                    stats.cache_write_bytes.fetch_add(len, Ordering::Relaxed);
+                                    stats.record_write_io(len);
                                 } else {
                                     tracing::trace!(
                                         id,

@@ -21,10 +21,13 @@ use std::{
 use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
 
-use super::{Dev, RegionId};
+use super::{Dev, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
-    io::{IoBuf, IoBufMut, PAGE},
+    io::{
+        buffer::{IoBuf, IoBufMut},
+        PAGE,
+    },
     Runtime,
 };
 
@@ -34,6 +37,7 @@ pub struct DirectFileDeviceConfig {
     path: PathBuf,
     capacity: usize,
     region_size: usize,
+    throttle: Throttle,
 }
 
 impl DirectFileDeviceConfig {
@@ -70,6 +74,8 @@ pub struct DirectFileDevice {
 
     capacity: usize,
     region_size: usize,
+
+    throttle: Throttle,
 
     runtime: Runtime,
 }
@@ -211,6 +217,10 @@ impl Dev for DirectFileDevice {
         self.region_size
     }
 
+    fn throttle(&self) -> &Throttle {
+        &self.throttle
+    }
+
     #[fastrace::trace(name = "foyer::storage::device::direct_file::open")]
     async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         options.verify()?;
@@ -252,6 +262,7 @@ impl Dev for DirectFileDevice {
             file,
             capacity: options.capacity,
             region_size: options.region_size,
+            throttle: options.throttle,
             runtime,
         })
     }
@@ -301,6 +312,7 @@ pub struct DirectFileDeviceOptions {
     path: PathBuf,
     capacity: Option<usize>,
     region_size: Option<usize>,
+    throttle: Throttle,
 }
 
 impl DirectFileDeviceOptions {
@@ -312,6 +324,7 @@ impl DirectFileDeviceOptions {
             path: path.as_ref().into(),
             capacity: None,
             region_size: None,
+            throttle: Throttle::default(),
         }
     }
 
@@ -332,6 +345,12 @@ impl DirectFileDeviceOptions {
     /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
     pub fn with_region_size(mut self, region_size: usize) -> Self {
         self.region_size = Some(region_size);
+        self
+    }
+
+    /// Set the throttle of the direct file device.
+    pub fn with_throttle(mut self, throttle: Throttle) -> Self {
+        self.throttle = throttle;
         self
     }
 }
@@ -357,11 +376,13 @@ impl From<DirectFileDeviceOptions> for DirectFileDeviceConfig {
         let region_size = align_v(region_size, PAGE);
 
         let capacity = align_v(capacity, region_size);
+        let throttle = options.throttle;
 
         DirectFileDeviceConfig {
             path,
             capacity,
             region_size,
+            throttle,
         }
     }
 }
@@ -371,7 +392,7 @@ mod tests {
     use bytes::BufMut;
 
     use super::*;
-    use crate::io::IoBuffer;
+    use crate::io::buffer::IoBuffer;
 
     #[test_log::test]
     fn test_options_builder() {

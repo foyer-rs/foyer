@@ -24,7 +24,7 @@ use foyer_common::{
 use crate::{
     compress::Compression,
     error::Error,
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::serde::{EntryHeader, Sequence},
     serde::{Checksummer, EntrySerializer},
     SharedIoSlice,

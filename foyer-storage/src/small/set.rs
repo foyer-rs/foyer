@@ -29,7 +29,7 @@ use foyer_common::{
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
     error::Result,
-    io::IoBuffer,
+    io::buffer::IoBuffer,
     serde::{Checksummer, EntryDeserializer},
     Compression,
 };

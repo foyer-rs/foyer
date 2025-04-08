@@ -30,7 +30,7 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     DirectFileDeviceOptions, Runtime,
 };
 

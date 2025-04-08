@@ -194,10 +194,7 @@ where
         let metrics = self.inner.metrics.clone();
 
         async move {
-            stats
-                .cache_read_bytes
-                .fetch_add(set_manager.set_size(), Ordering::Relaxed);
-
+            stats.record_read_io(set_manager.set_size());
             set_manager.load(hash).await.inspect_err(|e| {
                 tracing::error!(hash, ?e, "[sodc load]: fail to load");
                 metrics.storage_error.increase(1);
@@ -293,7 +290,7 @@ mod tests {
             Dev,
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceOptions,
+        DevExt, DirectFsDeviceOptions, IopsCounter,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
@@ -332,7 +329,7 @@ mod tests {
             flush: false,
             flushers: 1,
             buffer_pool_size: ByteSize::kib(64).as_u64() as _,
-            statistics: Arc::<Statistics>::default(),
+            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

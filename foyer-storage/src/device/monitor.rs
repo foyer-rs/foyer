@@ -23,10 +23,10 @@ use std::{
 
 use foyer_common::metrics::Metrics;
 
-use super::RegionId;
+use super::{RegionId, Throttle};
 use crate::{
     error::Result,
-    io::{IoBuf, IoBufMut},
+    io::buffer::{IoBuf, IoBufMut},
     Dev, DirectFileDevice, Runtime,
 };
 
@@ -164,6 +164,10 @@ where
 
     fn region_size(&self) -> usize {
         self.device.region_size()
+    }
+
+    fn throttle(&self) -> &Throttle {
+        self.device.throttle()
     }
 
     async fn open(config: Self::Config, runtime: Runtime) -> Result<Self> {
