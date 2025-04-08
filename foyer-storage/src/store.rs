@@ -56,7 +56,6 @@ use crate::{
         Storage,
     },
     ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
-    IopsCounter, Throttle,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -523,7 +522,7 @@ where
         };
         let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
-        let (engine, throttle, statistics) = {
+        let engine = {
             let metrics = metrics.clone();
             let runtime = runtime.clone();
             // Use the user runtime to open engine.
@@ -533,7 +532,7 @@ where
                         tracing::warn!(
                             "[store builder]: No device config set. Use `NoneStore` which always returns `None` for queries."
                         );
-                        Ok((EngineEnum::open(EngineConfig::Noop).await?, Throttle::default(), Arc::new(Statistics::new(IopsCounter::PerIo))))
+                        EngineEnum::open(EngineConfig::Noop).await
                     }
                     DeviceOptions::DeviceConfig(options) => {
                         let device = match Monitored::open(MonitoredConfig {
@@ -544,9 +543,7 @@ where
                             Ok(device) => device,
                             Err(e) =>return Err(e),
                         };
-                        let throttle = device.throttle().clone();
-                        let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
-                        let engine = match self.engine {
+                        match self.engine {
                             Engine::Large => {
                                 let regions = 0..device.regions() as RegionId;
                                 EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
@@ -566,7 +563,6 @@ where
                                     buffer_pool_size: self.large.buffer_pool_size,
                                     blob_index_size: self.large.blob_index_size,
                                     submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
-                                    statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
                                 }))
@@ -583,7 +579,6 @@ where
                                     flush: self.flush,
                                     flushers: self.small.flushers,
                                     buffer_pool_size: self.small.buffer_pool_size,
-                                    statistics: statistics.clone(),
                                     runtime,
                                     marker: PhantomData,
                                 }))
@@ -604,7 +599,6 @@ where
                                         flush: self.flush,
                                         flushers: self.small.flushers,
                                         buffer_pool_size: self.small.buffer_pool_size,
-                                        statistics: statistics.clone(),
                                         runtime: runtime.clone(),
                                         marker: PhantomData,
                                     },
@@ -625,7 +619,6 @@ where
                                         buffer_pool_size: self.large.buffer_pool_size,
                                         blob_index_size: self.large.blob_index_size,
                                         submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
-                                        statistics: statistics.clone(),
                                         runtime,
                                         marker: PhantomData,
                                     },
@@ -633,13 +626,15 @@ where
                                 }))
                                 .await
                             }
-                        }?;
-                        Ok((engine, throttle, statistics))
+                        }
                     }
                 }
             }).await.unwrap()?
         };
 
+        let statistics = engine.statistics().clone();
+
+        let throttle = engine.throttle();
         if throttle.write_throughput.is_some() || throttle.write_iops.is_some() {
             tracing::debug!(?throttle, "[store builder]: Device is throttled.");
             admission_picker = Arc::new(

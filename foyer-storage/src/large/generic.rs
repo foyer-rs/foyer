@@ -82,7 +82,6 @@ where
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -109,7 +108,6 @@ where
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -586,7 +584,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        DirectFsDeviceOptions, IopsCounter, TombstoneLogConfigBuilder,
+        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -643,7 +641,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
@@ -673,7 +670,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

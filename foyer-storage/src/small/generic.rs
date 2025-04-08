@@ -55,7 +55,6 @@ where
     pub flush: bool,
     pub flushers: usize,
     pub buffer_pool_size: usize,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -75,7 +74,6 @@ where
             .field("flush", &self.flush)
             .field("flushers", &self.flushers)
             .field("buffer_pool_size", &self.buffer_pool_size)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .field("marker", &self.marker)
             .finish()
@@ -293,7 +291,7 @@ mod tests {
             Dev,
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceOptions, IopsCounter,
+        DevExt, DirectFsDeviceOptions,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
@@ -332,7 +330,6 @@ mod tests {
             flush: false,
             flushers: 1,
             buffer_pool_size: ByteSize::kib(64).as_u64() as _,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
