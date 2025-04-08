@@ -44,7 +44,7 @@ use super::{
 use crate::large::test_utils::*;
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
+    device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
     io::{buffer::IoBuffer, PAGE},
     large::{
@@ -58,6 +58,7 @@ use crate::{
     serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
+    Throttle,
 };
 
 pub struct GenericLargeStorageConfig<K, V>
@@ -81,7 +82,6 @@ where
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -108,7 +108,6 @@ where
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -146,8 +145,6 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
-
-    statistics: Arc<Statistics>,
 
     flush: bool,
 
@@ -189,8 +186,6 @@ where
             );
         }
 
-        let stats = config.statistics.clone();
-
         let device = config.device.clone();
         let metrics = device.metrics().clone();
 
@@ -199,9 +194,8 @@ where
             None => None,
             Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &tombstone_log_config.path,
+                    tombstone_log_config,
                     device.clone(),
-                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
                     config.runtime.clone(),
@@ -247,7 +241,6 @@ where
             let device = device.clone();
             let submit_queue_size = submit_queue_size.clone();
             let tombstone_log = tombstone_log.clone();
-            let stats = stats.clone();
             let metrics = metrics.clone();
             #[cfg(test)]
             let flush_holder = flush_holder.clone();
@@ -260,7 +253,6 @@ where
                     device,
                     submit_queue_size,
                     tombstone_log,
-                    stats,
                     metrics,
                     &config.runtime,
                     #[cfg(test)]
@@ -277,7 +269,6 @@ where
                 reclaim_semaphore.clone(),
                 indexer.clone(),
                 flushers.clone(),
-                stats.clone(),
                 metrics.clone(),
             )
         }))
@@ -292,7 +283,6 @@ where
                 reclaimers,
                 submit_queue_size,
                 submit_queue_size_threshold: config.submit_queue_size_threshold,
-                statistics: stats,
                 flush: config.flush,
                 sequence,
                 runtime: config.runtime,
@@ -345,7 +335,6 @@ where
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
-        let stats = self.inner.statistics.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
@@ -377,8 +366,6 @@ where
                     return Err(e);
                 }
             }
-
-            stats.record_read_io(buf.len());
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
@@ -567,8 +554,12 @@ where
         self.destroy().await
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        self.inner.device.stat().clone()
+    fn throttle(&self) -> &Throttle {
+        self.inner.device.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.device.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -593,7 +584,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        DirectFsDeviceOptions, IopsCounter, TombstoneLogConfigBuilder,
+        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;
@@ -650,7 +641,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
@@ -680,7 +670,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

@@ -49,6 +49,18 @@ pub enum IopsCounter {
 }
 
 impl IopsCounter {
+    /// Create a new iops counter that count 1 iops for each io.
+    pub fn per_io() -> Self {
+        Self::PerIo
+    }
+
+    /// Create a new iops counter that count 1 iops for every io size in bytes among ios.
+    ///
+    /// NOTE: `io_size` must NOT be zero.
+    pub fn per_io_size(io_size: usize) -> Self {
+        Self::PerIoSize(NonZeroUsize::new(io_size).expect("io size must be non-zero"))
+    }
+
     /// Count io(s) by io size in bytes.
     pub fn count(&self, bytes: usize) -> usize {
         match self {

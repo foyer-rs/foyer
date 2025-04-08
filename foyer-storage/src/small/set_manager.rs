@@ -207,6 +207,7 @@ impl SetManager {
         self.inner.sets.len()
     }
 
+    #[expect(dead_code)]
     pub fn set_size(&self) -> usize {
         self.inner.set_size
     }

@@ -124,8 +124,8 @@ impl IoThrottlerPicker {
     fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
         let picked = self.inner.throttler.probe();
 
-        let bytes_current = stats.cache_write_bytes();
-        let ios_current = stats.cache_write_ios();
+        let bytes_current = stats.disk_write_bytes();
+        let ios_current = stats.disk_write_ios();
 
         let bytes_last = self.inner.bytes_last.load(Ordering::Relaxed);
         let ios_last = self.inner.ios_last.load(Ordering::Relaxed);

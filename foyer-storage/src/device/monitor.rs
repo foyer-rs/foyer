@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{fmt::Debug, sync::Arc, time::Instant};
 
 use foyer_common::metrics::Metrics;
 
@@ -27,25 +20,8 @@ use super::{RegionId, Throttle};
 use crate::{
     error::Result,
     io::buffer::{IoBuf, IoBufMut},
-    Dev, DirectFileDevice, Runtime,
+    Dev, DirectFileDevice, Runtime, Statistics,
 };
-
-/// The statistics information of the device.
-#[derive(Debug, Default)]
-pub struct DeviceStats {
-    /// The read io count of the device.
-    pub read_ios: AtomicUsize,
-    /// The read bytes of the device.
-    pub read_bytes: AtomicUsize,
-
-    /// The write io count of the device.
-    pub write_ios: AtomicUsize,
-    /// The write bytes of the device.
-    pub write_bytes: AtomicUsize,
-
-    /// The flush io count of the device.
-    pub flush_ios: AtomicUsize,
-}
 
 #[derive(Clone)]
 pub struct MonitoredConfig<D>
@@ -74,7 +50,7 @@ where
     D: Dev,
 {
     device: D,
-    stats: Arc<DeviceStats>,
+    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -84,9 +60,10 @@ where
 {
     async fn open(options: MonitoredConfig<D>, runtime: Runtime) -> Result<Self> {
         let device = D::open(options.config, runtime).await?;
+        let iops_counter = device.throttle().iops_counter.clone();
         Ok(Self {
             device,
-            stats: Arc::default(),
+            stats: Arc::new(Statistics::new(iops_counter)),
             metrics: options.metrics,
         })
     }
@@ -99,10 +76,10 @@ where
         let now = Instant::now();
 
         let bytes = buf.len();
-        self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
         let res = self.device.write(buf, region, offset).await;
+
+        self.stats.record_disk_write(bytes);
 
         self.metrics.storage_disk_write.increase(1);
         self.metrics.storage_disk_write_bytes.increase(bytes as u64);
@@ -121,10 +98,10 @@ where
         let now = Instant::now();
 
         let bytes = buf.len();
-        self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
         let res = self.device.read(buf, region, offset).await;
+
+        self.stats.record_disk_read(bytes);
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);
@@ -139,9 +116,9 @@ where
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
-        self.stats.flush_ios.fetch_add(1, Ordering::Relaxed);
-
         let res = self.device.flush(region).await;
+
+        self.stats.record_disk_flush();
 
         self.metrics.storage_disk_flush.increase(1);
         self.metrics
@@ -202,10 +179,10 @@ impl Monitored<DirectFileDevice> {
         let now = Instant::now();
 
         let bytes = buf.len();
-        self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
 
         let res = self.device.pwrite(buf, offset).await;
+
+        self.stats.record_disk_write(bytes);
 
         self.metrics.storage_disk_write.increase(1);
         self.metrics.storage_disk_write_bytes.increase(bytes as u64);
@@ -224,10 +201,10 @@ impl Monitored<DirectFileDevice> {
         let now = Instant::now();
 
         let bytes = buf.len();
-        self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
 
         let res = self.device.pread(buf, offset).await;
+
+        self.stats.record_disk_read(bytes);
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);
@@ -243,7 +220,7 @@ impl<D> Monitored<D>
 where
     D: Dev,
 {
-    pub fn stat(&self) -> &Arc<DeviceStats> {
+    pub fn statistics(&self) -> &Arc<Statistics> {
         &self.stats
     }
 

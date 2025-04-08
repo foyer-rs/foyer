@@ -39,7 +39,7 @@ use crate::{
         set_manager::SetManager,
     },
     storage::Storage,
-    DeviceStats, Runtime, Statistics,
+    Dev, Runtime, Statistics, Throttle,
 };
 
 pub struct GenericSmallStorageConfig<K, V>
@@ -55,7 +55,6 @@ where
     pub flush: bool,
     pub flushers: usize,
     pub buffer_pool_size: usize,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -75,7 +74,6 @@ where
             .field("flush", &self.flush)
             .field("flushers", &self.flushers)
             .field("buffer_pool_size", &self.buffer_pool_size)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .field("marker", &self.marker)
             .finish()
@@ -95,7 +93,6 @@ where
     active: AtomicBool,
 
     metrics: Arc<Metrics>,
-    stats: Arc<Statistics>,
     _runtime: Runtime,
 }
 
@@ -135,7 +132,6 @@ where
     V: StorageValue,
 {
     async fn open(config: GenericSmallStorageConfig<K, V>) -> Result<Self> {
-        let stats = config.statistics.clone();
         let metrics = config.device.metrics().clone();
 
         assert_eq!(
@@ -147,7 +143,7 @@ where
         let set_manager = SetManager::open(&config).await?;
 
         let flushers = (0..config.flushers)
-            .map(|_| Flusher::open(&config, set_manager.clone(), stats.clone(), metrics.clone()))
+            .map(|_| Flusher::open(&config, set_manager.clone(), metrics.clone()))
             .collect_vec();
 
         let inner = GenericSmallStorageInner {
@@ -156,7 +152,6 @@ where
             set_manager,
             active: AtomicBool::new(true),
             metrics,
-            stats,
             _runtime: config.runtime,
         };
         let inner = Arc::new(inner);
@@ -190,11 +185,9 @@ where
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
-        let stats = self.inner.stats.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
-            stats.record_read_io(set_manager.set_size());
             set_manager.load(hash).await.inspect_err(|e| {
                 tracing::error!(hash, ?e, "[sodc load]: fail to load");
                 metrics.storage_error.increase(1);
@@ -222,8 +215,12 @@ where
         self.inner.set_manager.may_contains(hash)
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        self.inner.device.stat().clone()
+    fn throttle(&self) -> &Throttle {
+        self.inner.device.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.device.statistics()
     }
 }
 
@@ -265,8 +262,12 @@ where
         self.destroy().await
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        self.stats()
+    fn throttle(&self) -> &Throttle {
+        self.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -290,7 +291,7 @@ mod tests {
             Dev,
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceOptions, IopsCounter,
+        DevExt, DirectFsDeviceOptions,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
@@ -329,7 +330,6 @@ mod tests {
             flush: false,
             flushers: 1,
             buffer_pool_size: ByteSize::kib(64).as_u64() as _,
-            statistics: Arc::new(Statistics::new(IopsCounter::PerIo)),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

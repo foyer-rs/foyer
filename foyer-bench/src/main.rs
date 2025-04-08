@@ -570,9 +570,7 @@ async fn benchmark(args: Args) {
     #[cfg(feature = "tracing")]
     hybrid.enable_tracing();
 
-    let stats = hybrid.stats();
-
-    let iostat_start = IoStat::snapshot(&stats);
+    let iostat_start = IoStat::snapshot(hybrid.statistics());
     let metrics = Metrics::default();
 
     let metrics_dump_start = metrics.dump();
@@ -581,9 +579,9 @@ async fn benchmark(args: Args) {
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
-
+        let stats = hybrid.statistics().clone();
         monitor(
-            stats.clone(),
+            stats,
             Duration::from_secs(args.report_interval),
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
@@ -604,7 +602,7 @@ async fn benchmark(args: Args) {
 
     handle_bench.await.unwrap();
 
-    let iostat_end = IoStat::snapshot(&stats);
+    let iostat_end = IoStat::snapshot(hybrid.statistics());
     let metrics_dump_end = metrics.dump();
     let analysis = analyze(
         time.elapsed(),
