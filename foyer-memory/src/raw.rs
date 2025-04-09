@@ -605,6 +605,28 @@ where
         }
     }
 
+    #[fastrace::trace(name = "foyer::memory::raw::evict_all")]
+    pub fn evict_all(&self) {
+        let mut garbages = vec![];
+        for shard in self.inner.shards.iter() {
+            shard.write().evict(0, &mut garbages);
+        }
+
+        // Deallocate data out of the lock critical section.
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+        if self.inner.event_listener.is_some() || piped {
+            for (event, record) in garbages {
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(event, record.key(), record.value())
+                }
+                if piped && event == Event::Evict {
+                    pipe.send(Piece::new(record));
+                }
+            }
+        }
+    }
+
     #[fastrace::trace(name = "foyer::memory::raw::remove")]
     pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, S, I>>
     where
@@ -1037,11 +1059,14 @@ mod tests {
     use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
 
     use super::*;
-    use crate::eviction::{
-        fifo::{Fifo, FifoConfig, FifoHint},
-        lfu::{Lfu, LfuConfig, LfuHint},
-        lru::{Lru, LruConfig, LruHint},
-        s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+    use crate::{
+        eviction::{
+            fifo::{Fifo, FifoConfig, FifoHint},
+            lfu::{Lfu, LfuConfig, LfuHint},
+            lru::{Lru, LruConfig, LruHint},
+            s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+        },
+        test_utils::PiecePipe,
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
@@ -1118,6 +1143,28 @@ mod tests {
         assert_eq!(fifo.usage(), 1);
         drop(e2b);
         assert_eq!(fifo.usage(), 1);
+    }
+
+    #[test]
+    fn test_evict_all() {
+        let pipe = Box::new(PiecePipe::default());
+
+        let fifo = fifo_cache_for_test();
+        fifo.set_pipe(pipe.clone());
+        for i in 0..fifo.capacity() as _ {
+            fifo.insert(i, i);
+        }
+        assert_eq!(fifo.usage(), fifo.capacity());
+
+        fifo.evict_all();
+        let mut pieces = pipe
+            .pieces()
+            .iter()
+            .map(|p| (p.hash(), *p.key(), *p.value()))
+            .collect_vec();
+        pieces.sort_by_key(|t| t.0);
+        let expected = (0..fifo.capacity() as u64).map(|i| (i, i, i)).collect_vec();
+        assert_eq!(pieces, expected);
     }
 
     fn test_resize<E>(cache: &RawCache<E, ModRandomState, HashTableIndexer<E>>)
