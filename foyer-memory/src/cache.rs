@@ -36,7 +36,7 @@ use crate::{
         lru::{Lru, LruConfig},
         s3fifo::{S3Fifo, S3FifoConfig},
     },
-    raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
+    raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
     Piece, Pipe, Result,
 };
@@ -836,7 +836,7 @@ where
 
     /// Get the ext of the fetch.
     #[doc(hidden)]
-    pub fn store(&self) -> &Option<FetchMark> {
+    pub fn store(&self) -> &Option<FetchContext> {
         match self {
             Fetch::Fifo(fetch) => fetch.store(),
             Fetch::S3Fifo(fetch) => fetch.store(),
@@ -911,7 +911,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),

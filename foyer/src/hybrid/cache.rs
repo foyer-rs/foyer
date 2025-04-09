@@ -36,8 +36,8 @@ use foyer_common::{
     metrics::Metrics,
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
-use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState, Piece, Pipe};
-use foyer_storage::{Statistics, Store};
+use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchContext, FetchState, Piece, Pipe};
+use foyer_storage::{Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -323,6 +323,12 @@ where
             self.metrics.hybrid_miss.increase(1);
             self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
         };
+        let record_throttled = || {
+            self.metrics.hybrid_throttled.increase(1);
+            self.metrics
+                .hybrid_throttled_duration
+                .record(now.elapsed().as_secs_f64());
+        };
 
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
@@ -338,11 +344,15 @@ where
             .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
             .await?
         {
-            Some((k, v)) => {
+            Load::Entry { key, value } => {
                 record_hit();
-                Some(self.memory.insert(k, v))
+                Some(self.memory.insert(key, value))
             }
-            None => {
+            Load::Throttled => {
+                record_throttled();
+                None
+            }
+            Load::Miss => {
                 record_miss();
                 None
             }
@@ -372,8 +382,9 @@ where
             let store = self.storage.clone();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from) {
-                    Ok(Some((_, v))) => Ok(v),
-                    Ok(None) => Err(ObtainFetchError::NotExist),
+                    Ok(Load::Entry { key: _, value }) => Ok(value),
+                    Ok(Load::Throttled) => Err(ObtainFetchError::Throttled),
+                    Ok(Load::Miss) => Err(ObtainFetchError::NotExist),
                     Err(e) => Err(ObtainFetchError::Err(e)),
                 }
             }
@@ -388,6 +399,14 @@ where
                 self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
+            }
+            Err(ObtainFetchError::Throttled) => {
+                self.metrics.hybrid_throttled.increase(1);
+                self.metrics
+                    .hybrid_throttled_duration
+                    .record(now.elapsed().as_secs_f64());
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                Ok(None)
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increase(1);
@@ -477,6 +496,7 @@ where
 
 #[derive(Debug)]
 enum ObtainFetchError {
+    Throttled,
     NotExist,
     RecvError(oneshot::error::RecvError),
     Err(anyhow::Error),
@@ -522,7 +542,10 @@ where
                 && *this.policy == HybridCachePolicy::WriteOnInsertion
                 && this.inner.store().is_some()
             {
-                this.storage.enqueue(entry.piece(), false);
+                let throttled = this.inner.store().as_ref().unwrap().throttled;
+                if !throttled {
+                    this.storage.enqueue(entry.piece(), false);
+                }
             }
         }
 
@@ -587,14 +610,14 @@ where
                 let runtime = self.storage().runtime().clone();
 
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from) {
-                        Ok(Some((_k, v))) => {
+                    let throttled = match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(Load::Entry { key: _, value }) => {
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-
-                            return Ok(v).into();
+                            return Ok(value).into();
                         }
-                        Ok(None) => {}
+                        Ok(Load::Throttled) => true,
+                        Ok(Load::Miss) => false,
                         Err(e) => return Err(e).into(),
                     };
 
@@ -604,7 +627,7 @@ where
                     let fut = async move {
                         Diversion {
                             target: future.await,
-                            store: Some(FetchMark),
+                            store: Some(FetchContext { throttled }),
                         }
                     }
                     .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
@@ -636,6 +659,7 @@ mod tests {
     use std::{path::Path, sync::Arc};
 
     use foyer_common::{hasher::ModRandomState, location::CacheLocation};
+    use foyer_storage::test_utils::{Record, Recorder};
     use storage::test_utils::BiasedPicker;
 
     use crate::*;
@@ -700,6 +724,30 @@ mod tests {
             .build()
             .await
             .unwrap()
+    }
+
+    async fn open_with_policy_and_recorder(
+        dir: impl AsRef<Path>,
+        policy: HybridCachePolicy,
+    ) -> (HybridCache<u64, Vec<u8>, ModRandomState>, Arc<Recorder>) {
+        let recorder = Arc::<Recorder>::default();
+        let hybrid = HybridCacheBuilder::new()
+            .with_name("test")
+            .with_policy(policy)
+            .memory(4 * MB)
+            .with_hash_builder(ModRandomState::default())
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB),
+            )
+            .with_admission_picker(recorder.clone())
+            .build()
+            .await
+            .unwrap();
+        (hybrid, recorder)
     }
 
     #[test_log::test(tokio::test)]
@@ -774,13 +822,16 @@ mod tests {
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
-        assert_eq!(hybrid.storage().load(&1).await.unwrap().unwrap().1, vec![1; 7 * KB]);
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
+            vec![1; 7 * KB]
+        );
 
         hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
-        assert!(hybrid.storage().load(&2).await.unwrap().is_none());
+        assert!(hybrid.storage().load(&2).await.unwrap().entry().is_none());
 
         // Test hybrid cache that write disk cache on insertion.
 
@@ -790,11 +841,69 @@ mod tests {
         hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
-        assert_eq!(hybrid.storage().load(&1).await.unwrap().unwrap().1, vec![1; 7 * KB]);
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
+            vec![1; 7 * KB]
+        );
 
         hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
-        assert!(hybrid.storage().load(&2).await.unwrap().is_none());
+        assert!(hybrid.storage().load(&2).await.unwrap().entry().is_none());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_read_throttled() {
+        // Test hybrid cache that write disk cache on insertion.
+
+        // 1. open empty hybrid cache
+        let dir = tempfile::tempdir().unwrap();
+        let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
+
+        // 2. insert e1 and flush it to disk.
+        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.storage().wait().await;
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
+            vec![1; 7 * KB]
+        );
+
+        // 3. throttle all reads
+        hybrid.storage().load_throttle_switch().throttle();
+        assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
+
+        // 4. assert fetch will not reinsert throttled but existed e1
+        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        hybrid.storage().wait().await;
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
+
+        // Test hybrid cache that write disk cache on eviction.
+
+        // 1. open empty hybrid cache
+        let dir = tempfile::tempdir().unwrap();
+        let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnEviction).await;
+
+        // 2. insert e1 and flush it to disk.
+        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        hybrid.memory().evict_all();
+        hybrid.storage().wait().await;
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
+            vec![1; 7 * KB]
+        );
+
+        // 3. throttle all reads
+        hybrid.storage().load_throttle_switch().throttle();
+        assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
+
+        // 4. assert fetch will not reinsert throttled but existed e1
+        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        hybrid.memory().evict_all();
+        hybrid.storage().wait().await;
+        assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
     }
 }

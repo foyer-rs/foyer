@@ -889,8 +889,12 @@ pub enum FetchState {
     Miss,
 }
 
-/// A mark for fetch calls.
-pub struct FetchMark;
+/// Context for fetch calls.
+#[derive(Debug)]
+pub struct FetchContext {
+    /// If this fetch is caused by disk cache throttled.
+    pub throttled: bool,
+}
 
 enum RawShardFetch<E, S, I>
 where
@@ -904,7 +908,7 @@ where
 }
 
 pub type RawFetch<E, ER, S = ahash::RandomState, I = HashTableIndexer<E>> =
-    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
+    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
 type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
@@ -919,7 +923,7 @@ where
 {
     Hit(RawFetchHit<E, S, I>),
     Wait(#[pin] RawFetchWait<E, S, I>),
-    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchMark>),
+    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchContext>),
 }
 
 impl<E, ER, S, I> RawFetchInner<E, ER, S, I>
@@ -944,7 +948,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
+    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -1001,7 +1005,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchMark>>,
+        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
     {
         let hash = self.inner.hash_builder.hash_one(&key);
 
@@ -1038,7 +1042,16 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
-                let entry = cache.insert_with_hint(key, value, hint);
+                let location = if let Some(store) = store.as_ref() {
+                    if store.throttled {
+                        CacheLocation::InMem
+                    } else {
+                        CacheLocation::Default
+                    }
+                } else {
+                    CacheLocation::Default
+                };
+                let entry = cache.emplace(key, value, hint, false, location);
                 Diversion {
                     target: Ok(entry),
                     store,

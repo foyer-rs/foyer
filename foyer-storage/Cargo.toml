@@ -73,13 +73,14 @@ tokio = { package = "tokio", version = "1", features = [
 [features]
 default = []
 serde = ["dep:serde"]
-deadlock = ["parking_lot/deadlock_detection"]
+tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 nightly = ["allocator-api2/nightly"]
+test_utils = []
+deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
-tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 
 [lints]
 workspace = true
