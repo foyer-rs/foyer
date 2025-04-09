@@ -99,6 +99,18 @@ struct IoThrottlerPickerInner {
     throttler: IoThrottler,
     bytes_last: AtomicUsize,
     ios_last: AtomicUsize,
+    target: IoThrottlerTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum IoThrottlerTarget {
+    /// Count read io for io throttling.
+    Read,
+    /// Count write io for io throttling.
+    Write,
+    /// Count read and write io for io throttling.
+    ReadWrite,
 }
 
 /// A picker that picks based on the disk statistics and the given throttle args.
@@ -111,11 +123,12 @@ impl IoThrottlerPicker {
     /// Create a rate limit picker with the given rate limit.
     ///
     /// Note: `None` stands for unlimited.
-    pub fn new(throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
+    pub fn new(target: IoThrottlerTarget, throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
         let inner = IoThrottlerPickerInner {
             throttler: IoThrottler::new(throughput, iops),
             bytes_last: AtomicUsize::default(),
             ios_last: AtomicUsize::default(),
+            target,
         };
 
         Self { inner: Arc::new(inner) }
@@ -124,8 +137,16 @@ impl IoThrottlerPicker {
     fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
         let picked = self.inner.throttler.probe();
 
-        let bytes_current = stats.disk_write_bytes();
-        let ios_current = stats.disk_write_ios();
+        let bytes_current = match self.inner.target {
+            IoThrottlerTarget::Read => stats.disk_read_bytes(),
+            IoThrottlerTarget::Write => stats.disk_write_bytes(),
+            IoThrottlerTarget::ReadWrite => stats.disk_read_bytes() + stats.disk_write_bytes(),
+        };
+        let ios_current = match self.inner.target {
+            IoThrottlerTarget::Read => stats.disk_read_ios(),
+            IoThrottlerTarget::Write => stats.disk_write_ios(),
+            IoThrottlerTarget::ReadWrite => stats.disk_read_ios() + stats.disk_write_ios(),
+        };
 
         let bytes_last = self.inner.bytes_last.load(Ordering::Relaxed);
         let ios_last = self.inner.ios_last.load(Ordering::Relaxed);
@@ -138,7 +159,7 @@ impl IoThrottlerPicker {
 
         self.inner.throttler.reduce(bytes_delta as f64, ios_delta as f64);
 
-        picked
+        picked.is_zero()
     }
 }
 
