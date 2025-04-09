@@ -33,7 +33,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
 };
 
 /// # Lock Order
@@ -207,6 +207,7 @@ impl SetManager {
         self.inner.sets.len()
     }
 
+    #[expect(dead_code)]
     pub fn set_size(&self) -> usize {
         self.inner.set_size
     }

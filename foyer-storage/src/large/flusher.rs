@@ -43,7 +43,7 @@ use crate::large::test_utils::*;
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         generic::GenericLargeStorageConfig,
@@ -54,7 +54,7 @@ use crate::{
     },
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
-    Compression, Dev, SharedIoSlice, Statistics,
+    Compression, Dev, SharedIoSlice,
 };
 
 pub enum Submission<K, V>
@@ -115,6 +115,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
+    id: usize,
     tx: flume::Sender<Submission<K, V>>,
     submit_queue_size: Arc<AtomicUsize>,
 
@@ -128,6 +129,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            id: self.id,
             tx: self.tx.clone(),
             submit_queue_size: self.submit_queue_size.clone(),
             metrics: self.metrics.clone(),
@@ -142,13 +144,13 @@ where
 {
     #[expect(clippy::too_many_arguments)]
     pub fn open(
+        id: usize,
         config: &GenericLargeStorageConfig<K, V>,
         indexer: Indexer,
         region_manager: RegionManager,
         device: MonitoredDevice,
         submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
-        stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
         #[cfg(test)] flush_holder: FlushHolder,
@@ -172,6 +174,7 @@ where
         let ctx = SplitCtx::new(device.region_size(), config.blob_index_size);
 
         let runner = Runner {
+            id,
             rx: Some(rx),
             buffer,
             ctx,
@@ -187,7 +190,6 @@ where
             compression: config.compression,
             flush: config.flush,
             runtime: runtime.clone(),
-            stats,
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
             current_region_handle,
@@ -198,11 +200,12 @@ where
 
         runtime.write().spawn(async move {
             if let Err(e) = runner.run().await {
-                tracing::error!("[flusher]: flusher exit with error: {e}");
+                tracing::error!(id, "[flusher]: flusher exit with error: {e}");
             }
         });
 
         Ok(Self {
+            id,
             tx,
             submit_queue_size,
             metrics,
@@ -210,12 +213,15 @@ where
     }
 
     pub fn submit(&self, submission: Submission<K, V>) {
-        tracing::trace!("[lodc flusher]: submit task: {submission:?}");
+        tracing::trace!(id = self.id, "[lodc flusher]: submit task: {submission:?}");
         if let Submission::CacheEntry { estimated_size, .. } = &submission {
             self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
         }
         if let Err(e) = self.tx.send(submission) {
-            tracing::error!("[lodc flusher]: error raised when submitting task, error: {e}");
+            tracing::error!(
+                id = self.id,
+                "[lodc flusher]: error raised when submitting task, error: {e}"
+            );
         }
     }
 
@@ -252,6 +258,8 @@ where
     K: StorageKey,
     V: StorageValue,
 {
+    id: usize,
+
     rx: Option<flume::Receiver<Submission<K, V>>>,
 
     // NOTE: writer is always `Some(..)`.
@@ -281,7 +289,6 @@ where
 
     runtime: Runtime,
 
-    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 
     io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
@@ -366,7 +373,7 @@ where
     }
 
     fn recv(&mut self, submission: Submission<K, V>) {
-        tracing::trace!(?submission, "[lodc flush runner]: recv submission");
+        tracing::trace!(id = self.id, ?submission, "[lodc flush runner]: recv submission");
 
         if self.queue_init.is_none() {
             self.queue_init = Some(Instant::now());
@@ -374,7 +381,7 @@ where
 
         let report = |written: bool| {
             if !written {
-                self.metrics.storage_queue_drop.increase(1);
+                self.metrics.storage_queue_buffer_overflow.increase(1);
             }
         };
 
@@ -416,7 +423,10 @@ where
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
     ) -> BoxFuture<'static, IoTaskCtx> {
+        let id = self.id;
+
         tracing::trace!(
+            id,
             ?batch,
             ?tombstone_infos,
             waiters = waiters.len(),
@@ -442,7 +452,6 @@ where
             .map(|(i, (Region { blob_parts }, region_handle))| {
                 let indexer = self.indexer.clone();
                 let region_manager = self.region_manager.clone();
-                let stats = self.stats.clone();
                 let flush = self.flush;
 
                 async move {
@@ -464,25 +473,52 @@ where
                             bits::assert_aligned(PAGE, len);
 
                             let region = region.clone();
-                            let stats = stats.clone();
                             async move {
                                 if len > 0 {
-                                    tracing::trace!(region = region.id(), offset, len, "[flusher]: write blob data");
+                                    tracing::trace!(
+                                        id,
+                                        region = region.id(),
+                                        offset,
+                                        len,
+                                        "[flusher]: write blob data"
+                                    );
 
                                     let (_, res) = region.write(data, offset as _).await;
+                                    if let Err(e) = res.as_ref() {
+                                        tracing::error!(
+                                            id,
+                                            blob_region_offset,
+                                            part_blob_offset,
+                                            ?indices,
+                                            ?res,
+                                            ?e,
+                                            "[flusher]: flush data error"
+                                        );
+                                    }
                                     res?;
 
-                                    tracing::trace!(offset = blob_region_offset, "[flusher]: write blob index");
+                                    tracing::trace!(id, offset = blob_region_offset, "[flusher]: write blob index");
 
                                     let (_, res) = region.write(index, blob_region_offset as _).await;
+                                    if let Err(e) = res.as_ref() {
+                                        tracing::error!(
+                                            id,
+                                            blob_region_offset,
+                                            part_blob_offset,
+                                            ?indices,
+                                            ?res,
+                                            ?e,
+                                            "[flusher]: flush data error"
+                                        );
+                                    }
                                     res?;
 
                                     if flush {
                                         region.flush().await?;
                                     }
-                                    stats.cache_write_bytes.fetch_add(len, Ordering::Relaxed);
                                 } else {
                                     tracing::trace!(
+                                        id,
                                         region = region.id(),
                                         "[flusher]: skip write region, because the window is empty"
                                     );
@@ -506,7 +542,7 @@ where
                                     sequence: index.sequence,
                                 },
                             };
-                            tracing::trace!(?addr, "[flusher]: append address");
+                            tracing::trace!(id, ?addr, "[flusher]: append address");
                             addrs.push(addr);
                         }
                     }
@@ -517,7 +553,7 @@ where
                     if i != regions - 1 {
                         region_manager.mark_evictable(region.id());
                     }
-                    tracing::trace!("[flusher]: write region {id} finish.", id = region.id());
+                    tracing::trace!(id, "[flusher]: write region {id} finish.", id = region.id());
 
                     Ok::<_, Error>(region_handle)
                 }
@@ -557,7 +593,7 @@ where
                     io_slice,
                 },
                 Ok(Err(e)) => {
-                    tracing::error!(?e, "[lodc flusher]: io task error");
+                    tracing::error!(id, ?e, "[lodc flusher]: io task error");
                     IoTaskCtx {
                         handle: None,
                         waiters,
@@ -566,7 +602,7 @@ where
                     }
                 }
                 Err(e) => {
-                    tracing::error!(?e, "[lodc flusher]: join io task error");
+                    tracing::error!(id, ?e, "[lodc flusher]: join io task error");
                     IoTaskCtx {
                         handle: None,
                         waiters,

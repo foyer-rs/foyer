@@ -17,14 +17,14 @@ use std::{sync::Arc, time::Instant};
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{StorageKey, StorageValue},
+    code::{CodeError, StorageKey, StorageValue},
     metrics::Metrics,
 };
 
 use crate::{
     compress::Compression,
     error::Error,
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::serde::{EntryHeader, Sequence},
     serde::{Checksummer, EntrySerializer},
     SharedIoSlice,
@@ -209,7 +209,7 @@ impl Buffer {
         let info = match EntrySerializer::serialize(key, value, compression, &mut buf[EntryHeader::serialized_len()..])
         {
             Ok(info) => info,
-            Err(Error::SizeLimit) => return false,
+            Err(Error::Code(CodeError::SizeLimit)) => return false,
             Err(e) => {
                 tracing::warn!(?e, "[blob writer]: serialize entry kv error");
                 return false;
@@ -328,99 +328,136 @@ impl Splitter {
             "[splitter] Blob index writer cannot be full at this point, it is supposed to be flushed in the last batch."
         );
 
-        let mut size = 0;
+        let mut part_size = 0;
         let mut indices = vec![];
 
         for info in entry_infos.into_iter() {
             tracing::trace!(?info, "[splitter]: handle entry");
 
-            let split_region =
-                ctx.current_blob_region_offset + ctx.current_part_blob_offset + size + info.aligned() > ctx.region_size;
-            let split_blob = ctx.current_blob_index.is_full() || split_region;
-
-            if split_blob {
-                tracing::trace!("[splitter]: split blob");
-
-                if indices.is_empty() {
-                    assert_eq!(size, 0);
-                    // The blob part is empty, only need to set the state.
-                    ctx.current_blob_index.reset();
-                    ctx.current_blob_region_offset += ctx.current_part_blob_offset;
-                    ctx.current_part_blob_offset = ctx.blob_index_size;
-                } else {
-                    // Seal and clear the blob index to prepare for the next blob.
-                    let index = ctx.current_blob_index.seal();
-                    ctx.current_blob_index.reset();
-
-                    let indices = std::mem::take(&mut indices);
-
-                    let blob = BlobPart {
-                        blob_region_offset: ctx.current_blob_region_offset,
-                        index,
-                        part_blob_offset: ctx.current_part_blob_offset,
-                        data: shared_io_slice.slice(..size),
-                        indices,
-                    };
-
-                    ctx.current_blob_region_offset =
-                        ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
-                    ctx.current_part_blob_offset = ctx.blob_index_size;
-                    shared_io_slice = shared_io_slice.slice(size..);
-                    size = 0;
-
-                    batch.regions.last_mut().unwrap().blob_parts.push(blob);
+            'handle: loop {
+                // Split blob if blob index is full.
+                if ctx.current_blob_index.is_full() {
+                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+                        batch.regions.last_mut().unwrap().blob_parts.push(part);
+                    }
+                    continue 'handle;
                 }
+
+                // Split blob and region if region is full.
+                if ctx.current_blob_region_offset + ctx.current_part_blob_offset + part_size + info.aligned()
+                    > ctx.region_size
+                {
+                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+                        batch.regions.last_mut().unwrap().blob_parts.push(part);
+                    }
+                    Self::split_region(ctx, &mut batch);
+                    continue 'handle;
+                }
+
+                let index = BlobEntryIndex {
+                    hash: info.hash,
+                    sequence: info.sequence,
+                    offset: ctx.current_part_blob_offset as u32 + part_size as u32,
+                    len: info.len as u32,
+                };
+
+                tracing::trace!(?index, ?info, "[splitter]: append entry");
+
+                ctx.current_blob_index.write(&index);
+                indices.push(index);
+                part_size += info.aligned();
+
+                break 'handle;
             }
-
-            if split_region {
-                tracing::trace!("[splitter]; split region");
-
-                batch.regions.push(Region { blob_parts: vec![] });
-                ctx.current_blob_region_offset = 0;
-            }
-
-            let index = BlobEntryIndex {
-                hash: info.hash,
-                sequence: info.sequence,
-                offset: ctx.current_part_blob_offset as u32 + size as u32,
-                len: info.len as u32,
-            };
-
-            tracing::trace!(?index, ?info, "[splitter]: append entry");
-
-            ctx.current_blob_index.write(&index);
-            indices.push(index);
-            size += info.aligned();
         }
 
-        if !indices.is_empty() {
-            // Seal the last blob.
-            let index = ctx.current_blob_index.seal();
-
-            let indices = std::mem::take(&mut indices);
-
-            let blob = BlobPart {
-                blob_region_offset: ctx.current_blob_region_offset,
-                index,
-                part_blob_offset: ctx.current_part_blob_offset,
-                data: shared_io_slice.slice(..size),
-                indices,
-            };
-
-            if ctx.current_blob_index.is_full() {
-                tracing::trace!("[splitter]; split blob");
-
-                ctx.current_blob_index.reset();
-                ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + size;
-                ctx.current_part_blob_offset = ctx.blob_index_size;
-            } else {
-                ctx.current_part_blob_offset += size;
-            }
-
-            batch.regions.last_mut().unwrap().blob_parts.push(blob);
+        if let Some(part) = Self::seal_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+            batch.regions.last_mut().unwrap().blob_parts.push(part);
         }
 
         batch
+    }
+
+    fn split_blob(
+        ctx: &mut SplitCtx,
+        indices: &mut Vec<BlobEntryIndex>,
+        part_size: &mut usize,
+        shared_io_slice: &mut SharedIoSlice,
+    ) -> Option<BlobPart> {
+        tracing::trace!("[splitter]: split blob");
+        if indices.is_empty() {
+            // The blob part is empty, only need to set the state.
+            assert_eq!(*part_size, 0);
+            ctx.current_blob_index.reset();
+            ctx.current_blob_region_offset += ctx.current_part_blob_offset;
+            ctx.current_part_blob_offset = ctx.blob_index_size;
+
+            None
+        } else {
+            // Seal and clear the blob index to prepare for the next blob.
+            let index = ctx.current_blob_index.seal();
+            ctx.current_blob_index.reset();
+
+            let indices = std::mem::take(indices);
+
+            let part = BlobPart {
+                blob_region_offset: ctx.current_blob_region_offset,
+                index,
+                part_blob_offset: ctx.current_part_blob_offset,
+                data: shared_io_slice.slice(..*part_size),
+                indices,
+            };
+
+            ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + *part_size;
+            ctx.current_part_blob_offset = ctx.blob_index_size;
+            *shared_io_slice = shared_io_slice.slice(*part_size..);
+            *part_size = 0;
+
+            Some(part)
+        }
+    }
+
+    fn split_region(ctx: &mut SplitCtx, batch: &mut Batch) {
+        tracing::trace!("[splitter]; split region");
+        batch.regions.push(Region { blob_parts: vec![] });
+        ctx.current_blob_region_offset = 0;
+    }
+
+    fn seal_blob(
+        ctx: &mut SplitCtx,
+        indices: &mut Vec<BlobEntryIndex>,
+        part_size: &mut usize,
+        shared_io_slice: &mut SharedIoSlice,
+    ) -> Option<BlobPart> {
+        tracing::trace!("[splitter]: seal blob");
+
+        if indices.is_empty() {
+            return None;
+        }
+
+        // Seal the last blob.
+        let index = ctx.current_blob_index.seal();
+
+        let indices = std::mem::take(indices);
+
+        let part = BlobPart {
+            blob_region_offset: ctx.current_blob_region_offset,
+            index,
+            part_blob_offset: ctx.current_part_blob_offset,
+            data: shared_io_slice.slice(..*part_size),
+            indices,
+        };
+
+        if ctx.current_blob_index.is_full() {
+            tracing::trace!("[splitter]: seal blob, split blob because index is full");
+            ctx.current_blob_index.reset();
+            ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + *part_size;
+            ctx.current_part_blob_offset = ctx.blob_index_size;
+        } else {
+            ctx.current_part_blob_offset += *part_size;
+        }
+
+        Some(part)
     }
 }
 
@@ -633,6 +670,79 @@ mod tests {
                         }]
                     },
                 ]
+            }
+        );
+    }
+
+    #[test_log::test]
+    fn test_split_region_last_entry() {
+        const KB: usize = 1 << 10;
+
+        const REGION_SIZE: usize = 64 * KB;
+        const BLOB_INDEX_SIZE: usize = 4 * KB;
+        const BATCH_SIZE: usize = 128 * KB;
+
+        // Remain 4 KB in size and 1 entry in count.
+        let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
+        ctx.current_blob_region_offset = 40 * KB;
+        ctx.current_part_blob_offset = 16 * KB;
+        ctx.current_blob_index.count = ctx.current_blob_index.capacity() - 1;
+
+        let shared_io_slice = IoBuffer::new(BATCH_SIZE).into_shared_io_slice();
+        let batch = Splitter::split(
+            &mut ctx,
+            shared_io_slice.clone(),
+            vec![
+                BufferEntryInfo {
+                    hash: 0,
+                    sequence: 0,
+                    offset: 0,
+                    len: 1234,
+                },
+                BufferEntryInfo {
+                    hash: 1,
+                    sequence: 1,
+                    offset: 4 * KB,
+                    len: 1234,
+                },
+            ],
+        );
+
+        println!("{batch:?}");
+        assert_eq!(
+            batch,
+            Batch {
+                regions: vec![
+                    Region {
+                        blob_parts: vec![BlobPart {
+                            blob_region_offset: 40 * KB,
+                            index: batch.regions[0].blob_parts[0].index.clone(),
+                            part_blob_offset: 16 * KB,
+                            data: shared_io_slice.slice(0..4 * KB),
+                            indices: vec![BlobEntryIndex {
+                                hash: 0,
+                                sequence: 0,
+                                offset: 16 * KB as u32,
+                                len: 1234,
+                            }]
+                        }]
+                    },
+                    Region {
+                        blob_parts: vec![BlobPart {
+                            blob_region_offset: 0,
+                            index: batch.regions[1].blob_parts[0].index.clone(),
+                            part_blob_offset: 4 * KB,
+                            data: shared_io_slice.slice(4 * KB..8 * KB),
+                            indices: vec![BlobEntryIndex {
+                                hash: 1,
+                                sequence: 1,
+                                offset: 4 * KB as u32,
+                                len: 1234,
+                            }]
+                        }]
+                    }
+                ],
+                io_slice: shared_io_slice,
             }
         );
     }

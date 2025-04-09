@@ -30,8 +30,8 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
-    DirectFileDeviceOptions, Runtime,
+    io::{buffer::IoBuffer, PAGE},
+    DirectFileDeviceOptions, IopsCounter, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -41,6 +41,8 @@ pub struct TombstoneLogConfig {
     pub path: PathBuf,
     /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub flush: bool,
+    /// iops_counter for the tombstone log device monitor.
+    pub iops_counter: IopsCounter,
 }
 
 /// The builder for the tombstone log config.
@@ -48,6 +50,7 @@ pub struct TombstoneLogConfig {
 pub struct TombstoneLogConfigBuilder {
     path: PathBuf,
     flush: bool,
+    iops_counter: IopsCounter,
 }
 
 impl TombstoneLogConfigBuilder {
@@ -56,6 +59,7 @@ impl TombstoneLogConfigBuilder {
         Self {
             path: path.as_ref().into(),
             flush: true,
+            iops_counter: IopsCounter::per_io(),
         }
     }
 
@@ -67,11 +71,18 @@ impl TombstoneLogConfigBuilder {
         self
     }
 
+    /// Set iops counter for the tombstone log device monitor.
+    pub fn with_iops_counter(mut self, iops_counter: IopsCounter) -> Self {
+        self.iops_counter = iops_counter;
+        self
+    }
+
     /// Build the tombstone log config with the given args.
     pub fn build(self) -> TombstoneLogConfig {
         TombstoneLogConfig {
             path: self.path,
             flush: self.flush,
+            iops_counter: self.iops_counter,
         }
     }
 }
@@ -117,9 +128,8 @@ impl TombstoneLog {
     ///
     /// The tombstone log will
     pub async fn open<D>(
-        path: impl AsRef<Path>,
+        config: &TombstoneLogConfig,
         cache_device: D,
-        flush: bool,
         tombstones: &mut Vec<Tombstone>,
         metrics: Arc<Metrics>,
         runtime: Runtime,
@@ -138,11 +148,11 @@ impl TombstoneLog {
 
         let device = Monitored::open(
             MonitoredConfig {
-                config: DirectFileDeviceOptions::new(path)
+                config: DirectFileDeviceOptions::new(&config.path)
                     .with_region_size(align)
                     .with_capacity(capacity)
                     .into(),
-                metrics,
+                metrics: metrics.clone(),
             },
             runtime,
         )
@@ -194,7 +204,7 @@ impl TombstoneLog {
         let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
         let region = bits::align_down(align as RegionId, offset as RegionId) / align as RegionId;
-        let buffer = PageBuffer::open(device, region, 0, flush).await?;
+        let buffer = PageBuffer::open(device, region, 0, config.flush).await?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(TombstoneLogInner { offset, buffer })),
@@ -326,9 +336,12 @@ mod tests {
         .unwrap();
 
         let log = TombstoneLog::open(
-            dir.path().join("test-tombstone-log"),
+            &TombstoneLogConfig {
+                path: dir.path().join("test-tombstone-log"),
+                flush: true,
+                iops_counter: IopsCounter::per_io(),
+            },
             device.clone(),
-            true,
             &mut vec![],
             Arc::new(Metrics::noop()),
             runtime.clone(),
@@ -356,12 +369,15 @@ mod tests {
         drop(log);
 
         let log = TombstoneLog::open(
-            dir.path().join("test-tombstone-log"),
-            device,
-            true,
+            &TombstoneLogConfig {
+                path: dir.path().join("test-tombstone-log"),
+                flush: true,
+                iops_counter: IopsCounter::per_io(),
+            },
+            device.clone(),
             &mut vec![],
             Arc::new(Metrics::noop()),
-            runtime,
+            runtime.clone(),
         )
         .await
         .unwrap();

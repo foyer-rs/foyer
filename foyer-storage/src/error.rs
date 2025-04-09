@@ -17,18 +17,17 @@ use std::{
     ops::Range,
 };
 
+use foyer_common::code::CodeError;
+
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Code error.
+    #[error("code error: {0}")]
+    Code(#[from] CodeError),
     /// I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// If (de)serializing a message takes more than the provided size limit, this error is returned.
-    #[error("size limit")]
-    SizeLimit,
-    /// Encoding/decoding error with `bincode`.
-    #[error("bincode error: {0}")]
-    Bincode(bincode::Error),
     #[error(transparent)]
     /// Multiple error list.
     Multiple(MultipleError),
@@ -56,22 +55,22 @@ pub enum Error {
         /// Gotten range.
         get: Range<usize>,
     },
+    /// Invalid I/O range.
+    #[error("invalid io range: {range:?}, region size: {region_size}, capacity: {capacity}")]
+    InvalidIoRange {
+        /// I/O range
+        range: Range<usize>,
+        /// Region size
+        region_size: usize,
+        /// Capacity
+        capacity: usize,
+    },
     /// Compression algorithm not supported.
     #[error("compression algorithm not supported: {0}")]
     CompressionAlgorithmNotSupported(u8),
     /// Other error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-impl From<bincode::Error> for Error {
-    fn from(err: bincode::Error) -> Self {
-        match err.as_ref() {
-            bincode::ErrorKind::SizeLimit => Self::SizeLimit,
-            bincode::ErrorKind::Io(e) if e.kind() == std::io::ErrorKind::WriteZero => Self::SizeLimit,
-            _ => Self::Bincode(err),
-        }
-    }
 }
 
 impl Error {

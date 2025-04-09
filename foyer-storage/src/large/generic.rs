@@ -44,9 +44,9 @@ use super::{
 use crate::large::test_utils::*;
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
+    device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{IoBuffer, PAGE},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
@@ -58,6 +58,7 @@ use crate::{
     serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
+    Throttle,
 };
 
 pub struct GenericLargeStorageConfig<K, V>
@@ -81,7 +82,6 @@ where
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -108,7 +108,6 @@ where
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -146,8 +145,6 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
-
-    statistics: Arc<Statistics>,
 
     flush: bool,
 
@@ -189,8 +186,6 @@ where
             );
         }
 
-        let stats = config.statistics.clone();
-
         let device = config.device.clone();
         let metrics = device.metrics().clone();
 
@@ -199,9 +194,8 @@ where
             None => None,
             Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &tombstone_log_config.path,
+                    tombstone_log_config,
                     device.clone(),
-                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
                     config.runtime.clone(),
@@ -240,20 +234,31 @@ where
         #[cfg(test)]
         let flush_holder = FlushHolder::default();
 
-        let flushers = try_join_all((0..config.flushers).map(|_| async {
-            Flusher::open(
-                &config,
-                indexer.clone(),
-                region_manager.clone(),
-                device.clone(),
-                submit_queue_size.clone(),
-                tombstone_log.clone(),
-                stats.clone(),
-                metrics.clone(),
-                &config.runtime,
-                #[cfg(test)]
-                flush_holder.clone(),
-            )
+        let flushers = try_join_all((0..config.flushers).map(|id| {
+            let config = &config;
+            let indexer = indexer.clone();
+            let region_manager = region_manager.clone();
+            let device = device.clone();
+            let submit_queue_size = submit_queue_size.clone();
+            let tombstone_log = tombstone_log.clone();
+            let metrics = metrics.clone();
+            #[cfg(test)]
+            let flush_holder = flush_holder.clone();
+            async move {
+                Flusher::open(
+                    id,
+                    config,
+                    indexer,
+                    region_manager,
+                    device,
+                    submit_queue_size,
+                    tombstone_log,
+                    metrics,
+                    &config.runtime,
+                    #[cfg(test)]
+                    flush_holder,
+                )
+            }
         }))
         .await?;
 
@@ -264,7 +269,6 @@ where
                 reclaim_semaphore.clone(),
                 indexer.clone(),
                 flushers.clone(),
-                stats.clone(),
                 metrics.clone(),
             )
         }))
@@ -279,7 +283,6 @@ where
                 reclaimers,
                 submit_queue_size,
                 submit_queue_size_threshold: config.submit_queue_size_threshold,
-                statistics: stats,
                 flush: config.flush,
                 sequence,
                 runtime: config.runtime,
@@ -314,11 +317,7 @@ where
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
-            tracing::warn!(
-                "[lodc] {} {}",
-                "submit queue overflow, new entry ignored.",
-                "Hint: set an appropriate rate limiter as the admission picker or scale out flushers."
-            );
+            self.inner.metrics.storage_queue_channel_overflow.increase(1);
             return;
         }
 
@@ -336,7 +335,6 @@ where
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
-        let stats = self.inner.statistics.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
@@ -353,19 +351,30 @@ where
 
             let buf = IoBuffer::new(bits::align_up(PAGE, addr.len as _));
             let (buf, res) = device.read(buf, addr.region, addr.offset as _).await;
-            res?;
-
-            stats
-                .cache_read_bytes
-                .fetch_add(bits::align_up(device.align(), buf.len()), Ordering::Relaxed);
+            match res {
+                Ok(_) => {}
+                Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(?e, "[lodc load]: invalid io range, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                    return Ok(None);
+                }
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
+            }
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
                 Err(e @ Error::MagicMismatch { .. })
                 | Err(e @ Error::ChecksumMismatch { .. })
                 | Err(e @ Error::CompressionAlgorithmNotSupported(_))
-                | Err(e @ Error::OutOfRange { .. }) => {
-                    tracing::trace!(
+                | Err(e @ Error::OutOfRange { .. })
+                | Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(
                         hash,
                         ?addr,
                         ?e,
@@ -376,7 +385,11 @@ where
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
             };
 
             let (k, v) = {
@@ -391,8 +404,9 @@ where
                     Ok(res) => res,
                     Err(e @ Error::MagicMismatch { .. })
                     | Err(e @ Error::ChecksumMismatch { .. })
-                    | Err(e @ Error::OutOfRange { .. }) => {
-                        tracing::trace!(
+                    | Err(e @ Error::OutOfRange { .. })
+                    | Err(e @ Error::InvalidIoRange { .. }) => {
+                        tracing::warn!(
                             hash,
                             ?addr,
                             ?header,
@@ -540,8 +554,12 @@ where
         self.destroy().await
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        self.inner.device.stat().clone()
+    fn throttle(&self) -> &Throttle {
+        self.inner.device.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.device.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -623,7 +641,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
@@ -653,7 +670,6 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };

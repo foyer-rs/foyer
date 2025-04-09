@@ -22,6 +22,7 @@ check-all:
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features tracing
+	cargo clippy --all-targets --features serde
 	cargo clippy --all-targets
 
 test:
@@ -47,6 +48,7 @@ example:
 	cargo run --features "tracing,ot" --example tail_based_tracing
 	cargo run --example equivalent
 	cargo run --example export_metrics_prometheus_hyper
+	cargo run --features serde --example serde
 
 full: check-all test-all example machete udeps
 

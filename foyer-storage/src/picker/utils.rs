@@ -15,6 +15,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
+    num::NonZeroUsize,
     ops::Range,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -22,14 +23,46 @@ use std::{
     },
 };
 
-use foyer_common::{rated_ticket::RatedTicket, strict_assert};
+use foyer_common::strict_assert;
 use itertools::Itertools;
 
 use super::{AdmissionPicker, EvictionPicker, ReinsertionPicker};
-use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
+use crate::{device::RegionId, io::throttle::IoThrottler, region::RegionStats, statistics::Statistics};
+
+/// Only admit on all chained admission pickers pick.
+#[derive(Debug, Default, Clone)]
+pub struct ChainedAdmissionPicker {
+    pickers: Arc<Vec<Arc<dyn AdmissionPicker>>>,
+}
+
+impl AdmissionPicker for ChainedAdmissionPicker {
+    fn pick(&self, stats: &Arc<Statistics>, size: u64) -> bool {
+        self.pickers.iter().all(|picker| picker.pick(stats, size))
+    }
+}
+
+/// A builder for [`ChainedAdmissionPicker`].
+#[derive(Debug, Default)]
+pub struct ChainedAdmissionPickerBuilder {
+    pickers: Vec<Arc<dyn AdmissionPicker>>,
+}
+
+impl ChainedAdmissionPickerBuilder {
+    /// Chain a new admission picker.
+    pub fn chain(mut self, picker: Arc<dyn AdmissionPicker>) -> Self {
+        self.pickers.push(picker);
+        self
+    }
+
+    /// Build the chained admission picker.
+    pub fn build(self) -> ChainedAdmissionPicker {
+        ChainedAdmissionPicker {
+            pickers: Arc::new(self.pickers),
+        }
+    }
+}
 
 /// A picker that always returns `true`.
-
 #[derive(Debug, Default)]
 pub struct AdmitAllPicker;
 
@@ -62,51 +95,75 @@ impl ReinsertionPicker for RejectAllPicker {
 }
 
 #[derive(Debug)]
-struct RateLimitPickerInner {
-    ticket: RatedTicket,
-    last: AtomicUsize,
+struct IoThrottlerPickerInner {
+    throttler: IoThrottler,
+    bytes_last: AtomicUsize,
+    ios_last: AtomicUsize,
+    target: IoThrottlerTarget,
 }
 
-/// A picker that picks based on the disk statistics and the given rate limit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum IoThrottlerTarget {
+    /// Count read io for io throttling.
+    Read,
+    /// Count write io for io throttling.
+    Write,
+    /// Count read and write io for io throttling.
+    ReadWrite,
+}
+
+/// A picker that picks based on the disk statistics and the given throttle args.
 #[derive(Debug, Clone)]
-pub struct RateLimitPicker {
-    inner: Arc<RateLimitPickerInner>,
+pub struct IoThrottlerPicker {
+    inner: Arc<IoThrottlerPickerInner>,
 }
 
-impl RateLimitPicker {
+impl IoThrottlerPicker {
     /// Create a rate limit picker with the given rate limit.
-    pub fn new(rate: usize) -> Self {
-        let inner = RateLimitPickerInner {
-            ticket: RatedTicket::new(rate as f64),
-            last: AtomicUsize::default(),
+    ///
+    /// Note: `None` stands for unlimited.
+    pub fn new(target: IoThrottlerTarget, throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
+        let inner = IoThrottlerPickerInner {
+            throttler: IoThrottler::new(throughput, iops),
+            bytes_last: AtomicUsize::default(),
+            ios_last: AtomicUsize::default(),
+            target,
         };
 
         Self { inner: Arc::new(inner) }
     }
 
     fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
-        let res = self.inner.ticket.probe();
+        let picked = self.inner.throttler.probe();
 
-        let current = stats.cache_write_bytes();
-        let last = self.inner.last.load(Ordering::Relaxed);
-        let delta = current.saturating_sub(last);
+        let bytes_current = match self.inner.target {
+            IoThrottlerTarget::Read => stats.disk_read_bytes(),
+            IoThrottlerTarget::Write => stats.disk_write_bytes(),
+            IoThrottlerTarget::ReadWrite => stats.disk_read_bytes() + stats.disk_write_bytes(),
+        };
+        let ios_current = match self.inner.target {
+            IoThrottlerTarget::Read => stats.disk_read_ios(),
+            IoThrottlerTarget::Write => stats.disk_write_ios(),
+            IoThrottlerTarget::ReadWrite => stats.disk_read_ios() + stats.disk_write_ios(),
+        };
 
-        if delta > 0 {
-            self.inner.last.store(current, Ordering::Relaxed);
-            self.inner.ticket.reduce(delta as f64);
-        }
+        let bytes_last = self.inner.bytes_last.load(Ordering::Relaxed);
+        let ios_last = self.inner.ios_last.load(Ordering::Relaxed);
 
-        res
+        let bytes_delta = bytes_current.saturating_sub(bytes_last);
+        let ios_delta = ios_current.saturating_sub(ios_last);
+
+        self.inner.bytes_last.store(bytes_current, Ordering::Relaxed);
+        self.inner.ios_last.store(ios_current, Ordering::Relaxed);
+
+        self.inner.throttler.reduce(bytes_delta as f64, ios_delta as f64);
+
+        picked.is_zero()
     }
 }
 
-impl AdmissionPicker for RateLimitPicker {
-    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> bool {
-        self.pick_inner(stats)
-    }
-}
-
-impl ReinsertionPicker for RateLimitPicker {
+impl AdmissionPicker for IoThrottlerPicker {
     fn pick(&self, stats: &Arc<Statistics>, _: u64) -> bool {
         self.pick_inner(stats)
     }

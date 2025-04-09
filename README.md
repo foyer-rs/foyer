@@ -65,16 +65,18 @@ Feel free to open a PR and add your projects here:
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.15"
+foyer = "0.16"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.15", features = ["nightly"] }
+foyer = { version = "0.16", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
+
+The in-memory cache setup is extremely easy and can be setup in at least 1 line.
 
 ```rust
 use foyer::{Cache, CacheBuilder};
@@ -90,6 +92,8 @@ fn main() {
 ```
 
 ### Easy-to-use Hybrid Cache
+
+The setup of a hybrid cache is extremely easy.
 
 ```rust
 use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
@@ -117,14 +121,17 @@ async fn main() -> anyhow::Result<()> {
 
 ### Fully Configured Hybrid Cache
 
+Here is an example of a hybrid cache setup with almost all configurations to show th possibilities of tuning.
+
 ```rust
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, LargeEngineOptions, LruConfig,
-    RateLimitPicker, RecoverMode, RuntimeOptions, SmallEngineOptions, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
+    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -133,6 +140,8 @@ async fn main() -> Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
+        .with_name("my-hybrid-cache")
+        .with_policy(HybridCachePolicy::WriteOnEviction)
         .memory(1024)
         .with_shards(4)
         .with_eviction_config(LruConfig {
@@ -144,11 +153,19 @@ async fn main() -> Result<()> {
         .with_device_options(
             DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024),
+                .with_file_size(4 * 1024 * 1024)
+                .with_throttle(
+                    Throttle::new()
+                        .with_read_iops(4000)
+                        .with_write_iops(2000)
+                        .with_write_throughput(100 * 1024 * 1024)
+                        .with_read_throughput(800 * 1024 * 1024)
+                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+                ),
         )
         .with_flush(true)
         .with_recover_mode(RecoverMode::Quiet)
-        .with_admission_picker(Arc::new(RateLimitPicker::new(100 * 1024 * 1024)))
+        .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
         .with_runtime_options(RuntimeOptions::Separated {
             read_runtime_options: TokioRuntimeOptions {
@@ -169,7 +186,7 @@ async fn main() -> Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_region_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::new(RateLimitPicker::new(10 * 1024 * 1024)))
+                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
                 .with_tombstone_log_config(
                     TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
                         .with_flush(true)
@@ -214,8 +231,27 @@ async fn mock() -> Result<String> {
 }
 ```
 
+### `serde` Support
+
+***foyer*** needs to serialize/deserialize entries between memory and disk with hybrid cache. Cached keys and values need to implement the `Code` trait when using hybrid cache.
+
+The `Code` trait has already been implemented for general types, such as:
+- Numeric types: `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`, `i64`, `i128`, `isize`, `f32`, `f64`.
+- Buffer: `Vec<u8>`.
+- String: `String`.
+- Other general types: `bool`.
+
+For more complex types, you need to implement the Code trait yourself.
+
+To make things easier, ***foyer*** provides support for the `serde` ecosystem. Types implement `serde::Serialize` and `serde::DeserializeOwned`, ***foyer*** will automatically implement the `Code` trait. This feature requires enabling the `serde` feature for foyer.
+
+```toml
+foyer = { version = "*", features = ["serde"] }
+```
+
 ### Other Examples
 
+- [Serialize/Deserialize w/wo serde](https://github.com/foyer-rs/foyer/tree/main/examples/serde.rs)
 - [Export Metrics with `prometheus` and `hyper`](https://github.com/foyer-rs/foyer/tree/main/examples/export_metrics_prometheus_hyper.rs)
 - [Tail-based Tracing](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs)
 

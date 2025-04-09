@@ -36,11 +36,13 @@ opentelemetry_sdk = { version = "0.26", features = [
   "trace",
 ], optional = true }
 prometheus = { workspace = true }
+serde = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
 tracing = { workspace = true }
 
 [features]
+serde = ["foyer/serde"]
 jaeger = ["fastrace-jaeger"]
 ot = [
   "fastrace-opentelemetry",
@@ -77,3 +79,7 @@ path = "equivalent.rs"
 [[example]]
 name = "export_metrics_prometheus_hyper"
 path = "export_metrics_prometheus_hyper.rs"
+
+[[example]]
+name = "serde"
+path = "serde.rs"

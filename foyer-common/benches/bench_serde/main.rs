@@ -12,7 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod buffer;
-pub mod throttle;
+#![expect(missing_docs)]
 
-pub const PAGE: usize = 4096;
+#[cfg(feature = "serde")]
+mod bench;
+
+#[cfg(feature = "serde")]
+criterion::criterion_group!(benches, bench::bench_encode, bench::bench_decode);
+#[cfg(feature = "serde")]
+criterion::criterion_main!(benches);
+
+#[cfg(not(feature = "serde"))]
+fn main() {
+    println!("Please enable the `serde` feature to run the benchmarks.");
+}

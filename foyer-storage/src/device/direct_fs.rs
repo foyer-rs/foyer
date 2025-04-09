@@ -22,20 +22,24 @@ use foyer_common::{asyncify::asyncify_with_runtime, bits};
 use fs4::free_space;
 use futures_util::future::try_join_all;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 
-use super::{Dev, DevExt, RegionId};
+use super::{Dev, DevExt, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
-    io::{IoBuf, IoBufMut, PAGE},
+    io::{
+        buffer::{IoBuf, IoBufMut},
+        PAGE,
+    },
     Runtime,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DirectFsDeviceConfig {
     dir: PathBuf,
     capacity: usize,
     file_size: usize,
+    throttle: Throttle,
 }
 
 impl DirectFsDeviceConfig {
@@ -74,6 +78,8 @@ struct DirectFsDeviceInner {
     capacity: usize,
     file_size: usize,
 
+    throttle: Throttle,
+
     runtime: Runtime,
 }
 
@@ -88,31 +94,24 @@ impl DirectFsDevice {
         &self.inner.files[region as usize]
     }
 
-    fn assert_io_range(&self, region: RegionId, offset: u64, len: usize) {
-        let offset = self.inner.file_size as u64 * region as u64 + offset;
-
+    fn check_io_range(&self, region: RegionId, offset: u64, len: usize) -> Result<()> {
         // Assert alignment.
         bits::assert_aligned(PAGE, offset as _);
         bits::assert_aligned(PAGE, len);
 
-        // Assert file capacity bound.
-        assert!(
-            offset as usize + len <= self.capacity(),
-            "offset ({offset}) + len ({len}) = total ({total}) <= capacity ({capacity})",
-            total = offset as usize + len,
-            capacity = self.inner.capacity,
-        );
+        let e = Error::InvalidIoRange {
+            range: offset as usize..offset as usize + len,
+            region_size: self.region_size(),
+            capacity: self.capacity(),
+        };
 
         // Assert region capacity bound if region is given.
-        if len != 0 {
-            let start_region = offset as usize / self.inner.file_size;
-            let end_region = (offset as usize + len - 1) / self.inner.file_size;
-            assert_eq!(
-                start_region, end_region,
-                "io range are not in the same region, region_size: {region_size}, offset: {offset}, len: {len}, start region: {start_region}, end region: {end_region}",
-                region_size = self.inner.file_size,
-            );
+        if offset as usize + len > self.inner.file_size {
+            tracing::error!(region, ?e, "[direct fs]: io range out of region capacity");
+            return Err(e);
         }
+
+        Ok(())
     }
 }
 
@@ -125,6 +124,10 @@ impl Dev for DirectFsDevice {
 
     fn region_size(&self) -> usize {
         self.inner.file_size
+    }
+
+    fn throttle(&self) -> &Throttle {
+        &self.inner.throttle
     }
 
     #[fastrace::trace(name = "foyer::storage::device::direct_fs::open")]
@@ -166,6 +169,7 @@ impl Dev for DirectFsDevice {
                 files,
                 capacity: options.capacity,
                 file_size: options.file_size,
+                throttle: options.throttle,
                 runtime,
             }),
         })
@@ -177,7 +181,9 @@ impl Dev for DirectFsDevice {
         B: IoBuf,
     {
         let len = buf.len();
-        self.assert_io_range(region, offset, len);
+        if let Err(e) = self.check_io_range(region, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file(region).clone();
         asyncify_with_runtime(self.inner.runtime.write(), move || {
@@ -214,7 +220,9 @@ impl Dev for DirectFsDevice {
         B: IoBufMut,
     {
         let len = buf.len();
-        self.assert_io_range(region, offset, len);
+        if let Err(e) = self.check_io_range(region, offset, len) {
+            return (buf, Err(e));
+        }
 
         let file = self.file(region).clone();
         asyncify_with_runtime(self.inner.runtime.read(), move || {
@@ -272,6 +280,7 @@ pub struct DirectFsDeviceOptions {
     dir: PathBuf,
     capacity: Option<usize>,
     file_size: Option<usize>,
+    throttle: Throttle,
 }
 
 impl DirectFsDeviceOptions {
@@ -283,6 +292,7 @@ impl DirectFsDeviceOptions {
             dir: dir.as_ref().into(),
             capacity: None,
             file_size: None,
+            throttle: Throttle::default(),
         }
     }
 
@@ -303,6 +313,12 @@ impl DirectFsDeviceOptions {
     /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
     pub fn with_file_size(mut self, file_size: usize) -> Self {
         self.file_size = Some(file_size);
+        self
+    }
+
+    /// Set the throttle of the direct file device.
+    pub fn with_throttle(mut self, throttle: Throttle) -> Self {
+        self.throttle = throttle;
         self
     }
 }
@@ -328,10 +344,13 @@ impl From<DirectFsDeviceOptions> for DirectFsDeviceConfig {
 
         let capacity = align_v(capacity, file_size);
 
+        let throttle = options.throttle;
+
         DirectFsDeviceConfig {
             dir,
             capacity,
             file_size,
+            throttle,
         }
     }
 }
@@ -341,7 +360,7 @@ mod tests {
     use bytes::BufMut;
 
     use super::*;
-    use crate::io::IoBuffer;
+    use crate::io::buffer::IoBuffer;
 
     #[test_log::test]
     fn test_options_builder() {

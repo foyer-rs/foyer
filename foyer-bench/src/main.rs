@@ -38,9 +38,9 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
+    Code, CodeError, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
+    HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
+    RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, Throttle, TokioRuntimeOptions, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -48,7 +48,6 @@ use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
 use rate::RateLimiter;
-use serde::{Deserialize, Serialize};
 use text::text;
 use tokio::sync::{broadcast, oneshot};
 
@@ -143,13 +142,21 @@ struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// Enable rated ticket admission picker if `admission_rate_limit > 0`.
-    #[arg(long, default_value_t = ByteSize::b(0))]
-    admission_rate_limit: ByteSize,
+    /// Disk write iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_write_iops: usize,
 
-    /// Enable rated ticket reinsertion picker if `reinsertion_rate_limit > 0`.
+    /// Disk read iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_read_iops: usize,
+
+    /// Disk write throughput throttle.
     #[arg(long, default_value_t = ByteSize::b(0))]
-    reinsertion_rate_limit: ByteSize,
+    disk_write_throughput: ByteSize,
+
+    /// Disk read throughput throttle.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    disk_read_throughput: ByteSize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -245,6 +252,9 @@ struct Args {
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
+    #[arg(long, value_parser = PossibleValuesParser::new(["eviction", "insertion"]), default_value = "eviction")]
+    policy: String,
+
     #[arg(long, default_value_t = ByteSize::mib(16))]
     buffer_pool_size: ByteSize,
 
@@ -321,10 +331,8 @@ struct Context {
     metrics: Metrics,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct Value {
-    // https://github.com/serde-rs/bytes/issues/43
-    #[serde(with = "arc_bytes")]
     inner: Arc<Vec<u8>>,
 }
 
@@ -336,25 +344,29 @@ impl Deref for Value {
     }
 }
 
-mod arc_bytes {
-    use std::sync::Arc;
-
-    use serde::{Deserialize, Deserializer, Serializer};
-    use serde_bytes::ByteBuf;
-
-    pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(data.as_slice())
+impl Code for Value {
+    fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), foyer::CodeError> {
+        self.len().encode(writer)?;
+        writer.write_all(self).map_err(CodeError::from)
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+    #[expect(clippy::uninit_vec)]
+    fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer::CodeError>
     where
-        D: Deserializer<'de>,
+        Self: Sized,
     {
-        let buf = ByteBuf::deserialize(deserializer)?;
-        Ok(Arc::new(buf.into_vec()))
+        let len = usize::decode(reader)?;
+        let mut v = Vec::with_capacity(len);
+        unsafe {
+            v.set_len(len);
+        }
+        reader.read_exact(&mut v).map_err(CodeError::from)?;
+        let this = Self { inner: Arc::new(v) };
+        Ok(this)
+    }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<usize>() + self.len()
     }
 }
 
@@ -443,7 +455,15 @@ async fn benchmark(args: Args) {
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
         .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
-    let builder = HybridCacheBuilder::new().with_tracing_options(tracing_options);
+    let policy = match args.policy.as_str() {
+        "eviction" => HybridCachePolicy::WriteOnInsertion,
+        "insertion" => HybridCachePolicy::WriteOnInsertion,
+        _ => panic!("unsupported policy: {}", args.policy),
+    };
+
+    let builder = HybridCacheBuilder::new()
+        .with_tracing_options(tracing_options)
+        .with_policy(policy);
 
     let builder = if args.metrics {
         let registry = Registry::new();
@@ -473,16 +493,24 @@ async fn benchmark(args: Args) {
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage(args.engine);
 
+    let throttle = Throttle::default()
+        .with_read_iops(args.disk_read_iops)
+        .with_write_iops(args.disk_write_iops)
+        .with_read_throughput(args.disk_read_throughput.as_u64() as _)
+        .with_write_throughput(args.disk_write_throughput.as_u64() as _);
+
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_options(
             DirectFileDeviceOptions::new(file)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _),
+                .with_region_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, Some(dir)) => builder.with_device_options(
             DirectFsDeviceOptions::new(dir)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _),
+                .with_file_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, None) => builder,
         _ => unreachable!(),
@@ -528,14 +556,6 @@ async fn benchmark(args: Args) {
         .with_set_size(args.set_size.as_u64() as _)
         .with_set_cache_capacity(args.set_cache_capacity);
 
-    if args.admission_rate_limit.as_u64() > 0 {
-        builder =
-            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
-    if args.reinsertion_rate_limit.as_u64() > 0 {
-        large = large.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
-
     if args.clean_region_threshold > 0 {
         large = large.with_clean_region_threshold(args.clean_region_threshold);
     }
@@ -550,9 +570,7 @@ async fn benchmark(args: Args) {
     #[cfg(feature = "tracing")]
     hybrid.enable_tracing();
 
-    let stats = hybrid.stats();
-
-    let iostat_start = IoStat::snapshot(&stats);
+    let iostat_start = IoStat::snapshot(hybrid.statistics());
     let metrics = Metrics::default();
 
     let metrics_dump_start = metrics.dump();
@@ -561,9 +579,9 @@ async fn benchmark(args: Args) {
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
-
+        let stats = hybrid.statistics().clone();
         monitor(
-            stats.clone(),
+            stats,
             Duration::from_secs(args.report_interval),
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
@@ -584,7 +602,7 @@ async fn benchmark(args: Args) {
 
     handle_bench.await.unwrap();
 
-    let iostat_end = IoStat::snapshot(&stats);
+    let iostat_end = IoStat::snapshot(hybrid.statistics());
     let metrics_dump_end = metrics.dump();
     let analysis = analyze(
         time.elapsed(),

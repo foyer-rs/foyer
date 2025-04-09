@@ -29,11 +29,12 @@ use foyer_storage::{
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use super::cache::HybridCachePipe;
-use crate::HybridCache;
+use crate::{HybridCache, HybridCachePolicy};
 
 /// Hybrid cache builder.
 pub struct HybridCacheBuilder<K, V> {
     name: Cow<'static, str>,
+    policy: HybridCachePolicy,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
     tracing_options: TracingOptions,
     registry: BoxedRegistry,
@@ -50,6 +51,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
     pub fn new() -> Self {
         Self {
             name: "foyer".into(),
+            policy: HybridCachePolicy::default(),
             event_listener: None,
             tracing_options: TracingOptions::default(),
             registry: Box::new(NoopMetricsRegistry),
@@ -65,6 +67,14 @@ impl<K, V> HybridCacheBuilder<K, V> {
     /// Default: `foyer`.
     pub fn with_name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         self.name = name.into();
+        self
+    }
+
+    /// Set the policy of the hybrid cache.
+    ///
+    /// Default: [`HybridCachePolicy::default()`].
+    pub fn with_policy(mut self, policy: HybridCachePolicy) -> Self {
+        self.policy = policy;
         self
     }
 
@@ -106,10 +116,11 @@ impl<K, V> HybridCacheBuilder<K, V> {
             builder = builder.with_event_listener(event_listener);
         }
         HybridCacheBuilderPhaseMemory {
-            builder,
             name: self.name,
+            policy: self.policy,
             metrics,
             tracing_options: self.tracing_options,
+            builder,
         }
     }
 }
@@ -122,6 +133,7 @@ where
     S: HashBuilder + Debug,
 {
     name: Cow<'static, str>,
+    policy: HybridCachePolicy,
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
     // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
@@ -140,6 +152,7 @@ where
         let builder = self.builder.with_shards(shards);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             builder,
@@ -153,6 +166,7 @@ where
         let builder = self.builder.with_eviction_config(eviction_config.into());
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             builder,
@@ -167,6 +181,7 @@ where
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             builder,
@@ -178,6 +193,7 @@ where
         let builder = self.builder.with_weighter(weighter);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             builder,
@@ -188,11 +204,12 @@ where
     pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
-            builder: StoreBuilder::new(self.name.clone(), memory.clone(), self.metrics.clone(), engine),
-            name: self.name,
+            name: self.name.clone(),
+            policy: self.policy,
             tracing_options: self.tracing_options,
-            metrics: self.metrics,
-            memory,
+            metrics: self.metrics.clone(),
+            memory: memory.clone(),
+            builder: StoreBuilder::new(self.name, memory, self.metrics, engine),
         }
     }
 }
@@ -205,6 +222,7 @@ where
     S: HashBuilder + Debug,
 {
     name: Cow<'static, str>,
+    policy: HybridCachePolicy,
     tracing_options: TracingOptions,
     metrics: Arc<Metrics>,
     memory: Cache<K, V, S>,
@@ -222,6 +240,7 @@ where
         let builder = self.builder.with_device_options(device_options);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -236,6 +255,7 @@ where
         let builder = self.builder.with_flush(flush);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -252,6 +272,7 @@ where
         let builder = self.builder.with_recover_mode(recover_mode);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -268,6 +289,7 @@ where
         let builder = self.builder.with_admission_picker(admission_picker);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -282,6 +304,7 @@ where
         let builder = self.builder.with_compression(compression);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -294,6 +317,7 @@ where
         let builder = self.builder.with_runtime_options(runtime_options);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -308,6 +332,7 @@ where
         let builder = self.builder.with_large_object_disk_cache_options(options);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -322,6 +347,7 @@ where
         let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
+            policy: self.policy,
             tracing_options: self.tracing_options,
             metrics: self.metrics,
             memory: self.memory,
@@ -333,7 +359,7 @@ where
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let builder = self.builder;
 
-        let piped = !builder.is_noop();
+        let piped = !builder.is_noop() && self.policy == HybridCachePolicy::WriteOnEviction;
 
         let memory = self.memory;
         let storage = builder.build().await?;
@@ -343,6 +369,12 @@ where
             memory.set_pipe(Box::new(pipe));
         }
 
-        Ok(HybridCache::new(memory, storage, self.tracing_options, self.metrics))
+        Ok(HybridCache::new(
+            self.policy,
+            memory,
+            storage,
+            self.tracing_options,
+            self.metrics,
+        ))
     }
 }

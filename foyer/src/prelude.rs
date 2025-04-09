@@ -15,14 +15,14 @@
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
-        code::{Key, StorageKey, StorageValue, Value},
+        code::{Code, CodeError, CodeResult, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
         range::RangeBoundsExt,
         tracing::TracingOptions,
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-        cache::{HybridCache, HybridCacheEntry, HybridFetch},
+        cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridFetch},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
@@ -30,10 +30,10 @@ pub use crate::{
         S3FifoConfig, Weighter,
     },
     storage::{
-        AdmissionPicker, AdmitAllPicker, Compression, Dev, DevConfig, DevExt, DeviceStats, DirectFileDevice,
-        DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine, EvictionPicker, FifoPicker,
-        InvalidRatioPicker, LargeEngineOptions, RateLimitPicker, RecoverMode, ReinsertionPicker, RejectAllPicker,
-        Runtime, RuntimeOptions, SmallEngineOptions, Storage, Store, StoreBuilder, TokioRuntimeOptions,
-        TombstoneLogConfigBuilder,
+        AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, Compression, Dev,
+        DevConfig, DevExt, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine,
+        EvictionPicker, FifoPicker, InvalidRatioPicker, IopsCounter, LargeEngineOptions, RecoverMode,
+        ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, SmallEngineOptions, Statistics, Storage, Store,
+        StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
     },
 };

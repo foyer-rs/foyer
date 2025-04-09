@@ -35,7 +35,7 @@ use std::{
 };
 
 use bytesize::ByteSize;
-use foyer::DeviceStats;
+use foyer::Statistics;
 use hdrhistogram::Histogram;
 use parking_lot::RwLock;
 use tokio::sync::broadcast;
@@ -242,12 +242,12 @@ pub struct IoStat {
 }
 
 impl IoStat {
-    pub fn snapshot(stats: &DeviceStats) -> Self {
+    pub fn snapshot(stats: &Statistics) -> Self {
         Self {
-            read_ios: stats.read_ios.load(Ordering::Relaxed),
-            read_bytes: stats.read_bytes.load(Ordering::Relaxed),
-            write_ios: stats.write_ios.load(Ordering::Relaxed),
-            write_bytes: stats.write_bytes.load(Ordering::Relaxed),
+            read_ios: stats.disk_read_ios(),
+            read_bytes: stats.disk_read_bytes(),
+            write_ios: stats.disk_write_ios(),
+            write_bytes: stats.disk_write_bytes(),
         }
     }
 }
@@ -310,7 +310,7 @@ pub fn analyze(
 }
 
 pub async fn monitor(
-    stats: Arc<DeviceStats>,
+    stats: Arc<Statistics>,
     interval: Duration,
     total_secs: Duration,
     warm_up: Duration,

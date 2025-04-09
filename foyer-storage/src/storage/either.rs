@@ -26,12 +26,12 @@ use futures_util::{
     future::{join, select, try_join, Either as EitherFuture},
     FutureExt,
 };
-use serde::{Deserialize, Serialize};
 
-use crate::{error::Result, storage::Storage, DeviceStats};
+use crate::{error::Result, storage::Storage, Statistics, Throttle};
 
 /// Order of ops.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Order {
     /// Use the left engine first.
     ///
@@ -239,9 +239,14 @@ where
         Ok(())
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
+    fn throttle(&self) -> &Throttle {
         // The two engines share the same device, so it is okay to use either device stats of those.
-        self.left.stats()
+        self.left.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        // The two engines share the same device, so it is okay to use either device stats of those.
+        self.left.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {

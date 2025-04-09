@@ -19,7 +19,6 @@ anyhow = "1.0"
 # TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
 array-util = "1"
 auto_enums = { version = "0.8", features = ["futures03"] }
-bincode = "1"
 bytes = { workspace = true }
 clap = { workspace = true }
 equivalent = { workspace = true }
@@ -35,10 +34,10 @@ libc = "0.2"
 lz4 = "1.24"
 ordered_hash_map = "0.4"
 parking_lot = { workspace = true }
-paste = "1"
+paste = { workspace = true }
 pin-project = "1"
 rand = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 twox-hash = "2"
@@ -73,6 +72,7 @@ tokio = { package = "tokio", version = "1", features = [
 
 [features]
 default = []
+serde = ["dep:serde"]
 deadlock = ["parking_lot/deadlock_detection"]
 nightly = ["allocator-api2/nightly"]
 strict_assertions = [

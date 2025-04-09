@@ -24,8 +24,12 @@ use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
+    device::MonitoredDevice,
     error::Result,
-    io::{IoBuffer, OwnedSlice, PAGE},
+    io::{
+        buffer::{IoBuffer, OwnedSlice},
+        PAGE,
+    },
     large::{
         flusher::{Flusher, Submission},
         generic::GenericLargeStorageConfig,
@@ -36,7 +40,6 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     runtime::Runtime,
-    statistics::Statistics,
 };
 
 #[derive(Debug)]
@@ -51,7 +54,6 @@ impl Reclaimer {
         reclaim_semaphore: Arc<Semaphore>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V>>,
-        stats: Arc<Statistics>,
         metrics: Arc<Metrics>,
     ) -> Self
     where
@@ -61,12 +63,12 @@ impl Reclaimer {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
         let runner = ReclaimRunner {
+            device: config.device.clone(),
             region_manager,
             reclaim_semaphore,
             indexer,
             flushers,
             reinsertion_picker: config.reinsertion_picker.clone(),
-            stats,
             blob_index_size: config.blob_index_size,
             flush: config.flush,
             _metrics: metrics,
@@ -94,6 +96,8 @@ where
     K: StorageKey,
     V: StorageValue,
 {
+    device: MonitoredDevice,
+
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
 
     region_manager: RegionManager,
@@ -102,8 +106,6 @@ where
     indexer: Indexer,
 
     flushers: Vec<Flusher<K, V>>,
-
-    stats: Arc<Statistics>,
 
     blob_index_size: usize,
     flush: bool,
@@ -191,7 +193,7 @@ where
                 Ok(Some(infos)) => infos,
             };
             for info in infos {
-                if self.reinsertion_picker.pick(&self.stats, info.hash) {
+                if self.reinsertion_picker.pick(self.device.statistics(), info.hash) {
                     let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
                     let (buf, res) = region.read(buf, info.addr.offset as _).await;
                     if let Err(e) = res {

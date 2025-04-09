@@ -12,7 +12,7 @@ license = { workspace = true }
 readme = { workspace = true }
 
 [package.metadata.docs.rs]
-features = ["nightly"]
+features = ["serde", "tracing", "nightly", "deadlock", "strict_assertions"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -24,6 +24,8 @@ foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
 mixtrics = { workspace = true }
+pin-project = { workspace = true }
+serde = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
@@ -54,18 +56,19 @@ tokio = { package = "tokio", version = "1", features = [
 
 [features]
 default = []
+serde = ["foyer-common/serde", "foyer-storage/serde"]
+tracing = [
+  "fastrace/enable",
+  "foyer-common/tracing",
+  "foyer-memory/tracing",
+  "foyer-storage/tracing",
+]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
-]
-tracing = [
-  "fastrace/enable",
-  "foyer-common/tracing",
-  "foyer-memory/tracing",
-  "foyer-storage/tracing",
 ]
 
 [lints]
