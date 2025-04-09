@@ -36,7 +36,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchMark, FetchState, Piece, Pipe};
-use foyer_storage::{Statistics, Store};
+use foyer_storage::{Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -297,6 +297,12 @@ where
             self.metrics.hybrid_miss.increase(1);
             self.metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
         };
+        let record_throttled = || {
+            self.metrics.hybrid_throttled.increase(1);
+            self.metrics
+                .hybrid_throttled_duration
+                .record(now.elapsed().as_secs_f64());
+        };
 
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
@@ -312,11 +318,15 @@ where
             .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
             .await?
         {
-            Some((k, v)) => {
+            Load::Entry { key, value } => {
                 record_hit();
-                Some(self.memory.insert(k, v))
+                Some(self.memory.insert(key, value))
             }
-            None => {
+            Load::Throttled => {
+                record_throttled();
+                None
+            }
+            Load::Miss => {
                 record_miss();
                 None
             }
@@ -346,8 +356,9 @@ where
             let store = self.storage.clone();
             async move {
                 match store.load(&key).await.map_err(anyhow::Error::from) {
-                    Ok(Some((_, v))) => Ok(v),
-                    Ok(None) => Err(ObtainFetchError::NotExist),
+                    Ok(Load::Entry { key: _, value }) => Ok(value),
+                    Ok(Load::Throttled) => Err(ObtainFetchError::Throttled),
+                    Ok(Load::Miss) => Err(ObtainFetchError::NotExist),
                     Err(e) => Err(ObtainFetchError::Err(e)),
                 }
             }
@@ -362,6 +373,14 @@ where
                 self.metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
+            }
+            Err(ObtainFetchError::Throttled) => {
+                self.metrics.hybrid_throttled.increase(1);
+                self.metrics
+                    .hybrid_throttled_duration
+                    .record(now.elapsed().as_secs_f64());
+                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                Ok(None)
             }
             Err(ObtainFetchError::NotExist) => {
                 self.metrics.hybrid_miss.increase(1);
@@ -451,6 +470,7 @@ where
 
 #[derive(Debug)]
 enum ObtainFetchError {
+    Throttled,
     NotExist,
     RecvError(oneshot::error::RecvError),
     Err(anyhow::Error),
@@ -558,14 +578,14 @@ where
                 let runtime = self.storage().runtime().clone();
 
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from) {
-                        Ok(Some((_k, v))) => {
+                    let refill = match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(Load::Entry { key: _, value }) => {
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-
-                            return Ok(v).into();
+                            return Ok(value).into();
                         }
-                        Ok(None) => {}
+                        Ok(Load::Throttled) => false,
+                        Ok(Load::Miss) => true,
                         Err(e) => return Err(e).into(),
                     };
 

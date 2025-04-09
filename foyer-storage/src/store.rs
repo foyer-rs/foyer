@@ -58,6 +58,32 @@ use crate::{
     ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
 };
 
+/// Load result.
+#[derive(Debug)]
+pub enum Load<K, V> {
+    /// Load entry success.
+    Entry {
+        /// The key of the entry.
+        key: K,
+        /// The value of the entry.
+        value: V,
+    },
+    /// The entry may be in the disk cache, the read io is throttled.
+    Throttled,
+    /// Disk cache miss.
+    Miss,
+}
+
+impl<K, V> Load<K, V> {
+    /// Return `Some` with the entry if load success, otherwise return `None`.
+    pub fn entry(self) -> Option<(K, V)> {
+        match self {
+            Load::Entry { key, value } => Some((key, value)),
+            _ => None,
+        }
+    }
+}
+
 /// The disk cache engine that serves as the storage backend of `foyer`.
 pub struct Store<K, V, S = RandomState>
 where
@@ -154,7 +180,7 @@ where
     }
 
     /// Load a cache entry from the disk cache.
-    pub async fn load<Q>(&self, key: &Q) -> Result<Option<(K, V)>>
+    pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V>>
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
@@ -165,14 +191,18 @@ where
 
         if let Some(throttler) = self.inner.load_throttler.as_ref() {
             if !throttler.pick(&self.inner.statistics, hash) {
-                return Ok(None);
+                if self.inner.engine.may_contains(hash) {
+                    return Ok(Load::Throttled);
+                } else {
+                    return Ok(Load::Miss);
+                }
             }
         }
 
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
-            Ok(Some((k, v))) if key.equivalent(&k) => Ok(Some((k, v))),
-            Ok(_) => Ok(None),
+            Ok(Some((key, value))) if key.equivalent(&key) => Ok(Load::Entry { key, value }),
+            Ok(_) => Ok(Load::Miss),
             Err(e) => Err(e),
         }
     }
