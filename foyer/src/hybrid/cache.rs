@@ -765,20 +765,24 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn test_hybrid_cache_location() {
+        // Test hybrid cache that write disk cache on eviction.
+
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
 
         hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
-        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(hybrid.storage().load(&1).await.unwrap().unwrap().1, vec![1; 7 * KB]);
 
         hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
+        assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
-        assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         assert!(hybrid.storage().load(&2).await.unwrap().is_none());
+
+        // Test hybrid cache that write disk cache on insertion.
 
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
