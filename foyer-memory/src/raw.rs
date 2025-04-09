@@ -33,6 +33,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
+    location::CacheLocation,
     metrics::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
@@ -517,26 +518,43 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_with_hint(key, value, Default::default())
+        self.emplace(key, value, Default::default(), false, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
     pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, false)
+        self.emplace(key, value, hint, false, CacheLocation::Default)
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::insert_with_location")]
+    pub fn insert_with_location(
+        &self,
+        key: E::Key,
+        value: E::Value,
+        location: CacheLocation,
+    ) -> RawCacheEntry<E, S, I> {
+        self.emplace(key, value, Default::default(), false, location)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
     pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_ephemeral_with_hint(key, value, Default::default())
+        self.emplace(key, value, Default::default(), true, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
     pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, true)
+        self.emplace(key, value, hint, true, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::emplace")]
-    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<E, S, I> {
+    fn emplace(
+        &self,
+        key: E::Key,
+        value: E::Value,
+        hint: E::Hint,
+        ephemeral: bool,
+        location: CacheLocation,
+    ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
 
@@ -551,6 +569,7 @@ where
                     hint,
                     hash,
                     weight,
+                    location,
                 },
                 ephemeral,
                 &mut garbages,
@@ -818,6 +837,10 @@ where
 
     pub fn weight(&self) -> usize {
         self.record.weight()
+    }
+
+    pub fn location(&self) -> CacheLocation {
+        self.record.location()
     }
 
     pub fn refs(&self) -> usize {
