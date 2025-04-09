@@ -32,6 +32,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
+    location::CacheLocation,
     metrics::Metrics,
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
@@ -119,6 +120,10 @@ where
     }
 
     fn send(&self, piece: Piece<Self::Key, Self::Value>) {
+        match piece.location() {
+            CacheLocation::InMem => return,
+            CacheLocation::Default | CacheLocation::OnDisk => {}
+        }
         self.store.enqueue(piece, false);
     }
 }
@@ -261,7 +266,7 @@ where
 
     /// Insert cache entry with cache hint to the hybrid cache.
     pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert_with_context");
+        root_span!(self, span, "foyer::hybrid::cache::insert_with_hint");
 
         let _guard = span.set_local_parent();
 
@@ -269,6 +274,27 @@ where
 
         let entry = self.memory.insert_with_hint(key, value, hint);
         if self.policy == HybridCachePolicy::WriteOnInsertion {
+            self.storage.enqueue(entry.piece(), false);
+        }
+
+        self.metrics.hybrid_insert.increase(1);
+        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
+
+        try_cancel!(self, span, record_hybrid_insert_threshold);
+
+        entry
+    }
+
+    /// Insert cache entry with preferred location to the hybrid cache.
+    pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> HybridCacheEntry<K, V, S> {
+        root_span!(self, span, "foyer::hybrid::cache::insert_with_location");
+
+        let _guard = span.set_local_parent();
+
+        let now = Instant::now();
+
+        let entry = self.memory.insert_with_location(key, value, location);
+        if self.policy == HybridCachePolicy::WriteOnInsertion && location != CacheLocation::InMem {
             self.storage.enqueue(entry.piece(), false);
         }
 
@@ -512,7 +538,10 @@ where
         let res = ready!(this.inner.as_mut().poll(cx));
 
         if let Ok(entry) = res.as_ref() {
-            if *this.policy == HybridCachePolicy::WriteOnInsertion && this.inner.store().is_some() {
+            if entry.location() != CacheLocation::InMem
+                && *this.policy == HybridCachePolicy::WriteOnInsertion
+                && this.inner.store().is_some()
+            {
                 this.storage.enqueue(entry.piece(), false);
             }
         }
@@ -626,7 +655,7 @@ mod tests {
 
     use std::{path::Path, sync::Arc};
 
-    use foyer_common::hasher::ModRandomState;
+    use foyer_common::{hasher::ModRandomState, location::CacheLocation};
     use storage::test_utils::BiasedPicker;
 
     use crate::*;
@@ -667,6 +696,27 @@ mod tests {
                     .with_file_size(MB),
             )
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
+            .build()
+            .await
+            .unwrap()
+    }
+
+    async fn open_with_policy(
+        dir: impl AsRef<Path>,
+        policy: HybridCachePolicy,
+    ) -> HybridCache<u64, Vec<u8>, ModRandomState> {
+        HybridCacheBuilder::new()
+            .with_name("test")
+            .with_policy(policy)
+            .memory(4 * MB)
+            .with_hash_builder(ModRandomState::default())
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB),
+            )
             .build()
             .await
             .unwrap()
@@ -731,5 +781,40 @@ mod tests {
 
         let e5 = hybrid.writer(5).storage().force().insert(vec![5; 7 * KB]).unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_location() {
+        // Test hybrid cache that write disk cache on eviction.
+
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
+
+        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        hybrid.memory().evict_all();
+        hybrid.storage().wait().await;
+        assert_eq!(hybrid.storage().load(&1).await.unwrap().unwrap().1, vec![1; 7 * KB]);
+
+        hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
+        assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
+        hybrid.memory().evict_all();
+        hybrid.storage().wait().await;
+        assert!(hybrid.storage().load(&2).await.unwrap().is_none());
+
+        // Test hybrid cache that write disk cache on insertion.
+
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
+
+        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.storage().wait().await;
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
+        assert_eq!(hybrid.storage().load(&1).await.unwrap().unwrap().1, vec![1; 7 * KB]);
+
+        hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
+        hybrid.storage().wait().await;
+        assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
+        assert!(hybrid.storage().load(&2).await.unwrap().is_none());
     }
 }

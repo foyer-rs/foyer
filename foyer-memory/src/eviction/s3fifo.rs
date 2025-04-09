@@ -447,6 +447,7 @@ mod tests {
                     hint: S3FifoHint,
                     hash: i,
                     weight: 1,
+                    location: Default::default(),
                 }))
             })
             .collect_vec();

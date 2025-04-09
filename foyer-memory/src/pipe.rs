@@ -14,7 +14,10 @@
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    location::CacheLocation,
+};
 
 use crate::{record::Record, Eviction};
 
@@ -26,6 +29,7 @@ pub struct Piece<K, V> {
     key: *const K,
     value: *const V,
     hash: u64,
+    location: CacheLocation,
     drop_fn: fn(*const ()),
 }
 
@@ -58,6 +62,7 @@ impl<K, V> Piece<K, V> {
         let key = unsafe { (*raw).key() } as *const _;
         let value = unsafe { (*raw).value() } as *const _;
         let hash = unsafe { (*raw).hash() };
+        let location = unsafe { (*raw).location() };
         let drop_fn = |ptr| unsafe {
             let _ = Arc::from_raw(ptr as *const Record<E>);
         };
@@ -66,6 +71,7 @@ impl<K, V> Piece<K, V> {
             key,
             value,
             hash,
+            location,
             drop_fn,
         }
     }
@@ -83,6 +89,11 @@ impl<K, V> Piece<K, V> {
     /// Get the hash of the record.
     pub fn hash(&self) -> u64 {
         self.hash
+    }
+
+    /// Get the preferred cache location.
+    pub fn location(&self) -> CacheLocation {
+        self.location
     }
 }
 
@@ -141,6 +152,7 @@ mod tests {
             hint: FifoHint,
             hash: 1,
             weight: 1,
+            location: Default::default(),
         }));
 
         let p1 = Piece::new(r1.clone());
