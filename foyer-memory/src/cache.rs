@@ -20,6 +20,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
+    location::CacheLocation,
     metrics::Metrics,
     runtime::SingletonHandle,
 };
@@ -205,6 +206,16 @@ where
             CacheEntry::Lru(entry) => entry.weight(),
             CacheEntry::Lfu(entry) => entry.weight(),
             CacheEntry::S3Fifo(entry) => entry.weight(),
+        }
+    }
+
+    /// Preferred location of the cached entry.
+    pub fn location(&self) -> CacheLocation {
+        match self {
+            CacheEntry::Fifo(entry) => entry.location(),
+            CacheEntry::Lru(entry) => entry.location(),
+            CacheEntry::Lfu(entry) => entry.location(),
+            CacheEntry::S3Fifo(entry) => entry.location(),
         }
     }
 
@@ -540,6 +551,17 @@ where
             Cache::S3Fifo(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
             Cache::Lru(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
             Cache::Lfu(cache) => cache.insert_with_hint(key, value, hint.into()).into(),
+        }
+    }
+
+    /// Insert cache entry with cache hint to the in-memory cache.
+    #[fastrace::trace(name = "foyer::memory::cache::insert_with_location")]
+    pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> CacheEntry<K, V, S> {
+        match self {
+            Cache::Fifo(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::S3Fifo(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::Lru(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::Lfu(cache) => cache.insert_with_location(key, value, location).into(),
         }
     }
 

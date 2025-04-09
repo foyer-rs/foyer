@@ -391,6 +391,7 @@ pub mod tests {
                     },
                     hash: i,
                     weight: 1,
+                    location: Default::default(),
                 }))
             })
             .collect_vec();
@@ -467,6 +468,7 @@ pub mod tests {
                     },
                     hash: i,
                     weight: 1,
+                    location: Default::default(),
                 }))
             })
             .collect_vec();
