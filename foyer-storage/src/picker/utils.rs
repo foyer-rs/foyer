@@ -114,6 +114,11 @@ pub enum IoThrottlerTarget {
 }
 
 /// A picker that picks based on the disk statistics and the given throttle args.
+///
+/// NOTE: This picker is automatically applied if the device throttle is set.
+///
+/// Please use set the `throttle` in the device options instead use this picker directly.
+/// Unless you know what you are doing. :D
 #[derive(Debug, Clone)]
 pub struct IoThrottlerPicker {
     inner: Arc<IoThrottlerPickerInner>,

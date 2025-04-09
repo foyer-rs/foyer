@@ -14,7 +14,14 @@
 
 //! Test utils for the `foyer-storage` crate.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use parking_lot::Mutex;
 
@@ -51,7 +58,7 @@ impl ReinsertionPicker for BiasedPicker {
 }
 
 /// The record entry for admission and eviction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
     /// Admission record entry hash.
     Admit(u64),
@@ -102,5 +109,28 @@ impl ReinsertionPicker for Recorder {
     fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
         self.records.lock().push(Record::Evict(hash));
         false
+    }
+}
+
+/// A switch to throttle/unthrottle all loads.
+#[derive(Debug, Clone, Default)]
+pub struct LoadThrottleSwitch {
+    throttled: Arc<AtomicBool>,
+}
+
+impl LoadThrottleSwitch {
+    /// If all loads are throttled.
+    pub fn is_throttled(&self) -> bool {
+        self.throttled.load(Ordering::Relaxed)
+    }
+
+    /// Throttle all loads.
+    pub fn throttle(&self) {
+        self.throttled.store(true, Ordering::Relaxed);
+    }
+
+    /// Unthrottle all loads.
+    pub fn unthrottle(&self) {
+        self.throttled.store(false, Ordering::Relaxed);
     }
 }

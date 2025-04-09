@@ -33,6 +33,8 @@ use foyer_common::{
 use foyer_memory::{Cache, Piece};
 use tokio::runtime::Handle;
 
+#[cfg(feature = "test_utils")]
+use crate::test_utils::*;
 use crate::{
     compress::Compression,
     device::{
@@ -113,6 +115,9 @@ where
 
     statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
+
+    #[cfg(feature = "test_utils")]
+    load_throttle_switch: LoadThrottleSwitch,
 }
 
 impl<K, V, S> Debug for Store<K, V, S>
@@ -186,8 +191,10 @@ where
     {
         let hash = self.inner.hasher.hash_one(key);
 
-        // FIXME(MrCroxx): Return `Some(None)` here will be treated as a disk cache miss, then trigger a cache refill.
-        // We need to skip it if we know it is not necessary.
+        #[cfg(feature = "test_utils")]
+        if self.inner.load_throttle_switch.is_throttled() {
+            return Ok(Load::Throttled);
+        }
 
         if let Some(throttler) = self.inner.load_throttler.as_ref() {
             if !throttler.pick(&self.inner.statistics, hash) {
@@ -245,6 +252,12 @@ where
     /// Wait for the ongoing flush and reclaim tasks to finish.
     pub async fn wait(&self) {
         self.inner.engine.wait().await
+    }
+
+    /// Get the load throttle switch for the disk cache.
+    #[cfg(feature = "test_utils")]
+    pub fn load_throttle_switch(&self) -> &LoadThrottleSwitch {
+        &self.inner.load_throttle_switch
     }
 }
 
@@ -704,6 +717,9 @@ where
             runtime,
             statistics,
             metrics,
+
+            #[cfg(feature = "test_utils")]
+            load_throttle_switch: LoadThrottleSwitch::default(),
         };
         let inner = Arc::new(inner);
         let store = Store { inner };

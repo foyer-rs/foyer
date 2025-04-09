@@ -29,6 +29,7 @@ serde = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+foyer-storage = { workspace = true, features = ["test_utils"] }
 tempfile = "3"
 test-log = { workspace = true }
 
