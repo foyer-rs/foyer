@@ -937,3 +937,27 @@ where
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use foyer_memory::CacheBuilder;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_build_with_unaligned_buffer_pool_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
+        let _ = StoreBuilder::new("test", memory, metrics, Engine::Large)
+            .with_device_options(DirectFsDeviceOptions::new(dir.path()))
+            .with_large_object_disk_cache_options(
+                LargeEngineOptions::new()
+                    .with_flushers(3)
+                    .with_buffer_pool_size(128 * 1024 * 1024),
+            )
+            .build()
+            .await
+            .unwrap();
+    }
+}
