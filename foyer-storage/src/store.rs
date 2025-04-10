@@ -58,6 +58,7 @@ use crate::{
         Storage,
     },
     ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
+    Pick,
 };
 
 /// Load result.
@@ -164,7 +165,7 @@ where
     }
 
     /// Return if the given key can be picked by the admission picker.
-    pub fn pick(&self, hash: u64) -> bool {
+    pub fn pick(&self, hash: u64) -> Pick {
         self.inner.admission_picker.pick(&self.inner.statistics, hash)
     }
 
@@ -172,7 +173,7 @@ where
     pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
         let now = Instant::now();
 
-        if force || self.pick(piece.hash()) {
+        if force || self.pick(piece.hash()).admitted() {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             self.inner.engine.enqueue(piece, estimated_size);
         }
@@ -197,11 +198,15 @@ where
         }
 
         if let Some(throttler) = self.inner.load_throttler.as_ref() {
-            if !throttler.pick(&self.inner.statistics, hash) {
-                if self.inner.engine.may_contains(hash) {
-                    return Ok(Load::Throttled);
-                } else {
-                    return Ok(Load::Miss);
+            match throttler.pick(&self.inner.statistics, hash) {
+                Pick::Admit => {}
+                Pick::Reject => unreachable!(),
+                Pick::Throttled(_) => {
+                    if self.inner.engine.may_contains(hash) {
+                        return Ok(Load::Throttled);
+                    } else {
+                        return Ok(Load::Miss);
+                    }
                 }
             }
         }

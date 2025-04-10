@@ -28,6 +28,7 @@ use parking_lot::Mutex;
 use crate::{
     picker::{AdmissionPicker, ReinsertionPicker},
     statistics::Statistics,
+    Pick,
 };
 
 /// A picker that only admits hash from the given list.
@@ -46,14 +47,14 @@ impl BiasedPicker {
 }
 
 impl AdmissionPicker for BiasedPicker {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
-        self.admits.contains(&hash)
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
+        self.admits.contains(&hash).into()
     }
 }
 
 impl ReinsertionPicker for BiasedPicker {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
-        self.admits.contains(&hash)
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
+        self.admits.contains(&hash).into()
     }
 }
 
@@ -99,16 +100,16 @@ impl Recorder {
 }
 
 impl AdmissionPicker for Recorder {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
         self.records.lock().push(Record::Admit(hash));
-        true
+        Pick::Admit
     }
 }
 
 impl ReinsertionPicker for Recorder {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> bool {
+    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
         self.records.lock().push(Record::Evict(hash));
-        false
+        Pick::Reject
     }
 }
 

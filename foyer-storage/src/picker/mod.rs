@@ -12,20 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc, time::Duration};
 
 use crate::{device::RegionId, region::RegionStats, statistics::Statistics};
+
+/// Pick result for admission pickers and reinsertion pickers.
+#[derive(Debug, Clone, Copy)]
+pub enum Pick {
+    /// Admittion.
+    Admit,
+    /// Rejection.
+    Reject,
+    /// This result indicates that the disk cache is throttled caused by the current io throttle.
+    /// The minimal duration to retry this submission is returned for the caller to decide whether to retry it later.
+    Throttled(Duration),
+}
+
+impl Pick {
+    /// Return `true` if the pick result is `Admit`.
+    pub fn admitted(&self) -> bool {
+        matches! {self, Self::Admit}
+    }
+
+    /// Return `true` if the pick result is `Reject`.
+    pub fn rejected(&self) -> bool {
+        matches! {self, Self::Reject}
+    }
+}
+
+impl From<bool> for Pick {
+    fn from(value: bool) -> Self {
+        match value {
+            true => Self::Admit,
+            false => Self::Reject,
+        }
+    }
+}
 
 /// The admission picker for the disk cache.
 pub trait AdmissionPicker: Send + Sync + 'static + Debug {
     /// Decide whether to pick an entry by hash.
-    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> bool;
+    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> Pick;
 }
 
 /// The reinsertion picker for the disk cache.
 pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
     /// Decide whether to pick an entry by hash.
-    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> bool;
+    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> Pick;
 }
 
 /// The eviction picker for the disk cache.

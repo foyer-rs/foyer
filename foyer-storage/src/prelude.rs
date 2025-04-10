@@ -30,7 +30,7 @@ pub use crate::{
             AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
             IoThrottlerPicker, RejectAllPicker,
         },
-        AdmissionPicker, EvictionPicker, ReinsertionPicker,
+        AdmissionPicker, EvictionPicker, Pick, ReinsertionPicker,
     },
     runtime::Runtime,
     statistics::Statistics,
