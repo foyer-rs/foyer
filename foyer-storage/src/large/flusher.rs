@@ -159,6 +159,9 @@ where
         let (tx, rx) = flume::unbounded();
 
         let io_buffer_size = config.buffer_pool_size / config.flushers;
+        let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
+        assert!(io_buffer_size > 0);
+
         bits::assert_aligned(PAGE, io_buffer_size);
         bits::assert_aligned(PAGE, config.blob_index_size);
 
