@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
@@ -109,6 +109,14 @@ pub trait Pipe: Send + Sync + 'static {
 
     /// Send the piece to the disk cache.
     fn send(&self, piece: Piece<Self::Key, Self::Value>);
+
+    /// Send the piece to the disk cache in a asynchronous manner.
+    ///
+    /// The synchronous `send` method is used by default.
+    fn send_async(&self, piece: Piece<Self::Key, Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        self.send(piece);
+        Box::pin(async {})
+    }
 }
 
 /// An no-op pipe that is never enabled.

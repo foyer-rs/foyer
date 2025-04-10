@@ -735,6 +735,20 @@ where
             Cache::Lfu(cache) => cache.evict_all(),
         }
     }
+
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
+    /// Therefore, this function is asynchronous.
+    #[fastrace::trace(name = "foyer::memory::raw::offload")]
+    pub async fn flush(&self) {
+        match self {
+            Cache::Fifo(cache) => cache.flush().await,
+            Cache::S3Fifo(cache) => cache.flush().await,
+            Cache::Lru(cache) => cache.flush().await,
+            Cache::Lfu(cache) => cache.flush().await,
+        }
+    }
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.

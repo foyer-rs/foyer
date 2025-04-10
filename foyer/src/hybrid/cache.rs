@@ -37,7 +37,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchContext, FetchState, Piece, Pipe};
-use foyer_storage::{Load, Statistics, Store};
+use foyer_storage::{Load, Pick, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -126,10 +126,47 @@ where
         }
         self.store.enqueue(piece, false);
     }
+
+    fn send_async(&self, piece: Piece<Self::Key, Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        match piece.location() {
+            CacheLocation::InMem => return Box::pin(async {}),
+            CacheLocation::Default | CacheLocation::OnDisk => {}
+        }
+        let store = self.store.clone();
+        Box::pin(async move {
+            'wait: loop {
+                match store.pick(piece.hash()) {
+                    Pick::Admit => break 'wait,
+                    Pick::Reject => return,
+                    Pick::Throttled(duration) => {
+                        tokio::time::sleep(duration).await;
+                    }
+                }
+            }
+            store.enqueue(piece, true);
+        })
+    }
 }
 
 /// A cached entry holder of the hybrid cache.
 pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
+
+#[derive(Debug)]
+pub struct HybridCacheOptions {
+    pub policy: HybridCachePolicy,
+    pub tracing_options: TracingOptions,
+    pub flush_on_close: bool,
+}
+
+impl Default for HybridCacheOptions {
+    fn default() -> Self {
+        Self {
+            policy: HybridCachePolicy::default(),
+            tracing_options: TracingOptions::default(),
+            flush_on_close: true,
+        }
+    }
+}
 
 /// Hybrid cache that integrates in-memory cache and disk cache.
 ///
@@ -151,11 +188,12 @@ where
     S: HashBuilder + Debug,
 {
     policy: HybridCachePolicy,
-    memory: Cache<K, V, S>,
-    storage: Store<K, V, S>,
+    flush_on_close: bool,
     metrics: Arc<Metrics>,
     tracing_config: Arc<TracingConfig>,
     tracing: Arc<AtomicBool>,
+    memory: Cache<K, V, S>,
+    storage: Store<K, V, S>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -166,10 +204,12 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridCache")
+            .field("policy", &self.policy)
+            .field("flush_on_close", &self.flush_on_close)
+            .field("tracing", &self.tracing)
+            .field("tracing_config", &self.tracing_config)
             .field("memory", &self.memory)
             .field("storage", &self.storage)
-            .field("tracing_config", &self.tracing_config)
-            .field("tracing", &self.tracing)
             .finish()
     }
 }
@@ -183,6 +223,7 @@ where
     fn clone(&self) -> Self {
         Self {
             policy: self.policy,
+            flush_on_close: self.flush_on_close,
             memory: self.memory.clone(),
             storage: self.storage.clone(),
             metrics: self.metrics.clone(),
@@ -199,17 +240,19 @@ where
     S: HashBuilder + Debug,
 {
     pub(crate) fn new(
-        policy: HybridCachePolicy,
+        options: HybridCacheOptions,
         memory: Cache<K, V, S>,
         storage: Store<K, V, S>,
-        tracing_options: TracingOptions,
         metrics: Arc<Metrics>,
     ) -> Self {
+        let policy = options.policy;
+        let flush_on_close = options.flush_on_close;
         let tracing_config = Arc::<TracingConfig>::default();
-        tracing_config.update(tracing_options);
+        tracing_config.update(options.tracing_options);
         let tracing = Arc::new(AtomicBool::new(false));
         Self {
             policy,
+            flush_on_close,
             memory,
             storage,
             metrics,
@@ -465,7 +508,14 @@ where
     /// Gracefully close the hybrid cache.
     ///
     /// `close` will wait for the ongoing flush and reclaim tasks to finish.
+    ///
+    /// Based on the `flush_on_close` option, `close` will flush all in-memory cached entries to the disk cache.
+    ///
+    /// For more details, please refer to [`super::builder::HybridCacheBuilder::with_flush_on_close()`].
     pub async fn close(&self) -> anyhow::Result<()> {
+        if self.flush_on_close {
+            self.memory.flush().await;
+        }
         self.storage.close().await?;
         Ok(())
     }

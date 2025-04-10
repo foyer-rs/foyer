@@ -28,15 +28,14 @@ use foyer_storage::{
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
-use super::cache::HybridCachePipe;
+use super::cache::{HybridCacheOptions, HybridCachePipe};
 use crate::{HybridCache, HybridCachePolicy};
 
 /// Hybrid cache builder.
 pub struct HybridCacheBuilder<K, V> {
     name: Cow<'static, str>,
-    policy: HybridCachePolicy,
+    options: HybridCacheOptions,
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
-    tracing_options: TracingOptions,
     registry: BoxedRegistry,
 }
 
@@ -51,9 +50,8 @@ impl<K, V> HybridCacheBuilder<K, V> {
     pub fn new() -> Self {
         Self {
             name: "foyer".into(),
-            policy: HybridCachePolicy::default(),
+            options: HybridCacheOptions::default(),
             event_listener: None,
-            tracing_options: TracingOptions::default(),
             registry: Box::new(NoopMetricsRegistry),
         }
     }
@@ -74,7 +72,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
     ///
     /// Default: [`HybridCachePolicy::default()`].
     pub fn with_policy(mut self, policy: HybridCachePolicy) -> Self {
-        self.policy = policy;
+        self.options.policy = policy;
         self
     }
 
@@ -90,7 +88,17 @@ impl<K, V> HybridCacheBuilder<K, V> {
     ///
     /// Default: Only operations over 1s will be recorded.
     pub fn with_tracing_options(mut self, tracing_options: TracingOptions) -> Self {
-        self.tracing_options = tracing_options;
+        self.options.tracing_options = tracing_options;
+        self
+    }
+
+    /// Set whether flush all in-memory cached entries to disk cache on close.
+    ///
+    /// Based on the disk cache performance and the io throttle configuration, this may take some extra time on close.
+    ///
+    /// Default: `true`.
+    pub fn with_flush_on_close(mut self, flush_on_close: bool) -> Self {
+        self.options.flush_on_close = flush_on_close;
         self
     }
 
@@ -117,9 +125,8 @@ impl<K, V> HybridCacheBuilder<K, V> {
         }
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            policy: self.policy,
+            options: self.options,
             metrics,
-            tracing_options: self.tracing_options,
             builder,
         }
     }
@@ -133,8 +140,7 @@ where
     S: HashBuilder + Debug,
 {
     name: Cow<'static, str>,
-    policy: HybridCachePolicy,
-    tracing_options: TracingOptions,
+    options: HybridCacheOptions,
     metrics: Arc<Metrics>,
     // `NoopMetricsRegistry` here will be ignored, for its metrics is already set.
     builder: CacheBuilder<K, V, S>,
@@ -152,8 +158,7 @@ where
         let builder = self.builder.with_shards(shards);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             builder,
         }
@@ -166,8 +171,7 @@ where
         let builder = self.builder.with_eviction_config(eviction_config.into());
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             builder,
         }
@@ -181,8 +185,7 @@ where
         let builder = self.builder.with_hash_builder(hash_builder);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             builder,
         }
@@ -193,8 +196,7 @@ where
         let builder = self.builder.with_weighter(weighter);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             builder,
         }
@@ -205,8 +207,7 @@ where
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
             name: self.name.clone(),
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics.clone(),
             memory: memory.clone(),
             builder: StoreBuilder::new(self.name, memory, self.metrics, engine),
@@ -222,8 +223,7 @@ where
     S: HashBuilder + Debug,
 {
     name: Cow<'static, str>,
-    policy: HybridCachePolicy,
-    tracing_options: TracingOptions,
+    options: HybridCacheOptions,
     metrics: Arc<Metrics>,
     memory: Cache<K, V, S>,
     builder: StoreBuilder<K, V, S>,
@@ -240,8 +240,7 @@ where
         let builder = self.builder.with_device_options(device_options);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -255,8 +254,7 @@ where
         let builder = self.builder.with_flush(flush);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -272,8 +270,7 @@ where
         let builder = self.builder.with_recover_mode(recover_mode);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -289,8 +286,7 @@ where
         let builder = self.builder.with_admission_picker(admission_picker);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -304,8 +300,7 @@ where
         let builder = self.builder.with_compression(compression);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -317,8 +312,7 @@ where
         let builder = self.builder.with_runtime_options(runtime_options);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -332,8 +326,7 @@ where
         let builder = self.builder.with_large_object_disk_cache_options(options);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -347,8 +340,7 @@ where
         let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
-            policy: self.policy,
-            tracing_options: self.tracing_options,
+            options: self.options,
             metrics: self.metrics,
             memory: self.memory,
             builder,
@@ -359,7 +351,7 @@ where
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let builder = self.builder;
 
-        let piped = !builder.is_noop() && self.policy == HybridCachePolicy::WriteOnEviction;
+        let piped = !builder.is_noop() && self.options.policy == HybridCachePolicy::WriteOnEviction;
 
         let memory = self.memory;
         let storage = builder.build().await?;
@@ -369,12 +361,6 @@ where
             memory.set_pipe(Box::new(pipe));
         }
 
-        Ok(HybridCache::new(
-            self.policy,
-            memory,
-            storage,
-            self.tracing_options,
-            self.metrics,
-        ))
+        Ok(HybridCache::new(self.options, memory, storage, self.metrics))
     }
 }
