@@ -193,7 +193,11 @@ where
                 Ok(Some(infos)) => infos,
             };
             for info in infos {
-                if self.reinsertion_picker.pick(self.device.statistics(), info.hash) {
+                if self
+                    .reinsertion_picker
+                    .pick(self.device.statistics(), info.hash)
+                    .admitted()
+                {
                     let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
                     let (buf, res) = region.read(buf, info.addr.offset as _).await;
                     if let Err(e) = res {

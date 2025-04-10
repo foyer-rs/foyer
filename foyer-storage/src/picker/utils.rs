@@ -21,12 +21,13 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use foyer_common::strict_assert;
 use itertools::Itertools;
 
-use super::{AdmissionPicker, EvictionPicker, ReinsertionPicker};
+use super::{AdmissionPicker, EvictionPicker, Pick, ReinsertionPicker};
 use crate::{device::RegionId, io::throttle::IoThrottler, region::RegionStats, statistics::Statistics};
 
 /// Only admit on all chained admission pickers pick.
@@ -36,8 +37,20 @@ pub struct ChainedAdmissionPicker {
 }
 
 impl AdmissionPicker for ChainedAdmissionPicker {
-    fn pick(&self, stats: &Arc<Statistics>, size: u64) -> bool {
-        self.pickers.iter().all(|picker| picker.pick(stats, size))
+    fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> Pick {
+        let mut duration = Duration::ZERO;
+        for picker in self.pickers.iter() {
+            match picker.pick(stats, hash) {
+                Pick::Admit => {}
+                Pick::Reject => return Pick::Reject,
+                Pick::Throttled(dur) => duration += dur,
+            }
+        }
+        if duration.is_zero() {
+            Pick::Admit
+        } else {
+            Pick::Throttled(duration)
+        }
     }
 }
 
@@ -67,14 +80,14 @@ impl ChainedAdmissionPickerBuilder {
 pub struct AdmitAllPicker;
 
 impl AdmissionPicker for AdmitAllPicker {
-    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
-        true
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> Pick {
+        Pick::Admit
     }
 }
 
 impl ReinsertionPicker for AdmitAllPicker {
-    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
-        true
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> Pick {
+        Pick::Admit
     }
 }
 
@@ -83,14 +96,14 @@ impl ReinsertionPicker for AdmitAllPicker {
 pub struct RejectAllPicker;
 
 impl AdmissionPicker for RejectAllPicker {
-    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
-        false
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> Pick {
+        Pick::Reject
     }
 }
 
 impl ReinsertionPicker for RejectAllPicker {
-    fn pick(&self, _: &Arc<Statistics>, _: u64) -> bool {
-        false
+    fn pick(&self, _: &Arc<Statistics>, _: u64) -> Pick {
+        Pick::Reject
     }
 }
 
@@ -139,8 +152,8 @@ impl IoThrottlerPicker {
         Self { inner: Arc::new(inner) }
     }
 
-    fn pick_inner(&self, stats: &Arc<Statistics>) -> bool {
-        let picked = self.inner.throttler.probe();
+    fn pick_inner(&self, stats: &Arc<Statistics>) -> Pick {
+        let duration = self.inner.throttler.probe();
 
         let bytes_current = match self.inner.target {
             IoThrottlerTarget::Read => stats.disk_read_bytes(),
@@ -164,12 +177,16 @@ impl IoThrottlerPicker {
 
         self.inner.throttler.reduce(bytes_delta as f64, ios_delta as f64);
 
-        picked.is_zero()
+        if duration.is_zero() {
+            Pick::Admit
+        } else {
+            Pick::Throttled(duration)
+        }
     }
 }
 
 impl AdmissionPicker for IoThrottlerPicker {
-    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> bool {
+    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> Pick {
         self.pick_inner(stats)
     }
 }
