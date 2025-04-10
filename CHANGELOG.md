@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-04-11
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.16.1 |
+| foyer-common | 0.16.1 |
+| foyer-memory | 0.16.1 |
+| foyer-storage | 0.16.1 |
+| foyer-bench | 0.16.1 |
+
+### Changes
+
+- Fix panic when building large object disk cache engine if `buffer_pool_size / flushers` is not 4K-aligned.
+- Make CI run on release branches.
+
 ## 2025-04-07
 
 ### Releases
