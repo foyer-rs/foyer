@@ -5,10 +5,12 @@ on:
     branches:
       - "main"
       - "forks/*"
+      - release-*.*
   pull_request:
     branches:
       - "main"
       - "v*.*.*-rc"
+      - release-*.*
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
