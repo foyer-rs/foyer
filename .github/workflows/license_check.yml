@@ -5,10 +5,12 @@ on:
     branches:
     - main
     - "forks/*"
+    - release-*.*
   pull_request:
     branches: 
     - main
     - "v*.*.*-rc"
+    - release-*.*
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
