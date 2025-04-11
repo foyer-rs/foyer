@@ -58,7 +58,7 @@ use crate::{
         Storage,
     },
     ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
-    Pick,
+    Pick, Throttle,
 };
 
 /// Load result.
@@ -264,6 +264,11 @@ where
         self.inner.engine.statistics()
     }
 
+    /// Get the io throttle of the disk cache.
+    pub fn throttle(&self) -> &Throttle {
+        self.inner.engine.throttle()
+    }
+
     /// Get the runtime.
     pub fn runtime(&self) -> &Runtime {
         &self.inner.runtime
@@ -272,6 +277,11 @@ where
     /// Wait for the ongoing flush and reclaim tasks to finish.
     pub async fn wait(&self) {
         self.inner.engine.wait().await
+    }
+
+    /// Return the estimated serialized size of the entry.
+    pub fn entry_estimated_size(&self, key: &K, value: &V) -> usize {
+        EntrySerializer::estimated_size(key, value)
     }
 
     /// Get the load throttle switch for the disk cache.
@@ -924,9 +934,9 @@ where
     /// If the total entry estimated size in the submit queue exceeds the threshold, the further entries will be
     /// ignored.
     ///
-    /// Default: `buffer_pool_size`` * 2.
-    pub fn with_submit_queue_size_threshold(mut self, buffer_pool_size: usize) -> Self {
-        self.buffer_pool_size = buffer_pool_size;
+    /// Default: `buffer_pool_size` * 2.
+    pub fn with_submit_queue_size_threshold(mut self, submit_queue_size_threshold: usize) -> Self {
+        self.submit_queue_size_threshold = Some(submit_queue_size_threshold);
         self
     }
 

@@ -115,6 +115,7 @@ struct IoThrottlerPickerInner {
     target: IoThrottlerTarget,
 }
 
+/// Target of the io throttler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IoThrottlerTarget {
@@ -148,7 +149,6 @@ impl IoThrottlerPicker {
             ios_last: AtomicUsize::default(),
             target,
         };
-
         Self { inner: Arc::new(inner) }
     }
 

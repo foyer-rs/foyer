@@ -20,7 +20,10 @@ pub use crate::{
         Dev, DevConfig, DevExt, IopsCounter, Throttle,
     },
     error::{Error, Result},
-    io::buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
+    io::{
+        buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
+        throttle::IoThrottler,
+    },
     large::{
         recover::RecoverMode,
         tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
@@ -28,7 +31,7 @@ pub use crate::{
     picker::{
         utils::{
             AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
-            IoThrottlerPicker, RejectAllPicker,
+            IoThrottlerPicker, IoThrottlerTarget, RejectAllPicker,
         },
         AdmissionPicker, EvictionPicker, Pick, ReinsertionPicker,
     },

@@ -37,7 +37,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchContext, FetchState, Piece, Pipe};
-use foyer_storage::{Load, Pick, Statistics, Store};
+use foyer_storage::{IoThrottler, Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -95,6 +95,17 @@ where
     store: Store<K, V, S>,
 }
 
+impl<K, V, S> Debug for HybridCachePipe<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridCachePipe").finish()
+    }
+}
+
 impl<K, V, S> HybridCachePipe<K, V, S>
 where
     K: StorageKey,
@@ -127,24 +138,59 @@ where
         self.store.enqueue(piece, false);
     }
 
-    fn send_async(&self, piece: Piece<Self::Key, Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        match piece.location() {
-            CacheLocation::InMem => return Box::pin(async {}),
-            CacheLocation::Default | CacheLocation::OnDisk => {}
-        }
+    fn flush(&self, pieces: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        let throttle = self.store.throttle().clone();
         let store = self.store.clone();
         Box::pin(async move {
-            'wait: loop {
-                match store.pick(piece.hash()) {
-                    Pick::Admit => break 'wait,
-                    Pick::Reject => return,
-                    Pick::Throttled(duration) => {
-                        tokio::time::sleep(duration).await;
-                    }
+            store.wait().await;
+            let throttler = IoThrottler::new(throttle.write_throughput, throttle.write_iops);
+            for piece in pieces {
+                let bytes = store.entry_estimated_size(piece.key(), piece.value());
+                let ios = throttle.iops_counter.count(bytes);
+                let wait = throttler.consume(bytes as _, ios as _);
+                if !wait.is_zero() {
+                    tokio::time::sleep(wait).await
                 }
+                store.enqueue(piece, false);
             }
-            store.enqueue(piece, true);
         })
+
+        // let store = self.store.clone();
+        // Box::pin(async move {
+        //     store.wait().await;
+        //     'piece: for piece in pieces {
+        //         'wait: loop {
+        //             match store.pick(piece.hash()) {
+        //                 Pick::Admit => break 'wait,
+        //                 Pick::Reject => continue 'piece,
+        //                 Pick::Throttled(duration) => {
+        //                     tokio::time::sleep(duration).await;
+        //                 }
+        //             }
+        //         }
+        //         store.enqueue(piece, true);
+        //     }
+        // })
+
+        // let throttle = self.store.throttle();
+        // println!("throttle: {throttle:?}")
+        // let throttler =
+        //     IoThrottlerPicker::new(IoThrottlerTarget::Write, throttle.write_throughput, throttle.write_iops);
+        // let store = self.store.clone();
+        // let statistics = self.store.statistics().clone();
+        // Box::pin(async move {
+        //     store.wait().await;
+        //     for piece in pieces {
+        //         match throttler.pick(&statistics, piece.hash()) {
+        //             Pick::Admit => {}
+        //             Pick::Reject => unreachable!(),
+        //             Pick::Throttled(duration) => tokio::time::sleep(duration).await,
+        //         }
+        //         // Since the cache is closing at the moment, no new entry will come after it.
+        //         // It is safe to force enqueue the piece and ignore the internal io throttler of the store.
+        //         store.enqueue(piece, false);
+        //     }
+        // })
     }
 }
 
@@ -513,10 +559,15 @@ where
     ///
     /// For more details, please refer to [`super::builder::HybridCacheBuilder::with_flush_on_close()`].
     pub async fn close(&self) -> anyhow::Result<()> {
+        let now = Instant::now();
         if self.flush_on_close {
+            let bytes = self.memory.usage();
+            tracing::info!(bytes, "[hybrid]: flush all in-memory cached entries to disk on close");
             self.memory.flush().await;
         }
         self.storage.close().await?;
+        let elapsed = now.elapsed();
+        tracing::info!("[hybrid]: close consumes {elapsed:?}",);
         Ok(())
     }
 

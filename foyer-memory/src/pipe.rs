@@ -98,7 +98,7 @@ impl<K, V> Piece<K, V> {
 }
 
 /// Pipe is used to notify disk cache to cache entries from the in-memory cache.
-pub trait Pipe: Send + Sync + 'static {
+pub trait Pipe: Send + Sync + 'static + Debug {
     /// Type of the key of the record.
     type Key;
     /// Type of the value of the record.
@@ -110,18 +110,21 @@ pub trait Pipe: Send + Sync + 'static {
     /// Send the piece to the disk cache.
     fn send(&self, piece: Piece<Self::Key, Self::Value>);
 
-    /// Send the piece to the disk cache in a asynchronous manner.
+    /// Flush all the pieces to the disk cache in a asynchronous manner.
     ///
-    /// The synchronous `send` method is used by default.
-    fn send_async(&self, piece: Piece<Self::Key, Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        self.send(piece);
-        Box::pin(async {})
-    }
+    /// This function is called when the in-memory cache is flushed.
+    /// It is expected to obey the io throttle of the disk cache.
+    fn flush(&self, pieces: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
 /// An no-op pipe that is never enabled.
-#[derive(Debug)]
 pub struct NoopPipe<K, V>(PhantomData<(K, V)>);
+
+impl<K, V> Debug for NoopPipe<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NoopPipe").finish()
+    }
+}
 
 impl<K, V> Default for NoopPipe<K, V> {
     fn default() -> Self {
@@ -142,6 +145,10 @@ where
     }
 
     fn send(&self, _: Piece<Self::Key, Self::Value>) {}
+
+    fn flush(&self, _: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async {})
+    }
 }
 
 #[cfg(test)]

@@ -89,11 +89,10 @@ impl IoThrottler {
         inner.iops_quota -= iops;
     }
 
-    /// Consume some throughput and iops quota from the rate limiter.
+    /// Get the nearest time to retry to check if an io can be submitted.
     ///
-    /// If there enough quota left, returns `true`; otherwise, returns `false`.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub fn consume(&self, throughput: f64, iops: f64) -> bool {
+    /// Return `Duration::ZERO` if no need to wait and consume the quota.
+    pub fn consume(&self, throughput: f64, iops: f64) -> Duration {
         let mut inner = self.inner.lock();
 
         let now = Instant::now();
@@ -104,10 +103,19 @@ impl IoThrottler {
         inner.throughput_quota = f64::min(inner.throughput_quota + throughput_refill, self.throughput);
         inner.iops_quota = f64::min(inner.iops_quota + iops_refill, self.iops);
 
-        let enough =
-            (self.throughput == 0.0 || inner.throughput_quota > 0.0) && (self.iops == 0.0 || inner.iops_quota > 0.0);
+        let throughput_refill_duration = if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
+        };
+        let iops_refill_duration = if self.iops == 0.0 || inner.iops_quota >= 0.0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(-inner.iops_quota / self.iops)
+        };
+        let wait = std::cmp::max(throughput_refill_duration, iops_refill_duration);
 
-        if enough {
+        if wait.is_zero() {
             if self.throughput > 0.0 {
                 inner.throughput_quota -= throughput;
             }
@@ -116,17 +124,15 @@ impl IoThrottler {
             }
         }
 
-        enough
+        wait
     }
 
     /// Get the throughput throttle.
-    #[expect(dead_code)]
     pub fn throughput(&self) -> f64 {
         self.throughput
     }
 
     /// Get the iops throttle.
-    #[expect(dead_code)]
     pub fn iops(&self) -> f64 {
         self.iops
     }
@@ -223,7 +229,7 @@ mod tests {
             Target::Throughput => rng.random_range(iops * 0.0004..iops * 0.0008),
             Target::Iops => rng.random_range(iops * 0.0008..iops * 0.0016),
         };
-        if throttler.consume(t, i) {
+        if throttler.consume(t, i).is_zero() {
             bytes.fetch_add(t as usize, Ordering::Relaxed);
             ios.fetch_add(i as usize, Ordering::Relaxed);
         }
