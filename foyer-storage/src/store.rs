@@ -85,6 +85,21 @@ impl<K, V> Load<K, V> {
             _ => None,
         }
     }
+
+    /// Check if the load result is a cache entry.
+    pub fn is_entry(&self) -> bool {
+        matches!(self, Load::Entry { .. })
+    }
+
+    /// Check if the load result is a cache miss.
+    pub fn is_miss(&self) -> bool {
+        matches!(self, Load::Miss)
+    }
+
+    /// Check if the load result is miss caused by io throttled.
+    pub fn is_throttled(&self) -> bool {
+        matches!(self, Load::Throttled)
+    }
 }
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -429,6 +444,30 @@ where
     small: SmallEngineOptions<K, V, S>,
 }
 
+impl<K, V, S> Debug for StoreBuilder<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreBuilder")
+            .field("name", &self.name)
+            .field("memory", &self.memory)
+            .field("metrics", &self.metrics)
+            .field("device_options", &self.device_options)
+            .field("engine", &self.engine)
+            .field("runtime_config", &self.runtime_config)
+            .field("admission_picker", &self.admission_picker)
+            .field("compression", &self.compression)
+            .field("recover_mode", &self.recover_mode)
+            .field("flush", &self.flush)
+            .field("large", &self.large)
+            .field("small", &self.small)
+            .finish()
+    }
+}
+
 impl<K, V, S> StoreBuilder<K, V, S>
 where
     K: StorageKey,
@@ -760,6 +799,29 @@ where
     _marker: PhantomData<(K, V, S)>,
 }
 
+impl<K, V, S> Debug for LargeEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LargeEngineOptions")
+            .field("indexer_shards", &self.indexer_shards)
+            .field("recover_concurrency", &self.recover_concurrency)
+            .field("flushers", &self.flushers)
+            .field("reclaimers", &self.reclaimers)
+            .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("blob_index_size", &self.blob_index_size)
+            .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
+            .field("clean_region_threshold", &self.clean_region_threshold)
+            .field("eviction_pickers", &self.eviction_pickers)
+            .field("reinsertion_picker", &self.reinsertion_picker)
+            .field("tombstone_log_config", &self.tombstone_log_config)
+            .finish()
+    }
+}
+
 impl<K, V, S> Default for LargeEngineOptions<K, V, S>
 where
     K: StorageKey,
@@ -931,6 +993,23 @@ where
     flushers: usize,
 
     _marker: PhantomData<(K, V, S)>,
+}
+
+impl<K, V, S> Debug for SmallEngineOptions<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmallEngineOptions")
+            .field("set_size", &self.set_size)
+            .field("set_cache_capacity", &self.set_cache_capacity)
+            .field("set_cache_shards", &self.set_cache_shards)
+            .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("flushers", &self.flushers)
+            .finish()
+    }
 }
 
 impl<K, V, S> Default for SmallEngineOptions<K, V, S>

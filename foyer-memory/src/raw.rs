@@ -605,6 +605,7 @@ where
         }
     }
 
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
     #[fastrace::trace(name = "foyer::memory::raw::evict_all")]
     pub fn evict_all(&self) {
         let mut garbages = vec![];
@@ -622,6 +623,32 @@ where
                 }
                 if piped && event == Event::Evict {
                     pipe.send(Piece::new(record));
+                }
+            }
+        }
+    }
+
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
+    /// Therefore, this function is asynchronous.
+    #[fastrace::trace(name = "foyer::memory::raw::flush")]
+    pub async fn flush(&self) {
+        let mut garbages = vec![];
+        for shard in self.inner.shards.iter() {
+            shard.write().evict(0, &mut garbages);
+        }
+
+        // Deallocate data out of the lock critical section.
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+        if self.inner.event_listener.is_some() || piped {
+            for (event, record) in garbages {
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(event, record.key(), record.value())
+                }
+                if piped && event == Event::Evict {
+                    pipe.send_async(Piece::new(record)).await;
                 }
             }
         }
