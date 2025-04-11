@@ -800,6 +800,27 @@ mod tests {
         (hybrid, recorder)
     }
 
+    async fn open_with_flush_on_close(
+        dir: impl AsRef<Path>,
+        flush_on_close: bool,
+    ) -> HybridCache<u64, Vec<u8>, ModRandomState> {
+        HybridCacheBuilder::new()
+            .with_name("test")
+            .with_flush_on_close(flush_on_close)
+            .memory(4 * MB)
+            .with_hash_builder(ModRandomState::default())
+            // TODO(MrCroxx): Test with `Engine::Mixed`.
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
+                    .with_capacity(16 * MB)
+                    .with_file_size(MB),
+            )
+            .build()
+            .await
+            .unwrap()
+    }
+
     #[test_log::test(tokio::test)]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
@@ -881,7 +902,7 @@ mod tests {
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
-        assert!(hybrid.storage().load(&2).await.unwrap().entry().is_none());
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         // Test hybrid cache that write disk cache on insertion.
 
@@ -899,7 +920,7 @@ mod tests {
         hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
-        assert!(hybrid.storage().load(&2).await.unwrap().entry().is_none());
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
     }
 
     #[test_log::test(tokio::test)]
@@ -955,5 +976,31 @@ mod tests {
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
         assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_flush_on_close() {
+        // check without flush on clsoe
+
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open_with_flush_on_close(dir.path(), false).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
+        hybrid.close().await.unwrap();
+        let hybrid = open_with_flush_on_close(dir.path(), false).await;
+        assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
+
+        // check with flush on clsoe
+
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open_with_flush_on_close(dir.path(), true).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
+        hybrid.close().await.unwrap();
+        let hybrid = open_with_flush_on_close(dir.path(), true).await;
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().entry().unwrap(),
+            (1, vec![1; 7 * KB])
+        );
     }
 }
