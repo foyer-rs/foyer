@@ -86,19 +86,19 @@ impl<K, V> Load<K, V> {
         }
     }
 
-    /// Chekc if the load result is a cache entry.
+    /// Check if the load result is a cache entry.
     pub fn is_entry(&self) -> bool {
         matches!(self, Load::Entry { .. })
     }
 
     /// Check if the load result is a cache miss.
     pub fn is_miss(&self) -> bool {
-        matches!(self, Load::Miss { .. })
+        matches!(self, Load::Miss)
     }
 
     /// Check if the load result is miss caused by io throttled.
     pub fn is_throttled(&self) -> bool {
-        matches!(self, Load::Throttled { .. })
+        matches!(self, Load::Throttled)
     }
 }
 

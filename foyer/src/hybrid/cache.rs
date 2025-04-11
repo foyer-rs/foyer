@@ -980,7 +980,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn test_flush_on_close() {
-        // check without flush on clsoe
+        // check without flush on close
 
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_flush_on_close(dir.path(), false).await;
@@ -990,7 +990,7 @@ mod tests {
         let hybrid = open_with_flush_on_close(dir.path(), false).await;
         assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
 
-        // check with flush on clsoe
+        // check with flush on close
 
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_flush_on_close(dir.path(), true).await;
