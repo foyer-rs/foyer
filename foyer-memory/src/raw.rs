@@ -642,15 +642,15 @@ where
         // Deallocate data out of the lock critical section.
         let pipe = self.inner.pipe.load();
         let piped = pipe.is_enabled();
-        if self.inner.event_listener.is_some() || piped {
-            for (event, record) in garbages {
-                if let Some(listener) = self.inner.event_listener.as_ref() {
-                    listener.on_leave(event, record.key(), record.value())
-                }
-                if piped && event == Event::Evict {
-                    pipe.send_async(Piece::new(record)).await;
-                }
+
+        if let Some(listener) = self.inner.event_listener.as_ref() {
+            for (event, record) in garbages.iter() {
+                listener.on_leave(*event, record.key(), record.value());
             }
+        }
+        if piped {
+            let pieces = garbages.into_iter().map(|(_, record)| Piece::new(record)).collect_vec();
+            pipe.flush(pieces).await;
         }
     }
 

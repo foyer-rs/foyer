@@ -282,6 +282,9 @@ struct Args {
     /// Record fetch trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
     trace_fetch: humantime::Duration,
+
+    #[arg(long, default_value_t = false)]
+    flush_on_close: bool,
 }
 
 #[derive(Debug)]
@@ -456,14 +459,15 @@ async fn benchmark(args: Args) {
         .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
     let policy = match args.policy.as_str() {
-        "eviction" => HybridCachePolicy::WriteOnInsertion,
+        "eviction" => HybridCachePolicy::WriteOnEviction,
         "insertion" => HybridCachePolicy::WriteOnInsertion,
         _ => panic!("unsupported policy: {}", args.policy),
     };
 
     let builder = HybridCacheBuilder::new()
         .with_tracing_options(tracing_options)
-        .with_policy(policy);
+        .with_policy(policy)
+        .with_flush_on_close(args.flush_on_close);
 
     let builder = if args.metrics {
         let registry = Registry::new();
@@ -612,12 +616,17 @@ async fn benchmark(args: Args) {
         &metrics_dump_end,
     );
 
-    hybrid.close().await.unwrap();
+    let close = {
+        let now = Instant::now();
+        hybrid.close().await.unwrap();
+        now.elapsed()
+    };
 
     handle_monitor.abort();
     handle_signal.abort();
 
     println!("\nTotal:\n{}", analysis);
+    println!("Close takes: {close:?}");
 
     teardown();
 }

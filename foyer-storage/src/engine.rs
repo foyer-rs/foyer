@@ -26,7 +26,7 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    Statistics, Storage,
+    Statistics, Storage, Throttle,
 };
 
 pub struct SizeSelector<K, V>
@@ -226,7 +226,7 @@ where
         }
     }
 
-    fn throttle(&self) -> &crate::Throttle {
+    fn throttle(&self) -> &Throttle {
         match self {
             EngineEnum::Noop(storage) => storage.throttle(),
             EngineEnum::Large(storage) => storage.throttle(),

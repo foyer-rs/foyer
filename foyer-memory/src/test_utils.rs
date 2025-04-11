@@ -14,7 +14,7 @@
 
 //! Utilities for testing.
 
-use std::sync::Arc;
+use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
 
 use foyer_common::code::{Key, Value};
 use parking_lot::{Mutex, MutexGuard};
@@ -22,9 +22,14 @@ use parking_lot::{Mutex, MutexGuard};
 use crate::{Piece, Pipe};
 
 /// A pipe that records all sent pieces.
-#[derive(Debug)]
 pub struct PiecePipe<K, V> {
     pieces: Arc<Mutex<Vec<Piece<K, V>>>>,
+}
+
+impl<K, V> Debug for PiecePipe<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PiecePipe").field("pieces", &self.pieces).finish()
+    }
 }
 
 impl<K, V> Clone for PiecePipe<K, V> {
@@ -57,6 +62,11 @@ where
 
     fn send(&self, piece: Piece<Self::Key, Self::Value>) {
         self.pieces.lock().push(piece);
+    }
+
+    fn flush(&self, mut pieces: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        self.pieces.lock().append(&mut pieces);
+        Box::pin(async {})
     }
 }
 
