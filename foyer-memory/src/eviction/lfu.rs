@@ -14,7 +14,7 @@
 
 use std::{mem::offset_of, sync::Arc};
 
-use cmsketch::CMSketchU16;
+use cmsketch::CMSketchAtomicU16;
 use foyer_common::{
     code::{Key, Value},
     strict_assert, strict_assert_eq, strict_assert_ne,
@@ -134,7 +134,7 @@ where
     protected_weight_capacity: usize,
 
     // TODO(MrCroxx): use a count-min-sketch impl with atomic u16
-    frequencies: CMSketchU16,
+    frequencies: CMSketchAtomicU16,
 
     step: usize,
     decay: usize,
@@ -212,7 +212,7 @@ where
 
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
-        let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let frequencies = CMSketchAtomicU16::new(config.cmsketch_eps, config.cmsketch_confidence);
         let decay = frequencies.width();
 
         Self {
@@ -393,7 +393,8 @@ where
                             this.increase_queue_weight(Queue::Protected, record.weight());
                             this.protected.push_back(r);
 
-                            // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
+                            // If `protected` weight exceeds the capacity, overflow entry from `protected` to
+                            // `probation`.
                             while this.protected_weight > this.protected_weight_capacity {
                                 strict_assert!(!this.protected.is_empty());
                                 let r = this.protected.pop_front().unwrap();
