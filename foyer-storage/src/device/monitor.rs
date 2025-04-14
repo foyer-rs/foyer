@@ -12,36 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Instant,
+use std::{fmt::Debug, sync::Arc, time::Instant};
+
+use foyer_common::metrics::Metrics;
+
+use super::{RegionId, Throttle};
+use crate::{
+    error::Result,
+    io::buffer::{IoBuf, IoBufMut},
+    Dev, DirectFileDevice, Runtime, Statistics,
 };
-
-use foyer_common::{bits, metrics::Metrics};
-
-use super::RegionId;
-use crate::{error::Result, Dev, DevExt, DirectFileDevice, IoBytes, IoBytesMut, Runtime};
-
-/// The statistics information of the device.
-#[derive(Debug, Default)]
-pub struct DeviceStats {
-    /// The read io count of the device.
-    pub read_ios: AtomicUsize,
-    /// The read bytes of the device.
-    pub read_bytes: AtomicUsize,
-
-    /// The write io count of the device.
-    pub write_ios: AtomicUsize,
-    /// The write bytes of the device.
-    pub write_bytes: AtomicUsize,
-
-    /// The flush io count of the device.
-    pub flush_ios: AtomicUsize,
-}
 
 #[derive(Clone)]
 pub struct MonitoredConfig<D>
@@ -70,7 +50,7 @@ where
     D: Dev,
 {
     device: D,
-    stats: Arc<DeviceStats>,
+    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -80,22 +60,26 @@ where
 {
     async fn open(options: MonitoredConfig<D>, runtime: Runtime) -> Result<Self> {
         let device = D::open(options.config, runtime).await?;
+        let iops_counter = device.throttle().iops_counter.clone();
         Ok(Self {
             device,
-            stats: Arc::default(),
+            stats: Arc::new(Statistics::new(iops_counter)),
             metrics: options.metrics,
         })
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::write")]
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), buf.len());
-        self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
+        let bytes = buf.len();
 
         let res = self.device.write(buf, region, offset).await;
+
+        self.stats.record_disk_write(bytes);
 
         self.metrics.storage_disk_write.increase(1);
         self.metrics.storage_disk_write_bytes.increase(bytes as u64);
@@ -107,14 +91,17 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::read")]
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), len);
-        self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
+        let bytes = buf.len();
 
-        let res = self.device.read(region, offset, len).await;
+        let res = self.device.read(buf, region, offset).await;
+
+        self.stats.record_disk_read(bytes);
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);
@@ -129,9 +116,9 @@ where
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
-        self.stats.flush_ios.fetch_add(1, Ordering::Relaxed);
-
         let res = self.device.flush(region).await;
+
+        self.stats.record_disk_flush();
 
         self.metrics.storage_disk_flush.increase(1);
         self.metrics
@@ -156,16 +143,26 @@ where
         self.device.region_size()
     }
 
+    fn throttle(&self) -> &Throttle {
+        self.device.throttle()
+    }
+
     async fn open(config: Self::Config, runtime: Runtime) -> Result<Self> {
         Self::open(config, runtime).await
     }
 
-    async fn write(&self, buf: IoBytes, region: RegionId, offset: u64) -> Result<()> {
+    async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         self.write(buf, region, offset).await
     }
 
-    async fn read(&self, region: RegionId, offset: u64, len: usize) -> Result<IoBytesMut> {
-        self.read(region, offset, len).await
+    async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
+        self.read(buf, region, offset).await
     }
 
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
@@ -175,14 +172,17 @@ where
 
 impl Monitored<DirectFileDevice> {
     #[fastrace::trace(name = "foyer::storage::device::monitor::pwrite")]
-    pub async fn pwrite(&self, buf: IoBytes, offset: u64) -> Result<()> {
+    pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), buf.len());
-        self.stats.write_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.write_bytes.fetch_add(bytes, Ordering::Relaxed);
+        let bytes = buf.len();
 
         let res = self.device.pwrite(buf, offset).await;
+
+        self.stats.record_disk_write(bytes);
 
         self.metrics.storage_disk_write.increase(1);
         self.metrics.storage_disk_write_bytes.increase(bytes as u64);
@@ -194,14 +194,17 @@ impl Monitored<DirectFileDevice> {
     }
 
     #[fastrace::trace(name = "foyer::storage::device::monitor::pread")]
-    pub async fn pread(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
+    pub async fn pread<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         let now = Instant::now();
 
-        let bytes = bits::align_up(self.align(), len);
-        self.stats.read_ios.fetch_add(1, Ordering::Relaxed);
-        self.stats.read_bytes.fetch_add(bytes, Ordering::Relaxed);
+        let bytes = buf.len();
 
-        let res = self.device.pread(offset, len).await;
+        let res = self.device.pread(buf, offset).await;
+
+        self.stats.record_disk_read(bytes);
 
         self.metrics.storage_disk_read.increase(1);
         self.metrics.storage_disk_read_bytes.increase(bytes as u64);
@@ -217,7 +220,7 @@ impl<D> Monitored<D>
 where
     D: Dev,
 {
-    pub fn stat(&self) -> &Arc<DeviceStats> {
+    pub fn statistics(&self) -> &Arc<Statistics> {
         &self.stats
     }
 

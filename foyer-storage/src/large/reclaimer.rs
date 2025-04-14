@@ -15,18 +15,24 @@
 use std::{fmt::Debug, future::Future, sync::Arc, time::Duration};
 
 use foyer_common::{
+    bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
-use futures::future::join_all;
+use futures_util::future::join_all;
 use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
-    device::IO_BUFFER_ALLOCATOR,
+    device::MonitoredDevice,
     error::Result,
+    io::{
+        buffer::{IoBuffer, OwnedSlice},
+        PAGE,
+    },
     large::{
         flusher::{Flusher, Submission},
+        generic::GenericLargeStorageConfig,
         indexer::Indexer,
         scanner::RegionScanner,
         serde::Sequence,
@@ -34,8 +40,6 @@ use crate::{
     picker::ReinsertionPicker,
     region::{Region, RegionManager},
     runtime::Runtime,
-    statistics::Statistics,
-    IoBytes,
 };
 
 #[derive(Debug)]
@@ -44,17 +48,13 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    #[expect(clippy::too_many_arguments)]
     pub fn open<K, V>(
+        config: &GenericLargeStorageConfig<K, V>,
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V>>,
-        stats: Arc<Statistics>,
-        flush: bool,
         metrics: Arc<Metrics>,
-        runtime: &Runtime,
     ) -> Self
     where
         K: StorageKey,
@@ -63,19 +63,20 @@ impl Reclaimer {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
         let runner = ReclaimRunner {
+            device: config.device.clone(),
             region_manager,
             reclaim_semaphore,
             indexer,
             flushers,
-            reinsertion_picker,
-            stats,
-            flush,
-            metrics,
+            reinsertion_picker: config.reinsertion_picker.clone(),
+            blob_index_size: config.blob_index_size,
+            flush: config.flush,
+            _metrics: metrics,
             wait_rx,
-            runtime: runtime.clone(),
+            runtime: config.runtime.clone(),
         };
 
-        let _handle = runtime.write().spawn(async move { runner.run().await });
+        let _handle = config.runtime.write().spawn(async move { runner.run().await });
 
         Self { wait_tx }
     }
@@ -95,7 +96,9 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    device: MonitoredDevice,
+
+    reinsertion_picker: Arc<dyn ReinsertionPicker>,
 
     region_manager: RegionManager,
     reclaim_semaphore: Arc<Semaphore>,
@@ -104,11 +107,10 @@ where
 
     flushers: Vec<Flusher<K, V>>,
 
-    stats: Arc<Statistics>,
-
+    blob_index_size: usize,
     flush: bool,
 
-    metrics: Arc<Metrics>,
+    _metrics: Arc<Metrics>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
@@ -168,7 +170,7 @@ where
 
         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone(), self.metrics.clone());
+        let mut scanner = RegionScanner::new(region.clone(), self.blob_index_size);
         let mut picked_count = 0;
         let mut unpicked = vec![];
         // The loop will ends when:
@@ -179,7 +181,7 @@ where
         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
         // They will be removed when a query find a mismatch entry.
         'reinsert: loop {
-            let (info, key) = match scanner.next_key().await {
+            let infos = match scanner.next().await {
                 Ok(None) => break 'reinsert,
                 Err(e) => {
                     tracing::warn!(
@@ -188,30 +190,37 @@ where
                     );
                     break 'reinsert;
                 }
-                Ok(Some((info, key))) => (info, key),
+                Ok(Some(infos)) => infos,
             };
-            if self.reinsertion_picker.pick(&self.stats, &key) {
-                let buffer = match region.read(info.addr.offset as _, info.addr.len as _).await {
-                    Err(e) => {
+            for info in infos {
+                if self
+                    .reinsertion_picker
+                    .pick(self.device.statistics(), info.hash)
+                    .admitted()
+                {
+                    let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
+                    let (buf, res) = region.read(buf, info.addr.offset as _).await;
+                    if let Err(e) = res {
                         tracing::warn!(
-                            "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                            id = region.id()
-                        );
+                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                        id = region.id()
+                    );
                         break 'reinsert;
                     }
-                    Ok(buf) => buf.freeze(),
-                };
-                let flusher = self.flushers[picked_count % self.flushers.len()].clone();
-                flusher.submit(Submission::Reinsertion {
-                    reinsertion: Reinsertion {
-                        hash: info.hash,
-                        sequence: info.sequence,
-                        buffer,
-                    },
-                });
-                picked_count += 1;
-            } else {
-                unpicked.push(info.hash);
+
+                    let slice = buf.into_owned_slice().slice(..info.addr.len as usize);
+                    let flusher = self.flushers[picked_count % self.flushers.len()].clone();
+                    flusher.submit(Submission::Reinsertion {
+                        reinsertion: Reinsertion {
+                            hash: info.hash,
+                            sequence: info.addr.sequence,
+                            slice,
+                        },
+                    });
+                    picked_count += 1;
+                } else {
+                    unpicked.push(info.hash);
+                }
             }
         }
 
@@ -251,8 +260,10 @@ pub struct RegionCleaner;
 
 impl RegionCleaner {
     pub async fn clean(region: &Region, flush: bool) -> Result<()> {
-        let buf = allocator_api2::vec::from_elem_in(0, region.align(), &IO_BUFFER_ALLOCATOR).into();
-        region.write(buf, 0).await?;
+        let mut page = IoBuffer::new(PAGE);
+        page.fill(0);
+        let (_, res) = region.write(page, 0).await;
+        res?;
         if flush {
             region.flush().await?;
         }
@@ -264,5 +275,5 @@ impl RegionCleaner {
 pub struct Reinsertion {
     pub hash: u64,
     pub sequence: Sequence,
-    pub buffer: IoBytes,
+    pub slice: OwnedSlice,
 }

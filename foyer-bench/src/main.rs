@@ -38,21 +38,16 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCache,
-    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, RecoverMode,
-    RuntimeOptions, S3FifoConfig, SmallEngineOptions, TokioRuntimeOptions, TracingOptions,
+    Code, CodeError, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
+    HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
+    RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, Throttle, TokioRuntimeOptions, TracingOptions,
 };
-use futures::future::join_all;
+use futures_util::future::join_all;
 use itertools::Itertools;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
-use rand::{
-    distributions::Distribution,
-    rngs::{OsRng, StdRng},
-    Rng, SeedableRng,
-};
+use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
 use rate::RateLimiter;
-use serde::{Deserialize, Serialize};
 use text::text;
 use tokio::sync::{broadcast, oneshot};
 
@@ -147,13 +142,21 @@ struct Args {
     #[arg(long, default_value_t = 16)]
     recover_concurrency: usize,
 
-    /// Enable rated ticket admission picker if `admission_rate_limit > 0`.
-    #[arg(long, default_value_t = ByteSize::b(0))]
-    admission_rate_limit: ByteSize,
+    /// Disk write iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_write_iops: usize,
 
-    /// Enable rated ticket reinsertion picker if `reinsertion_rate_limit > 0`.
+    /// Disk read iops throttle.
+    #[arg(long, default_value_t = 0)]
+    disk_read_iops: usize,
+
+    /// Disk write throughput throttle.
     #[arg(long, default_value_t = ByteSize::b(0))]
-    reinsertion_rate_limit: ByteSize,
+    disk_write_throughput: ByteSize,
+
+    /// Disk read throughput throttle.
+    #[arg(long, default_value_t = ByteSize::b(0))]
+    disk_read_throughput: ByteSize,
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
@@ -249,6 +252,15 @@ struct Args {
     #[arg(long, value_parser = PossibleValuesParser::new(["lru", "lfu", "fifo", "s3fifo"]), default_value = "lru")]
     eviction: String,
 
+    #[arg(long, value_parser = PossibleValuesParser::new(["eviction", "insertion"]), default_value = "eviction")]
+    policy: String,
+
+    #[arg(long, default_value_t = ByteSize::mib(16))]
+    buffer_pool_size: ByteSize,
+
+    #[arg(long, default_value_t = ByteSize::kib(4))]
+    blob_index_size: ByteSize,
+
     #[arg(long, default_value_t = ByteSize::kib(16))]
     set_size: ByteSize,
 
@@ -270,6 +282,9 @@ struct Args {
     /// Record fetch trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
     trace_fetch: humantime::Duration,
+
+    #[arg(long, default_value_t = false)]
+    flush_on_close: bool,
 }
 
 #[derive(Debug)]
@@ -319,10 +334,8 @@ struct Context {
     metrics: Metrics,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct Value {
-    // https://github.com/serde-rs/bytes/issues/43
-    #[serde(with = "arc_bytes")]
     inner: Arc<Vec<u8>>,
 }
 
@@ -334,25 +347,29 @@ impl Deref for Value {
     }
 }
 
-mod arc_bytes {
-    use std::sync::Arc;
-
-    use serde::{Deserialize, Deserializer, Serializer};
-    use serde_bytes::ByteBuf;
-
-    pub fn serialize<S>(data: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(data.as_slice())
+impl Code for Value {
+    fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), foyer::CodeError> {
+        self.len().encode(writer)?;
+        writer.write_all(self).map_err(CodeError::from)
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+    #[expect(clippy::uninit_vec)]
+    fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer::CodeError>
     where
-        D: Deserializer<'de>,
+        Self: Sized,
     {
-        let buf = ByteBuf::deserialize(deserializer)?;
-        Ok(Arc::new(buf.into_vec()))
+        let len = usize::decode(reader)?;
+        let mut v = Vec::with_capacity(len);
+        unsafe {
+            v.set_len(len);
+        }
+        reader.read_exact(&mut v).map_err(CodeError::from)?;
+        let this = Self { inner: Arc::new(v) };
+        Ok(this)
+    }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<usize>() + self.len()
     }
 }
 
@@ -441,7 +458,16 @@ async fn benchmark(args: Args) {
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
         .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
 
-    let builder = HybridCacheBuilder::new().with_tracing_options(tracing_options);
+    let policy = match args.policy.as_str() {
+        "eviction" => HybridCachePolicy::WriteOnEviction,
+        "insertion" => HybridCachePolicy::WriteOnInsertion,
+        _ => panic!("unsupported policy: {}", args.policy),
+    };
+
+    let builder = HybridCacheBuilder::new()
+        .with_tracing_options(tracing_options)
+        .with_policy(policy)
+        .with_flush_on_close(args.flush_on_close);
 
     let builder = if args.metrics {
         let registry = Registry::new();
@@ -471,16 +497,24 @@ async fn benchmark(args: Args) {
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage(args.engine);
 
+    let throttle = Throttle::default()
+        .with_read_iops(args.disk_read_iops)
+        .with_write_iops(args.disk_write_iops)
+        .with_read_throughput(args.disk_read_throughput.as_u64() as _)
+        .with_write_throughput(args.disk_write_throughput.as_u64() as _);
+
     builder = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => builder.with_device_options(
             DirectFileDeviceOptions::new(file)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _),
+                .with_region_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, Some(dir)) => builder.with_device_options(
             DirectFsDeviceOptions::new(dir)
                 .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _),
+                .with_file_size(args.region_size.as_u64() as _)
+                .with_throttle(throttle),
         ),
         (None, None) => builder,
         _ => unreachable!(),
@@ -517,20 +551,14 @@ async fn benchmark(args: Args) {
         .with_eviction_pickers(vec![
             Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
             Box::<FifoPicker>::default(),
-        ]);
+        ])
+        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
+        .with_blob_index_size(args.blob_index_size.as_u64() as _);
 
     let small = SmallEngineOptions::new()
         .with_flushers(args.flushers)
         .with_set_size(args.set_size.as_u64() as _)
         .with_set_cache_capacity(args.set_cache_capacity);
-
-    if args.admission_rate_limit.as_u64() > 0 {
-        builder =
-            builder.with_admission_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
-    if args.reinsertion_rate_limit.as_u64() > 0 {
-        large = large.with_reinsertion_picker(Arc::new(RateLimitPicker::new(args.admission_rate_limit.as_u64() as _)));
-    }
 
     if args.clean_region_threshold > 0 {
         large = large.with_clean_region_threshold(args.clean_region_threshold);
@@ -546,9 +574,7 @@ async fn benchmark(args: Args) {
     #[cfg(feature = "tracing")]
     hybrid.enable_tracing();
 
-    let stats = hybrid.stats();
-
-    let iostat_start = IoStat::snapshot(&stats);
+    let iostat_start = IoStat::snapshot(hybrid.statistics());
     let metrics = Metrics::default();
 
     let metrics_dump_start = metrics.dump();
@@ -557,9 +583,9 @@ async fn benchmark(args: Args) {
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
-
+        let stats = hybrid.statistics().clone();
         monitor(
-            stats.clone(),
+            stats,
             Duration::from_secs(args.report_interval),
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
@@ -580,7 +606,7 @@ async fn benchmark(args: Args) {
 
     handle_bench.await.unwrap();
 
-    let iostat_end = IoStat::snapshot(&stats);
+    let iostat_end = IoStat::snapshot(hybrid.statistics());
     let metrics_dump_end = metrics.dump();
     let analysis = analyze(
         time.elapsed(),
@@ -590,12 +616,17 @@ async fn benchmark(args: Args) {
         &metrics_dump_end,
     );
 
-    hybrid.close().await.unwrap();
+    let close = {
+        let now = Instant::now();
+        hybrid.close().await.unwrap();
+        now.elapsed()
+    };
 
     handle_monitor.abort();
     handle_signal.abort();
 
     println!("\nTotal:\n{}", analysis);
+    println!("Close takes: {close:?}");
 
     teardown();
 }
@@ -680,6 +711,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         _ => None,
     };
 
+    let mut osrng = StdRng::from_os_rng();
     let mut c = 0;
 
     loop {
@@ -694,7 +726,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         }
 
         let idx = id + step * c;
-        let entry_size = OsRng.gen_range(context.entry_size_range.clone());
+        let entry_size = osrng.random_range(context.entry_size_range.clone());
         let data = Value {
             inner: Arc::new(text(idx as usize, entry_size)),
         };
@@ -757,6 +789,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     let step = context.counts.len() as u64;
 
     let mut rng = StdRng::seed_from_u64(0);
+    let mut osrng = StdRng::from_os_rng();
 
     loop {
         match stop.try_recv() {
@@ -767,13 +800,13 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             return;
         }
 
-        let w = rng.gen_range(0..step); // pick a writer to read form
+        let w = rng.random_range(0..step); // pick a writer to read form
         let c_w = context.counts[w as usize].load(Ordering::Relaxed);
         if c_w == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
-        let c = rng.gen_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
+        let c = rng.random_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
         let (miss_tx, mut miss_rx) = oneshot::channel();
@@ -782,9 +815,9 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let fetch = hybrid.fetch(idx, || {
             let context = context.clone();
+            let entry_size = osrng.random_range(context.entry_size_range.clone());
             async move {
                 let _ = miss_tx.send(time.elapsed());
-                let entry_size = OsRng.gen_range(context.entry_size_range.clone());
                 Ok(Value {
                     inner: Arc::new(text(idx as usize, entry_size)),
                 })
@@ -836,11 +869,12 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 fn gen_zipf_histogram(n: usize, s: f64, groups: usize, samples: usize) -> BTreeMap<usize, f64> {
     let step = n / groups;
 
-    let mut rng = rand::thread_rng();
-    let zipf = zipf::ZipfDistribution::new(n, s).unwrap();
+    let mut rng = rand::rng();
+    let zipf = rand_distr::Zipf::new(n as f64, s).unwrap();
     let mut data: BTreeMap<usize, usize> = BTreeMap::default();
     for _ in 0..samples {
         let v = zipf.sample(&mut rng);
+        let v = v.round() as usize;
         let g = std::cmp::min(v / step, groups);
         *data.entry(g).or_default() += 1;
     }

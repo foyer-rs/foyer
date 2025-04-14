@@ -17,15 +17,17 @@ use std::{
     ops::Range,
 };
 
+use foyer_common::code::CodeError;
+
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Code error.
+    #[error("code error: {0}")]
+    Code(#[from] CodeError),
     /// I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// Encoding/decoding error with `bincode`.
-    #[error("bincode error: {0}")]
-    Bincode(#[from] bincode::Error),
     #[error(transparent)]
     /// Multiple error list.
     Multiple(MultipleError),
@@ -52,6 +54,16 @@ pub enum Error {
         valid: Range<usize>,
         /// Gotten range.
         get: Range<usize>,
+    },
+    /// Invalid I/O range.
+    #[error("invalid io range: {range:?}, region size: {region_size}, capacity: {capacity}")]
+    InvalidIoRange {
+        /// I/O range
+        range: Range<usize>,
+        /// Region size
+        region_size: usize,
+        /// Capacity
+        capacity: usize,
     },
     /// Compression algorithm not supported.
     #[error("compression algorithm not supported: {0}")]

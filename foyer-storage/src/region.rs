@@ -24,12 +24,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use async_channel::{Receiver, Sender};
+use flume::{Receiver, Sender};
 use foyer_common::{countdown::Countdown, metrics::Metrics};
-use futures::{
-    future::{BoxFuture, Shared},
-    FutureExt,
-};
+use futures_core::future::BoxFuture;
+use futures_util::{future::Shared, FutureExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use pin_project::pin_project;
@@ -39,8 +37,8 @@ use tokio::sync::Semaphore;
 use crate::{
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::Result,
+    io::buffer::{IoBuf, IoBufMut},
     picker::EvictionPicker,
-    IoBytes, IoBytesMut,
 };
 
 #[derive(Debug, Default)]
@@ -83,13 +81,19 @@ impl Region {
         &self.stats
     }
 
-    pub async fn write(&self, buf: IoBytes, offset: u64) -> Result<()> {
+    pub async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBuf,
+    {
         self.device.write(buf, self.id, offset).await
     }
 
-    pub async fn read(&self, offset: u64, len: usize) -> Result<IoBytesMut> {
+    pub async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    where
+        B: IoBufMut,
+    {
         self.stats.access.fetch_add(1, Ordering::Relaxed);
-        self.device.read(self.id, offset, len).await
+        self.device.read(buf, self.id, offset).await
     }
 
     pub async fn flush(&self) -> Result<()> {
@@ -98,10 +102,6 @@ impl Region {
 
     pub fn size(&self) -> usize {
         self.device.region_size()
-    }
-
-    pub fn align(&self) -> usize {
-        self.device.align()
     }
 }
 
@@ -156,7 +156,7 @@ impl RegionManager {
                 stats: Arc::new(RegionStats::default()),
             })
             .collect_vec();
-        let (clean_region_tx, clean_region_rx) = async_channel::unbounded();
+        let (clean_region_tx, clean_region_rx) = flume::unbounded();
 
         metrics.storage_region_total.absolute(device.regions() as _);
         metrics.storage_region_size_bytes.absolute(device.region_size() as _);
@@ -226,14 +226,7 @@ impl RegionManager {
         }
 
         // If no region is selected, just randomly pick one.
-        let picked = picked.unwrap_or_else(|| {
-            eviction
-                .evictable
-                .keys()
-                .choose(&mut rand::thread_rng())
-                .copied()
-                .unwrap()
-        });
+        let picked = picked.unwrap_or_else(|| eviction.evictable.keys().choose(&mut rand::rng()).copied().unwrap());
 
         // Update evictable map.
         eviction.evictable.remove(&picked).unwrap();
@@ -257,7 +250,7 @@ impl RegionManager {
     pub async fn mark_clean(&self, region: RegionId) {
         self.inner
             .clean_region_tx
-            .send(self.region(region).clone())
+            .send_async(self.region(region).clone())
             .await
             .unwrap();
         self.inner.metrics.storage_region_clean.increase(1);
@@ -270,7 +263,7 @@ impl RegionManager {
         let metrics = self.inner.metrics.clone();
         GetCleanRegionHandle::new(
             async move {
-                let region = clean_region_rx.recv().await.unwrap();
+                let region = clean_region_rx.recv_async().await.unwrap();
                 // The only place to increase the permit.
                 //
                 // See comments in `ReclaimRunner::handle()` and `RecoverRunner::run()`.

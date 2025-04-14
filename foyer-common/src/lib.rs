@@ -14,7 +14,7 @@
 
 //! Shared components and utils for foyer.
 
-/// Allow enable debug assertions in release profile with feature "strict_assertion".
+/// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
 /// The util that convert the blocking call to async call.
 pub mod asyncify;
@@ -32,6 +32,8 @@ pub mod event;
 pub mod future;
 /// Provisioned hashers.
 pub mod hasher;
+/// Preferred cache location for each cache entry.
+pub mod location;
 /// The shared metrics for foyer.
 pub mod metrics;
 /// Extensions for [`std::option::Option`].
@@ -48,5 +50,3 @@ pub mod runtime;
 pub mod scope;
 /// Tracing related components.
 pub mod tracing;
-/// An async wait group implementation.
-pub mod wait_group;

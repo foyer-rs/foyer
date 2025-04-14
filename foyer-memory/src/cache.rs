@@ -20,6 +20,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
+    location::CacheLocation,
     metrics::Metrics,
     runtime::SingletonHandle,
 };
@@ -35,7 +36,7 @@ use crate::{
         lru::{Lru, LruConfig},
         s3fifo::{S3Fifo, S3FifoConfig},
     },
-    raw::{FetchMark, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
+    raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
     Piece, Pipe, Result,
 };
@@ -205,6 +206,16 @@ where
             CacheEntry::Lru(entry) => entry.weight(),
             CacheEntry::Lfu(entry) => entry.weight(),
             CacheEntry::S3Fifo(entry) => entry.weight(),
+        }
+    }
+
+    /// Preferred location of the cached entry.
+    pub fn location(&self) -> CacheLocation {
+        match self {
+            CacheEntry::Fifo(entry) => entry.location(),
+            CacheEntry::Lru(entry) => entry.location(),
+            CacheEntry::Lfu(entry) => entry.location(),
+            CacheEntry::S3Fifo(entry) => entry.location(),
         }
     }
 
@@ -543,6 +554,17 @@ where
         }
     }
 
+    /// Insert cache entry with cache hint to the in-memory cache.
+    #[fastrace::trace(name = "foyer::memory::cache::insert_with_location")]
+    pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> CacheEntry<K, V, S> {
+        match self {
+            Cache::Fifo(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::S3Fifo(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::Lru(cache) => cache.insert_with_location(key, value, location).into(),
+            Cache::Lfu(cache) => cache.insert_with_location(key, value, location).into(),
+        }
+    }
+
     /// Temporarily insert cache entry to the in-memory cache.
     ///
     /// The entry will be removed as soon as the returned entry is dropped.
@@ -700,6 +722,33 @@ where
             Cache::Lfu(cache) => cache.set_pipe(pipe),
         }
     }
+
+    /// Evict all entries from the in-memory cache.
+    ///
+    /// Instead of [`Cache::clear`], [`Cache::evict_all`] will send the evicted pipe to the pipe.
+    /// It is useful when the cache is used as a hybrid cache.
+    pub fn evict_all(&self) {
+        match self {
+            Cache::Fifo(cache) => cache.evict_all(),
+            Cache::S3Fifo(cache) => cache.evict_all(),
+            Cache::Lru(cache) => cache.evict_all(),
+            Cache::Lfu(cache) => cache.evict_all(),
+        }
+    }
+
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
+    /// Therefore, this function is asynchronous.
+    #[fastrace::trace(name = "foyer::memory::raw::offload")]
+    pub async fn flush(&self) {
+        match self {
+            Cache::Fifo(cache) => cache.flush().await,
+            Cache::S3Fifo(cache) => cache.flush().await,
+            Cache::Lru(cache) => cache.flush().await,
+            Cache::Lfu(cache) => cache.flush().await,
+        }
+    }
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
@@ -801,7 +850,7 @@ where
 
     /// Get the ext of the fetch.
     #[doc(hidden)]
-    pub fn store(&self) -> &Option<FetchMark> {
+    pub fn store(&self) -> &Option<FetchContext> {
         match self {
             Fetch::Fifo(fetch) => fetch.store(),
             Fetch::S3Fifo(fetch) => fetch.store(),
@@ -876,7 +925,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<V, ER>, FetchMark>>,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
@@ -891,7 +940,7 @@ where
 mod tests {
     use std::{ops::Range, time::Duration};
 
-    use futures::future::join_all;
+    use futures_util::future::join_all;
     use itertools::Itertools;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
@@ -952,8 +1001,8 @@ mod tests {
     }
 
     async fn operate(cache: &Cache<u64, u64>, rng: &mut StdRng) {
-        let i = rng.gen_range(RANGE);
-        match rng.gen_range(0..=3) {
+        let i = rng.random_range(RANGE);
+        match rng.random_range(0..=3) {
             0 => {
                 let entry = cache.insert(i, i);
                 assert_eq!(*entry.key(), i);

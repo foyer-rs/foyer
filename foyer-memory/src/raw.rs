@@ -33,6 +33,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
+    location::CacheLocation,
     metrics::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
@@ -538,26 +539,43 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_with_hint(key, value, Default::default())
+        self.emplace(key, value, Default::default(), false, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
     pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, false)
+        self.emplace(key, value, hint, false, CacheLocation::Default)
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::insert_with_location")]
+    pub fn insert_with_location(
+        &self,
+        key: E::Key,
+        value: E::Value,
+        location: CacheLocation,
+    ) -> RawCacheEntry<E, S, I> {
+        self.emplace(key, value, Default::default(), false, location)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
     pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_ephemeral_with_hint(key, value, Default::default())
+        self.emplace(key, value, Default::default(), true, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
     pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, true)
+        self.emplace(key, value, hint, true, CacheLocation::Default)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::emplace")]
-    fn emplace(&self, key: E::Key, value: E::Value, hint: E::Hint, ephemeral: bool) -> RawCacheEntry<E, S, I> {
+    fn emplace(
+        &self,
+        key: E::Key,
+        value: E::Value,
+        hint: E::Hint,
+        ephemeral: bool,
+        location: CacheLocation,
+    ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
 
@@ -572,6 +590,7 @@ where
                     hint,
                     hash,
                     weight,
+                    location,
                 },
                 ephemeral,
                 &mut garbages,
@@ -604,6 +623,55 @@ where
         RawCacheEntry {
             record,
             inner: self.inner.clone(),
+        }
+    }
+
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
+    #[fastrace::trace(name = "foyer::memory::raw::evict_all")]
+    pub fn evict_all(&self) {
+        let mut garbages = vec![];
+        for shard in self.inner.shards.iter() {
+            shard.write().evict(0, &mut garbages);
+        }
+
+        // Deallocate data out of the lock critical section.
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+        if self.inner.event_listener.is_some() || piped {
+            for (event, record) in garbages {
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(event, record.key(), record.value())
+                }
+                if piped && event == Event::Evict {
+                    pipe.send(Piece::new(record));
+                }
+            }
+        }
+    }
+
+    /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
+    /// Therefore, this function is asynchronous.
+    #[fastrace::trace(name = "foyer::memory::raw::flush")]
+    pub async fn flush(&self) {
+        let mut garbages = vec![];
+        for shard in self.inner.shards.iter() {
+            shard.write().evict(0, &mut garbages);
+        }
+
+        // Deallocate data out of the lock critical section.
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+
+        if let Some(listener) = self.inner.event_listener.as_ref() {
+            for (event, record) in garbages.iter() {
+                listener.on_leave(*event, record.key(), record.value());
+            }
+        }
+        if piped {
+            let pieces = garbages.into_iter().map(|(_, record)| Piece::new(record)).collect_vec();
+            pipe.flush(pieces).await;
         }
     }
 
@@ -858,6 +926,10 @@ where
         self.record.weight()
     }
 
+    pub fn location(&self) -> CacheLocation {
+        self.record.location()
+    }
+
     pub fn refs(&self) -> usize {
         self.record.refs()
     }
@@ -882,8 +954,12 @@ pub enum FetchState {
     Miss,
 }
 
-/// A mark for fetch calls.
-pub struct FetchMark;
+/// Context for fetch calls.
+#[derive(Debug)]
+pub struct FetchContext {
+    /// If this fetch is caused by disk cache throttled.
+    pub throttled: bool,
+}
 
 enum RawShardFetch<E, S, I>
 where
@@ -897,7 +973,7 @@ where
 }
 
 pub type RawFetch<E, ER, S = ahash::RandomState, I = HashTableIndexer<E>> =
-    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
+    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
 type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
@@ -912,7 +988,7 @@ where
 {
     Hit(RawFetchHit<E, S, I>),
     Wait(#[pin] RawFetchWait<E, S, I>),
-    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchMark>),
+    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchContext>),
 }
 
 impl<E, ER, S, I> RawFetchInner<E, ER, S, I>
@@ -937,7 +1013,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchMark>;
+    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -948,7 +1024,6 @@ where
     }
 }
 
-// TODO(MrCroxx): use `hashbrown::HashTable` with `Handle` may relax the `Clone` bound?
 impl<E, S, I> RawCache<E, S, I>
 where
     E: Eviction,
@@ -995,7 +1070,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchMark>>,
+        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
     {
         let hash = self.inner.hash_builder.hash_one(&key);
 
@@ -1038,7 +1113,16 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
-                let entry = cache.insert_with_hint(key, value, hint);
+                let location = if let Some(store) = store.as_ref() {
+                    if store.throttled {
+                        CacheLocation::InMem
+                    } else {
+                        CacheLocation::Default
+                    }
+                } else {
+                    CacheLocation::Default
+                };
+                let entry = cache.emplace(key, value, hint, false, location);
                 Diversion {
                     target: Ok(entry),
                     store,
@@ -1055,16 +1139,18 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use foyer_common::hasher::ModRandomState;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
 
     use super::*;
-    use crate::eviction::{
-        fifo::{Fifo, FifoConfig, FifoHint},
-        lfu::{Lfu, LfuConfig, LfuHint},
-        lru::{Lru, LruConfig, LruHint},
-        s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+    use crate::{
+        eviction::{
+            fifo::{Fifo, FifoConfig, FifoHint},
+            lfu::{Lfu, LfuConfig, LfuHint},
+            lru::{Lru, LruConfig, LruHint},
+            s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+        },
+        test_utils::PiecePipe,
     };
 
     fn is_send_sync_static<T: Send + Sync + 'static>() {}
@@ -1141,6 +1227,28 @@ mod tests {
         assert_eq!(fifo.usage(), 1);
         drop(e2b);
         assert_eq!(fifo.usage(), 1);
+    }
+
+    #[test]
+    fn test_evict_all() {
+        let pipe = Box::new(PiecePipe::default());
+
+        let fifo = fifo_cache_for_test();
+        fifo.set_pipe(pipe.clone());
+        for i in 0..fifo.capacity() as _ {
+            fifo.insert(i, i);
+        }
+        assert_eq!(fifo.usage(), fifo.capacity());
+
+        fifo.evict_all();
+        let mut pieces = pipe
+            .pieces()
+            .iter()
+            .map(|p| (p.hash(), *p.key(), *p.value()))
+            .collect_vec();
+        pieces.sort_by_key(|t| t.0);
+        let expected = (0..fifo.capacity() as u64).map(|i| (i, i, i)).collect_vec();
+        assert_eq!(pieces, expected);
     }
 
     fn test_resize<E>(cache: &RawCache<E, ModRandomState, HashTableIndexer<E>>)

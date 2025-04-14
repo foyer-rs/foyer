@@ -10,44 +10,66 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.docs.rs]
-features = ["nightly"]
+features = ["serde", "tracing", "nightly", "deadlock", "strict_assertions"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 ahash = { workspace = true }
-anyhow = "1"
+anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
-futures = "0.3"
 mixtrics = { workspace = true }
-tokio = { workspace = true }
+pin-project = { workspace = true }
+serde = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+foyer-storage = { workspace = true, features = ["test_utils"] }
 tempfile = "3"
 test-log = { workspace = true }
 
+[target.'cfg(madsim)'.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { package = "tokio", version = "1", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
 [features]
 default = []
+serde = ["foyer-common/serde", "foyer-storage/serde"]
+tracing = [
+  "fastrace/enable",
+  "foyer-common/tracing",
+  "foyer-memory/tracing",
+  "foyer-storage/tracing",
+]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
-]
-sanity = ["strict_assertions", "foyer-memory/sanity"]
-tracing = [
-  "fastrace/enable",
-  "foyer-common/tracing",
-  "foyer-memory/tracing",
-  "foyer-storage/tracing",
 ]
 
 [lints]

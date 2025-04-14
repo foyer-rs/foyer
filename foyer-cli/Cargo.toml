@@ -11,10 +11,9 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 publish = false
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }

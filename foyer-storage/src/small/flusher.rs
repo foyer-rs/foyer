@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    future::Future,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{fmt::Debug, future::Future, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
 };
 use foyer_memory::Piece;
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::{
@@ -31,10 +27,7 @@ use super::{
     generic::GenericSmallStorageConfig,
     set_manager::SetManager,
 };
-use crate::{
-    error::{Error, Result},
-    Statistics,
-};
+use crate::error::{Error, Result};
 
 pub enum Submission<K, V>
 where
@@ -79,12 +72,7 @@ where
     K: StorageKey,
     V: StorageValue,
 {
-    pub fn open(
-        config: &GenericSmallStorageConfig<K, V>,
-        set_manager: SetManager,
-        stats: Arc<Statistics>,
-        metrics: Arc<Metrics>,
-    ) -> Self {
+    pub fn open(config: &GenericSmallStorageConfig<K, V>, set_manager: SetManager, metrics: Arc<Metrics>) -> Self {
         let (tx, rx) = flume::unbounded();
 
         let buffer_size = config.buffer_pool_size / config.flushers;
@@ -96,7 +84,6 @@ where
             batch,
             flight: Arc::new(Semaphore::new(1)),
             set_manager,
-            stats,
             metrics,
         };
 
@@ -131,12 +118,11 @@ where
     V: StorageValue,
 {
     rx: flume::Receiver<Submission<K, V>>,
-    batch: BatchMut<K, V>,
+    batch: BatchMut,
     flight: Arc<Semaphore>,
 
     set_manager: SetManager,
 
-    stats: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -169,32 +155,24 @@ where
     fn submit(&mut self, submission: Submission<K, V>) {
         let report = |enqueued: bool| {
             if !enqueued {
-                self.metrics.storage_queue_drop.increase(1);
+                self.metrics.storage_queue_buffer_overflow.increase(1);
             }
         };
 
         match submission {
-            Submission::Insertion {
-                piece: entry,
-                estimated_size,
-            } => report(self.batch.insert(entry, estimated_size)),
+            Submission::Insertion { piece, estimated_size } => report(self.batch.insert(piece, estimated_size)),
             Submission::Deletion { hash } => self.batch.delete(hash),
             Submission::Wait { tx } => self.batch.wait(tx),
         }
     }
 
-    pub async fn commit(&self, batch: Batch<K, V>, permit: OwnedSemaphorePermit) {
+    pub async fn commit(&self, batch: Batch, permit: OwnedSemaphorePermit) {
         tracing::trace!("[sodc flusher] commit batch: {batch:?}");
 
         let futures = batch.sets.into_iter().map(|(sid, SetBatch { deletions, items })| {
             let set_manager = self.set_manager.clone();
-            let stats = self.stats.clone();
             async move {
                 set_manager.update(sid, &deletions, items).await?;
-
-                stats
-                    .cache_write_bytes
-                    .fetch_add(set_manager.set_size(), Ordering::Relaxed);
 
                 Ok::<_, Error>(())
             }
@@ -206,6 +184,13 @@ where
 
         for waiter in batch.waiters {
             let _ = waiter.send(());
+        }
+
+        if let Some(init) = batch.init.as_ref() {
+            self.metrics.storage_queue_rotate.increase(1);
+            self.metrics
+                .storage_queue_rotate_duration
+                .record(init.elapsed().as_secs_f64());
         }
 
         drop(permit);

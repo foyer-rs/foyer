@@ -205,22 +205,23 @@ impl SingletonHandle {
     /// }
     /// ```
     ///
-    /// [`JoinError`]: struct@crate::task::JoinError
-    /// [`JoinHandle`]: struct@crate::task::JoinHandle
+    /// [`JoinError`]: struct@tokio::task::JoinError
+    /// [`JoinHandle`]: struct@tokio::task::JoinHandle
     /// [`Runtime::block_on`]: fn@crate::runtime::Runtime::block_on
-    /// [`Runtime::shutdown_background`]: fn@crate::runtime::Runtime::shutdown_background
-    /// [`Runtime::shutdown_timeout`]: fn@crate::runtime::Runtime::shutdown_timeout
-    /// [`spawn_blocking`]: crate::task::spawn_blocking
-    /// [`tokio::fs`]: crate::fs
-    /// [`tokio::net`]: crate::net
-    /// [`tokio::time`]: crate::time
+    /// [`Runtime::shutdown_background`]: fn@tokio::runtime::Runtime::shutdown_background
+    /// [`Runtime::shutdown_timeout`]: fn@tokio::runtime::Runtime::shutdown_timeout
+    /// [`spawn_blocking`]: tokio::task::spawn_blocking
+    /// [`tokio::fs`]: tokio::fs
+    /// [`tokio::net`]: tokio::net
+    /// [`tokio::time`]: tokio::time
     #[cfg(not(madsim))]
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         self.0.block_on(future)
     }
 
     #[cfg(madsim)]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+    /// Dummy implementation for madsim.
+    pub fn block_on<F: Future>(&self, _: F) -> F::Output {
         unimplemented!("`block_on()` is not supported with madsim")
     }
 }

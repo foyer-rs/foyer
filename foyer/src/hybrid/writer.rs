@@ -20,6 +20,7 @@ use std::{
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheHint;
+use foyer_storage::Pick;
 
 use crate::{HybridCache, HybridCacheEntry};
 
@@ -69,8 +70,10 @@ where
 {
     hybrid: HybridCache<K, V, S>,
     key: K,
+    hash: u64,
 
-    picked: Option<bool>,
+    force: bool,
+    picked: Option<Pick>,
     pick_duration: Duration,
 }
 
@@ -81,9 +84,12 @@ where
     S: HashBuilder + Debug,
 {
     pub(crate) fn new(hybrid: HybridCache<K, V, S>, key: K) -> Self {
+        let hash = hybrid.memory().hash(&key);
         Self {
             hybrid,
             key,
+            hash,
+            force: false,
             picked: None,
             pick_duration: Duration::default(),
         }
@@ -91,15 +97,11 @@ where
 
     /// Check if the entry can be admitted by the admission picker of the disk cache.
     ///
-    /// `pick` is idempotent (unless `force` is called). Which means the disk cache only check its admission at most
-    /// once.
-    pub fn pick(&mut self) -> bool {
-        if let Some(picked) = self.picked {
-            return picked;
-        }
+    /// After calling `pick`, the writer will not be checked by the admission picker again.
+    pub fn pick(&mut self) -> Pick {
         let now = Instant::now();
 
-        let picked = self.hybrid.storage().pick(&self.key);
+        let picked = self.hybrid.storage().pick(self.hash);
         self.picked = Some(picked);
 
         self.pick_duration = now.elapsed();
@@ -107,16 +109,26 @@ where
         picked
     }
 
+    fn may_pick(&mut self) -> Pick {
+        if let Some(picked) = self.picked {
+            picked
+        } else {
+            self.pick()
+        }
+    }
+
     /// Force the disk cache to admit the writer.
+    ///
+    /// Note: There is still chance that the entry is ignored because of the storage engine buffer full.
     pub fn force(mut self) -> Self {
-        self.picked = Some(true);
+        self.force = true;
         self
     }
 
     fn insert_inner(mut self, value: V, hint: Option<CacheHint>) -> Option<HybridCacheEntry<K, V, S>> {
         let now = Instant::now();
 
-        if !self.pick() {
+        if !self.force && !self.may_pick().admitted() {
             return None;
         }
 

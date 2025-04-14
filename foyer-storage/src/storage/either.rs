@@ -12,29 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::Debug,
+    future::{ready, Future},
+    pin::pin,
+    sync::Arc,
+};
 
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::{
-    future::{join, ready, select, try_join, Either as EitherFuture},
-    pin_mut, Future, FutureExt,
+use futures_util::{
+    future::{join, select, try_join, Either as EitherFuture},
+    FutureExt,
 };
-use serde::{Deserialize, Serialize};
 
-use crate::{error::Result, storage::Storage, DeviceStats};
+use crate::{error::Result, storage::Storage, Statistics, Throttle};
 
 /// Order of ops.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Order {
     /// Use the left engine first.
     ///
-    /// If the op does returns the expected result, use then right engine then.
+    /// If the op does return the expected result, use then right engine then.
     LeftFirst,
     /// Use the right engine first.
     ///
-    /// If the op does returns the expected result, use then left engine then.
+    /// If the op does return the expected result, use then left engine then.
     RightFirst,
     /// Use the left engine and the right engine in parallel.
     ///
@@ -198,8 +203,8 @@ where
             }),
             Order::Parallel => {
                 async move {
-                    pin_mut!(fleft);
-                    pin_mut!(fright);
+                    let fleft = pin!(fleft);
+                    let fright = pin!(fright);
                     // Returns a 4-way `Either` by nesting `Either` in `Either`.
                     select(fleft, fright)
                         .then(|either| match either {
@@ -234,9 +239,14 @@ where
         Ok(())
     }
 
-    fn stats(&self) -> std::sync::Arc<DeviceStats> {
+    fn throttle(&self) -> &Throttle {
         // The two engines share the same device, so it is okay to use either device stats of those.
-        self.left.stats()
+        self.left.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        // The two engines share the same device, so it is okay to use either device stats of those.
+        self.left.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {

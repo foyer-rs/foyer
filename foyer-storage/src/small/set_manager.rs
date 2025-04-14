@@ -15,7 +15,10 @@
 use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc};
 
 use bytes::{Buf, BufMut};
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    metrics::Metrics,
+};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -30,7 +33,7 @@ use super::{
 use crate::{
     device::{Dev, MonitoredDevice, RegionId},
     error::Result,
-    IoBytesMut,
+    io::{buffer::IoBuffer, PAGE},
 };
 
 /// # Lock Order
@@ -67,6 +70,8 @@ struct SetManagerInner {
     device: MonitoredDevice,
     regions: Range<RegionId>,
     flush: bool,
+
+    metrics: Arc<Metrics>,
 }
 
 #[derive(Clone)]
@@ -86,6 +91,7 @@ impl Debug for SetManager {
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
             .field("flush", &self.inner.flush)
+            .field("metrics", &self.inner.metrics)
             .finish()
     }
 }
@@ -124,6 +130,7 @@ impl SetManager {
             device,
             regions,
             flush: config.flush,
+            metrics: config.device.metrics().clone(),
         };
         let inner = Arc::new(inner);
         Ok(Self { inner })
@@ -170,11 +177,7 @@ impl SetManager {
         res
     }
 
-    pub async fn update<K, V>(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item<K, V>>) -> Result<()>
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
+    pub async fn update(&self, sid: SetId, deletions: &HashSet<u64>, items: Vec<Item>) -> Result<()> {
         // Acquire set lock.
         let set = self.inner.sets[sid as usize].write().await;
 
@@ -186,9 +189,10 @@ impl SetManager {
 
         *self.inner.loose_bloom_filters[sid as usize].write() = storage.bloom_filter().clone();
 
-        let buffer = storage.freeze();
+        let buffer = storage.into_io_buffer();
         let (region, offset) = self.locate(sid);
-        self.inner.device.write(buffer, region, offset).await?;
+        let (_, res) = self.inner.device.write(buffer, region, offset).await;
+        res?;
         if self.inner.flush {
             self.inner.device.flush(Some(region)).await?;
         }
@@ -203,6 +207,7 @@ impl SetManager {
         self.inner.sets.len()
     }
 
+    #[expect(dead_code)]
     pub fn set_size(&self) -> usize {
         self.inner.set_size
     }
@@ -227,8 +232,10 @@ impl SetManager {
 
     async fn storage(&self, id: SetId) -> Result<SetStorage> {
         let (region, offset) = self.locate(id);
-        let buffer = self.inner.device.read(region, offset, self.inner.set_size).await?;
-        let storage = SetStorage::load(buffer, self.watermark().await);
+        let buf = IoBuffer::new(self.inner.set_size);
+        let (buf, res) = self.inner.device.read(buf, region, offset).await;
+        res?;
+        let storage = SetStorage::load(buf, self.watermark().await, self.inner.metrics.clone());
         Ok(storage)
     }
 
@@ -304,15 +311,18 @@ impl Metadata {
     }
 
     async fn flush(&self, device: &MonitoredDevice) -> Result<()> {
-        let mut buf = IoBytesMut::with_capacity(Self::SIZE);
-        self.write(&mut buf);
-        let buf = buf.freeze();
-        device.write(buf, 0, 0).await?;
+        let mut buf = IoBuffer::new(PAGE);
+        self.write(&mut buf[..]);
+        let (_, res) = device.write(buf, 0, 0).await;
+        res?;
         Ok(())
     }
 
     async fn load(device: &MonitoredDevice) -> Result<Self> {
-        let buf = device.read(0, 0, Metadata::SIZE).await?;
+        let buf = IoBuffer::new(PAGE);
+
+        let (buf, res) = device.read(buf, 0, 0).await;
+        res?;
         let metadata = Metadata::read(&buf[..Metadata::SIZE]);
         Ok(metadata)
     }

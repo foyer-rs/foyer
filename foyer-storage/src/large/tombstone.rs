@@ -19,8 +19,8 @@ use std::{
 
 use array_util::SliceExt;
 use bytes::{Buf, BufMut};
-use foyer_common::{bits, metrics::Metrics, strict_assert_eq};
-use futures::future::try_join_all;
+use foyer_common::{bits, metrics::Metrics};
+use futures_util::future::try_join_all;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -30,7 +30,8 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    DirectFileDeviceOptions, IoBytesMut, Runtime,
+    io::{buffer::IoBuffer, PAGE},
+    DirectFileDeviceOptions, IopsCounter, Runtime,
 };
 
 /// The configurations for the tombstone log.
@@ -40,6 +41,8 @@ pub struct TombstoneLogConfig {
     pub path: PathBuf,
     /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
     pub flush: bool,
+    /// iops_counter for the tombstone log device monitor.
+    pub iops_counter: IopsCounter,
 }
 
 /// The builder for the tombstone log config.
@@ -47,6 +50,7 @@ pub struct TombstoneLogConfig {
 pub struct TombstoneLogConfigBuilder {
     path: PathBuf,
     flush: bool,
+    iops_counter: IopsCounter,
 }
 
 impl TombstoneLogConfigBuilder {
@@ -55,6 +59,7 @@ impl TombstoneLogConfigBuilder {
         Self {
             path: path.as_ref().into(),
             flush: true,
+            iops_counter: IopsCounter::per_io(),
         }
     }
 
@@ -66,11 +71,18 @@ impl TombstoneLogConfigBuilder {
         self
     }
 
+    /// Set iops counter for the tombstone log device monitor.
+    pub fn with_iops_counter(mut self, iops_counter: IopsCounter) -> Self {
+        self.iops_counter = iops_counter;
+        self
+    }
+
     /// Build the tombstone log config with the given args.
     pub fn build(self) -> TombstoneLogConfig {
         TombstoneLogConfig {
             path: self.path,
             flush: self.flush,
+            iops_counter: self.iops_counter,
         }
     }
 }
@@ -116,9 +128,8 @@ impl TombstoneLog {
     ///
     /// The tombstone log will
     pub async fn open<D>(
-        path: impl AsRef<Path>,
+        config: &TombstoneLogConfig,
         cache_device: D,
-        flush: bool,
         tombstones: &mut Vec<Tombstone>,
         metrics: Arc<Metrics>,
         runtime: Runtime,
@@ -137,11 +148,11 @@ impl TombstoneLog {
 
         let device = Monitored::open(
             MonitoredConfig {
-                config: DirectFileDeviceOptions::new(path)
+                config: DirectFileDeviceOptions::new(&config.path)
                     .with_region_size(align)
                     .with_capacity(capacity)
                     .into(),
-                metrics,
+                metrics: metrics.clone(),
             },
             runtime,
         )
@@ -154,7 +165,9 @@ impl TombstoneLog {
             let len = std::cmp::min(offset + Self::RECOVER_IO_SIZE, capacity) - offset;
             let device = device.clone();
             async move {
-                let buffer = device.pread(offset as _, len).await?;
+                let buf = IoBuffer::new(len);
+                let (buffer, res) = device.pread(buf, offset as _).await;
+                res?;
 
                 let mut seq = 0;
                 let mut addr = 0;
@@ -162,11 +175,7 @@ impl TombstoneLog {
                 let mut tombstones = vec![];
 
                 // TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
-                for (slot, buf) in buffer
-                    .as_slice()
-                    .array_chunks_ext::<{ Tombstone::serialized_len() }>()
-                    .enumerate()
-                {
+                for (slot, buf) in buffer.array_chunks_ext::<{ Tombstone::serialized_len() }>().enumerate() {
                     let tombstone = Tombstone::read(&buf[..]);
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
@@ -195,7 +204,7 @@ impl TombstoneLog {
         let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
         let region = bits::align_down(align as RegionId, offset as RegionId) / align as RegionId;
-        let buffer = PageBuffer::open(device, region, 0, flush).await?;
+        let buffer = PageBuffer::open(device, region, 0, config.flush).await?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(TombstoneLogInner { offset, buffer })),
@@ -228,7 +237,8 @@ impl TombstoneLog {
 pub struct PageBuffer<D> {
     region: RegionId,
     idx: u32,
-    buffer: IoBytesMut,
+    // NOTE: This is always `Some(..)`.
+    buffer: Option<IoBuffer>,
 
     device: D,
 
@@ -237,13 +247,13 @@ pub struct PageBuffer<D> {
 
 impl<D> AsRef<[u8]> for PageBuffer<D> {
     fn as_ref(&self) -> &[u8] {
-        &self.buffer
+        self.buffer.as_ref().unwrap()
     }
 }
 
 impl<D> AsMut<[u8]> for PageBuffer<D> {
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer
+        self.buffer.as_mut().unwrap()
     }
 }
 
@@ -255,7 +265,7 @@ where
         let mut this = Self {
             region,
             idx,
-            buffer: IoBytesMut::new(),
+            buffer: Some(IoBuffer::new(PAGE)),
             device,
             sync,
         };
@@ -266,18 +276,13 @@ where
     }
 
     pub async fn update(&mut self) -> Result<()> {
-        self.buffer = self
+        let buf = self.buffer.take().unwrap();
+        let (buf, res) = self
             .device
-            .read(
-                self.region,
-                Self::offset(self.device.align(), self.idx),
-                self.device.align(),
-            )
-            .await?;
-
-        strict_assert_eq!(self.buffer.len(), self.device.align());
-        strict_assert_eq!(self.buffer.capacity(), self.device.align());
-
+            .read(buf, self.region, Self::offset(self.device.align(), self.idx))
+            .await;
+        self.buffer = Some(buf);
+        res?;
         Ok(())
     }
 
@@ -287,14 +292,14 @@ where
         self.update().await
     }
 
-    pub async fn flush(&self) -> Result<()> {
-        self.device
-            .write(
-                self.buffer.clone().freeze(),
-                self.region,
-                Self::offset(self.device.align(), self.idx),
-            )
-            .await?;
+    pub async fn flush(&mut self) -> Result<()> {
+        let buf = self.buffer.take().unwrap();
+        let (buf, res) = self
+            .device
+            .write(buf, self.region, Self::offset(self.device.align(), self.idx))
+            .await;
+        self.buffer = Some(buf);
+        res?;
         if self.sync {
             self.device.flush(Some(self.region)).await?;
         }
@@ -331,9 +336,12 @@ mod tests {
         .unwrap();
 
         let log = TombstoneLog::open(
-            dir.path().join("test-tombstone-log"),
+            &TombstoneLogConfig {
+                path: dir.path().join("test-tombstone-log"),
+                flush: true,
+                iops_counter: IopsCounter::per_io(),
+            },
             device.clone(),
-            true,
             &mut vec![],
             Arc::new(Metrics::noop()),
             runtime.clone(),
@@ -361,12 +369,15 @@ mod tests {
         drop(log);
 
         let log = TombstoneLog::open(
-            dir.path().join("test-tombstone-log"),
-            device,
-            true,
+            &TombstoneLogConfig {
+                path: dir.path().join("test-tombstone-log"),
+                flush: true,
+                iops_counter: IopsCounter::per_io(),
+            },
+            device.clone(),
             &mut vec![],
             Arc::new(Metrics::noop()),
-            runtime,
+            runtime.clone(),
         )
         .await
         .unwrap();

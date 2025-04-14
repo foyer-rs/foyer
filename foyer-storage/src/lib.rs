@@ -21,7 +21,7 @@ mod compress;
 mod device;
 mod engine;
 mod error;
-mod io_buffer_pool;
+mod io;
 mod large;
 mod picker;
 mod region;
@@ -35,4 +35,5 @@ mod store;
 mod prelude;
 pub use prelude::*;
 
+#[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;

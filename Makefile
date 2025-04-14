@@ -21,23 +21,23 @@ check-all:
 	cargo fmt --all
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
-	cargo clippy --all-targets --features sanity
 	cargo clippy --all-targets --features tracing
+	cargo clippy --all-targets --features serde
 	cargo clippy --all-targets
 
 test:
-	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity"
+	RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions"
 	RUST_BACKTRACE=1 cargo test --doc
 	RUSTDOCFLAGS="--cfg docsrs -D warnings" cargo +nightly doc --features "nightly" --no-deps
 
 test-ignored:
-	RUST_BACKTRACE=1 cargo nextest run --run-ignored ignored-only --no-capture --workspace --features "strict_assertions,sanity"
+	RUST_BACKTRACE=1 cargo nextest run --run-ignored ignored-only --no-capture --workspace --features "strict_assertions"
 
 test-all: test test-ignored
 
 madsim:
 	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" cargo clippy --all-targets
-	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions,sanity"
+	RUSTFLAGS="--cfg madsim --cfg tokio_unstable" RUST_BACKTRACE=1 cargo nextest run --all --features "strict_assertions"
 
 example:
 	cargo run --example memory
@@ -48,6 +48,7 @@ example:
 	cargo run --features "tracing,ot" --example tail_based_tracing
 	cargo run --example equivalent
 	cargo run --example export_metrics_prometheus_hyper
+	cargo run --features serde --example serde
 
 full: check-all test-all example machete udeps
 

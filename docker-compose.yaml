@@ -44,6 +44,7 @@ services:
       - 3000:3000
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
+      - NO_PROXY=prometheus
   
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -56,4 +57,3 @@ services:
       - 6832:6832/udp
       - 16686:16686
       - 4317:4317
-    

@@ -31,20 +31,22 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::Piece;
-use futures::future::{join_all, try_join_all};
+use futures_util::future::{join_all, try_join_all};
 use tokio::sync::Semaphore;
 
 use super::{
-    batch::InvalidStats,
-    flusher::{Flusher, Submission},
+    flusher::{Flusher, InvalidStats, Submission},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
 };
+#[cfg(test)]
+use crate::large::test_utils::*;
 use crate::{
     compress::Compression,
-    device::{monitor::DeviceStats, Dev, DevExt, MonitoredDevice, RegionId},
+    device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
+    io::{buffer::IoBuffer, PAGE},
     large::{
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
@@ -56,6 +58,7 @@ use crate::{
     serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
+    Throttle,
 };
 
 pub struct GenericLargeStorageConfig<K, V>
@@ -73,14 +76,14 @@ where
     pub flushers: usize,
     pub reclaimers: usize,
     pub buffer_pool_size: usize,
+    pub blob_index_size: usize,
     pub submit_queue_size_threshold: usize,
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    pub reinsertion_picker: Arc<dyn ReinsertionPicker<Key = K>>,
+    pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
     pub tombstone_log_config: Option<TombstoneLogConfig>,
-    pub statistics: Arc<Statistics>,
     pub runtime: Runtime,
-    pub marker: PhantomData<V>,
+    pub marker: PhantomData<(K, V)>,
 }
 
 impl<K, V> Debug for GenericLargeStorageConfig<K, V>
@@ -99,12 +102,12 @@ where
             .field("flushers", &self.flushers)
             .field("reclaimers", &self.reclaimers)
             .field("buffer_pool_size", &self.buffer_pool_size)
+            .field("blob_index_size", &self.blob_index_size)
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
             .field("tombstone_log_config", &self.tombstone_log_config)
-            .field("statistics", &self.statistics)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -143,8 +146,6 @@ where
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
 
-    statistics: Arc<Statistics>,
-
     flush: bool,
 
     sequence: AtomicSequence,
@@ -154,6 +155,9 @@ where
     active: AtomicBool,
 
     metrics: Arc<Metrics>,
+
+    #[cfg(test)]
+    flush_holder: FlushHolder,
 }
 
 impl<K, V> Clone for GenericLargeStorage<K, V>
@@ -182,8 +186,6 @@ where
             );
         }
 
-        let stats = config.statistics.clone();
-
         let device = config.device.clone();
         let metrics = device.metrics().clone();
 
@@ -192,9 +194,8 @@ where
             None => None,
             Some(tombstone_log_config) => {
                 let log = TombstoneLog::open(
-                    &tombstone_log_config.path,
+                    tombstone_log_config,
                     device.clone(),
-                    tombstone_log_config.flush,
                     &mut tombstones,
                     metrics.clone(),
                     config.runtime.clone(),
@@ -226,37 +227,49 @@ where
             &indexer,
             &region_manager,
             &tombstones,
-            metrics.clone(),
             config.runtime.clone(),
         )
         .await?;
 
-        let flushers = try_join_all((0..config.flushers).map(|_| async {
-            Flusher::open(
-                &config,
-                indexer.clone(),
-                region_manager.clone(),
-                device.clone(),
-                submit_queue_size.clone(),
-                tombstone_log.clone(),
-                stats.clone(),
-                metrics.clone(),
-                &config.runtime,
-            )
+        #[cfg(test)]
+        let flush_holder = FlushHolder::default();
+
+        let flushers = try_join_all((0..config.flushers).map(|id| {
+            let config = &config;
+            let indexer = indexer.clone();
+            let region_manager = region_manager.clone();
+            let device = device.clone();
+            let submit_queue_size = submit_queue_size.clone();
+            let tombstone_log = tombstone_log.clone();
+            let metrics = metrics.clone();
+            #[cfg(test)]
+            let flush_holder = flush_holder.clone();
+            async move {
+                Flusher::open(
+                    id,
+                    config,
+                    indexer,
+                    region_manager,
+                    device,
+                    submit_queue_size,
+                    tombstone_log,
+                    metrics,
+                    &config.runtime,
+                    #[cfg(test)]
+                    flush_holder,
+                )
+            }
         }))
         .await?;
 
         let reclaimers = join_all((0..config.reclaimers).map(|_| async {
             Reclaimer::open(
+                &config,
                 region_manager.clone(),
                 reclaim_semaphore.clone(),
-                config.reinsertion_picker.clone(),
                 indexer.clone(),
                 flushers.clone(),
-                stats.clone(),
-                config.flush,
                 metrics.clone(),
-                &config.runtime,
             )
         }))
         .await;
@@ -270,12 +283,13 @@ where
                 reclaimers,
                 submit_queue_size,
                 submit_queue_size_threshold: config.submit_queue_size_threshold,
-                statistics: stats,
                 flush: config.flush,
                 sequence,
                 runtime: config.runtime,
                 active: AtomicBool::new(true),
                 metrics,
+                #[cfg(test)]
+                flush_holder,
             }),
         })
     }
@@ -303,11 +317,7 @@ where
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
-            tracing::warn!(
-                "[lodc] {} {}",
-                "submit queue overflow, new entry ignored.",
-                "Hint: set an appropriate rate limiter as the admission picker or scale out flushers."
-            );
+            self.inner.metrics.storage_queue_channel_overflow.increase(1);
             return;
         }
 
@@ -325,7 +335,6 @@ where
 
         let device = self.inner.device.clone();
         let indexer = self.inner.indexer.clone();
-        let stats = self.inner.statistics.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
@@ -338,45 +347,88 @@ where
                 }
             };
 
-            tracing::trace!("{addr:#?}");
+            tracing::trace!(hash, ?addr, "[lodc]: load");
 
-            let buffer = device.read(addr.region, addr.offset as _, addr.len as _).await?;
+            let buf = IoBuffer::new(bits::align_up(PAGE, addr.len as _));
+            let (buf, res) = device.read(buf, addr.region, addr.offset as _).await;
+            match res {
+                Ok(_) => {}
+                Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(?e, "[lodc load]: invalid io range, remove this entry and skip");
+                    indexer.remove(hash);
+                    metrics.storage_miss.increase(1);
+                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                    return Ok(None);
+                }
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
+            }
 
-            stats
-                .cache_read_bytes
-                .fetch_add(bits::align_up(device.align(), buffer.len()), Ordering::Relaxed);
-
-            let header = match EntryHeader::read(&buffer[..EntryHeader::serialized_len()]) {
+            let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
                 Err(e @ Error::MagicMismatch { .. })
                 | Err(e @ Error::ChecksumMismatch { .. })
-                | Err(e @ Error::CompressionAlgorithmNotSupported(_)) => {
-                    tracing::trace!("deserialize entry header error: {e}, remove this entry and skip");
+                | Err(e @ Error::CompressionAlgorithmNotSupported(_))
+                | Err(e @ Error::OutOfRange { .. })
+                | Err(e @ Error::InvalidIoRange { .. }) => {
+                    tracing::warn!(
+                        hash,
+                        ?addr,
+                        ?e,
+                        "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                    );
                     indexer.remove(hash);
                     metrics.storage_miss.increase(1);
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    metrics.storage_error.increase(1);
+                    return Err(e);
+                }
             };
 
-            let (k, v) = match EntryDeserializer::deserialize::<K, V>(
-                &buffer[EntryHeader::serialized_len()..],
-                header.key_len as _,
-                header.value_len as _,
-                header.compression,
-                Some(header.checksum),
-                &metrics,
-            ) {
-                Ok(res) => res,
-                Err(e @ Error::MagicMismatch { .. }) | Err(e @ Error::ChecksumMismatch { .. }) => {
-                    tracing::trace!("deserialize read buffer raise error: {e}, remove this entry and skip");
-                    indexer.remove(hash);
-                    metrics.storage_miss.increase(1);
-                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
-                    return Ok(None);
-                }
-                Err(e) => return Err(e),
+            let (k, v) = {
+                let now = Instant::now();
+                let res = match EntryDeserializer::deserialize::<K, V>(
+                    &buf[EntryHeader::serialized_len()..],
+                    header.key_len as _,
+                    header.value_len as _,
+                    header.compression,
+                    Some(header.checksum),
+                ) {
+                    Ok(res) => res,
+                    Err(e @ Error::MagicMismatch { .. })
+                    | Err(e @ Error::ChecksumMismatch { .. })
+                    | Err(e @ Error::OutOfRange { .. })
+                    | Err(e @ Error::InvalidIoRange { .. }) => {
+                        tracing::warn!(
+                            hash,
+                            ?addr,
+                            ?header,
+                            ?e,
+                            "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                        );
+                        indexer.remove(hash);
+                        metrics.storage_miss.increase(1);
+                        metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
+                        metrics.storage_error.increase(1);
+                        return Ok(None);
+                    }
+                    Err(e) => {
+                        tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
+                        metrics.storage_error.increase(1);
+                        return Err(e);
+                    }
+                };
+                metrics
+                    .storage_entry_deserialize_duration
+                    .record(now.elapsed().as_secs_f64());
+                res
             };
 
             metrics.storage_hit.increase(1);
@@ -453,6 +505,16 @@ where
 
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn hold_flush(&self) {
+        self.inner.flush_holder.hold();
+    }
+
+    #[cfg(test)]
+    pub fn unhold_flush(&self) {
+        self.inner.flush_holder.unhold();
+    }
 }
 
 impl<K, V> Storage for GenericLargeStorage<K, V>
@@ -492,8 +554,12 @@ where
         self.destroy().await
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        self.inner.device.stat().clone()
+    fn throttle(&self) -> &Throttle {
+        self.inner.device.throttle()
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.device.statistics()
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -506,8 +572,8 @@ mod tests {
 
     use std::{fs::File, path::Path};
 
-    use ahash::RandomState;
     use bytesize::ByteSize;
+    use foyer_common::hasher::ModRandomState;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
     use itertools::Itertools;
     use tokio::runtime::Handle;
@@ -523,10 +589,11 @@ mod tests {
 
     const KB: usize = 1024;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
         CacheBuilder::new(10)
             .with_shards(1)
             .with_eviction_config(FifoConfig::default())
+            .with_hash_builder(ModRandomState::default())
             .build()
     }
 
@@ -548,12 +615,12 @@ mod tests {
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
     async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>> {
-        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker<u64>>::default()).await
+        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
         dir: impl AsRef<Path>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker<Key = u64>>,
+        reinsertion_picker: Arc<dyn ReinsertionPicker>,
     ) -> GenericLargeStorage<u64, Vec<u8>> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
@@ -572,8 +639,8 @@ mod tests {
             reinsertion_picker,
             tombstone_log_config: None,
             buffer_pool_size: 16 * 1024 * 1024,
+            blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
@@ -598,18 +665,18 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            reinsertion_picker: Arc::<RejectAllPicker<u64>>::default(),
+            reinsertion_picker: Arc::<RejectAllPicker>::default(),
             tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
+            blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            statistics: Arc::<Statistics>::default(),
             runtime: Runtime::new(None, None, Handle::current()),
             marker: PhantomData,
         };
         GenericLargeStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, RandomState>) {
+    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, ModRandomState>) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
         store.enqueue(entry.piece(), estimated_size);
     }
@@ -622,56 +689,60 @@ mod tests {
         let store = store_for_test(dir.path()).await;
 
         // [ [e1, e2], [], [], [] ]
+        store.hold_flush();
         let e1 = memory.insert(1, vec![1; 7 * KB]);
-        let e2 = memory.insert(2, vec![2; 7 * KB]);
-
+        let e2 = memory.insert(2, vec![2; 3 * KB]);
         enqueue(&store, e1.clone());
         enqueue(&store, e2);
+        store.unhold_flush();
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
         let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
-        assert_eq!(r2, (2, vec![2; 7 * KB]));
+        assert_eq!(r2, (2, vec![2; 3 * KB]));
 
         // [ [e1, e2], [e3, e4], [], [] ]
+        store.hold_flush();
         let e3 = memory.insert(3, vec![3; 7 * KB]);
-        let e4 = memory.insert(4, vec![4; 6 * KB]);
-
+        let e4 = memory.insert(4, vec![4; 2 * KB]);
         enqueue(&store, e3);
         enqueue(&store, e4);
+        store.unhold_flush();
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
         let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
-        assert_eq!(r2, (2, vec![2; 7 * KB]));
+        assert_eq!(r2, (2, vec![2; 3 * KB]));
         let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
         let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
-        assert_eq!(r4, (4, vec![4; 6 * KB]));
+        assert_eq!(r4, (4, vec![4; 2 * KB]));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
-        let e5 = memory.insert(5, vec![5; 13 * KB]);
+        let e5 = memory.insert(5, vec![5; 11 * KB]);
         enqueue(&store, e5);
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
         let r2 = store.load(memory.hash(&2)).await.unwrap().unwrap();
-        assert_eq!(r2, (2, vec![2; 7 * KB]));
+        assert_eq!(r2, (2, vec![2; 3 * KB]));
         let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
         let r4 = store.load(memory.hash(&4)).await.unwrap().unwrap();
-        assert_eq!(r4, (4, vec![4; 6 * KB]));
+        assert_eq!(r4, (4, vec![4; 2 * KB]));
         let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
-        assert_eq!(r5, (5, vec![5; 13 * KB]));
+        assert_eq!(r5, (5, vec![5; 11 * KB]));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
+        store.hold_flush();
         let e6 = memory.insert(6, vec![6; 7 * KB]);
-        let e4v2 = memory.insert(4, vec![!4; 7 * KB]);
+        let e4v2 = memory.insert(4, vec![!4; 3 * KB]);
         enqueue(&store, e6);
         enqueue(&store, e4v2);
+        store.unhold_flush();
         store.wait().await;
 
         assert!(store.load(memory.hash(&1)).await.unwrap().is_none());
@@ -679,9 +750,9 @@ mod tests {
         let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
         let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
-        assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
+        assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
         let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
-        assert_eq!(r5, (5, vec![5; 13 * KB]));
+        assert_eq!(r5, (5, vec![5; 11 * KB]));
         let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
@@ -698,9 +769,9 @@ mod tests {
         let r3 = store.load(memory.hash(&3)).await.unwrap().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
         let r4v2 = store.load(memory.hash(&4)).await.unwrap().unwrap();
-        assert_eq!(r4v2, (4, vec![!4; 7 * KB]));
+        assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
         let r5 = store.load(memory.hash(&5)).await.unwrap().unwrap();
-        assert_eq!(r5, (5, vec![5; 13 * KB]));
+        assert_eq!(r5, (5, vec![5; 11 * KB]));
         let r6 = store.load(memory.hash(&6)).await.unwrap().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
@@ -712,17 +783,18 @@ mod tests {
         let memory = cache_for_test();
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
+        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
-        for e in es.iter().take(6) {
+        // [[0, 1, 2], [3, 4, 5], [6, 7, 8], []]
+        for e in es.iter().take(9) {
             enqueue(&store, e.clone());
         }
         store.wait().await;
 
-        for i in 0..6 {
+        for i in 0..9 {
             assert_eq!(
                 store.load(memory.hash(&i)).await.unwrap(),
-                Some((i, vec![i as u8; 7 * KB]))
+                Some((i, vec![i as u8; 3 * KB]))
             );
         }
 
@@ -734,11 +806,11 @@ mod tests {
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
-        for i in 0..6 {
+        for i in 0..9 {
             if i != 3 {
                 assert_eq!(
                     store.load(memory.hash(&i)).await.unwrap(),
-                    Some((i, vec![i as u8; 7 * KB]))
+                    Some((i, vec![i as u8; 3 * KB]))
                 );
             } else {
                 assert_eq!(store.load(memory.hash(&3)).await.unwrap(), None);
@@ -747,14 +819,14 @@ mod tests {
 
         enqueue(&store, es[3].clone());
         store.wait().await;
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 3 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 3 * KB])));
     }
 
     #[test_log::test(tokio::test)]
@@ -764,17 +836,20 @@ mod tests {
         let memory = cache_for_test();
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
+        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
-        for e in es.iter().take(6) {
+        // [[0, 1, 2], [3, 4, 5], [6, 7, 8], []]
+        store.hold_flush();
+        for e in es.iter().take(9) {
             enqueue(&store, e.clone());
         }
+        store.unhold_flush();
         store.wait().await;
 
-        for i in 0..6 {
+        for i in 0..9 {
             assert_eq!(
                 store.load(memory.hash(&i)).await.unwrap(),
-                Some((i, vec![i as u8; 7 * KB]))
+                Some((i, vec![i as u8; 3 * KB]))
             );
         }
 
@@ -788,20 +863,20 @@ mod tests {
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
-        for i in 0..6 {
+        for i in 0..9 {
             assert_eq!(store.load(memory.hash(&i)).await.unwrap(), None);
         }
 
         enqueue(&store, es[3].clone());
         store.wait().await;
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 3 * KB])));
 
         store.close().await.unwrap();
         drop(store);
 
         let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
 
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 7 * KB])));
+        assert_eq!(store.load(memory.hash(&3)).await.unwrap(), Some((3, vec![3; 3 * KB])));
     }
 
     // FIXME(MrCroxx): Move the admission test to store level.
@@ -829,53 +904,61 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store =
-            store_for_test_with_reinsertion_picker(dir.path(), Arc::new(BiasedPicker::new(vec![1, 3, 5, 7, 9]))).await;
+        let store = store_for_test_with_reinsertion_picker(
+            dir.path(),
+            Arc::new(BiasedPicker::new(vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19])),
+        )
+        .await;
 
-        let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 7 * KB])).collect_vec();
+        let es = (0..15).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
-        // [ [e0, e1], [e2, e3], [e4, e5], [] ]
-        for e in es.iter().take(6).cloned() {
+        // [[(0), (1), (2)], [(3), (4), (5)], [(6), (7), (8)], []]
+        for e in es.iter().take(9).cloned() {
             enqueue(&store, e);
             store.wait().await;
         }
 
-        for i in 0..6 {
+        for i in 0..9 {
             let r = store.load(memory.hash(&i)).await.unwrap().unwrap();
-            assert_eq!(r, (i, vec![i as u8; 7 * KB]));
+            assert_eq!(r, (i, vec![i as u8; 3 * KB]));
         }
 
-        // [ [], [e2, e3], [e4, e5], [e6, e1] ]
-        enqueue(&store, es[6].clone());
+        // [[], [(3), (4), (5)], [(6), (7), (8)], [(9), (10), (1)]]
+        enqueue(&store, es[9].clone());
+        enqueue(&store, es[10].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..7 {
+        for i in 0..11 {
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
             vec![
                 None,
-                Some((1, vec![1; 7 * KB])),
-                Some((2, vec![2; 7 * KB])),
-                Some((3, vec![3; 7 * KB])),
-                Some((4, vec![4; 7 * KB])),
-                Some((5, vec![5; 7 * KB])),
-                Some((6, vec![6; 7 * KB])),
+                Some((1, vec![1; 3 * KB])),
+                None,
+                Some((3, vec![3; 3 * KB])),
+                Some((4, vec![4; 3 * KB])),
+                Some((5, vec![5; 3 * KB])),
+                Some((6, vec![6; 3 * KB])),
+                Some((7, vec![7; 3 * KB])),
+                Some((8, vec![8; 3 * KB])),
+                Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
             ]
         );
 
-        // [ [e7, e3], [], [e4, e5], [e6, e1] ]
-        enqueue(&store, es[7].clone());
+        // [[(11), (3), (5)], [], [(6), (7), (8)], [(9), (10), (1)]]
+        enqueue(&store, es[11].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..8 {
+        for i in 0..12 {
             tracing::trace!("==========> {i}");
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
@@ -883,41 +966,54 @@ mod tests {
             res,
             vec![
                 None,
-                Some((1, vec![1; 7 * KB])),
+                Some((1, vec![1; 3 * KB])),
                 None,
-                Some((3, vec![3; 7 * KB])),
-                Some((4, vec![4; 7 * KB])),
-                Some((5, vec![5; 7 * KB])),
-                Some((6, vec![6; 7 * KB])),
-                Some((7, vec![7; 7 * KB])),
+                Some((3, vec![3; 3 * KB])),
+                None,
+                Some((5, vec![5; 3 * KB])),
+                Some((6, vec![6; 3 * KB])),
+                Some((7, vec![7; 3 * KB])),
+                Some((8, vec![8; 3 * KB])),
+                Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
+                Some((11, vec![11; 3 * KB])),
             ]
         );
 
-        // [ [e7, e3], [e8, e9], [], [e6, e1] ]
-        store.delete(memory.hash(&5));
-        enqueue(&store, es[8].clone());
-        enqueue(&store, es[9].clone());
+        // [[(11), (3), (5)], [(12), (13), (14)], [], [(9), (10), (1)]]
+        store.delete(memory.hash(&7));
+        store.wait().await;
+        enqueue(&store, es[12].clone());
+        store.wait().await;
+        enqueue(&store, es[13].clone());
+        store.wait().await;
+        enqueue(&store, es[14].clone());
         store.wait().await;
         for reclaimer in store.inner.reclaimers.iter() {
             reclaimer.wait().await;
         }
         let mut res = vec![];
-        for i in 0..10 {
+        for i in 0..15 {
             res.push(store.load(memory.hash(&i)).await.unwrap());
         }
         assert_eq!(
             res,
             vec![
                 None,
-                Some((1, vec![1; 7 * KB])),
+                Some((1, vec![1; 3 * KB])),
                 None,
-                Some((3, vec![3; 7 * KB])),
+                Some((3, vec![3; 3 * KB])),
+                None,
+                Some((5, vec![5; 3 * KB])),
                 None,
                 None,
-                Some((6, vec![6; 7 * KB])),
-                Some((7, vec![7; 7 * KB])),
-                Some((8, vec![8; 7 * KB])),
-                Some((9, vec![9; 7 * KB])),
+                None,
+                Some((9, vec![9; 3 * KB])),
+                Some((10, vec![10; 3 * KB])),
+                Some((11, vec![11; 3 * KB])),
+                Some((12, vec![12; 3 * KB])),
+                Some((13, vec![13; 3 * KB])),
+                Some((14, vec![14; 3 * KB])),
             ]
         );
     }
@@ -949,12 +1045,12 @@ mod tests {
             #[cfg(target_family = "unix")]
             {
                 use std::os::unix::fs::FileExt;
-                file.write_all_at(&[b'x'; 4 * 1024], 0).unwrap();
+                file.write_all_at(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
             }
             #[cfg(target_family = "windows")]
             {
                 use std::os::windows::fs::FileExt;
-                file.seek_write(&[b'x'; 4 * 1024], 0).unwrap();
+                file.seek_write(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
             }
         }
 

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
 use auto_enums::auto_enum;
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::Future;
 
 use crate::{
     error::Result,
@@ -27,7 +26,7 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    DeviceStats, Storage,
+    Statistics, Storage, Throttle,
 };
 
 pub struct SizeSelector<K, V>
@@ -227,12 +226,21 @@ where
         }
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
+    fn throttle(&self) -> &Throttle {
         match self {
-            EngineEnum::Noop(storage) => storage.stats(),
-            EngineEnum::Large(storage) => storage.stats(),
-            EngineEnum::Small(storage) => storage.stats(),
-            EngineEnum::Mixed(storage) => storage.stats(),
+            EngineEnum::Noop(storage) => storage.throttle(),
+            EngineEnum::Large(storage) => storage.throttle(),
+            EngineEnum::Small(storage) => storage.throttle(),
+            EngineEnum::Mixed(storage) => storage.throttle(),
+        }
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        match self {
+            EngineEnum::Noop(storage) => storage.statistics(),
+            EngineEnum::Large(storage) => storage.statistics(),
+            EngineEnum::Small(storage) => storage.statistics(),
+            EngineEnum::Mixed(storage) => storage.statistics(),
         }
     }
 

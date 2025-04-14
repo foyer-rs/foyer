@@ -9,6 +9,127 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-04-11
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.16.1 |
+| foyer-common | 0.16.1 |
+| foyer-memory | 0.16.1 |
+| foyer-storage | 0.16.1 |
+| foyer-bench | 0.16.1 |
+
+### Changes
+
+- Fix panic when building large object disk cache engine if `buffer_pool_size / flushers` is not 4K-aligned.
+- Make CI run on release branches.
+
+## 2025-04-07
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.16.0 |
+| foyer-common | 0.16.0 |
+| foyer-memory | 0.16.0 |
+| foyer-storage | 0.16.0 |
+| foyer-bench | 0.16.0 |
+
+### Changes
+
+- Refine the cache key/value serialization and deserializaion.
+  - Support customized serialization and deserialization.
+  - Support serialization and deserialization with `serde` and `bincode`. (optional)
+- Make `serde` and `bincode` optional, and disabled by default. You can enable it with `serde` feature.
+- Reduce verbose warning logs.
+
+## 2025-03-28
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.3 |
+| foyer-common | 0.15.3 |
+| foyer-memory | 0.15.3 |
+| foyer-storage | 0.15.3 |
+| foyer-bench | 0.15.3 |
+
+### Changes
+
+- Fix lodc flush buffer split condition calculation error.
+
+## 2025-03-26
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.2 |
+| foyer-common | 0.15.2 |
+| foyer-memory | 0.15.2 |
+| foyer-storage | 0.15.2 |
+| foyer-bench | 0.15.2 |
+
+### Changes
+
+- Mitigate low-priority errors. Refine error handling.
+
+## 2025-03-25
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.1 |
+| foyer-common | 0.15.1 |
+| foyer-memory | 0.15.1 |
+| foyer-storage | 0.15.1 |
+| foyer-bench | 0.15.1 |
+
+### Changes
+
+- Support either write disk cache on in-memory cache evction or on insertion with `HybridCacheBuilder::with_policy()`.
+
+## 2025-03-24
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.0 |
+| foyer-common | 0.15.0 |
+| foyer-memory | 0.15.0 |
+| foyer-storage | 0.15.0 |
+| foyer-bench | 0.15.0 |
+
+### Changes
+
+- Support blob file format to speed up disk cache recovery and reduce reclaim overhead.
+- Make histogram metrics more precise.
+- Refine redundant codes.
+- Refine dependencies.
+
+## 2025-02-08
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.14.1 |
+| foyer-common | 0.14.1 |
+| foyer-memory | 0.14.1 |
+| foyer-storage | 0.14.1 |
+| foyer-bench | 0.14.1 |
+
+### Changes
+
+- Use `tokio-rs/tokio` by default as the runtime, use `madsim-tokio` when `madsim` configuration is enabled.
+- Optimize dependencies.
+
 ## 2025-01-14
 
 ### Releases

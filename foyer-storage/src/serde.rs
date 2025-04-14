@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, io::Write, time::Instant};
+use std::{fmt::Debug, io::Write};
 
-use foyer_common::{
-    code::{StorageKey, StorageValue},
-    metrics::Metrics,
-};
+use foyer_common::code::{StorageKey, StorageValue};
 use twox_hash::{XxHash32, XxHash64};
 
 use crate::{
@@ -44,6 +41,7 @@ pub struct KvInfo {
     pub value_len: usize,
 }
 
+/// A writer wrapper that count how many bytes has been written.
 #[derive(Debug)]
 pub struct TrackedWriter<W> {
     inner: W,
@@ -55,12 +53,8 @@ impl<W> TrackedWriter<W> {
         Self { inner, written: 0 }
     }
 
-    pub fn written(&self) -> usize {
+    pub fn written(self) -> usize {
         self.written
-    }
-
-    pub fn recount(&mut self) {
-        self.written = 0;
     }
 }
 
@@ -97,55 +91,57 @@ pub struct EntrySerializer;
 
 impl EntrySerializer {
     #[fastrace::trace(name = "foyer::storage::serde::serialize")]
-    pub fn serialize<'a, K, V, W>(
-        key: &'a K,
-        value: &'a V,
-        compression: &'a Compression,
-        writer: W,
-        metrics: &Metrics,
-    ) -> Result<KvInfo>
+    pub fn serialize<K, V, W>(key: &K, value: &V, compression: Compression, mut writer: W) -> Result<KvInfo>
     where
         K: StorageKey,
         V: StorageValue,
         W: Write,
     {
-        let now = Instant::now();
-
-        let mut writer = TrackedWriter::new(writer);
-
         // serialize value
+        let value_len = Self::serialize_value(value, &mut writer, compression)?;
+
+        // serialize key
+        let key_len = Self::serialize_key(key, &mut writer)?;
+
+        Ok(KvInfo { key_len, value_len })
+    }
+
+    fn serialize_key<K, W>(key: &K, writer: W) -> Result<usize>
+    where
+        K: StorageKey,
+        W: Write,
+    {
+        let mut writer = TrackedWriter::new(writer);
+        key.encode(&mut writer).map_err(Error::from)?;
+        Ok(writer.written())
+    }
+
+    fn serialize_value<V, W>(value: &V, writer: W, compression: Compression) -> Result<usize>
+    where
+        V: StorageValue,
+        W: Write,
+    {
+        let mut writer = TrackedWriter::new(writer);
         match compression {
             Compression::None => {
-                bincode::serialize_into(&mut writer, &value).map_err(Error::from)?;
+                value.encode(&mut writer).map_err(Error::from)?;
             }
             Compression::Zstd => {
                 // Do not use `auto_finish()` here, for we will lost `ZeroWrite` error.
                 let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::from)?;
-                bincode::serialize_into(&mut encoder, &value).map_err(Error::from)?;
+                value.encode(&mut encoder).map_err(Error::from)?;
                 encoder.finish().map_err(Error::from)?;
             }
             Compression::Lz4 => {
-                let encoder = lz4::EncoderBuilder::new()
+                let mut encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .auto_flush(true)
                     .build(&mut writer)
                     .map_err(Error::from)?;
-                bincode::serialize_into(encoder, &value).map_err(Error::from)?;
+                value.encode(&mut encoder).map_err(Error::from)?;
             }
         }
-
-        let value_len = writer.written();
-        writer.recount();
-
-        // serialize key
-        bincode::serialize_into(&mut writer, &key).map_err(Error::from)?;
-        let key_len = writer.written();
-
-        metrics
-            .storage_entry_serialize_duration
-            .record(now.elapsed().as_secs_f64());
-
-        Ok(KvInfo { key_len, value_len })
+        Ok(writer.written())
     }
 
     pub fn estimated_size<'a, K, V>(key: &'a K, value: &'a V) -> usize
@@ -153,8 +149,7 @@ impl EntrySerializer {
         K: StorageKey,
         V: StorageValue,
     {
-        // `serialized_size` should always return `Ok(..)` without a hard size limit.
-        (bincode::serialized_size(key).unwrap() + bincode::serialized_size(value).unwrap()) as usize
+        key.estimated_size() + value.estimated_size()
     }
 }
 
@@ -169,14 +164,11 @@ impl EntryDeserializer {
         value_len: usize,
         compression: Compression,
         checksum: Option<u64>,
-        metrics: &Metrics,
     ) -> Result<(K, V)>
     where
         K: StorageKey,
         V: StorageValue,
     {
-        let now = Instant::now();
-
         // deserialize value
         let buf = &buffer[..value_len];
         let value = Self::deserialize_value(buf, compression)?;
@@ -193,35 +185,31 @@ impl EntryDeserializer {
             }
         }
 
-        metrics
-            .storage_entry_deserialize_duration
-            .record(now.elapsed().as_secs_f64());
-
         Ok((key, value))
     }
 
     #[fastrace::trace(name = "foyer::storage::serde::deserialize_key")]
-    pub fn deserialize_key<K>(buf: &[u8]) -> Result<K>
+    fn deserialize_key<K>(buf: &[u8]) -> Result<K>
     where
         K: StorageKey,
     {
-        bincode::deserialize_from(buf).map_err(Error::from)
+        K::decode(&mut &buf[..]).map_err(Error::from)
     }
 
     #[fastrace::trace(name = "foyer::storage::serde::deserialize_value")]
-    pub fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
+    fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
     where
         V: StorageValue,
     {
         match compression {
-            Compression::None => bincode::deserialize_from(buf).map_err(Error::from),
+            Compression::None => V::decode(&mut &buf[..]).map_err(Error::from),
             Compression::Zstd => {
-                let decoder = zstd::Decoder::new(buf).map_err(Error::from)?;
-                bincode::deserialize_from(decoder).map_err(Error::from)
+                let mut decoder = zstd::Decoder::new(buf).map_err(Error::from)?;
+                V::decode(&mut decoder).map_err(Error::from)
             }
             Compression::Lz4 => {
-                let decoder = lz4::Decoder::new(buf).map_err(Error::from)?;
-                bincode::deserialize_from(decoder).map_err(Error::from)
+                let mut decoder = lz4::Decoder::new(buf).map_err(Error::from)?;
+                V::decode(&mut decoder).map_err(Error::from)
             }
         }
     }

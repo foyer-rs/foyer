@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 
-use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry};
+use mixtrics::metrics::{BoxedCounter, BoxedGauge, BoxedHistogram, BoxedRegistry, Buckets};
 
 #[expect(missing_docs)]
-#[derive(Debug)]
 pub struct Metrics {
     /* in-memory cache metrics */
     pub memory_insert: BoxedCounter,
@@ -38,6 +37,7 @@ pub struct Metrics {
     pub storage_hit: BoxedCounter,
     pub storage_miss: BoxedCounter,
     pub storage_delete: BoxedCounter,
+    pub storage_error: BoxedCounter,
 
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
@@ -46,7 +46,8 @@ pub struct Metrics {
 
     pub storage_queue_rotate: BoxedCounter,
     pub storage_queue_rotate_duration: BoxedHistogram,
-    pub storage_queue_drop: BoxedCounter,
+    pub storage_queue_buffer_overflow: BoxedCounter,
+    pub storage_queue_channel_overflow: BoxedCounter,
 
     pub storage_disk_write: BoxedCounter,
     pub storage_disk_read: BoxedCounter,
@@ -68,17 +69,28 @@ pub struct Metrics {
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
+    pub storage_lodc_buffer_efficiency: BoxedHistogram,
+    pub storage_lodc_recover_duration: BoxedHistogram,
+
     /* hybrid cache metrics */
     pub hybrid_insert: BoxedCounter,
     pub hybrid_hit: BoxedCounter,
     pub hybrid_miss: BoxedCounter,
+    pub hybrid_throttled: BoxedCounter,
     pub hybrid_remove: BoxedCounter,
 
     pub hybrid_insert_duration: BoxedHistogram,
     pub hybrid_hit_duration: BoxedHistogram,
     pub hybrid_miss_duration: BoxedHistogram,
+    pub hybrid_throttled_duration: BoxedHistogram,
     pub hybrid_remove_duration: BoxedHistogram,
     pub hybrid_fetch_duration: BoxedHistogram,
+}
+
+impl Debug for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Metrics").finish()
+    }
 }
 
 impl Metrics {
@@ -119,10 +131,12 @@ impl Metrics {
             "foyer disk cache operations".into(),
             &["name", "op"],
         );
-        let foyer_storage_op_duration = registry.register_histogram_vec(
+        let foyer_storage_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_op_duration".into(),
             "foyer disk cache op durations".into(),
             &["name", "op"],
+            // 1us ~ 4s
+            Buckets::exponential(0.000_001, 2.0, 23),
         );
 
         let foyer_storage_inner_op_total = registry.register_counter_vec(
@@ -130,10 +144,12 @@ impl Metrics {
             "foyer disk cache inner operations".into(),
             &["name", "op"],
         );
-        let foyer_storage_inner_op_duration = registry.register_histogram_vec(
+        let foyer_storage_inner_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_inner_op_duration".into(),
             "foyer disk cache inner op durations".into(),
             &["name", "op"],
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
 
         let foyer_storage_disk_io_total = registry.register_counter_vec(
@@ -146,10 +162,12 @@ impl Metrics {
             "foyer disk cache disk io bytes".into(),
             &["name", "op"],
         );
-        let foyer_storage_disk_io_duration = registry.register_histogram_vec(
+        let foyer_storage_disk_io_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_disk_io_duration".into(),
             "foyer disk cache disk io duration".into(),
             &["name", "op"],
+            // 1us ~ 4s
+            Buckets::exponential(0.000_001, 2.0, 23),
         );
 
         let foyer_storage_region = registry.register_gauge_vec(
@@ -163,16 +181,35 @@ impl Metrics {
             &["name"],
         );
 
-        let foyer_storage_entry_serde_duration = registry.register_histogram_vec(
+        let foyer_storage_entry_serde_duration = registry.register_histogram_vec_with_buckets(
             "foyer_storage_entry_serde_duration".into(),
             "foyer disk cache entry serde durations".into(),
             &["name", "op"],
+            // 10ns ~ 40ms
+            Buckets::exponential(0.000_000_01, 2.0, 23),
+        );
+
+        let foyer_storage_lodc_buffer_efficiency = registry.register_histogram_vec_with_buckets(
+            "foyer_storage_lodc_buffer_efficiency".into(),
+            "foyer large object disk cache buffer efficiency".into(),
+            &["name"],
+            // 0% ~ 100%
+            Buckets::linear(0.1, 0.1, 10),
+        );
+
+        let foyer_storage_lodc_recover_duration = registry.register_histogram_vec_with_buckets(
+            "foyer_storage_lodc_recover_duration".into(),
+            "foyer large object disk cache recover duration".into(),
+            &["name"],
+            // 1ms ~ 1000s
+            Buckets::exponential(0.001, 2.0, 21),
         );
 
         let storage_enqueue = foyer_storage_op_total.counter(&[name.clone(), "enqueue".into()]);
         let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
         let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
         let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]);
+        let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
 
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
@@ -180,7 +217,10 @@ impl Metrics {
         let storage_delete_duration = foyer_storage_op_duration.histogram(&[name.clone(), "delete".into()]);
 
         let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_rotate".into()]);
-        let storage_queue_drop = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_drop".into()]);
+        let storage_queue_buffer_overflow =
+            foyer_storage_inner_op_total.counter(&[name.clone(), "buffer_overflow".into()]);
+        let storage_queue_channel_overflow =
+            foyer_storage_inner_op_total.counter(&[name.clone(), "channel_overflow".into()]);
 
         let storage_queue_rotate_duration =
             foyer_storage_inner_op_duration.histogram(&[name.clone(), "queue_rotate".into()]);
@@ -207,6 +247,10 @@ impl Metrics {
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
 
+        let storage_lodc_buffer_efficiency = foyer_storage_lodc_buffer_efficiency.histogram(&[name.clone()]);
+
+        let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(&[name.clone()]);
+
         /* hybrid cache metrics */
 
         let foyer_hybrid_op_total = registry.register_counter_vec(
@@ -223,11 +267,13 @@ impl Metrics {
         let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]);
         let hybrid_hit = foyer_hybrid_op_total.counter(&[name.clone(), "hit".into()]);
         let hybrid_miss = foyer_hybrid_op_total.counter(&[name.clone(), "miss".into()]);
+        let hybrid_throttled = foyer_hybrid_op_total.counter(&[name.clone(), "throttled".into()]);
         let hybrid_remove = foyer_hybrid_op_total.counter(&[name.clone(), "remove".into()]);
 
         let hybrid_insert_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "insert".into()]);
         let hybrid_hit_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "hit".into()]);
         let hybrid_miss_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "miss".into()]);
+        let hybrid_throttled_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "throttled".into()]);
         let hybrid_remove_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "remove".into()]);
         let hybrid_fetch_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "fetch".into()]);
 
@@ -248,13 +294,15 @@ impl Metrics {
             storage_hit,
             storage_miss,
             storage_delete,
+            storage_error,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,
             storage_delete_duration,
             storage_queue_rotate,
             storage_queue_rotate_duration,
-            storage_queue_drop,
+            storage_queue_buffer_overflow,
+            storage_queue_channel_overflow,
             storage_disk_write,
             storage_disk_read,
             storage_disk_flush,
@@ -269,10 +317,14 @@ impl Metrics {
             storage_region_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
+            storage_lodc_buffer_efficiency,
+            storage_lodc_recover_duration,
 
             hybrid_insert,
             hybrid_hit,
             hybrid_miss,
+            hybrid_throttled,
+            hybrid_throttled_duration,
             hybrid_remove,
             hybrid_insert_duration,
             hybrid_hit_duration,

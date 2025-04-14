@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.14.0"
+version = "0.16.1"
 edition = "2021"
 rust-version = "1.81.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -23,38 +23,38 @@ readme = "README.md"
 
 [workspace.dependencies]
 ahash = "0.8"
+anyhow = "1"
+bincode = "1"
+bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
-crossbeam = "0.8"
 equivalent = "1"
 fastrace = "0.7"
+futures-core = { version = "0.3" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
 itertools = "0.14"
 parking_lot = { version = "0.12" }
-serde = { version = "1", features = ["derive", "rc"] }
+paste = "1"
+pin-project = "1"
+rand = { version = "0.9" }
+rand_distr = { version = "0.5" }
+serde = { version = "1", features = ["derive"] }
 test-log = { version = "0.2", default-features = false, features = [
   "trace",
   "color",
 ] }
 thiserror = "2"
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
 tracing = "0.1"
-prometheus = "0.13"
-mixtrics = "0.0.3"
+prometheus = "0.14"
+mixtrics = "0.0.6"
+criterion = "0.5"
 
 # foyer components
-foyer-common = { version = "0.14.0", path = "foyer-common" }
-foyer-memory = { version = "0.14.0", path = "foyer-memory" }
-foyer-storage = { version = "0.14.0", path = "foyer-storage" }
-foyer = { version = "0.14.0", path = "foyer" }
+foyer-common = { version = "0.16.1", path = "foyer-common" }
+foyer-memory = { version = "0.16.1", path = "foyer-memory" }
+foyer-storage = { version = "0.16.1", path = "foyer-storage" }
+foyer = { version = "0.16.1", path = "foyer" }
 
 [workspace.lints.rust]
 missing_docs = "warn"

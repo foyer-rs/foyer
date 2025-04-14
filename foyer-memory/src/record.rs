@@ -19,6 +19,7 @@ use std::{
 };
 
 use bitflags::bitflags;
+use foyer_common::location::CacheLocation;
 use serde::{Deserialize, Serialize};
 
 use crate::eviction::Eviction;
@@ -60,6 +61,7 @@ where
     pub hint: E::Hint,
     pub hash: u64,
     pub weight: usize,
+    pub location: CacheLocation,
 }
 
 /// [`Record`] holds the information of the cached entry.
@@ -126,6 +128,11 @@ where
     /// Get the record weight.
     pub fn weight(&self) -> usize {
         self.data.weight
+    }
+
+    /// Get the preferred cache location.
+    pub fn location(&self) -> CacheLocation {
+        self.data.location
     }
 
     /// Get the record state wrapped with [`UnsafeCell`].

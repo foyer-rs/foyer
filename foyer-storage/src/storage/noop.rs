@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
+use std::{
+    fmt::Debug,
+    future::{ready, Future},
+    marker::PhantomData,
+    sync::Arc,
+};
 
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
-use futures::future::ready;
 
-use crate::{device::monitor::DeviceStats, error::Result, storage::Storage};
+use crate::{error::Result, storage::Storage, Statistics, Throttle};
 
 pub struct Noop<K, V>
 where
     K: StorageKey,
     V: StorageValue,
 {
+    throttle: Arc<Throttle>,
+    statistics: Arc<Statistics>,
     _marker: PhantomData<(K, V)>,
 }
 
@@ -44,7 +50,11 @@ where
     V: StorageValue,
 {
     fn clone(&self) -> Self {
-        Self { _marker: PhantomData }
+        Self {
+            throttle: self.throttle.clone(),
+            statistics: self.statistics.clone(),
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -58,7 +68,13 @@ where
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
-        Ok(Self { _marker: PhantomData })
+        let throttle = Arc::<Throttle>::default();
+        let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
+        Ok(Self {
+            throttle,
+            statistics,
+            _marker: PhantomData,
+        })
     }
 
     async fn close(&self) -> Result<()> {
@@ -81,8 +97,12 @@ where
         Ok(())
     }
 
-    fn stats(&self) -> Arc<DeviceStats> {
-        Arc::default()
+    fn throttle(&self) -> &Throttle {
+        &self.throttle
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {

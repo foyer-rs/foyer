@@ -18,8 +18,7 @@
 
 use std::{path::Path, sync::Arc};
 
-use ahash::RandomState;
-use foyer_common::metrics::Metrics;
+use foyer_common::{hasher::ModRandomState, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
@@ -32,9 +31,9 @@ const INSERTS: usize = 100;
 const LOOPS: usize = 10;
 
 async fn test_store(
-    memory: Cache<u64, Vec<u8>>,
-    builder: impl Fn(&Cache<u64, Vec<u8>>) -> StoreBuilder<u64, Vec<u8>, RandomState>,
-    recorder: Arc<Recorder<u64>>,
+    memory: Cache<u64, Vec<u8>, ModRandomState>,
+    builder: impl Fn(&Cache<u64, Vec<u8>, ModRandomState>) -> StoreBuilder<u64, Vec<u8>, ModRandomState>,
+    recorder: Arc<Recorder>,
 ) {
     let store = builder(&memory).build().await.unwrap();
 
@@ -52,7 +51,7 @@ async fn test_store(
     let remains = recorder.remains();
 
     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-        let value = store.load(&i).await.unwrap().map(|(_, v)| v);
+        let value = store.load(&i).await.unwrap().entry().map(|(_, v)| v);
         if remains.contains(&i) {
             assert_eq!(value, Some(vec![i as u8; 1 * KB]));
         } else {
@@ -68,7 +67,7 @@ async fn test_store(
         let remains = recorder.remains();
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-            let value = store.load(&i).await.unwrap().map(|(_, v)| v);
+            let value = store.load(&i).await.unwrap().entry().map(|(_, v)| v);
             if remains.contains(&i) {
                 assert_eq!(value, Some(vec![i as u8; 1 * KB]), "value mismatch, loop: {l}, i: {i}");
             } else {
@@ -88,7 +87,7 @@ async fn test_store(
         let remains = recorder.remains();
 
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
-            let value = store.load(&i).await.unwrap().map(|(_, v)| v);
+            let value = store.load(&i).await.unwrap().entry().map(|(_, v)| v);
             if remains.contains(&i) {
                 assert_eq!(value, Some(vec![i as u8; 1 * KB]));
             } else {
@@ -101,10 +100,10 @@ async fn test_store(
 }
 
 fn basic(
-    memory: &Cache<u64, Vec<u8>>,
+    memory: &Cache<u64, Vec<u8>, ModRandomState>,
     path: impl AsRef<Path>,
-    recorder: &Arc<Recorder<u64>>,
-) -> StoreBuilder<u64, Vec<u8>> {
+    recorder: &Arc<Recorder>,
+) -> StoreBuilder<u64, Vec<u8>, ModRandomState> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()), Engine::Large)
         .with_device_options(
@@ -126,9 +125,12 @@ fn basic(
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
-    let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
+    let memory = CacheBuilder::new(1)
+        .with_eviction_config(FifoConfig::default())
+        .with_hash_builder(ModRandomState::default())
+        .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r);
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| basic(memory, tempdir.path(), &r);
     test_store(memory, builder, recorder).await;
 }
 
@@ -136,9 +138,14 @@ async fn test_direct_fs_store() {
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
-    let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
+    let memory = CacheBuilder::new(1)
+        .with_eviction_config(FifoConfig::default())
+        .with_hash_builder(ModRandomState::default())
+        .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r).with_compression(Compression::Zstd);
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| {
+        basic(memory, tempdir.path(), &r).with_compression(Compression::Zstd)
+    };
     test_store(memory, builder, recorder).await;
 }
 
@@ -146,8 +153,13 @@ async fn test_direct_fs_store_zstd() {
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(Recorder::default());
-    let memory = CacheBuilder::new(1).with_eviction_config(FifoConfig::default()).build();
+    let memory = CacheBuilder::new(1)
+        .with_eviction_config(FifoConfig::default())
+        .with_hash_builder(ModRandomState::default())
+        .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>>| basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4);
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| {
+        basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4)
+    };
     test_store(memory, builder, recorder).await;
 }

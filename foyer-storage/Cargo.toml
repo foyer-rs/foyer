@@ -10,7 +10,6 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ahash = { workspace = true }
@@ -19,30 +18,27 @@ allocator-api2 = "0.2"
 anyhow = "1.0"
 # TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
 array-util = "1"
-async-channel = "2"
 auto_enums = { version = "0.8", features = ["futures03"] }
-bincode = "1"
-bytes = "1"
+bytes = { workspace = true }
 clap = { workspace = true }
-either = "1"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 flume = "0.11"
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-fs4 = { version = "0.12", default-features = false }
-futures = "0.3"
+fs4 = { version = "0.13", default-features = false }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24"
 ordered_hash_map = "0.4"
 parking_lot = { workspace = true }
-paste = "1"
+paste = { workspace = true }
 pin-project = "1"
-rand = "0.8"
-serde = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 twox-hash = "2"
 zstd = "0.13"
@@ -52,15 +48,39 @@ bytesize = { workspace = true }
 tempfile = "3"
 test-log = { workspace = true }
 
+[target.'cfg(madsim)'.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { package = "tokio", version = "1", features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
 [features]
 default = []
-deadlock = ["parking_lot/deadlock_detection"]
+serde = ["dep:serde"]
+tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 nightly = ["allocator-api2/nightly"]
+test_utils = []
+deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
-tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
 
 [lints]
 workspace = true
