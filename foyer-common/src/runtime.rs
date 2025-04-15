@@ -224,4 +224,20 @@ impl SingletonHandle {
     pub fn block_on<F: Future>(&self, _: F) -> F::Output {
         unimplemented!("`block_on()` is not supported with madsim")
     }
+
+    /// Captures a snapshot of the runtime’s state.
+    ///
+    /// FYI: https://docs.rs/tokio/latest/tokio/runtime/struct.Handle.html#method.dump
+    #[cfg(all(not(madsim), tokio_unstable))]
+    pub fn id(&self) -> tokio::runtime::Id {
+        self.0.id()
+    }
+
+    /// Captures a snapshot of the runtime’s state.
+    ///
+    /// FYI: https://docs.rs/tokio/latest/tokio/runtime/struct.Handle.html#method.dump
+    #[cfg(all(not(madsim), tokio_unstable, tokio_taskdump))]
+    pub async fn dump(&self) -> tokio::runtime::dump::Dump {
+        self.0.dump().await
+    }
 }

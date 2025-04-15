@@ -58,10 +58,19 @@ foyer = { version = "0.16.1", path = "foyer" }
 
 [workspace.lints.rust]
 missing_docs = "warn"
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(madsim)',
+  'cfg(tokio_unstable)',
+  'cfg(tokio_taskdump)',
+] }
 
 [workspace.lints.clippy]
 allow_attributes = "warn"
 
+[profile.dev]
+debug = "full"
+split-debuginfo = "off"
+
 [profile.release]
 debug = "full"
+split-debuginfo = "off"

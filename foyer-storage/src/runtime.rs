@@ -17,6 +17,25 @@ use std::sync::Arc;
 use foyer_common::runtime::{BackgroundShutdownRuntime, SingletonHandle};
 use tokio::runtime::Handle;
 
+/// The identify of the runtime in foyer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", serde::Serialize, serde::Deserialize)]
+pub enum RuntimeIdentify {
+    /// Runtime for user tasks.
+    User,
+    /// Runtime for read tasks.
+    Read,
+    /// Runtime for write tasks.
+    Write,
+}
+
+#[cfg(all(not(madsim), tokio_unstable, tokio_taskdump))]
+#[derive(Debug)]
+pub struct RuntimeDump {
+    pub identifies: Vec<RuntimeIdentify>,
+    pub dump: tokio::runtime::dump::Dump,
+}
+
 #[derive(Debug)]
 struct RuntimeInner {
     _read_runtime: Option<Arc<BackgroundShutdownRuntime>>,
@@ -85,5 +104,48 @@ impl Runtime {
     /// Get the non-cloneable user runtime handle.
     pub fn user(&self) -> &SingletonHandle {
         &self.inner.user_runtime_handle
+    }
+
+    /// Captures the snapshots of all of the runtime’s state.
+    ///
+    /// FYI: https://docs.rs/tokio/latest/tokio/runtime/struct.Handle.html#method.dump
+    #[cfg(all(not(madsim), tokio_unstable, tokio_taskdump))]
+    pub async fn dump(&self) -> std::collections::HashMap<tokio::runtime::Id, RuntimeDump> {
+        let mut dumps = std::collections::HashMap::new();
+
+        match dumps.entry(self.inner.read_runtime_handle.id()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(RuntimeDump {
+                    identifies: vec![RuntimeIdentify::Read],
+                    dump: self.inner.read_runtime_handle.dump().await,
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().identifies.push(RuntimeIdentify::Read);
+            }
+        }
+        match dumps.entry(self.inner.write_runtime_handle.id()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(RuntimeDump {
+                    identifies: vec![RuntimeIdentify::Write],
+                    dump: self.inner.write_runtime_handle.dump().await,
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().identifies.push(RuntimeIdentify::Write);
+            }
+        }
+        match dumps.entry(self.inner.user_runtime_handle.id()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(RuntimeDump {
+                    identifies: vec![RuntimeIdentify::User],
+                    dump: self.inner.user_runtime_handle.dump().await,
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().identifies.push(RuntimeIdentify::User);
+            }
+        }
+        dumps
     }
 }

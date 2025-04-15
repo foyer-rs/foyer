@@ -37,7 +37,7 @@ use foyer_common::{
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchContext, FetchState, Piece, Pipe};
-use foyer_storage::{IoThrottler, Load, Statistics, Store};
+use foyer_storage::{IoThrottler, Load, Runtime, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -751,6 +751,11 @@ where
         };
 
         InRootSpan::new(inner, span).with_threshold(self.tracing_config.record_hybrid_fetch_threshold())
+    }
+
+    /// Get the runtime of the hybrid cache.
+    pub fn runtime(&self) -> &Runtime {
+        self.storage.runtime()
     }
 }
 

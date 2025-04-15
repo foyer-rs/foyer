@@ -35,7 +35,7 @@ pub use crate::{
         },
         AdmissionPicker, EvictionPicker, Pick, ReinsertionPicker,
     },
-    runtime::Runtime,
+    runtime::{Runtime, RuntimeIdentify},
     statistics::Statistics,
     storage::{either::Order, Storage},
     store::{
