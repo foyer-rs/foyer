@@ -307,6 +307,11 @@ where
         }
     }
 
+    /// Get the hybrid cache policy
+    pub fn policy(&self) -> HybridCachePolicy {
+        self.policy
+    }
+
     /// Access the trace config with options.
     pub fn update_tracing_options(&self, options: TracingOptions) {
         self.tracing_config.update(options);
@@ -682,7 +687,7 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
-        self.fetch_with_hint(key, CacheHint::Normal, fetch)
+        self.fetch_inner(key, CacheHint::Normal, CacheLocation::Default, fetch)
     }
 
     /// Fetch and insert a cache entry with the given key, hint, and method if there is a cache miss.
@@ -690,6 +695,44 @@ where
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
     pub fn fetch_with_hint<F, FU>(&self, key: K, hint: CacheHint, fetch: F) -> HybridFetch<K, V, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+    {
+        self.fetch_inner(key, hint, CacheLocation::Default, fetch)
+    }
+
+    /// Fetch and insert a cache entry with the given key, location, and method if there is a cache miss.
+    ///
+    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+    /// runtime. Otherwise, the user's runtime will be used.
+    pub fn fetch_with_location<F, FU>(&self, key: K, location: CacheLocation, fetch: F) -> HybridFetch<K, V, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+    {
+        self.fetch_inner(key, CacheHint::Normal, location, fetch)
+    }
+
+    /// Fetch and insert a cache entry with the given key, hint, location, and method if there is a cache miss.
+    ///
+    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+    /// runtime. Otherwise, the user's runtime will be used.
+    pub fn fetch_advanced<F, FU>(
+        &self,
+        key: K,
+        hint: CacheHint,
+        location: CacheLocation,
+        fetch: F,
+    ) -> HybridFetch<K, V, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+    {
+        self.fetch_inner(key, hint, location, fetch)
+    }
+
+    fn fetch_inner<F, FU>(&self, key: K, hint: CacheHint, location: CacheLocation, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
@@ -706,6 +749,7 @@ where
         let inner = self.memory.fetch_inner(
             key.clone(),
             hint,
+            location,
             || {
                 let metrics = self.metrics.clone();
                 let runtime = self.storage().runtime().clone();
@@ -955,6 +999,14 @@ mod tests {
         hybrid.storage().wait().await;
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
+        hybrid.insert_with_location(3, vec![3; 7 * KB], CacheLocation::OnDisk);
+        hybrid.storage().wait().await;
+        assert!(hybrid.memory().get(&3).is_none());
+        assert_eq!(
+            hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
+            vec![3; 7 * KB]
+        );
+
         // Test hybrid cache that write disk cache on insertion.
 
         let dir = tempfile::tempdir().unwrap();
@@ -972,6 +1024,14 @@ mod tests {
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
+
+        hybrid.insert_with_location(3, vec![3; 7 * KB], CacheLocation::OnDisk);
+        hybrid.storage().wait().await;
+        assert!(hybrid.memory().get(&3).is_none());
+        assert_eq!(
+            hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
+            vec![3; 7 * KB]
+        );
     }
 
     #[test_log::test(tokio::test)]

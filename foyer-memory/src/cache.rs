@@ -595,6 +595,32 @@ where
         }
     }
 
+    /// Insert cache entry with all tunable options to the in-memory cache.
+    #[fastrace::trace(name = "foyer::memory::cache::insert_ephemeral_with_hint")]
+    pub fn insert_advanced(
+        &self,
+        key: K,
+        value: V,
+        hint: CacheHint,
+        location: CacheLocation,
+        ephemeral: bool,
+    ) -> CacheEntry<K, V, S> {
+        match self {
+            Cache::Fifo(cache) => cache
+                .insert_advanced(key, value, hint.into(), location, ephemeral)
+                .into(),
+            Cache::Lru(cache) => cache
+                .insert_advanced(key, value, hint.into(), location, ephemeral)
+                .into(),
+            Cache::Lfu(cache) => cache
+                .insert_advanced(key, value, hint.into(), location, ephemeral)
+                .into(),
+            Cache::S3Fifo(cache) => cache
+                .insert_advanced(key, value, hint.into(), location, ephemeral)
+                .into(),
+        }
+    }
+
     /// Remove a cached entry with the given key from the in-memory cache.
     #[fastrace::trace(name = "foyer::memory::cache::remove")]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S>>
@@ -906,6 +932,32 @@ where
         }
     }
 
+    /// Get the cached entry with the given key from the in-memory cache with all tunable options.
+    ///
+    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
+    ///
+    /// The concurrent fetch requests will be deduplicated.
+    pub fn fetch_advanced<F, FU, ER, ID>(
+        &self,
+        key: K,
+        hint: CacheHint,
+        location: CacheLocation,
+        fetch: F,
+    ) -> Fetch<K, V, ER, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = ID> + Send + 'static,
+        ER: Send + 'static + Debug,
+        ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
+    {
+        match self {
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_advanced(key, hint.into(), location, fetch)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_advanced(key, hint.into(), location, fetch)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_advanced(key, hint.into(), location, fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_advanced(key, hint.into(), location, fetch)),
+        }
+    }
+
     /// Get the cached entry with the given key from the in-memory cache.
     ///
     /// The fetch task will be spawned in the give `runtime`.
@@ -918,6 +970,7 @@ where
         &self,
         key: K,
         hint: CacheHint,
+        location: CacheLocation,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> Fetch<K, V, ER, S>
@@ -928,10 +981,10 @@ where
         ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), fetch, runtime)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), location, fetch, runtime)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), location, fetch, runtime)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), location, fetch, runtime)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, hint.into(), location, fetch, runtime)),
         }
     }
 }
