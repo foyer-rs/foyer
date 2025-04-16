@@ -53,7 +53,7 @@ macro_rules! root_span {
         root_span!($self, () $name, $label)
     };
     ($self:ident, ($($mut:tt)?) $name:ident, $label:expr) => {
-        let $name = if $self.tracing.load(std::sync::atomic::Ordering::Relaxed) {
+        let $($mut)? $name = if $self.tracing.load(std::sync::atomic::Ordering::Relaxed) {
             Span::root($label, SpanContext::random())
         } else {
             Span::noop()
@@ -154,43 +154,6 @@ where
                 store.enqueue(piece, false);
             }
         })
-
-        // let store = self.store.clone();
-        // Box::pin(async move {
-        //     store.wait().await;
-        //     'piece: for piece in pieces {
-        //         'wait: loop {
-        //             match store.pick(piece.hash()) {
-        //                 Pick::Admit => break 'wait,
-        //                 Pick::Reject => continue 'piece,
-        //                 Pick::Throttled(duration) => {
-        //                     tokio::time::sleep(duration).await;
-        //                 }
-        //             }
-        //         }
-        //         store.enqueue(piece, true);
-        //     }
-        // })
-
-        // let throttle = self.store.throttle();
-        // println!("throttle: {throttle:?}")
-        // let throttler =
-        //     IoThrottlerPicker::new(IoThrottlerTarget::Write, throttle.write_throughput, throttle.write_iops);
-        // let store = self.store.clone();
-        // let statistics = self.store.statistics().clone();
-        // Box::pin(async move {
-        //     store.wait().await;
-        //     for piece in pieces {
-        //         match throttler.pick(&statistics, piece.hash()) {
-        //             Pick::Admit => {}
-        //             Pick::Reject => unreachable!(),
-        //             Pick::Throttled(duration) => tokio::time::sleep(duration).await,
-        //         }
-        //         // Since the cache is closing at the moment, no new entry will come after it.
-        //         // It is safe to force enqueue the piece and ignore the internal io throttler of the store.
-        //         store.enqueue(piece, false);
-        //     }
-        // })
     }
 }
 
@@ -334,7 +297,7 @@ where
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert");
+        root_span!(self, mut span, "foyer::hybrid::cache::insert");
 
         let _guard = span.set_local_parent();
 
@@ -355,7 +318,7 @@ where
 
     /// Insert cache entry with cache hint to the hybrid cache.
     pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert_with_hint");
+        root_span!(self, mut span, "foyer::hybrid::cache::insert_with_hint");
 
         let _guard = span.set_local_parent();
 
@@ -376,7 +339,7 @@ where
 
     /// Insert cache entry with preferred location to the hybrid cache.
     pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert_with_location");
+        root_span!(self, mut span, "foyer::hybrid::cache::insert_with_location");
 
         let _guard = span.set_local_parent();
 
@@ -400,7 +363,7 @@ where
     where
         Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
     {
-        root_span!(self, span, "foyer::hybrid::cache::get");
+        root_span!(self, mut span, "foyer::hybrid::cache::get");
 
         let now = Instant::now();
 
@@ -462,7 +425,7 @@ where
     where
         K: Clone,
     {
-        root_span!(self, span, "foyer::hybrid::cache::obtain");
+        root_span!(self, mut span, "foyer::hybrid::cache::obtain");
 
         let now = Instant::now();
 
@@ -519,7 +482,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
-        root_span!(self, span, "foyer::hybrid::cache::remove");
+        root_span!(self, mut span, "foyer::hybrid::cache::remove");
 
         let _guard = span.set_local_parent();
 
