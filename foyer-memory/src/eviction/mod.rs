@@ -31,6 +31,11 @@ impl<T> State for T where T: Send + Sync + 'static + Default {}
 pub trait Config: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 impl<T> Config for T where T: Send + Sync + 'static + Clone + Serialize + DeserializeOwned + Default {}
 
+pub trait Context: Send + Sync + 'static + Clone {
+    type Config: Config;
+    fn init(config: &Self::Config) -> Self;
+}
+
 /// Wrapper for one of the three kind of operations for the eviction container:
 ///
 /// 1. no operation
@@ -124,9 +129,11 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     type Hint: Hint;
     /// State for a cache entry. Mutable state for maintaining the cache eviction algorithm implementation.
     type State: State;
+    /// Shared context for all evction shards.
+    type Context: Context<Config = Self::Config>;
 
     /// Create a new cache eviction algorithm instance with the given arguments.
-    fn new(capacity: usize, config: &Self::Config) -> Self;
+    fn new(capacity: usize, config: &Self::Config, context: &Self::Context) -> Self;
 
     /// Update the arguments of the ache eviction algorithm instance.
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()>;

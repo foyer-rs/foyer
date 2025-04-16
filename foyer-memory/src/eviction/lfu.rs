@@ -22,7 +22,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op, OpCtx};
+use super::{Context, Eviction, Op, OpCtx};
 use crate::{
     error::{Error, Result},
     record::{CacheHint, Record},
@@ -105,6 +105,21 @@ pub struct LfuState {
 
 intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
+#[derive(Debug, Clone)]
+pub struct LfuContext {
+    frequencies: Arc<CMSketchAtomicU16>,
+}
+
+impl Context for LfuContext {
+    type Config = LfuConfig;
+
+    fn init(config: &Self::Config) -> Self {
+        let frequencies = CMSketchAtomicU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let frequencies = Arc::new(frequencies);
+        Self { frequencies }
+    }
+}
+
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
 /// A new and hot entry is kept in `window`.
@@ -133,8 +148,7 @@ where
     window_weight_capacity: usize,
     protected_weight_capacity: usize,
 
-    // TODO(MrCroxx): use a count-min-sketch impl with atomic u16
-    frequencies: CMSketchAtomicU16,
+    frequencies: Arc<CMSketchAtomicU16>,
 
     step: usize,
     decay: usize,
@@ -185,8 +199,9 @@ where
     type Value = V;
     type Hint = LfuHint;
     type State = LfuState;
+    type Context = LfuContext;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config, context: &Self::Context) -> Self
     where
         Self: Sized,
     {
@@ -212,7 +227,7 @@ where
 
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
-        let frequencies = CMSketchAtomicU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let frequencies = context.frequencies.clone();
         let decay = frequencies.width();
 
         Self {
@@ -503,7 +518,8 @@ mod tests {
             cmsketch_eps: 0.01,
             cmsketch_confidence: 0.95,
         };
-        let mut lfu = TestLfu::new(10, &config);
+        let context = LfuContext::init(&config);
+        let mut lfu = TestLfu::new(10, &config, &context);
 
         assert_eq!(lfu.window_weight_capacity, 2);
         assert_eq!(lfu.protected_weight_capacity, 6);

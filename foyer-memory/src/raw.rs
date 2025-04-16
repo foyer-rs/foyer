@@ -20,7 +20,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::Poll,
 };
 
 use arc_swap::ArcSwap;
@@ -46,7 +46,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     error::{Error, Result},
-    eviction::{Eviction, EvictionExt, Op, OpCtx},
+    eviction::{Context, Eviction, EvictionExt, Op, OpCtx},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     pipe::NoopPipe,
     record::{Data, Record},
@@ -462,9 +462,11 @@ where
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
         let shard_capacity = config.capacity / config.shards;
 
+        let context = E::Context::init(&config.eviction_config);
+
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
-                eviction: E::new(shard_capacity, &config.eviction_config),
+                eviction: E::new(shard_capacity, &config.eviction_config, &context),
                 indexer: Sentry::default(),
                 usage: 0,
                 capacity: shard_capacity,
@@ -1015,7 +1017,7 @@ where
 {
     type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
             RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()).map(Diversion::from),

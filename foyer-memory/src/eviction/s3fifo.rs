@@ -28,7 +28,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op};
+use super::{Context, Eviction, Op};
 use crate::{
     error::{Error, Result},
     record::{CacheHint, Record},
@@ -119,6 +119,17 @@ impl S3FifoState {
 }
 
 intrusive_adapter! { Adapter<K, V> = Arc<Record<S3Fifo<K, V>>>: Record<S3Fifo<K, V>> { ?offset = Record::<S3Fifo<K, V>>::STATE_OFFSET + offset_of!(S3FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+
+#[derive(Debug, Clone)]
+pub struct S3FifoContext;
+
+impl Context for S3FifoContext {
+    type Config = S3FifoConfig;
+
+    fn init(_: &Self::Config) -> Self {
+        Self
+    }
+}
 
 pub struct S3Fifo<K, V>
 where
@@ -215,8 +226,9 @@ where
     type Value = V;
     type Hint = S3FifoHint;
     type State = S3FifoState;
+    type Context = S3FifoContext;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config, _: &Self::Context) -> Self
     where
         Self: Sized,
     {
@@ -459,7 +471,7 @@ mod tests {
             ghost_queue_capacity_ratio: 10.0,
             small_to_main_freq_threshold: 2,
         };
-        let mut s3fifo = TestS3Fifo::new(8, &config);
+        let mut s3fifo = TestS3Fifo::new(8, &config, &S3FifoContext);
 
         assert_eq!(s3fifo.small_weight_capacity, 2);
 
