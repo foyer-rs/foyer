@@ -339,6 +339,12 @@ where
     V: Value,
     S: HashBuilder,
 {
+    /// Set the capacity of the in-memory cache instance.
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = capacity;
+        self
+    }
+
     /// Set the name of the foyer in-memory cache instance.
     ///
     /// foyer will use the name as the prefix of the metric names.
@@ -512,6 +518,19 @@ where
             Self::Lru(cache) => Self::Lru(cache.clone()),
             Self::Lfu(cache) => Self::Lfu(cache.clone()),
         }
+    }
+}
+
+impl<K, V> Cache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    /// Create a new in-memory cache builder.
+    ///
+    /// The default capacity is 1MiB, use [`CacheBuilder::with_capacity`] to set the capacity.
+    pub fn builder() -> CacheBuilder<K, V, RandomState> {
+        CacheBuilder::new(1024 * 1024)
     }
 }
 
