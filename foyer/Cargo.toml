@@ -56,7 +56,8 @@ tokio = { package = "tokio", version = "1", features = [
 ] }
 
 [features]
-default = []
+default = ["hybrid"]
+hybrid = []
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 tracing = [
   "fastrace/enable",
