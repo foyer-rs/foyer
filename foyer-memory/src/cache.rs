@@ -526,11 +526,9 @@ where
     K: Key,
     V: Value,
 {
-    /// Create a new in-memory cache builder.
-    ///
-    /// The default capacity is 1MiB, use [`CacheBuilder::with_capacity`] to set the capacity.
-    pub fn builder() -> CacheBuilder<K, V, RandomState> {
-        CacheBuilder::new(1024 * 1024)
+    /// Create a new in-memory cache builder with capacity.
+    pub fn builder(capacity: usize) -> CacheBuilder<K, V, RandomState> {
+        CacheBuilder::new(capacity)
     }
 }
 
