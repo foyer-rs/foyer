@@ -339,12 +339,6 @@ where
     V: Value,
     S: HashBuilder,
 {
-    /// Set the capacity of the in-memory cache instance.
-    pub fn with_capacity(mut self, capacity: usize) -> Self {
-        self.capacity = capacity;
-        self
-    }
-
     /// Set the name of the foyer in-memory cache instance.
     ///
     /// foyer will use the name as the prefix of the metric names.
