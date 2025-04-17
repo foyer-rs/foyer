@@ -26,7 +26,6 @@ pub use crate::{
         S3FifoConfig, Weighter,
     },
 };
-
 #[cfg(feature = "hybrid")]
 pub use crate::{
     hybrid::{
