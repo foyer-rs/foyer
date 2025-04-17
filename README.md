@@ -27,7 +27,7 @@
 [![License Checker](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml/badge.svg)](https://github.com/foyer-rs/foyer/actions/workflows/license_check.yml)
 [![codecov](https://codecov.io/github/foyer-rs/foyer/branch/main/graph/badge.svg?token=YO33YQCB70)](https://codecov.io/github/foyer-rs/foyer)
 
-*foyer* aims to be an efficient and user-friendly hybrid cache lib in Rust. 
+*foyer* aims to be an efficient and user-friendly hybrid cache lib in Rust.
 
 foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cachelib), a highly-regarded hybrid cache library written in C++, and [ben-manes/caffeine](https://github.com/ben-manes/caffeine), a popular Java caching library, among other projects.
 
@@ -56,7 +56,8 @@ Feel free to open a PR and add your projects here:
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 - [SlateDB](https://github.com/slatedb/slatedb): A cloud native embedded storage engine built on object storage.
-- [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services. 
+- [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services.
+- [si](https://github.com/systeminit/si): The System Initiative software.
 
 ## Quick Start
 
@@ -236,6 +237,7 @@ async fn mock() -> Result<String> {
 ***foyer*** needs to serialize/deserialize entries between memory and disk with hybrid cache. Cached keys and values need to implement the `Code` trait when using hybrid cache.
 
 The `Code` trait has already been implemented for general types, such as:
+
 - Numeric types: `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`, `i64`, `i128`, `isize`, `f32`, `f64`.
 - Buffer: `Vec<u8>`.
 - String: `String`.
@@ -267,10 +269,10 @@ More examples and details can be found [here](https://github.com/foyer-rs/foyer/
 
 However, other components may not support non-Linux OS.
 
-| Component | Linux | MacOS | Windows |
-| - | - | - | - |
-| foyer | ✓ | ✓ | ✓ |
-| foyer-bench | ✓ | ✗ | ✗ |
+| Component   | Linux | MacOS | Windows |
+|-------------|-------|-------|---------|
+| foyer       | ✓     | ✓     | ✓       |
+| foyer-bench | ✓     | ✗     | ✗       |
 
 ## Development State & Roadmap
 
