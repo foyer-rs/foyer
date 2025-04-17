@@ -515,6 +515,17 @@ where
     }
 }
 
+impl<K, V> Cache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    /// Create a new in-memory cache builder with capacity.
+    pub fn builder(capacity: usize) -> CacheBuilder<K, V, RandomState> {
+        CacheBuilder::new(capacity)
+    }
+}
+
 impl<K, V, S> Cache<K, V, S>
 where
     K: Key,
