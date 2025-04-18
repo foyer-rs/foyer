@@ -15,7 +15,7 @@ readme = { workspace = true }
 ahash = { workspace = true }
 arc-swap = "1"
 bitflags = "2"
-cmsketch = "0.2.1"
+cmsketch = "0.2.2"
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
