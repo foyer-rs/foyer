@@ -22,7 +22,7 @@ use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_memory::CacheHint;
 use foyer_storage::Pick;
 
-use crate::{HybridCache, HybridCacheEntry};
+use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy};
 
 /// Writer for hybrid cache to support more flexible write APIs.
 pub struct HybridCacheWriter<K, V, S = RandomState>
@@ -136,8 +136,9 @@ where
             Some(hint) => self.hybrid.memory().insert_ephemeral_with_hint(self.key, value, hint),
             None => self.hybrid.memory().insert_ephemeral(self.key, value),
         };
-        self.hybrid.storage().enqueue(entry.piece(), true);
-
+        if self.hybrid.policy() == HybridCachePolicy::WriteOnInsertion {
+            self.hybrid.storage().enqueue(entry.piece(), true);
+        }
         self.hybrid.metrics().hybrid_insert.increase(1);
         self.hybrid
             .metrics()

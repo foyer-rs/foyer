@@ -518,12 +518,12 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, Default::default(), false, CacheLocation::Default)
+        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
     pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, false, CacheLocation::Default)
+        self.insert_advanced(key, value, hint, CacheLocation::Default, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_location")]
@@ -533,27 +533,33 @@ where
         value: E::Value,
         location: CacheLocation,
     ) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, Default::default(), false, location)
+        self.insert_advanced(
+            key,
+            value,
+            Default::default(),
+            location,
+            matches! {location, CacheLocation::OnDisk},
+        )
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
     pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, Default::default(), true, CacheLocation::Default)
+        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, true)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
     pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.emplace(key, value, hint, true, CacheLocation::Default)
+        self.insert_advanced(key, value, hint, CacheLocation::Default, true)
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::emplace")]
-    fn emplace(
+    #[fastrace::trace(name = "foyer::memory::raw::insert_advanced")]
+    pub fn insert_advanced(
         &self,
         key: E::Key,
         value: E::Value,
         hint: E::Hint,
-        ephemeral: bool,
         location: CacheLocation,
+        ephemeral: bool,
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
@@ -809,8 +815,16 @@ where
                     .with(|mut shard| shard.remove(hash, self.key()))
                     .inspect(|record| {
                         // Deallocate data out of the lock critical section.
-                        if let Some(listener) = self.inner.event_listener.as_ref() {
-                            listener.on_leave(Event::Remove, record.key(), record.value());
+                        let pipe = self.inner.pipe.load();
+                        let piped = pipe.is_enabled();
+                        let event = Event::Evict;
+                        if self.inner.event_listener.is_some() || piped {
+                            if let Some(listener) = self.inner.event_listener.as_ref() {
+                                listener.on_leave(Event::Evict, record.key(), record.value());
+                            }
+                        }
+                        if piped && event == Event::Evict {
+                            pipe.send(self.piece());
                         }
                     });
             }
@@ -1003,6 +1017,7 @@ where
         self.fetch_inner(
             key,
             Default::default(),
+            CacheLocation::Default,
             fetch,
             &tokio::runtime::Handle::current().into(),
         )
@@ -1015,16 +1030,63 @@ where
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(key, hint, fetch, &tokio::runtime::Handle::current().into())
+        self.fetch_inner(
+            key,
+            hint,
+            CacheLocation::Default,
+            fetch,
+            &tokio::runtime::Handle::current().into(),
+        )
     }
 
-    /// Internal fetch function, only for other foyer crates usages only, so the doc is hidden.
+    #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
+    pub fn fetch_with_location<F, FU, ER>(
+        &self,
+        key: E::Key,
+        location: CacheLocation,
+        fetch: F,
+    ) -> RawFetch<E, ER, S, I>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
+        self.fetch_inner(
+            key,
+            Default::default(),
+            location,
+            fetch,
+            &tokio::runtime::Handle::current().into(),
+        )
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::fetch_advanced")]
+    pub fn fetch_advanced<F, FU, ER, ID>(
+        &self,
+        key: E::Key,
+        hint: E::Hint,
+        location: CacheLocation,
+        fetch: F,
+    ) -> RawFetch<E, ER, S, I>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = ID> + Send + 'static,
+        ER: Send + 'static + Debug,
+        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
+    {
+        self.fetch_inner(key, hint, location, fetch, &tokio::runtime::Handle::current().into())
+    }
+
+    /// Advanced fetch with specified runtime.
+    ///
+    /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[fastrace::trace(name = "foyer::memory::raw::fetch_inner")]
     pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: E::Key,
         hint: E::Hint,
+        location: CacheLocation,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
@@ -1073,12 +1135,13 @@ where
                     if store.throttled {
                         CacheLocation::InMem
                     } else {
-                        CacheLocation::Default
+                        location
                     }
                 } else {
-                    CacheLocation::Default
+                    location
                 };
-                let entry = cache.emplace(key, value, hint, false, location);
+                let entry =
+                    cache.insert_advanced(key, value, hint, location, matches! {location, CacheLocation::OnDisk});
                 Diversion {
                     target: Ok(entry),
                     store,

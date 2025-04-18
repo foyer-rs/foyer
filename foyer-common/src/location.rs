@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// TODO(MrCroxx): Is it necessary to make popluated entry still follow the cache location advice?
 /// Advice cache location for the cache entry.
 ///
 /// Useful when using hybrid cache.
+///
+/// NOTE: `CacheLocation` only affects the first time the entry is handle.
+/// After it is populated, the entry may not follow the given advice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheLocation {
     /// The default location.
@@ -22,11 +26,9 @@ pub enum CacheLocation {
     /// Prefer to store the entry in the in-memory cache with in-memory cache.
     /// And prefer to store the entry in the hybrid cache with hybrid cache.
     Default,
-    /// Prefer to store the entry in the in-memory cache only.
+    /// Prefer to store the entry in the in-memory cache.
     InMem,
-    /// Prefer to store the entry on the disk cache only.
-    ///
-    /// TODO(MrCroxx): This option is not supported yet. The behaviour is the same as `Default`.
+    /// Prefer to store the entry on the disk cache.
     OnDisk,
 }
 

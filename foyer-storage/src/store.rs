@@ -186,6 +186,7 @@ where
 
     /// Push a in-memory cache piece to the disk cache write queue.
     pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
+        tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
         if force || self.pick(piece.hash()).admitted() {
