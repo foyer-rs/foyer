@@ -28,8 +28,10 @@
 
 use foyer_common as common;
 use foyer_memory as memory;
+#[cfg(feature = "hybrid")]
 use foyer_storage as storage;
 
+#[cfg(feature = "hybrid")]
 mod hybrid;
 
 mod prelude;

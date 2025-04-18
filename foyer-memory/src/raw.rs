@@ -344,9 +344,7 @@ where
                 let (tx, rx) = oneshot::channel();
                 o.get_mut().push(tx);
                 self.metrics.memory_queue.increase(1);
-                RawShardFetch::Wait(rx.in_span(Span::enter_with_local_parent(
-                    "foyer::memory::raw::fetch_with_runtime::wait",
-                )))
+                RawShardFetch::Wait(rx.in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_queue::wait")))
             }
             HashMapEntry::Vacant(v) => {
                 v.insert(vec![]);
