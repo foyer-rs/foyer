@@ -16,7 +16,7 @@ use std::{fmt::Debug, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
-    location::CacheLocation,
+    location::Location,
 };
 
 use crate::{record::Record, Eviction};
@@ -29,7 +29,7 @@ pub struct Piece<K, V> {
     key: *const K,
     value: *const V,
     hash: u64,
-    location: CacheLocation,
+    location: Location,
     drop_fn: fn(*const ()),
 }
 
@@ -92,7 +92,7 @@ impl<K, V> Piece<K, V> {
     }
 
     /// Get the preferred cache location.
-    pub fn location(&self) -> CacheLocation {
+    pub fn location(&self) -> Location {
         self.location
     }
 }

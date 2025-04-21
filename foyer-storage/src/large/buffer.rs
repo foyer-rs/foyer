@@ -18,6 +18,7 @@ use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
     code::{CodeError, StorageKey, StorageValue},
+    location::Location,
     metrics::Metrics,
 };
 
@@ -189,7 +190,15 @@ impl Buffer {
         self.entry_infos.is_empty()
     }
 
-    pub fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: Compression, sequence: Sequence) -> bool
+    pub fn push<K, V>(
+        &mut self,
+        key: &K,
+        value: &V,
+        hash: u64,
+        compression: Compression,
+        location: Location,
+        sequence: Sequence,
+    ) -> bool
     where
         K: StorageKey,
         V: StorageValue,
@@ -226,6 +235,7 @@ impl Buffer {
             sequence,
             checksum,
             compression,
+            location,
         };
         header.write(&mut buf[..EntryHeader::serialized_len()]);
 
@@ -529,13 +539,13 @@ mod tests {
         let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K
-        assert!(buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, 1));
+        assert!(buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, Location::Default, 1));
 
         // 16K (deny)
-        assert!(!buffer.push(&2u64, &vec![2u8; 13 * KB], 2, Compression::None, 2));
+        assert!(!buffer.push(&2u64, &vec![2u8; 13 * KB], 2, Compression::None, Location::Default, 2));
 
         // 4K
-        assert!(buffer.push(&3u64, &vec![3u8; 3 * KB], 3, Compression::None, 3));
+        assert!(buffer.push(&3u64, &vec![3u8; 3 * KB], 3, Compression::None, Location::Default, 3));
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_shared_io_slice();
@@ -575,13 +585,13 @@ mod tests {
         let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K, region split
-        assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4));
+        assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, Location::Default, 4));
 
         // 8K
-        assert!(buffer.push(&5u64, &vec![5u8; 7 * KB], 5, Compression::None, 5));
+        assert!(buffer.push(&5u64, &vec![5u8; 7 * KB], 5, Compression::None, Location::Default, 5));
 
         // 8K, region early split
-        assert!(buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, 6));
+        assert!(buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, Location::Default, 6));
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_shared_io_slice();
@@ -643,7 +653,7 @@ mod tests {
         let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 8K, region split
-        assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7));
+        assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, Location::Default, 7));
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_shared_io_slice();

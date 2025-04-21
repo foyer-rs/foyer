@@ -95,7 +95,7 @@ impl RegionScanner {
 mod tests {
     use std::{path::Path, sync::Arc};
 
-    use foyer_common::metrics::Metrics;
+    use foyer_common::{location::Location, metrics::Metrics};
     use tempfile::tempdir;
 
     use super::*;
@@ -152,6 +152,7 @@ mod tests {
                 &vec![i as u8; 3 * 1024],
                 i as u64,
                 Compression::None,
+                Location::Default,
                 i as Sequence,
             );
         }

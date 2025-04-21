@@ -20,7 +20,7 @@ use foyer_common::{
     code::{HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
-    location::CacheLocation,
+    location::Location,
     metrics::Metrics,
     runtime::SingletonHandle,
 };
@@ -210,7 +210,7 @@ where
     }
 
     /// Preferred location of the cached entry.
-    pub fn location(&self) -> CacheLocation {
+    pub fn location(&self) -> Location {
         match self {
             CacheEntry::Fifo(entry) => entry.location(),
             CacheEntry::Lru(entry) => entry.location(),
@@ -567,7 +567,7 @@ where
 
     /// Insert cache entry with cache hint to the in-memory cache.
     #[fastrace::trace(name = "foyer::memory::cache::insert_with_location")]
-    pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> CacheEntry<K, V, S> {
+    pub fn insert_with_location(&self, key: K, value: V, location: Location) -> CacheEntry<K, V, S> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_location(key, value, location).into(),
             Cache::S3Fifo(cache) => cache.insert_with_location(key, value, location).into(),
@@ -613,7 +613,7 @@ where
         key: K,
         value: V,
         hint: CacheHint,
-        location: CacheLocation,
+        location: Location,
         ephemeral: bool,
     ) -> CacheEntry<K, V, S> {
         match self {
@@ -952,7 +952,7 @@ where
         &self,
         key: K,
         hint: CacheHint,
-        location: CacheLocation,
+        location: Location,
         fetch: F,
     ) -> Fetch<K, V, ER, S>
     where
@@ -981,7 +981,7 @@ where
         &self,
         key: K,
         hint: CacheHint,
-        location: CacheLocation,
+        location: Location,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> Fetch<K, V, ER, S>

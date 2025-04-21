@@ -369,26 +369,12 @@ where
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
-                Err(e @ Error::MagicMismatch { .. })
-                | Err(e @ Error::ChecksumMismatch { .. })
-                | Err(e @ Error::CompressionAlgorithmNotSupported(_))
-                | Err(e @ Error::OutOfRange { .. })
-                | Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(
-                        hash,
-                        ?addr,
-                        ?e,
-                        "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
-                    );
+                Err(e) => {
+                    tracing::warn!(hash, ?addr, ?e, "[lodc load]: load error, remove this entry and skip");
                     indexer.remove(hash);
                     metrics.storage_miss.increase(1);
                     metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(None);
-                }
-                Err(e) => {
-                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
-                    metrics.storage_error.increase(1);
-                    return Err(e);
                 }
             };
 
@@ -402,27 +388,19 @@ where
                     Some(header.checksum),
                 ) {
                     Ok(res) => res,
-                    Err(e @ Error::MagicMismatch { .. })
-                    | Err(e @ Error::ChecksumMismatch { .. })
-                    | Err(e @ Error::OutOfRange { .. })
-                    | Err(e @ Error::InvalidIoRange { .. }) => {
+                    Err(e) => {
                         tracing::warn!(
                             hash,
                             ?addr,
                             ?header,
                             ?e,
-                            "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                            "[lodc load]: load error, remove this entry and skip"
                         );
                         indexer.remove(hash);
                         metrics.storage_miss.increase(1);
                         metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                         metrics.storage_error.increase(1);
                         return Ok(None);
-                    }
-                    Err(e) => {
-                        tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
-                        metrics.storage_error.increase(1);
-                        return Err(e);
                     }
                 };
                 metrics

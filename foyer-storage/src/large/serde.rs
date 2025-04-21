@@ -15,14 +15,14 @@
 use std::sync::atomic::AtomicU64;
 
 use bytes::{Buf, BufMut};
+use foyer_common::location::Location;
 
 use crate::{
     compress::Compression,
     error::{Error, Result},
 };
 
-const ENTRY_MAGIC: u32 = 0x97_03_27_00;
-const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
+const ENTRY_MAGIC: u32 = 0x9703;
 
 pub type Sequence = u64;
 pub type AtomicSequence = AtomicU64;
@@ -35,6 +35,7 @@ pub struct EntryHeader {
     pub sequence: Sequence,
     pub checksum: u64,
     pub compression: Compression,
+    pub location: Location,
 }
 
 impl EntryHeader {
@@ -49,7 +50,7 @@ impl EntryHeader {
         buf.put_u64(self.sequence);
         buf.put_u64(self.checksum);
 
-        let v = ENTRY_MAGIC | self.compression.to_u8() as u32;
+        let v = (ENTRY_MAGIC << 16) | ((self.location.to_u8() as u32) << 8) | self.compression.to_u8() as u32;
         buf.put_u32(v);
     }
 
@@ -64,13 +65,14 @@ impl EntryHeader {
 
         tracing::trace!("read entry header, key len: {key_len}, value_len: {value_len}, hash: {hash}, sequence: {sequence}, checksum: {checksum}, extra: {v}");
 
-        let magic = v & ENTRY_MAGIC_MASK;
+        let magic = v >> 16;
         if magic != ENTRY_MAGIC {
             return Err(Error::MagicMismatch {
                 expected: ENTRY_MAGIC,
                 get: magic,
             });
         }
+        let location = Location::try_from((v >> 8) as u8)?;
         let compression = Compression::try_from(v as u8)?;
 
         Ok(Self {
@@ -80,6 +82,7 @@ impl EntryHeader {
             sequence,
             checksum,
             compression,
+            location,
         })
     }
 }

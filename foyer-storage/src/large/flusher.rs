@@ -399,6 +399,7 @@ where
                     piece.value(),
                     piece.hash(),
                     self.compression,
+                    piece.location(),
                     sequence,
                 ));
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);

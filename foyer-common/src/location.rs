@@ -20,7 +20,7 @@
 /// NOTE: `CacheLocation` only affects the first time the entry is handle.
 /// After it is populated, the entry may not follow the given advice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheLocation {
+pub enum Location {
     /// The default location.
     ///
     /// Prefer to store the entry in the in-memory cache with in-memory cache.
@@ -32,8 +32,47 @@ pub enum CacheLocation {
     OnDisk,
 }
 
-impl Default for CacheLocation {
+impl Default for Location {
     fn default() -> Self {
         Self::Default
     }
 }
+
+impl Location {
+    /// Get the u8 that represent the compression algorithm.
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Self::Default => 0,
+            Self::InMem => 1,
+            Self::OnDisk => 2,
+        }
+    }
+}
+
+impl From<Location> for u8 {
+    fn from(value: Location) -> Self {
+        match value {
+            Location::Default => 0,
+            Location::InMem => 1,
+            Location::OnDisk => 2,
+        }
+    }
+}
+
+impl TryFrom<u8> for Location {
+    type Error = ParseLocationError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::InMem),
+            2 => Ok(Self::OnDisk),
+            _ => Err(ParseLocationError(value)),
+        }
+    }
+}
+
+/// Parse location error.
+#[derive(thiserror::Error, Debug)]
+#[error("parse location error: {0}")]
+pub struct ParseLocationError(u8);

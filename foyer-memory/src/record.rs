@@ -19,7 +19,7 @@ use std::{
 };
 
 use bitflags::bitflags;
-use foyer_common::location::CacheLocation;
+use foyer_common::location::Location;
 use serde::{Deserialize, Serialize};
 
 use crate::eviction::Eviction;
@@ -61,7 +61,7 @@ where
     pub hint: E::Hint,
     pub hash: u64,
     pub weight: usize,
-    pub location: CacheLocation,
+    pub location: Location,
 }
 
 /// [`Record`] holds the information of the cached entry.
@@ -131,7 +131,7 @@ where
     }
 
     /// Get the preferred cache location.
-    pub fn location(&self) -> CacheLocation {
+    pub fn location(&self) -> Location {
         self.data.location
     }
 

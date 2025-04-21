@@ -17,7 +17,7 @@ use std::{
     ops::Range,
 };
 
-use foyer_common::code::CodeError;
+use foyer_common::{code::CodeError, location::ParseLocationError};
 
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
@@ -65,6 +65,9 @@ pub enum Error {
         /// Capacity
         capacity: usize,
     },
+    /// Location parse error.
+    #[error("parse location error: {0}")]
+    ParseLocationError(#[from] ParseLocationError),
     /// Compression algorithm not supported.
     #[error("compression algorithm not supported: {0}")]
     CompressionAlgorithmNotSupported(u8),

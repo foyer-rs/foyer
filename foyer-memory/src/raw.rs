@@ -33,7 +33,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
-    location::CacheLocation,
+    location::Location,
     metrics::Metrics,
     runtime::SingletonHandle,
     scope::Scope,
@@ -518,38 +518,33 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, false)
+        self.insert_advanced(key, value, Default::default(), Location::Default, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
     pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, hint, CacheLocation::Default, false)
+        self.insert_advanced(key, value, hint, Location::Default, false)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_with_location")]
-    pub fn insert_with_location(
-        &self,
-        key: E::Key,
-        value: E::Value,
-        location: CacheLocation,
-    ) -> RawCacheEntry<E, S, I> {
+    pub fn insert_with_location(&self, key: E::Key, value: E::Value, location: Location) -> RawCacheEntry<E, S, I> {
         self.insert_advanced(
             key,
             value,
             Default::default(),
             location,
-            matches! {location, CacheLocation::OnDisk},
+            matches! {location, Location::OnDisk},
         )
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
     pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, true)
+        self.insert_advanced(key, value, Default::default(), Location::Default, true)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
     pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, hint, CacheLocation::Default, true)
+        self.insert_advanced(key, value, hint, Location::Default, true)
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::insert_advanced")]
@@ -558,7 +553,7 @@ where
         key: E::Key,
         value: E::Value,
         hint: E::Hint,
-        location: CacheLocation,
+        location: Location,
         ephemeral: bool,
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
@@ -902,7 +897,7 @@ where
         self.record.weight()
     }
 
-    pub fn location(&self) -> CacheLocation {
+    pub fn location(&self) -> Location {
         self.record.location()
     }
 
@@ -1017,7 +1012,7 @@ where
         self.fetch_inner(
             key,
             Default::default(),
-            CacheLocation::Default,
+            Location::Default,
             fetch,
             &tokio::runtime::Handle::current().into(),
         )
@@ -1033,19 +1028,14 @@ where
         self.fetch_inner(
             key,
             hint,
-            CacheLocation::Default,
+            Location::Default,
             fetch,
             &tokio::runtime::Handle::current().into(),
         )
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
-    pub fn fetch_with_location<F, FU, ER>(
-        &self,
-        key: E::Key,
-        location: CacheLocation,
-        fetch: F,
-    ) -> RawFetch<E, ER, S, I>
+    pub fn fetch_with_location<F, FU, ER>(&self, key: E::Key, location: Location, fetch: F) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
@@ -1065,7 +1055,7 @@ where
         &self,
         key: E::Key,
         hint: E::Hint,
-        location: CacheLocation,
+        location: Location,
         fetch: F,
     ) -> RawFetch<E, ER, S, I>
     where
@@ -1086,7 +1076,7 @@ where
         &self,
         key: E::Key,
         hint: E::Hint,
-        location: CacheLocation,
+        location: Location,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
@@ -1131,17 +1121,17 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
+                // FIXME (MrCroxx): FIX LOCATIOn CALCULATION HERE!!!
                 let location = if let Some(store) = store.as_ref() {
                     if store.throttled {
-                        CacheLocation::InMem
+                        Location::InMem
                     } else {
                         location
                     }
                 } else {
                     location
                 };
-                let entry =
-                    cache.insert_advanced(key, value, hint, location, matches! {location, CacheLocation::OnDisk});
+                let entry = cache.insert_advanced(key, value, hint, location, matches! {location, Location::OnDisk});
                 Diversion {
                     target: Ok(entry),
                     store,
