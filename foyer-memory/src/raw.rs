@@ -1138,7 +1138,8 @@ where
                         false => location,
                     },
                     None => {
-                        // No fetch context indicates that the entry is populated. Don't need to write back to disk cache again.
+                        // No fetch context indicates that the entry is populated.
+                        // Don't need to write back to disk cache again.
                         CacheLocation::InMem
                     }
                 };
