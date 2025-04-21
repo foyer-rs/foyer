@@ -1131,15 +1131,18 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
-                let location = if let Some(store) = store.as_ref() {
-                    if store.throttled {
+
+                let location = match store.as_ref() {
+                    Some(ctx) => match ctx.throttled {
+                        true => CacheLocation::InMem,
+                        false => location,
+                    },
+                    None => {
+                        // No fetch context indicates that the entry is populated. Don't need to write back to disk cache again.
                         CacheLocation::InMem
-                    } else {
-                        location
                     }
-                } else {
-                    location
                 };
+
                 let entry =
                     cache.insert_advanced(key, value, hint, location, matches! {location, CacheLocation::OnDisk});
                 Diversion {
