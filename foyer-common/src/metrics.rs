@@ -69,6 +69,7 @@ pub struct Metrics {
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
+    pub storage_lodc_indexer_conflict: BoxedCounter,
     pub storage_lodc_buffer_efficiency: BoxedHistogram,
     pub storage_lodc_recover_duration: BoxedHistogram,
 
@@ -189,6 +190,12 @@ impl Metrics {
             Buckets::exponential(0.000_000_01, 2.0, 23),
         );
 
+        let foyer_storage_lodc_op_total = registry.register_counter_vec(
+            "foyer_storage_lodc_op_total".into(),
+            "foyer large object disk cache operations".into(),
+            &["name", "op"],
+        );
+
         let foyer_storage_lodc_buffer_efficiency = registry.register_histogram_vec_with_buckets(
             "foyer_storage_lodc_buffer_efficiency".into(),
             "foyer large object disk cache buffer efficiency".into(),
@@ -247,8 +254,9 @@ impl Metrics {
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
 
+        let storage_lodc_indexer_conflict =
+            foyer_storage_lodc_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
         let storage_lodc_buffer_efficiency = foyer_storage_lodc_buffer_efficiency.histogram(&[name.clone()]);
-
         let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(&[name.clone()]);
 
         /* hybrid cache metrics */
@@ -317,6 +325,7 @@ impl Metrics {
             storage_region_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
+            storage_lodc_indexer_conflict,
             storage_lodc_buffer_efficiency,
             storage_lodc_recover_duration,
 

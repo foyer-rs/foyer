@@ -456,6 +456,7 @@ where
                 let indexer = self.indexer.clone();
                 let region_manager = self.region_manager.clone();
                 let flush = self.flush;
+                let metrics = self.metrics.clone();
 
                 async move {
                     // Wait for region is clean.
@@ -550,7 +551,8 @@ where
                         }
                     }
 
-                    indexer.insert_batch(addrs);
+                    let olds = indexer.insert_batch(addrs);
+                    metrics.storage_lodc_indexer_conflict.increase(olds.len() as _);
 
                     // Window expect window is full, make it evictable.
                     if i != regions - 1 {
