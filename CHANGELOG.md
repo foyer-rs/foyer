@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-04-22
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.15.4 |
+| foyer-common | 0.15.4 |
+| foyer-memory | 0.15.4 |
+| foyer-storage | 0.15.4 |
+| foyer-bench | 0.15.4 |
+
+### Changes
+
+- Add metrics for large object disk cache indexer conflicts.
+
 ## 2025-04-11
 
 ### Releases
