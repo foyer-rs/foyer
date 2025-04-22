@@ -18,9 +18,9 @@ use foyer_common::metrics::Metrics;
 
 use super::{RegionId, Throttle};
 use crate::{
+    Dev, DirectFileDevice, Runtime, Statistics,
     error::Result,
     io::buffer::{IoBuf, IoBufMut},
-    Dev, DirectFileDevice, Runtime, Statistics,
 };
 
 #[derive(Clone)]

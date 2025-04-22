@@ -18,8 +18,8 @@ use std::{
     num::NonZeroUsize,
     ops::Range,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };

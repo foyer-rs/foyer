@@ -19,10 +19,10 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Instant,
 };
 

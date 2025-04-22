@@ -18,8 +18,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     task::{Context, Poll},
 };
@@ -27,7 +27,7 @@ use std::{
 use flume::{Receiver, Sender};
 use foyer_common::{countdown::Countdown, metrics::Metrics};
 use futures_core::future::BoxFuture;
-use futures_util::{future::Shared, FutureExt};
+use futures_util::{FutureExt, future::Shared};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use pin_project::pin_project;

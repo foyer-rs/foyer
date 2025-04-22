@@ -18,8 +18,8 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -32,6 +32,7 @@ use futures_util::future::join_all;
 use itertools::Itertools;
 
 use crate::{
+    Dev, Runtime, Statistics, Throttle,
     device::{MonitoredDevice, RegionId},
     error::Result,
     small::{
@@ -39,7 +40,6 @@ use crate::{
         set_manager::SetManager,
     },
     storage::Storage,
-    Dev, Runtime, Statistics, Throttle,
 };
 
 pub struct GenericSmallStorageConfig<K, V>
@@ -286,12 +286,12 @@ mod tests {
 
     use super::*;
     use crate::{
+        DevExt, DirectFsDeviceOptions,
         device::{
-            monitor::{Monitored, MonitoredConfig},
             Dev,
+            monitor::{Monitored, MonitoredConfig},
         },
         serde::EntrySerializer,
-        DevExt, DirectFsDeviceOptions,
     };
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {

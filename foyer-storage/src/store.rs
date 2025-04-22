@@ -36,29 +36,29 @@ use tokio::runtime::Handle;
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
 use crate::{
+    ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
+    Pick, Throttle,
     compress::Compression,
     device::{
-        monitor::{Monitored, MonitoredConfig},
         DeviceConfig, RegionId,
+        monitor::{Monitored, MonitoredConfig},
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     io::PAGE,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
-        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
+        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
     },
     runtime::Runtime,
     serde::EntrySerializer,
     small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
-        either::{EitherConfig, Order},
         Storage,
+        either::{EitherConfig, Order},
     },
-    ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
-    Pick, Throttle,
 };
 
 /// Load result.
@@ -568,7 +568,9 @@ where
     /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
     pub fn with_large_object_disk_cache_options(mut self, options: LargeEngineOptions<K, V, S>) -> Self {
         if matches!(self.engine, Engine::Small) {
-            tracing::warn!("[store builder]: Setting up large object disk cache options, but only small object disk cache is enabled.");
+            tracing::warn!(
+                "[store builder]: Setting up large object disk cache options, but only small object disk cache is enabled."
+            );
         }
         self.large = options;
         self
@@ -579,7 +581,9 @@ where
     /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
     pub fn with_small_object_disk_cache_options(mut self, options: SmallEngineOptions<K, V, S>) -> Self {
         if matches!(self.engine, Engine::Large) {
-            tracing::warn!("[store builder]: Setting up small object disk cache options, but only large object disk cache is enabled.");
+            tracing::warn!(
+                "[store builder]: Setting up small object disk cache options, but only large object disk cache is enabled."
+            );
         }
         self.small = options;
         self

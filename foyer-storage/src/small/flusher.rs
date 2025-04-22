@@ -20,7 +20,7 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 use futures_util::future::try_join_all;
-use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use super::{
     batch::{Batch, BatchMut, SetBatch},

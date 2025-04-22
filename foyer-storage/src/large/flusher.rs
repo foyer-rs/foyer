@@ -15,12 +15,12 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
-    task::{ready, Poll},
+    task::{Poll, ready},
     time::Instant,
 };
 
@@ -32,8 +32,8 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
     FutureExt,
+    future::{try_join, try_join_all},
 };
 use itertools::Itertools;
 use tokio::sync::oneshot;
@@ -41,9 +41,10 @@ use tokio::sync::oneshot;
 #[cfg(test)]
 use crate::large::test_utils::*;
 use crate::{
+    Compression, Dev, SharedIoSlice,
     device::{MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{buffer::IoBuffer, PAGE},
+    io::{PAGE, buffer::IoBuffer},
     large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         generic::GenericLargeStorageConfig,
@@ -54,7 +55,6 @@ use crate::{
     },
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
-    Compression, Dev, SharedIoSlice,
 };
 
 pub enum Submission<K, V>

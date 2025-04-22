@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use foyer_common::code::{Key, Value};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     error::Result,

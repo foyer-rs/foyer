@@ -100,9 +100,10 @@ mod tests {
 
     use super::*;
     use crate::{
+        Compression, DirectFsDeviceOptions, Runtime,
         device::{
-            monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice, RegionId,
+            monitor::{Monitored, MonitoredConfig},
         },
         io::PAGE,
         large::{
@@ -110,7 +111,6 @@ mod tests {
             serde::Sequence,
         },
         region::RegionStats,
-        Compression, DirectFsDeviceOptions, Runtime,
     };
 
     const KB: usize = 1024;

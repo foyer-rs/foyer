@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
+    Piece, Pipe, Result,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -38,7 +39,6 @@ use crate::{
     },
     raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     record::CacheHint,
-    Piece, Pipe, Result,
 };
 
 pub type FifoCache<K, V, S = RandomState> = RawCache<Fifo<K, V>, S>;
@@ -1006,7 +1006,7 @@ mod tests {
 
     use futures_util::future::join_all;
     use itertools::Itertools;
-    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
     use super::*;
     use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};

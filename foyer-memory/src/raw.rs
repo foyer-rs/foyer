@@ -26,8 +26,8 @@ use std::{
 use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 use fastrace::{
-    future::{FutureExt, InSpan},
     Span,
+    future::{FutureExt, InSpan},
 };
 use foyer_common::{
     code::HashBuilder,
@@ -45,12 +45,12 @@ use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
+    Piece, Pipe,
     error::{Error, Result},
     eviction::{Eviction, Op},
-    indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
+    indexer::{Indexer, hash_table::HashTableIndexer, sentry::Sentry},
     pipe::NoopPipe,
     record::{Data, Record},
-    Piece, Pipe,
 };
 
 /// The weighter for the in-memory cache.
@@ -1109,7 +1109,7 @@ where
                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
                     record,
                     inner: self.inner.clone(),
-                })))
+                })));
             }
             RawShardFetch::Wait(future) => return RawFetch::new(RawFetchInner::Wait(future)),
             RawShardFetch::Miss => {}
@@ -1159,7 +1159,7 @@ where
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModRandomState;
-    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{

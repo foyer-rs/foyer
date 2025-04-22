@@ -24,14 +24,14 @@ use futures_util::future::try_join_all;
 use tokio::sync::Mutex;
 
 use crate::{
+    DirectFileDeviceOptions, IopsCounter, Runtime,
     device::{
+        Dev, DevExt, RegionId,
         direct_file::DirectFileDevice,
         monitor::{Monitored, MonitoredConfig},
-        Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    io::{buffer::IoBuffer, PAGE},
-    DirectFileDeviceOptions, IopsCounter, Runtime,
+    io::{PAGE, buffer::IoBuffer},
 };
 
 /// The configurations for the tombstone log.

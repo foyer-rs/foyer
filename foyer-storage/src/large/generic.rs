@@ -18,8 +18,8 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Instant,
 };
@@ -43,10 +43,11 @@ use super::{
 #[cfg(test)]
 use crate::large::test_utils::*;
 use crate::{
+    Throttle,
     compress::Compression,
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
-    io::{buffer::IoBuffer, PAGE},
+    io::{PAGE, buffer::IoBuffer},
     large::{
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
@@ -58,7 +59,6 @@ use crate::{
     serde::EntryDeserializer,
     statistics::Statistics,
     storage::Storage,
-    Throttle,
 };
 
 pub struct GenericLargeStorageConfig<K, V>
@@ -179,7 +179,8 @@ where
 {
     async fn open(mut config: GenericLargeStorageConfig<K, V>) -> Result<Self> {
         if config.flushers + config.clean_region_threshold > config.device.regions() / 2 {
-            tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
+            tracing::warn!(
+                "[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
                 flushers = config.flushers,
                 clean_region_threshold = config.clean_region_threshold,
                 regions = config.device.regions()
@@ -580,11 +581,11 @@ mod tests {
 
     use super::*;
     use crate::{
+        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
         device::monitor::{Monitored, MonitoredConfig},
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
     };
 
     const KB: usize = 1024;

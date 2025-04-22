@@ -18,7 +18,7 @@ use foyer_common::{
     code::{Key, Value},
     strict_assert,
 };
-use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
+use intrusive_collections::{LinkedList, LinkedListAtomicLink, intrusive_adapter};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
@@ -163,12 +163,10 @@ where
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
             if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
-                return Err(Error::ConfigError(
-                    format!(
-                        "[lru]: high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
-                        config.high_priority_pool_ratio
-                    )
-                ));
+                return Err(Error::ConfigError(format!(
+                    "[lru]: high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
+                    config.high_priority_pool_ratio
+                )));
             }
             self.config = config.clone();
         }
@@ -329,7 +327,7 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        eviction::test_utils::{Dump, OpExt, assert_ptr_eq, assert_ptr_vec_vec_eq},
         record::Data,
     };
 

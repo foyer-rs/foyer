@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 #[derive(Debug, Clone, Default)]

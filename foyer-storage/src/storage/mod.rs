@@ -20,7 +20,7 @@ use std::{fmt::Debug, future::Future, sync::Arc};
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
 
-use crate::{error::Result, Statistics, Throttle};
+use crate::{Statistics, Throttle, error::Result};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {

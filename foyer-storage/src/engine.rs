@@ -19,6 +19,7 @@ use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
 
 use crate::{
+    Statistics, Storage, Throttle,
     error::Result,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
     small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
@@ -26,7 +27,6 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    Statistics, Storage, Throttle,
 };
 
 pub struct SizeSelector<K, V>

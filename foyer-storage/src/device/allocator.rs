@@ -36,7 +36,7 @@ unsafe impl<const N: usize> Allocator for AlignedAllocator<N> {
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        Global.deallocate(ptr, layout.align_to(N).unwrap())
+        unsafe { Global.deallocate(ptr, layout.align_to(N).unwrap()) }
     }
 }
 

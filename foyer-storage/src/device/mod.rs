@@ -24,12 +24,12 @@ use direct_fs::DirectFsDeviceConfig;
 use monitor::Monitored;
 
 use crate::{
+    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
     error::Result,
     io::{
-        buffer::{IoBuf, IoBufMut},
         PAGE,
+        buffer::{IoBuf, IoBufMut},
     },
-    DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
 };
 
 pub type RegionId = u32;

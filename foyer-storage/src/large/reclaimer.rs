@@ -21,14 +21,14 @@ use foyer_common::{
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
-use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc, oneshot};
 
 use crate::{
     device::MonitoredDevice,
     error::Result,
     io::{
-        buffer::{IoBuffer, OwnedSlice},
         PAGE,
+        buffer::{IoBuffer, OwnedSlice},
     },
     large::{
         flusher::{Flusher, Submission},
@@ -202,9 +202,9 @@ where
                     let (buf, res) = region.read(buf, info.addr.offset as _).await;
                     if let Err(e) = res {
                         tracing::warn!(
-                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                        id = region.id()
-                    );
+                            "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+                            id = region.id()
+                        );
                         break 'reinsert;
                     }
 

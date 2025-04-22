@@ -16,7 +16,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     ops::Range,
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering},
     time::Instant,
 };
 

@@ -14,7 +14,7 @@
 
 use std::{
     fmt::Debug,
-    future::{ready, Future},
+    future::{Future, ready},
     marker::PhantomData,
     sync::Arc,
 };
@@ -22,7 +22,7 @@ use std::{
 use foyer_common::code::{StorageKey, StorageValue};
 use foyer_memory::Piece;
 
-use crate::{error::Result, storage::Storage, Statistics, Throttle};
+use crate::{Statistics, Throttle, error::Result, storage::Storage};
 
 pub struct Noop<K, V>
 where

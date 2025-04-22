@@ -16,8 +16,8 @@ use std::{
     collections::{HashSet, VecDeque},
     mem::offset_of,
     sync::{
-        atomic::{AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicU8, Ordering},
     },
 };
 
@@ -25,7 +25,7 @@ use foyer_common::{
     code::{Key, Value},
     strict_assert, strict_assert_eq,
 };
-use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
+use intrusive_collections::{LinkedList, LinkedListAtomicLink, intrusive_adapter};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
@@ -392,7 +392,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        eviction::test_utils::{Dump, OpExt, assert_ptr_eq, assert_ptr_vec_vec_eq},
         record::Data,
     };
 
