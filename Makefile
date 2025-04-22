@@ -67,7 +67,7 @@ msrv:
 	RUST_BACKTRACE=1 cargo +1.81.0 nextest run --run-ignored ignored-only --no-capture --workspace
 
 udeps:
-	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly-2024-08-30 udeps --all-targets
+	RUSTFLAGS="--cfg tokio_unstable -Awarnings" cargo +nightly udeps --all-targets
 
 machete:
 	cargo machete
