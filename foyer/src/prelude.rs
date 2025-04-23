@@ -18,8 +18,8 @@ pub use crate::{
         code::{Code, CodeError, CodeResult, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
         location::CacheLocation,
-        range::RangeBoundsExt,
         tracing::TracingOptions,
+        utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
