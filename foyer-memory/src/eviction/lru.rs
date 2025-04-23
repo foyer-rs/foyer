@@ -15,7 +15,7 @@
 use std::{mem::offset_of, sync::Arc};
 
 use foyer_common::{
-    code::{Key, Value},
+    code::{Context, Key, Value},
     strict_assert,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
@@ -88,16 +88,17 @@ pub struct LruState {
     is_pinned: bool,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Lru<K, V>>>: Record<Lru<K, V>> { ?offset = Record::<Lru<K, V>>::STATE_OFFSET + offset_of!(LruState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, C> = Arc<Record<Lru<K, V, C>>>: Record<Lru<K, V, C>> { ?offset = Record::<Lru<K, V, C>>::STATE_OFFSET + offset_of!(LruState, link) => LinkedListAtomicLink } where K: Key, V: Value, C: Context }
 
-pub struct Lru<K, V>
+pub struct Lru<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
-    high_priority_list: LinkedList<Adapter<K, V>>,
-    list: LinkedList<Adapter<K, V>>,
-    pin_list: LinkedList<Adapter<K, V>>,
+    high_priority_list: LinkedList<Adapter<K, V, C>>,
+    list: LinkedList<Adapter<K, V, C>>,
+    pin_list: LinkedList<Adapter<K, V, C>>,
 
     high_priority_weight: usize,
     high_priority_weight_capacity: usize,
@@ -105,10 +106,11 @@ where
     config: LruConfig,
 }
 
-impl<K, V> Lru<K, V>
+impl<K, V, C> Lru<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
     fn may_overflow_high_priority_pool(&mut self) {
         while self.high_priority_weight > self.high_priority_weight_capacity {
@@ -125,14 +127,16 @@ where
     }
 }
 
-impl<K, V> Eviction for Lru<K, V>
+impl<K, V, C> Eviction for Lru<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
     type Config = LruConfig;
     type Key = K;
     type Value = V;
+    type Context = C;
     type Hint = LruHint;
     type State = LruState;
 
@@ -333,7 +337,7 @@ pub mod tests {
         record::Data,
     };
 
-    impl<K, V> Dump for Lru<K, V>
+    impl<K, V> Dump for Lru<K, V, ()>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -375,7 +379,7 @@ pub mod tests {
         }
     }
 
-    type TestLru = Lru<u64, u64>;
+    type TestLru = Lru<u64, u64, ()>;
 
     #[test]
     fn test_lru() {

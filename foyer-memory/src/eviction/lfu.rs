@@ -16,7 +16,7 @@ use std::{mem::offset_of, sync::Arc};
 
 use cmsketch::CMSketchU16;
 use foyer_common::{
-    code::{Key, Value},
+    code::{Context, Key, Value},
     strict_assert, strict_assert_eq, strict_assert_ne,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
@@ -103,7 +103,7 @@ pub struct LfuState {
     queue: Queue,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, C> = Arc<Record<Lfu<K, V, C>>>: Record<Lfu<K, V, C>> { ?offset = Record::<Lfu<K, V, C>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value, C: Context }
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
@@ -117,14 +117,15 @@ intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> {
 ///
 /// When evicting, the entry with a lower frequency from `window` or `probation` will be evicted first, then from
 /// `protected`.
-pub struct Lfu<K, V>
+pub struct Lfu<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
-    window: LinkedList<Adapter<K, V>>,
-    probation: LinkedList<Adapter<K, V>>,
-    protected: LinkedList<Adapter<K, V>>,
+    window: LinkedList<Adapter<K, V, C>>,
+    probation: LinkedList<Adapter<K, V, C>>,
+    protected: LinkedList<Adapter<K, V, C>>,
 
     window_weight: usize,
     probation_weight: usize,
@@ -142,10 +143,11 @@ where
     config: LfuConfig,
 }
 
-impl<K, V> Lfu<K, V>
+impl<K, V, C> Lfu<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
     fn increase_queue_weight(&mut self, queue: Queue, weight: usize) {
         match queue {
@@ -175,14 +177,16 @@ where
     }
 }
 
-impl<K, V> Eviction for Lfu<K, V>
+impl<K, V, C> Eviction for Lfu<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
     type Config = LfuConfig;
     type Key = K;
     type Value = V;
+    type Context = C;
     type Hint = LfuHint;
     type State = LfuState;
 
@@ -428,7 +432,7 @@ mod tests {
         record::Data,
     };
 
-    impl<K, V> Dump for Lfu<K, V>
+    impl<K, V> Dump for Lfu<K, V, ()>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -470,7 +474,7 @@ mod tests {
         }
     }
 
-    type TestLfu = Lfu<u64, u64>;
+    type TestLfu = Lfu<u64, u64, ()>;
 
     #[test]
     fn test_lfu() {

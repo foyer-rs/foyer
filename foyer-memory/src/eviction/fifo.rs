@@ -14,7 +14,7 @@
 
 use std::{mem::offset_of, sync::Arc};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{Context, Key, Value};
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
@@ -50,24 +50,27 @@ pub struct FifoState {
     link: LinkedListAtomicLink,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Fifo<K, V>>>: Record<Fifo<K, V>> { ?offset = Record::<Fifo<K, V>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, C> = Arc<Record<Fifo<K, V, C>>>: Record<Fifo<K, V, C>> { ?offset = Record::<Fifo<K, V, C>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value, C: Context }
 
-pub struct Fifo<K, V>
+pub struct Fifo<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
-    queue: LinkedList<Adapter<K, V>>,
+    queue: LinkedList<Adapter<K, V, C>>,
 }
 
-impl<K, V> Eviction for Fifo<K, V>
+impl<K, V, C> Eviction for Fifo<K, V, C>
 where
     K: Key,
     V: Value,
+    C: Context,
 {
     type Config = FifoConfig;
     type Key = K;
     type Value = V;
+    type Context = C;
     type Hint = FifoHint;
     type State = FifoState;
 
@@ -118,7 +121,7 @@ pub mod tests {
         record::Data,
     };
 
-    impl<K, V> Dump for Fifo<K, V>
+    impl<K, V> Dump for Fifo<K, V, ()>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -138,7 +141,7 @@ pub mod tests {
         }
     }
 
-    type TestFifo = Fifo<u64, u64>;
+    type TestFifo = Fifo<u64, u64, ()>;
 
     #[test]
     fn test_fifo() {

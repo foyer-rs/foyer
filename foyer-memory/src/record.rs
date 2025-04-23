@@ -62,6 +62,7 @@ where
     pub hash: u64,
     pub weight: usize,
     pub location: CacheLocation,
+    pub context: E::Context,
 }
 
 /// [`Record`] holds the information of the cached entry.

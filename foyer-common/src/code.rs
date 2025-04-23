@@ -22,6 +22,10 @@ pub trait Value: Send + Sync + 'static {}
 impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
+/// Context trait for the in-memory cache.
+pub trait Context: Send + Sync + 'static {}
+impl<T: Send + Sync + 'static> Context for T {}
+
 /// Hash builder trait.
 pub trait HashBuilder: BuildHasher + Send + Sync + 'static {}
 impl<T> HashBuilder for T where T: BuildHasher + Send + Sync + 'static {}

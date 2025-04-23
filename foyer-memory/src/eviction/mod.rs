@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::code::{Context, Key, Value};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -92,6 +92,8 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     type Key: Key;
     /// Cache value. Generally, it is supposed to be a generic type of the implementation.
     type Value: Value;
+    /// Cache context. Generally, it is supposed to be a generic type of the implementation.
+    type Context: Context;
     /// Hint for a cache entry. Can be used to support priority at the entry granularity.
     type Hint: Hint;
     /// State for a cache entry. Mutable state for maintaining the cache eviction algorithm implementation.
