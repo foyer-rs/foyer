@@ -36,17 +36,13 @@ pub mod hasher;
 pub mod location;
 /// The shared metrics for foyer.
 pub mod metrics;
-/// Extensions for [`std::option::Option`].
-pub mod option;
-/// The range extensions.
-pub mod range;
 /// A rate limiter that returns the wait duration for limitation.
 pub mod rate;
 ///  A ticket-based rate limiter.
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
-/// A kotlin like functional programming helper.
-pub mod scope;
 /// Tracing related components.
 pub mod tracing;
+/// Useful helpers.
+pub mod utils;

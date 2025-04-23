@@ -36,8 +36,8 @@ use foyer_common::{
     location::CacheLocation,
     metrics::Metrics,
     runtime::SingletonHandle,
-    scope::Scope,
     strict_assert,
+    utils::scope::Scope,
 };
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
