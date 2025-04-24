@@ -20,7 +20,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::Poll,
 };
 
 use arc_swap::ArcSwap;
@@ -46,7 +46,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
     error::{Error, Result},
-    eviction::{Eviction, Op},
+    eviction::{Context, Eviction, EvictionExt, Op, OpCtx},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
     pipe::NoopPipe,
     record::{Data, Record},
@@ -215,7 +215,7 @@ where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
         self.get_inner(hash, key)
-            .inspect(|record| self.acquire_immutable(record))
+            .inspect(|record| self.eviction.acquire_immutable(record))
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::get_mutable")]
@@ -223,7 +223,36 @@ where
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        self.get_inner(hash, key).inspect(|record| self.acquire_mutable(record))
+        self.get_inner(hash, key)
+            .inspect(|record| self.eviction.acquire_mutable(record))
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::get_immutable")]
+    fn get_immutable_ctx<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+    {
+        let res = self.get_inner(hash, key);
+        let ctx = match res.as_ref() {
+            Some(record) => OpCtx::Hit { record },
+            None => OpCtx::Miss { hash },
+        };
+        self.eviction.acquire_immutable_ctx(ctx);
+        res
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::get_mutable")]
+    fn get_mutable_ctx<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+    {
+        let res = self.get_inner(hash, key);
+        let ctx = match res.as_ref() {
+            Some(record) => OpCtx::Hit { record },
+            None => OpCtx::Miss { hash },
+        };
+        self.eviction.acquire_mutable_ctx(ctx);
+        res
     }
 
     #[fastrace::trace(name = "foyer::memory::raw::shard::get_inner")]
@@ -269,38 +298,6 @@ where
         self.metrics.memory_remove.increase(count);
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
-    fn acquire_immutable(&self, record: &Arc<Record<E>>) {
-        match E::acquire() {
-            Op::Immutable(f) => f(&self.eviction, record),
-            _ => unreachable!(),
-        }
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")]
-    fn acquire_mutable(&mut self, record: &Arc<Record<E>>) {
-        match E::acquire() {
-            Op::Mutable(mut f) => f(&mut self.eviction, record),
-            _ => unreachable!(),
-        }
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::release_immutable")]
-    fn release_immutable(&self, record: &Arc<Record<E>>) {
-        match E::release() {
-            Op::Immutable(f) => f(&self.eviction, record),
-            _ => unreachable!(),
-        }
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::shard::release_mutable")]
-    fn release_mutable(&mut self, record: &Arc<Record<E>>) {
-        match E::release() {
-            Op::Mutable(mut f) => f(&mut self.eviction, record),
-            _ => unreachable!(),
-        }
-    }
-
     #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop")]
     fn fetch_noop(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
@@ -331,6 +328,30 @@ where
         E::Key: Clone,
     {
         if let Some(record) = self.get_mutable(hash, key) {
+            return RawShardFetch::Hit(record);
+        }
+
+        self.fetch_queue(key.clone())
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")]
+    fn fetch_immutable_ctx(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    where
+        E::Key: Clone,
+    {
+        if let Some(record) = self.get_immutable_ctx(hash, key) {
+            return RawShardFetch::Hit(record);
+        }
+
+        self.fetch_queue(key.clone())
+    }
+
+    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")]
+    fn fetch_mutable_ctx(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    where
+        E::Key: Clone,
+    {
+        if let Some(record) = self.get_mutable_ctx(hash, key) {
             return RawShardFetch::Hit(record);
         }
 
@@ -441,9 +462,11 @@ where
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
         let shard_capacity = config.capacity / config.shards;
 
+        let context = E::Context::init(&config.eviction_config);
+
         let shards = (0..config.shards)
             .map(|_| RawCacheShard {
-                eviction: E::new(shard_capacity, &config.eviction_config),
+                eviction: E::new(shard_capacity, &config.eviction_config, &context),
                 indexer: Sentry::default(),
                 usage: 0,
                 capacity: shard_capacity,
@@ -698,6 +721,12 @@ where
             Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| shard.get_mutable(hash, key)),
+            Op::ImmutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .read()
+                .with(|shard| shard.get_immutable_ctx(hash, key)),
+            Op::MutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .write()
+                .with(|mut shard| shard.get_mutable_ctx(hash, key)),
         }?;
 
         Some(RawCacheEntry {
@@ -733,6 +762,12 @@ where
             Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| shard.get_mutable(hash, key)),
+            Op::ImmutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .read()
+                .with(|shard| shard.get_immutable_ctx(hash, key)),
+            Op::MutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .write()
+                .with(|mut shard| shard.get_mutable_ctx(hash, key)),
         }
         .is_some()
     }
@@ -805,8 +840,13 @@ where
         if self.record.dec_refs(1) == 0 {
             match E::release() {
                 Op::Noop => {}
-                Op::Immutable(_) => shard.read().with(|shard| shard.release_immutable(&self.record)),
-                Op::Mutable(_) => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
+                Op::Immutable(_) => shard
+                    .read()
+                    .with(|shard| shard.eviction.release_immutable(&self.record)),
+                Op::Mutable(_) => shard
+                    .write()
+                    .with(|mut shard| shard.eviction.release_mutable(&self.record)),
+                Op::ImmutableCtx(_) | Op::MutableCtx(_) => unreachable!(),
             }
 
             if self.record.is_ephemeral() {
@@ -991,7 +1031,7 @@ where
 {
     type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
             RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()).map(Diversion::from),
@@ -1102,6 +1142,12 @@ where
             Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
             Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
             Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
+            Op::ImmutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .read()
+                .fetch_immutable_ctx(hash, &key),
+            Op::MutableCtx(_) => self.inner.shards[self.shard(hash)]
+                .write()
+                .fetch_mutable_ctx(hash, &key),
         };
 
         match raw {

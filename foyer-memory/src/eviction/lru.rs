@@ -21,7 +21,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op};
+use super::{Context, Eviction, Op};
 use crate::{
     error::{Error, Result},
     record::{CacheHint, Record},
@@ -90,6 +90,17 @@ pub struct LruState {
 
 intrusive_adapter! { Adapter<K, V> = Arc<Record<Lru<K, V>>>: Record<Lru<K, V>> { ?offset = Record::<Lru<K, V>>::STATE_OFFSET + offset_of!(LruState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
+#[derive(Debug, Clone)]
+pub struct LruContext;
+
+impl Context for LruContext {
+    type Config = LruConfig;
+
+    fn init(_: &Self::Config) -> Self {
+        Self
+    }
+}
+
 pub struct Lru<K, V>
 where
     K: Key,
@@ -135,8 +146,9 @@ where
     type Value = V;
     type Hint = LruHint;
     type State = LruState;
+    type Context = LruContext;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config, _: &Self::Context) -> Self
     where
         Self: Sized,
     {
@@ -400,7 +412,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config);
+        let mut lru = TestLru::new(8, &config, &LruContext);
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 
@@ -477,7 +489,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config);
+        let mut lru = TestLru::new(8, &config, &LruContext);
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 

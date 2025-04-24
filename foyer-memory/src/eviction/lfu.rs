@@ -14,7 +14,7 @@
 
 use std::{mem::offset_of, sync::Arc};
 
-use cmsketch::CMSketchU16;
+use cmsketch::CMSketchAtomicU16;
 use foyer_common::{
     code::{Key, Value},
     strict_assert, strict_assert_eq, strict_assert_ne,
@@ -22,7 +22,7 @@ use foyer_common::{
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op};
+use super::{Context, Eviction, Op, OpCtx};
 use crate::{
     error::{Error, Result},
     record::{CacheHint, Record},
@@ -105,6 +105,21 @@ pub struct LfuState {
 
 intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
+#[derive(Debug, Clone)]
+pub struct LfuContext {
+    frequencies: Arc<CMSketchAtomicU16>,
+}
+
+impl Context for LfuContext {
+    type Config = LfuConfig;
+
+    fn init(config: &Self::Config) -> Self {
+        let frequencies = CMSketchAtomicU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let frequencies = Arc::new(frequencies);
+        Self { frequencies }
+    }
+}
+
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
 /// A new and hot entry is kept in `window`.
@@ -133,8 +148,7 @@ where
     window_weight_capacity: usize,
     protected_weight_capacity: usize,
 
-    // TODO(MrCroxx): use a count-min-sketch impl with atomic u16
-    frequencies: CMSketchU16,
+    frequencies: Arc<CMSketchAtomicU16>,
 
     step: usize,
     decay: usize,
@@ -185,8 +199,9 @@ where
     type Value = V;
     type Hint = LfuHint;
     type State = LfuState;
+    type Context = LfuContext;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config, context: &Self::Context) -> Self
     where
         Self: Sized,
     {
@@ -212,7 +227,7 @@ where
 
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
-        let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
+        let frequencies = context.frequencies.clone();
         let decay = frequencies.width();
 
         Self {
@@ -284,7 +299,6 @@ where
         record.set_in_eviction(true);
         state.queue = Queue::Window;
         self.increase_queue_weight(Queue::Window, record.weight());
-        self.update_frequencies(record.hash());
         self.window.push_back(record);
 
         // If `window` weight exceeds the capacity, overflow entry from `window` to `probation`.
@@ -365,48 +379,57 @@ where
     }
 
     fn acquire() -> Op<Self> {
-        Op::mutable(|this: &mut Self, record| {
-            // Update frequency by access.
-            this.update_frequencies(record.hash());
+        Op::mutable_ctx(|this: &mut Self, ctx| {
+            match ctx {
+                OpCtx::Hit { record } => {
+                    // Update frequency by access.
+                    this.update_frequencies(record.hash());
 
-            if !record.is_in_eviction() {
-                return;
-            }
+                    if !record.is_in_eviction() {
+                        return;
+                    }
 
-            let state = unsafe { &mut *record.state().get() };
+                    let state = unsafe { &mut *record.state().get() };
 
-            strict_assert!(state.link.is_linked());
+                    strict_assert!(state.link.is_linked());
 
-            match state.queue {
-                Queue::None => unreachable!(),
-                Queue::Window => {
-                    // Move to MRU position of `window`.
-                    let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.window.push_back(r);
-                }
-                Queue::Probation => {
-                    // Promote to MRU position of `protected`.
-                    let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.decrease_queue_weight(Queue::Probation, record.weight());
-                    state.queue = Queue::Protected;
-                    this.increase_queue_weight(Queue::Protected, record.weight());
-                    this.protected.push_back(r);
+                    match state.queue {
+                        Queue::None => unreachable!(),
+                        Queue::Window => {
+                            // Move to MRU position of `window`.
+                            let r = unsafe { this.window.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.window.push_back(r);
+                        }
+                        Queue::Probation => {
+                            // Promote to MRU position of `protected`.
+                            let r = unsafe { this.probation.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.decrease_queue_weight(Queue::Probation, record.weight());
+                            state.queue = Queue::Protected;
+                            this.increase_queue_weight(Queue::Protected, record.weight());
+                            this.protected.push_back(r);
 
-                    // If `protected` weight exceeds the capacity, overflow entry from `protected` to `probation`.
-                    while this.protected_weight > this.protected_weight_capacity {
-                        strict_assert!(!this.protected.is_empty());
-                        let r = this.protected.pop_front().unwrap();
-                        let s = unsafe { &mut *r.state().get() };
-                        this.decrease_queue_weight(Queue::Protected, r.weight());
-                        s.queue = Queue::Probation;
-                        this.increase_queue_weight(Queue::Probation, r.weight());
-                        this.probation.push_back(r);
+                            // If `protected` weight exceeds the capacity, overflow entry from `protected` to
+                            // `probation`.
+                            while this.protected_weight > this.protected_weight_capacity {
+                                strict_assert!(!this.protected.is_empty());
+                                let r = this.protected.pop_front().unwrap();
+                                let s = unsafe { &mut *r.state().get() };
+                                this.decrease_queue_weight(Queue::Protected, r.weight());
+                                s.queue = Queue::Probation;
+                                this.increase_queue_weight(Queue::Probation, r.weight());
+                                this.probation.push_back(r);
+                            }
+                        }
+                        Queue::Protected => {
+                            // Move to MRU position of `protected`.
+                            let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
+                            this.protected.push_back(r);
+                        }
                     }
                 }
-                Queue::Protected => {
-                    // Move to MRU position of `protected`.
-                    let r = unsafe { this.protected.remove_from_ptr(Arc::as_ptr(record)) };
-                    this.protected.push_back(r);
+                OpCtx::Miss { hash } => {
+                    // Update frequency by access.
+                    this.update_frequencies(hash);
                 }
             }
         })
@@ -495,7 +518,8 @@ mod tests {
             cmsketch_eps: 0.01,
             cmsketch_confidence: 0.95,
         };
-        let mut lfu = TestLfu::new(10, &config);
+        let context = LfuContext::init(&config);
+        let mut lfu = TestLfu::new(10, &config, &context);
 
         assert_eq!(lfu.window_weight_capacity, 2);
         assert_eq!(lfu.protected_weight_capacity, 6);

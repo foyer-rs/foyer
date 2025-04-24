@@ -18,7 +18,7 @@ use foyer_common::code::{Key, Value};
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
-use super::{Eviction, Op};
+use super::{Context, Eviction, Op};
 use crate::{
     error::Result,
     record::{CacheHint, Record},
@@ -52,6 +52,17 @@ pub struct FifoState {
 
 intrusive_adapter! { Adapter<K, V> = Arc<Record<Fifo<K, V>>>: Record<Fifo<K, V>> { ?offset = Record::<Fifo<K, V>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
 
+#[derive(Debug, Clone)]
+pub struct FifoContext;
+
+impl Context for FifoContext {
+    type Config = FifoConfig;
+
+    fn init(_: &Self::Config) -> Self {
+        Self
+    }
+}
+
 pub struct Fifo<K, V>
 where
     K: Key,
@@ -70,8 +81,9 @@ where
     type Value = V;
     type Hint = FifoHint;
     type State = FifoState;
+    type Context = FifoContext;
 
-    fn new(_capacity: usize, _config: &Self::Config) -> Self
+    fn new(_: usize, _: &Self::Config, _: &Self::Context) -> Self
     where
         Self: Sized,
     {
@@ -156,7 +168,7 @@ pub mod tests {
             .collect_vec();
         let r = |i: usize| rs[i].clone();
 
-        let mut fifo = TestFifo::new(100, &FifoConfig {});
+        let mut fifo = TestFifo::new(100, &FifoConfig {}, &FifoContext);
 
         // 0, 1, 2, 3
         fifo.push(r(0));
