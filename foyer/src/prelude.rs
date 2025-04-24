@@ -21,14 +21,17 @@ pub use crate::{
         tracing::TracingOptions,
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
+    memory::{
+        Cache, CacheBuilder, CacheEntry, CacheHint, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
+        S3FifoConfig, Weighter,
+    },
+};
+#[cfg(feature = "hybrid")]
+pub use crate::{
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
         cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridFetch},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
-    },
-    memory::{
-        Cache, CacheBuilder, CacheEntry, CacheHint, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
-        S3FifoConfig, Weighter,
     },
     storage::{
         AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, Compression, Dev,

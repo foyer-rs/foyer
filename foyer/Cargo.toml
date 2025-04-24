@@ -22,7 +22,7 @@ equivalent = { workspace = true }
 fastrace = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-foyer-storage = { workspace = true }
+foyer-storage = { workspace = true, optional = true }
 mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
@@ -56,7 +56,8 @@ tokio = { package = "tokio", version = "1", features = [
 ] }
 
 [features]
-default = []
+default = ["hybrid"]
+hybrid = ["dep:foyer-storage"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 tracing = [
   "fastrace/enable",

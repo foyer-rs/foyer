@@ -19,6 +19,7 @@ check-all:
 	cargo sort -w
 	taplo fmt
 	cargo fmt --all
+	cargo clippy -p foyer --no-default-features
 	cargo clippy --all-targets --features deadlock
 	cargo clippy --all-targets --features tokio-console
 	cargo clippy --all-targets --features tracing

@@ -89,6 +89,28 @@ jobs:
           toolchain: stable
       - name: Run cargo machete
         uses: bnjbvr/cargo-machete@main
+  rust-cargo-tree:
+    name: show rust dependencies
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Print in-memory only foyer dependencies
+        run: |
+          cargo tree -p foyer --no-default-features -e normal 
+      - name: Print hybrid foyer dependencies
+        run: |
+          cargo tree -p foyer -e normal
+
   rust-udeps:
     name: rust udeps test
     strategy:
@@ -205,6 +227,7 @@ jobs:
       - name: Run rust clippy check (stable)
         if: matrix.rust_toolchain == 'stable'
         run: |
+          cargo clippy -p foyer --no-default-features
           cargo clippy --all-targets ${{ matrix.serde }} --features tokio-console -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features deadlock -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features tracing -- -D warnings
