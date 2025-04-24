@@ -28,6 +28,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
@@ -57,13 +58,14 @@ use crate::{
     Compression, Dev, SharedIoSlice,
 };
 
-pub enum Submission<K, V>
+pub enum Submission<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     CacheEntry {
-        piece: Piece<K, V>,
+        piece: Piece<K, V, P>,
         estimated_size: usize,
         sequence: Sequence,
     },
@@ -79,10 +81,11 @@ where
     },
 }
 
-impl<K, V> Debug for Submission<K, V>
+impl<K, V, P> Debug for Submission<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -110,22 +113,24 @@ where
 }
 
 #[derive(Debug)]
-pub struct Flusher<K, V>
+pub struct Flusher<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     id: usize,
-    tx: flume::Sender<Submission<K, V>>,
+    tx: flume::Sender<Submission<K, V, P>>,
     submit_queue_size: Arc<AtomicUsize>,
 
     metrics: Arc<Metrics>,
 }
 
-impl<K, V> Clone for Flusher<K, V>
+impl<K, V, P> Clone for Flusher<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         Self {
@@ -137,10 +142,11 @@ where
     }
 }
 
-impl<K, V> Flusher<K, V>
+impl<K, V, P> Flusher<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     #[expect(clippy::too_many_arguments)]
     pub fn open(
@@ -215,7 +221,7 @@ where
         })
     }
 
-    pub fn submit(&self, submission: Submission<K, V>) {
+    pub fn submit(&self, submission: Submission<K, V, P>) {
         tracing::trace!(id = self.id, "[lodc flusher]: submit task: {submission:?}");
         if let Submission::CacheEntry { estimated_size, .. } = &submission {
             self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
@@ -256,14 +262,15 @@ struct IoTaskCtx {
     io_slice: SharedIoSlice,
 }
 
-struct Runner<K, V>
+struct Runner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     id: usize,
 
-    rx: Option<flume::Receiver<Submission<K, V>>>,
+    rx: Option<flume::Receiver<Submission<K, V, P>>>,
 
     // NOTE: writer is always `Some(..)`.
     buffer: Option<Buffer>,
@@ -302,10 +309,11 @@ where
     flush_holder: FlushHolder,
 }
 
-impl<K, V> Runner<K, V>
+impl<K, V, P> Runner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + '_ {
         poll_fn(|cx| {
@@ -375,7 +383,7 @@ where
         Ok(())
     }
 
-    fn recv(&mut self, submission: Submission<K, V>) {
+    fn recv(&mut self, submission: Submission<K, V, P>) {
         tracing::trace!(id = self.id, ?submission, "[lodc flush runner]: recv submission");
 
         if self.queue_init.is_none() {

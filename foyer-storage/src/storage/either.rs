@@ -20,7 +20,10 @@ use std::{
 };
 
 use auto_enums::auto_enum;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    properties::Properties,
+};
 use foyer_memory::Piece;
 use futures_util::{
     future::{join, select, try_join, Either as EitherFuture},
@@ -86,17 +89,19 @@ pub enum Selection {
 pub trait Selector: Send + Sync + 'static + Debug {
     type Key: StorageKey;
     type Value: StorageValue;
+    type Properties: Properties;
 
-    fn select(&self, piece: &Piece<Self::Key, Self::Value>, estimated_size: usize) -> Selection;
+    fn select(&self, piece: &Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection;
 }
 
-pub struct Either<K, V, SL, SR, SE>
+pub struct Either<K, V, P, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    SL: Storage<Key = K, Value = V>,
-    SR: Storage<Key = K, Value = V>,
-    SE: Selector<Key = K, Value = V>,
+    P: Properties,
+    SL: Storage<Key = K, Value = V, Properties = P>,
+    SR: Storage<Key = K, Value = V, Properties = P>,
+    SE: Selector<Key = K, Value = V, Properties = P>,
 {
     selector: Arc<SE>,
 
@@ -106,13 +111,14 @@ where
     load_order: Order,
 }
 
-impl<K, V, SL, SR, SE> Debug for Either<K, V, SL, SR, SE>
+impl<K, V, P, SL, SR, SE> Debug for Either<K, V, P, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    SL: Storage<Key = K, Value = V>,
-    SR: Storage<Key = K, Value = V>,
-    SE: Selector<Key = K, Value = V>,
+    P: Properties,
+    SL: Storage<Key = K, Value = V, Properties = P>,
+    SR: Storage<Key = K, Value = V, Properties = P>,
+    SE: Selector<Key = K, Value = V, Properties = P>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EitherStore")
@@ -122,13 +128,14 @@ where
     }
 }
 
-impl<K, V, SL, SR, SE> Clone for Either<K, V, SL, SR, SE>
+impl<K, V, P, SL, SR, SE> Clone for Either<K, V, P, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    SL: Storage<Key = K, Value = V>,
-    SR: Storage<Key = K, Value = V>,
-    SE: Selector<Key = K, Value = V>,
+    P: Properties,
+    SL: Storage<Key = K, Value = V, Properties = P>,
+    SR: Storage<Key = K, Value = V, Properties = P>,
+    SE: Selector<Key = K, Value = V, Properties = P>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -140,16 +147,18 @@ where
     }
 }
 
-impl<K, V, SL, SR, SE> Storage for Either<K, V, SL, SR, SE>
+impl<K, V, P, SL, SR, SE> Storage for Either<K, V, P, SL, SR, SE>
 where
     K: StorageKey,
     V: StorageValue,
-    SL: Storage<Key = K, Value = V>,
-    SR: Storage<Key = K, Value = V>,
-    SE: Selector<Key = K, Value = V>,
+    P: Properties,
+    SL: Storage<Key = K, Value = V, Properties = P>,
+    SR: Storage<Key = K, Value = V, Properties = P>,
+    SE: Selector<Key = K, Value = V, Properties = P>,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
     type Config = EitherConfig<K, V, SL, SR, SE>;
 
     async fn open(config: Self::Config) -> Result<Self> {
@@ -171,7 +180,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         match self.selector.select(&piece, estimated_size) {
             Selection::Left => {
                 self.right.delete(piece.hash());

@@ -45,6 +45,8 @@ zstd = "0.13"
 
 [dev-dependencies]
 bytesize = { workspace = true }
+foyer-memory = { workspace = true, features = ["test_utils"] }
+foyer-storage = { workspace = true, features = ["test_utils"] }
 tempfile = "3"
 test-log = { workspace = true }
 

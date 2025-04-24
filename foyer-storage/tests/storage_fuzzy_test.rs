@@ -19,7 +19,7 @@
 use std::{path::Path, sync::Arc};
 
 use foyer_common::{hasher::ModRandomState, metrics::Metrics};
-use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 use foyer_storage::{
     test_utils::Recorder, Compression, DirectFsDeviceOptions, Engine, LargeEngineOptions, StoreBuilder,
 };
@@ -31,8 +31,10 @@ const INSERTS: usize = 100;
 const LOOPS: usize = 10;
 
 async fn test_store(
-    memory: Cache<u64, Vec<u8>, ModRandomState>,
-    builder: impl Fn(&Cache<u64, Vec<u8>, ModRandomState>) -> StoreBuilder<u64, Vec<u8>, ModRandomState>,
+    memory: Cache<u64, Vec<u8>, ModRandomState, TestProperties>,
+    builder: impl Fn(
+        &Cache<u64, Vec<u8>, ModRandomState, TestProperties>,
+    ) -> StoreBuilder<u64, Vec<u8>, ModRandomState, TestProperties>,
     recorder: Arc<Recorder>,
 ) {
     let store = builder(&memory).build().await.unwrap();
@@ -100,10 +102,10 @@ async fn test_store(
 }
 
 fn basic(
-    memory: &Cache<u64, Vec<u8>, ModRandomState>,
+    memory: &Cache<u64, Vec<u8>, ModRandomState, TestProperties>,
     path: impl AsRef<Path>,
     recorder: &Arc<Recorder>,
-) -> StoreBuilder<u64, Vec<u8>, ModRandomState> {
+) -> StoreBuilder<u64, Vec<u8>, ModRandomState, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()), Engine::Large)
         .with_device_options(
@@ -130,7 +132,7 @@ async fn test_direct_fs_store() {
         .with_hash_builder(ModRandomState::default())
         .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| basic(memory, tempdir.path(), &r);
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState, TestProperties>| basic(memory, tempdir.path(), &r);
     test_store(memory, builder, recorder).await;
 }
 
@@ -143,7 +145,7 @@ async fn test_direct_fs_store_zstd() {
         .with_hash_builder(ModRandomState::default())
         .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| {
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState, TestProperties>| {
         basic(memory, tempdir.path(), &r).with_compression(Compression::Zstd)
     };
     test_store(memory, builder, recorder).await;
@@ -158,7 +160,7 @@ async fn test_direct_fs_store_lz4() {
         .with_hash_builder(ModRandomState::default())
         .build();
     let r = recorder.clone();
-    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState>| {
+    let builder = |memory: &Cache<u64, Vec<u8>, ModRandomState, TestProperties>| {
         basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4)
     };
     test_store(memory, builder, recorder).await;

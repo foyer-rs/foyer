@@ -17,6 +17,7 @@ use std::{fmt::Debug, future::Future, sync::Arc};
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use foyer_memory::Piece;
 use futures_util::future::try_join_all;
@@ -29,20 +30,29 @@ use super::{
 };
 use crate::error::{Error, Result};
 
-pub enum Submission<K, V>
+pub enum Submission<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    Insertion { piece: Piece<K, V>, estimated_size: usize },
-    Deletion { hash: u64 },
-    Wait { tx: oneshot::Sender<()> },
+    Insertion {
+        piece: Piece<K, V, P>,
+        estimated_size: usize,
+    },
+    Deletion {
+        hash: u64,
+    },
+    Wait {
+        tx: oneshot::Sender<()>,
+    },
 }
 
-impl<K, V> Debug for Submission<K, V>
+impl<K, V, P> Debug for Submission<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -59,18 +69,20 @@ where
     }
 }
 
-pub struct Flusher<K, V>
+pub struct Flusher<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    tx: flume::Sender<Submission<K, V>>,
+    tx: flume::Sender<Submission<K, V, P>>,
 }
 
-impl<K, V> Flusher<K, V>
+impl<K, V, P> Flusher<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     pub fn open(config: &GenericSmallStorageConfig<K, V>, set_manager: SetManager, metrics: Arc<Metrics>) -> Self {
         let (tx, rx) = flume::unbounded();
@@ -96,7 +108,7 @@ where
         Self { tx }
     }
 
-    pub fn submit(&self, submission: Submission<K, V>) {
+    pub fn submit(&self, submission: Submission<K, V, P>) {
         tracing::trace!("[sodc flusher]: submit task: {submission:?}");
         if let Err(e) = self.tx.send(submission) {
             tracing::error!("[sodc flusher]: error raised when submitting task, error: {e}");
@@ -112,12 +124,13 @@ where
     }
 }
 
-struct Runner<K, V>
+struct Runner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    rx: flume::Receiver<Submission<K, V>>,
+    rx: flume::Receiver<Submission<K, V, P>>,
     batch: BatchMut,
     flight: Arc<Semaphore>,
 
@@ -126,10 +139,11 @@ where
     metrics: Arc<Metrics>,
 }
 
-impl<K, V> Runner<K, V>
+impl<K, V, P> Runner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     pub async fn run(mut self) -> Result<()> {
         loop {
@@ -152,7 +166,7 @@ where
         Ok(())
     }
 
-    fn submit(&mut self, submission: Submission<K, V>) {
+    fn submit(&mut self, submission: Submission<K, V, P>) {
         let report = |enqueued: bool| {
             if !enqueued {
                 self.metrics.storage_queue_buffer_overflow.increase(1);

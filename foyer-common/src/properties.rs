@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 /// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
 ///
 /// The meaning of the hint differs in each cache eviction algorithm, and some of them can be ignore by specific
@@ -30,6 +32,12 @@ pub enum Hint {
     ///
     /// Used by LRU.
     Low,
+}
+
+impl Default for Hint {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 // TODO(MrCroxx): Is it necessary to make popluated entry still follow the cache location advice?
@@ -61,22 +69,43 @@ impl Default for Location {
 /// Entry source used by hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    /// Inserted by the user.
-    Inserted,
+    /// Comes from outer system of foyer.
+    Outer,
     /// Populated from the disk cache.
     Populated,
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Self::Outer
+    }
 }
 
 /// Entry level properties trait.
 ///
 /// The in-memory only cache and the hybrid cache may have different properties implementations to minimize the overhead
-/// of necessary properties in different scenarioes.
-pub trait Properties: Send + Sync + 'static {
+/// of necessary properties in different scenarios.
+pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
+    /// Set entry ephemeral.
+    fn with_ephemeral(self, ephemeral: bool) -> Self;
+
+    /// Entry ephemeral.
+    fn ephemeral(&self) -> Option<bool>;
+
+    /// Set entry hint.
+    fn with_hint(self, hint: Hint) -> Self;
+
     /// Entry hint.
     fn hint(&self) -> Option<Hint>;
 
+    /// Set entry location.
+    fn with_location(self, location: Location) -> Self;
+
     /// Entry location.
     fn location(&self) -> Option<Location>;
+
+    /// Set entry source.
+    fn with_source(self, source: Source) -> Self;
 
     /// Entry source.
     fn source(&self) -> Option<Source>;

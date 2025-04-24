@@ -32,11 +32,11 @@ use fastrace::prelude::*;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
-    location::CacheLocation,
     metrics::Metrics,
+    properties::{Hint, Location, Properties, Source},
     tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
-use foyer_memory::{Cache, CacheEntry, CacheHint, Fetch, FetchContext, FetchState, Piece, Pipe};
+use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, Piece, Pipe};
 use foyer_storage::{IoThrottler, Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
@@ -71,6 +71,93 @@ macro_rules! try_cancel {
     };
 }
 
+/// Entry properties for in-memory only cache.
+#[derive(Debug, Clone, Default)]
+pub struct HybridCacheProperties {
+    ephemeral: bool,
+    hint: Hint,
+    location: Location,
+    source: Source,
+}
+
+impl HybridCacheProperties {
+    /// Set the entry to be ephemeral.
+    ///
+    /// An ephemeral entry will be evicted immediately after all its holders drop it,
+    /// no matter if the capacity is reached.
+    pub fn with_ephemeral(mut self, ephemeral: bool) -> Self {
+        self.ephemeral = ephemeral;
+        self
+    }
+
+    /// Get if the entry is ephemeral.
+    pub fn ephemeral(&self) -> bool {
+        self.ephemeral
+    }
+
+    /// Set entry hint.
+    pub fn with_hint(mut self, hint: Hint) -> Self {
+        self.hint = hint;
+        self
+    }
+
+    /// Get entry hint.
+    pub fn hint(&self) -> Hint {
+        self.hint
+    }
+
+    /// Set entry location advice.
+    pub fn with_location(mut self, location: Location) -> Self {
+        self.location = location;
+        self
+    }
+
+    /// Get entry location advice.
+    pub fn location(&self) -> Location {
+        self.location
+    }
+
+    /// Get entry source.
+    pub fn source(&self) -> Source {
+        self.source
+    }
+}
+
+impl Properties for HybridCacheProperties {
+    fn with_ephemeral(self, ephemeral: bool) -> Self {
+        self.with_ephemeral(ephemeral)
+    }
+
+    fn ephemeral(&self) -> Option<bool> {
+        Some(self.ephemeral())
+    }
+
+    fn with_hint(self, hint: Hint) -> Self {
+        self.with_hint(hint)
+    }
+
+    fn hint(&self) -> Option<Hint> {
+        Some(self.hint())
+    }
+
+    fn with_location(self, location: Location) -> Self {
+        self.with_location(location)
+    }
+
+    fn location(&self) -> Option<Location> {
+        Some(self.location())
+    }
+
+    fn with_source(mut self, source: Source) -> Self {
+        self.source = source;
+        self
+    }
+
+    fn source(&self) -> Option<Source> {
+        Some(self.source())
+    }
+}
+
 /// Control the cache policy of the hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HybridCachePolicy {
@@ -92,7 +179,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    store: Store<K, V, S>,
+    store: Store<K, V, S, HybridCacheProperties>,
 }
 
 impl<K, V, S> Debug for HybridCachePipe<K, V, S>
@@ -112,7 +199,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    pub fn new(store: Store<K, V, S>) -> Self {
+    pub fn new(store: Store<K, V, S, HybridCacheProperties>) -> Self {
         Self { store }
     }
 }
@@ -125,20 +212,24 @@ where
 {
     type Key = K;
     type Value = V;
+    type Properties = HybridCacheProperties;
 
     fn is_enabled(&self) -> bool {
         true
     }
 
-    fn send(&self, piece: Piece<Self::Key, Self::Value>) {
-        match piece.location() {
-            CacheLocation::InMem => return,
-            CacheLocation::Default | CacheLocation::OnDisk => {}
+    fn send(&self, piece: Piece<Self::Key, Self::Value, HybridCacheProperties>) {
+        match piece.properties().location() {
+            Location::InMem => return,
+            Location::Default | Location::OnDisk => {}
         }
         self.store.enqueue(piece, false);
     }
 
-    fn flush(&self, pieces: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn flush(
+        &self,
+        pieces: Vec<Piece<Self::Key, Self::Value, HybridCacheProperties>>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let throttle = self.store.throttle().clone();
         let store = self.store.clone();
         Box::pin(async move {
@@ -154,48 +245,11 @@ where
                 store.enqueue(piece, false);
             }
         })
-
-        // let store = self.store.clone();
-        // Box::pin(async move {
-        //     store.wait().await;
-        //     'piece: for piece in pieces {
-        //         'wait: loop {
-        //             match store.pick(piece.hash()) {
-        //                 Pick::Admit => break 'wait,
-        //                 Pick::Reject => continue 'piece,
-        //                 Pick::Throttled(duration) => {
-        //                     tokio::time::sleep(duration).await;
-        //                 }
-        //             }
-        //         }
-        //         store.enqueue(piece, true);
-        //     }
-        // })
-
-        // let throttle = self.store.throttle();
-        // println!("throttle: {throttle:?}")
-        // let throttler =
-        //     IoThrottlerPicker::new(IoThrottlerTarget::Write, throttle.write_throughput, throttle.write_iops);
-        // let store = self.store.clone();
-        // let statistics = self.store.statistics().clone();
-        // Box::pin(async move {
-        //     store.wait().await;
-        //     for piece in pieces {
-        //         match throttler.pick(&statistics, piece.hash()) {
-        //             Pick::Admit => {}
-        //             Pick::Reject => unreachable!(),
-        //             Pick::Throttled(duration) => tokio::time::sleep(duration).await,
-        //         }
-        //         // Since the cache is closing at the moment, no new entry will come after it.
-        //         // It is safe to force enqueue the piece and ignore the internal io throttler of the store.
-        //         store.enqueue(piece, false);
-        //     }
-        // })
     }
 }
 
 /// A cached entry holder of the hybrid cache.
-pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S>;
+pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S, HybridCacheProperties>;
 
 #[derive(Debug)]
 pub struct HybridCacheOptions {
@@ -238,8 +292,8 @@ where
     metrics: Arc<Metrics>,
     tracing_config: Arc<TracingConfig>,
     tracing: Arc<AtomicBool>,
-    memory: Cache<K, V, S>,
-    storage: Store<K, V, S>,
+    memory: Cache<K, V, S, HybridCacheProperties>,
+    storage: Store<K, V, S, HybridCacheProperties>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -287,8 +341,8 @@ where
 {
     pub(crate) fn new(
         options: HybridCacheOptions,
-        memory: Cache<K, V, S>,
-        storage: Store<K, V, S>,
+        memory: Cache<K, V, S, HybridCacheProperties>,
+        storage: Store<K, V, S, HybridCacheProperties>,
         metrics: Arc<Metrics>,
     ) -> Self {
         let policy = options.policy;
@@ -318,7 +372,7 @@ where
     }
 
     /// Access the in-memory cache.
-    pub fn memory(&self) -> &Cache<K, V, S> {
+    pub fn memory(&self) -> &Cache<K, V, S, HybridCacheProperties> {
         &self.memory
     }
 
@@ -358,37 +412,24 @@ where
         entry
     }
 
-    /// Insert cache entry with cache hint to the hybrid cache.
-    pub fn insert_with_hint(&self, key: K, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert_with_hint");
+    /// Insert cache entry to the hybrid cache with properties.
+    pub fn insert_with_properties(
+        &self,
+        key: K,
+        value: V,
+        properties: HybridCacheProperties,
+    ) -> HybridCacheEntry<K, V, S> {
+        root_span!(self, span, "foyer::hybrid::cache::insert");
 
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
 
-        let entry = self.memory.insert_with_hint(key, value, hint);
-        if self.policy == HybridCachePolicy::WriteOnInsertion {
-            self.storage.enqueue(entry.piece(), false);
-        }
-
-        self.metrics.hybrid_insert.increase(1);
-        self.metrics.hybrid_insert_duration.record(now.elapsed().as_secs_f64());
-
-        try_cancel!(self, span, record_hybrid_insert_threshold);
-
-        entry
-    }
-
-    /// Insert cache entry with preferred location to the hybrid cache.
-    pub fn insert_with_location(&self, key: K, value: V, location: CacheLocation) -> HybridCacheEntry<K, V, S> {
-        root_span!(self, span, "foyer::hybrid::cache::insert_with_location");
-
-        let _guard = span.set_local_parent();
-
-        let now = Instant::now();
-
-        let entry = self.memory.insert_with_location(key, value, location);
-        if self.policy == HybridCachePolicy::WriteOnInsertion && location != CacheLocation::InMem {
+        let ephemeral = matches! { properties.location(), Location::OnDisk };
+        let entry = self
+            .memory
+            .insert_with_properties(key, value, properties.with_ephemeral(ephemeral));
+        if self.policy == HybridCachePolicy::WriteOnInsertion && entry.properties().location() != Location::InMem {
             self.storage.enqueue(entry.piece(), false);
         }
 
@@ -591,7 +632,7 @@ where
         HybridCacheStorageWriter::new(self.clone(), key)
     }
 
-    pub(crate) fn storage(&self) -> &Store<K, V, S> {
+    pub(crate) fn storage(&self) -> &Store<K, V, S, HybridCacheProperties> {
         &self.storage
     }
 
@@ -626,9 +667,9 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: Fetch<K, V, anyhow::Error, S>,
+    inner: Fetch<K, V, anyhow::Error, S, HybridCacheProperties>,
     policy: HybridCachePolicy,
-    storage: Store<K, V, S>,
+    storage: Store<K, V, S, HybridCacheProperties>,
 }
 
 impl<K, V, S> Future for HybridFetchInner<K, V, S>
@@ -637,14 +678,14 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Output = anyhow::Result<CacheEntry<K, V, S>>;
+    type Output = anyhow::Result<CacheEntry<K, V, S, HybridCacheProperties>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         let res = ready!(this.inner.as_mut().poll(cx));
 
         if let Ok(entry) = res.as_ref() {
-            if entry.location() != CacheLocation::InMem
+            if entry.properties().location() != Location::InMem
                 && *this.policy == HybridCachePolicy::WriteOnInsertion
                 && this.inner.store().is_some()
             {
@@ -665,7 +706,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Target = Fetch<K, V, anyhow::Error, S>;
+    type Target = Fetch<K, V, anyhow::Error, S, HybridCacheProperties>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -687,52 +728,27 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
-        self.fetch_inner(key, CacheHint::Normal, CacheLocation::Default, fetch)
+        self.fetch_inner(key, HybridCacheProperties::default(), fetch)
     }
 
-    /// Fetch and insert a cache entry with the given key, hint, and method if there is a cache miss.
+    /// Fetch and insert a cache entry with the given key, properties, and method if there is a cache miss.
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_hint<F, FU>(&self, key: K, hint: CacheHint, fetch: F) -> HybridFetch<K, V, S>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
-    {
-        self.fetch_inner(key, hint, CacheLocation::Default, fetch)
-    }
-
-    /// Fetch and insert a cache entry with the given key, location, and method if there is a cache miss.
-    ///
-    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
-    /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_location<F, FU>(&self, key: K, location: CacheLocation, fetch: F) -> HybridFetch<K, V, S>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
-    {
-        self.fetch_inner(key, CacheHint::Normal, location, fetch)
-    }
-
-    /// Fetch and insert a cache entry with the given key, hint, location, and method if there is a cache miss.
-    ///
-    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
-    /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_advanced<F, FU>(
+    pub fn fetch_with_properties<F, FU>(
         &self,
         key: K,
-        hint: CacheHint,
-        location: CacheLocation,
+        properties: HybridCacheProperties,
         fetch: F,
     ) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
     {
-        self.fetch_inner(key, hint, location, fetch)
+        self.fetch_inner(key, properties, fetch)
     }
 
-    fn fetch_inner<F, FU>(&self, key: K, hint: CacheHint, location: CacheLocation, fetch: F) -> HybridFetch<K, V, S>
+    fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = anyhow::Result<V>> + Send + 'static,
@@ -748,8 +764,7 @@ where
         let future = fetch();
         let inner = self.memory.fetch_inner(
             key.clone(),
-            hint,
-            location,
+            properties,
             || {
                 let metrics = self.metrics.clone();
                 let runtime = self.storage().runtime().clone();
@@ -759,7 +774,13 @@ where
                         Ok(Load::Entry { key: _, value }) => {
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-                            return Ok(value).into();
+                            return Diversion {
+                                target: Ok(value),
+                                store: Some(FetchContext {
+                                    throttled: false,
+                                    source: Source::Populated,
+                                }),
+                            };
                         }
                         Ok(Load::Throttled) => true,
                         Ok(Load::Miss) => false,
@@ -772,7 +793,10 @@ where
                     let fut = async move {
                         Diversion {
                             target: future.await,
-                            store: Some(FetchContext { throttled }),
+                            store: Some(FetchContext {
+                                throttled,
+                                source: Source::Outer,
+                            }),
                         }
                     }
                     .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
@@ -803,7 +827,7 @@ mod tests {
 
     use std::{path::Path, sync::Arc};
 
-    use foyer_common::{hasher::ModRandomState, location::CacheLocation};
+    use foyer_common::hasher::ModRandomState;
     use foyer_storage::test_utils::{Record, Recorder};
     use storage::test_utils::BiasedPicker;
 
@@ -923,14 +947,14 @@ mod tests {
         let hybrid = open(dir.path()).await;
 
         let e1 = hybrid.insert(1, vec![1; 7 * KB]);
-        let e2 = hybrid.insert_with_hint(2, vec![2; 7 * KB], CacheHint::Normal);
+        let e2 = hybrid.insert_with_properties(2, vec![2; 7 * KB], HybridCacheProperties::default());
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.storage_writer(3).insert(vec![3; 7 * KB]).unwrap();
         let e4 = hybrid
             .storage_writer(4)
-            .insert_with_context(vec![4; 7 * KB], CacheHint::Normal)
+            .insert_with_properties(vec![4; 7 * KB], HybridCacheProperties::default())
             .unwrap();
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -959,13 +983,17 @@ mod tests {
         let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
 
         let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
-        let e2 = hybrid.writer(2).insert_with_hint(vec![2; 7 * KB], CacheHint::Normal);
+        let e2 = hybrid
+            .writer(2)
+            .insert_with_properties(vec![2; 7 * KB], HybridCacheProperties::default());
 
         assert_eq!(e1.value(), &vec![1; 7 * KB]);
         assert_eq!(e2.value(), &vec![2; 7 * KB]);
 
         let e3 = hybrid.writer(3).storage().insert(vec![3; 7 * KB]).unwrap();
-        let e4 = hybrid.writer(4).insert_with_hint(vec![4; 7 * KB], CacheHint::Normal);
+        let e4 = hybrid
+            .writer(4)
+            .insert_with_properties(vec![4; 7 * KB], HybridCacheProperties::default());
 
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
@@ -985,7 +1013,11 @@ mod tests {
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
 
         hybrid
-            .fetch_with_location(1, CacheLocation::Default, || async move { Ok(vec![1; 7 * KB]) })
+            .fetch_with_properties(
+                1,
+                HybridCacheProperties::default().with_location(Location::Default),
+                || async move { Ok(vec![1; 7 * KB]) },
+            )
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
@@ -997,7 +1029,11 @@ mod tests {
         );
 
         hybrid
-            .fetch_with_location(2, CacheLocation::InMem, || async move { Ok(vec![2; 7 * KB]) })
+            .fetch_with_properties(
+                2,
+                HybridCacheProperties::default().with_location(Location::InMem),
+                || async move { Ok(vec![2; 7 * KB]) },
+            )
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
@@ -1006,7 +1042,11 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .fetch_with_location(3, CacheLocation::OnDisk, || async move { Ok(vec![3; 7 * KB]) })
+            .fetch_with_properties(
+                3,
+                HybridCacheProperties::default().with_location(Location::OnDisk),
+                || async move { Ok(vec![3; 7 * KB]) },
+            )
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1022,7 +1062,11 @@ mod tests {
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
 
         hybrid
-            .fetch_with_location(1, CacheLocation::Default, || async move { Ok(vec![1; 7 * KB]) })
+            .fetch_with_properties(
+                1,
+                HybridCacheProperties::default().with_location(Location::Default),
+                || async move { Ok(vec![1; 7 * KB]) },
+            )
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1033,7 +1077,11 @@ mod tests {
         );
 
         hybrid
-            .fetch_with_location(2, CacheLocation::InMem, || async move { Ok(vec![2; 7 * KB]) })
+            .fetch_with_properties(
+                2,
+                HybridCacheProperties::default().with_location(Location::InMem),
+                || async move { Ok(vec![2; 7 * KB]) },
+            )
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1041,7 +1089,11 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .fetch_with_location(3, CacheLocation::OnDisk, || async move { Ok(vec![3; 7 * KB]) })
+            .fetch_with_properties(
+                3,
+                HybridCacheProperties::default().with_location(Location::OnDisk),
+                || async move { Ok(vec![3; 7 * KB]) },
+            )
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1059,7 +1111,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
 
-        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.insert_with_properties(
+            1,
+            vec![1; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::Default),
+        );
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
@@ -1068,13 +1124,21 @@ mod tests {
             vec![1; 7 * KB]
         );
 
-        hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
+        hybrid.insert_with_properties(
+            2,
+            vec![2; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::InMem),
+        );
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
-        hybrid.insert_with_location(3, vec![3; 7 * KB], CacheLocation::OnDisk);
+        hybrid.insert_with_properties(
+            3,
+            vec![3; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::OnDisk),
+        );
         hybrid.storage().wait().await;
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
@@ -1087,7 +1151,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
 
-        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.insert_with_properties(
+            1,
+            vec![1; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::Default),
+        );
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(
@@ -1095,12 +1163,20 @@ mod tests {
             vec![1; 7 * KB]
         );
 
-        hybrid.insert_with_location(2, vec![2; 7 * KB], CacheLocation::InMem);
+        hybrid.insert_with_properties(
+            2,
+            vec![2; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::InMem),
+        );
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
-        hybrid.insert_with_location(3, vec![3; 7 * KB], CacheLocation::OnDisk);
+        hybrid.insert_with_properties(
+            3,
+            vec![3; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::OnDisk),
+        );
         hybrid.storage().wait().await;
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
@@ -1118,7 +1194,11 @@ mod tests {
         let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
 
         // 2. insert e1 and flush it to disk.
-        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.insert_with_properties(
+            1,
+            vec![1; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::Default),
+        );
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(
@@ -1143,7 +1223,11 @@ mod tests {
         let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnEviction).await;
 
         // 2. insert e1 and flush it to disk.
-        hybrid.insert_with_location(1, vec![1; 7 * KB], CacheLocation::Default);
+        hybrid.insert_with_properties(
+            1,
+            vec![1; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::Default),
+        );
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;

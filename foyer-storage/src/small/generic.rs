@@ -26,6 +26,7 @@ use std::{
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use foyer_memory::Piece;
 use futures_util::future::join_all;
@@ -80,12 +81,13 @@ where
     }
 }
 
-struct GenericSmallStorageInner<K, V>
+struct GenericSmallStorageInner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    flushers: Vec<Flusher<K, V>>,
+    flushers: Vec<Flusher<K, V, P>>,
 
     device: MonitoredDevice,
     set_manager: SetManager,
@@ -96,28 +98,31 @@ where
     _runtime: Runtime,
 }
 
-pub struct GenericSmallStorage<K, V>
+pub struct GenericSmallStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    inner: Arc<GenericSmallStorageInner<K, V>>,
+    inner: Arc<GenericSmallStorageInner<K, V, P>>,
 }
 
-impl<K, V> Debug for GenericSmallStorage<K, V>
+impl<K, V, P> Debug for GenericSmallStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericSmallStorage").finish()
     }
 }
 
-impl<K, V> Clone for GenericSmallStorage<K, V>
+impl<K, V, P> Clone for GenericSmallStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         Self {
@@ -126,10 +131,11 @@ where
     }
 }
 
-impl<K, V> GenericSmallStorage<K, V>
+impl<K, V, P> GenericSmallStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     async fn open(config: GenericSmallStorageConfig<K, V>) -> Result<Self> {
         let metrics = config.device.metrics().clone();
@@ -172,7 +178,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<K, V>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -224,13 +230,15 @@ where
     }
 }
 
-impl<K, V> Storage for GenericSmallStorage<K, V>
+impl<K, V, P> Storage for GenericSmallStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
     type Config = GenericSmallStorageConfig<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
@@ -242,7 +250,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         self.enqueue(piece, estimated_size);
     }
 
@@ -281,7 +289,7 @@ mod tests {
 
     use bytesize::ByteSize;
     use foyer_common::{hasher::ModRandomState, metrics::Metrics};
-    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
+    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use tokio::runtime::Handle;
 
     use super::*;
@@ -294,7 +302,7 @@ mod tests {
         DevExt, DirectFsDeviceOptions,
     };
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
         CacheBuilder::new(10)
             .with_shards(1)
             .with_hash_builder(ModRandomState::default())
@@ -318,7 +326,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>> {
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericSmallStorage<u64, Vec<u8>, TestProperties> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericSmallStorageConfig {
@@ -336,19 +344,25 @@ mod tests {
         GenericSmallStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>>, piece: Piece<u64, Vec<u8>>) {
+    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>, piece: Piece<u64, Vec<u8>, TestProperties>) {
         let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
         store.enqueue(piece, estimated_size);
     }
 
-    async fn assert_some(store: &GenericSmallStorage<u64, Vec<u8>>, entry: &CacheEntry<u64, Vec<u8>, ModRandomState>) {
+    async fn assert_some(
+        store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
+        entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+    ) {
         assert_eq!(
             store.load(entry.hash()).await.unwrap().unwrap(),
             (*entry.key(), entry.value().clone())
         );
     }
 
-    async fn assert_none(store: &GenericSmallStorage<u64, Vec<u8>>, entry: &CacheEntry<u64, Vec<u8>, ModRandomState>) {
+    async fn assert_none(
+        store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
+        entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+    ) {
         assert!(store.load(entry.hash()).await.unwrap().is_none());
     }
 

@@ -61,6 +61,7 @@ tokio = { package = "tokio", version = "1", features = [
 
 [features]
 nightly = ["hashbrown/nightly"]
+test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]

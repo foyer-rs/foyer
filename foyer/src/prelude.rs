@@ -17,17 +17,17 @@ pub use crate::{
         buf::{BufExt, BufMutExt},
         code::{Code, CodeError, CodeResult, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
-        location::CacheLocation,
+        properties::{Hint, Location, Source},
         tracing::TracingOptions,
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-        cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridFetch},
+        cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties, HybridFetch},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
-        Cache, CacheBuilder, CacheEntry, CacheHint, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
+        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
         S3FifoConfig, Weighter,
     },
     storage::{

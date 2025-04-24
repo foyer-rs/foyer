@@ -33,8 +33,8 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     future::{Diversion, DiversionFuture},
-    location::CacheLocation,
     metrics::Metrics,
+    properties::{Location, Properties, Source},
     runtime::SingletonHandle,
     strict_assert,
     utils::scope::Scope,
@@ -123,7 +123,6 @@ where
     fn emplace(
         &mut self,
         data: Data<E>,
-        ephemeral: bool,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
     ) -> Arc<Record<E>> {
@@ -156,6 +155,7 @@ where
         }
         strict_assert!(record.is_in_indexer());
 
+        let ephemeral = record.properties().ephemeral().unwrap_or_default();
         record.set_ephemeral(ephemeral);
         if !ephemeral {
             self.eviction.push(record.clone());
@@ -357,6 +357,7 @@ where
     }
 }
 
+#[expect(clippy::type_complexity)]
 struct RawCacheInner<E, S, I>
 where
     E: Eviction,
@@ -372,7 +373,7 @@ where
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pipe: ArcSwap<Box<dyn Pipe<Key = E::Key, Value = E::Value>>>,
+    pipe: ArcSwap<Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>>,
 }
 
 impl<E, S, I> RawCacheInner<E, S, I>
@@ -454,7 +455,8 @@ where
             .map(RwLock::new)
             .collect_vec();
 
-        let pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value>> = Box::new(NoopPipe::default());
+        let pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>> =
+            Box::new(NoopPipe::default());
 
         let inner = RawCacheInner {
             shards,
@@ -518,48 +520,15 @@ where
 
     #[fastrace::trace(name = "foyer::memory::raw::insert")]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, false)
+        self.insert_with_properties(key, value, Default::default())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::insert_with_hint")]
-    pub fn insert_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, hint, CacheLocation::Default, false)
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::insert_with_location")]
-    pub fn insert_with_location(
+    #[fastrace::trace(name = "foyer::memory::raw::insert_with_properties")]
+    pub fn insert_with_properties(
         &self,
         key: E::Key,
         value: E::Value,
-        location: CacheLocation,
-    ) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(
-            key,
-            value,
-            Default::default(),
-            location,
-            matches! {location, CacheLocation::OnDisk},
-        )
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral")]
-    pub fn insert_ephemeral(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, Default::default(), CacheLocation::Default, true)
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::insert_ephemeral_with_hint")]
-    pub fn insert_ephemeral_with_hint(&self, key: E::Key, value: E::Value, hint: E::Hint) -> RawCacheEntry<E, S, I> {
-        self.insert_advanced(key, value, hint, CacheLocation::Default, true)
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::insert_advanced")]
-    pub fn insert_advanced(
-        &self,
-        key: E::Key,
-        value: E::Value,
-        hint: E::Hint,
-        location: CacheLocation,
-        ephemeral: bool,
+        properties: E::Properties,
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
@@ -572,12 +541,10 @@ where
                 Data {
                     key,
                     value,
-                    hint,
+                    properties,
                     hash,
                     weight,
-                    location,
                 },
-                ephemeral,
                 &mut garbages,
                 &mut waiters,
             )
@@ -762,7 +729,7 @@ where
         self.inner.shards.len()
     }
 
-    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value>>) {
+    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>) {
         self.inner.pipe.store(Arc::new(pipe));
     }
 
@@ -894,16 +861,12 @@ where
         self.record.value()
     }
 
-    pub fn hint(&self) -> &E::Hint {
-        self.record.hint()
+    pub fn properties(&self) -> &E::Properties {
+        self.record.properties()
     }
 
     pub fn weight(&self) -> usize {
         self.record.weight()
-    }
-
-    pub fn location(&self) -> CacheLocation {
-        self.record.location()
     }
 
     pub fn refs(&self) -> usize {
@@ -914,7 +877,7 @@ where
         !self.record.is_in_indexer()
     }
 
-    pub fn piece(&self) -> Piece<E::Key, E::Value> {
+    pub fn piece(&self) -> Piece<E::Key, E::Value, E::Properties> {
         Piece::new(self.record.clone())
     }
 }
@@ -935,6 +898,8 @@ pub enum FetchState {
 pub struct FetchContext {
     /// If this fetch is caused by disk cache throttled.
     pub throttled: bool,
+    /// Fetched entry source.
+    pub source: Source,
 }
 
 enum RawShardFetch<E, S, I>
@@ -1017,55 +982,16 @@ where
         self.fetch_inner(
             key,
             Default::default(),
-            CacheLocation::Default,
             fetch,
             &tokio::runtime::Handle::current().into(),
         )
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
-    pub fn fetch_with_hint<F, FU, ER>(&self, key: E::Key, hint: E::Hint, fetch: F) -> RawFetch<E, ER, S, I>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
-        ER: Send + 'static + Debug,
-    {
-        self.fetch_inner(
-            key,
-            hint,
-            CacheLocation::Default,
-            fetch,
-            &tokio::runtime::Handle::current().into(),
-        )
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::fetch_with_hint")]
-    pub fn fetch_with_location<F, FU, ER>(
+    #[fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")]
+    pub fn fetch_with_properties<F, FU, ER, ID>(
         &self,
         key: E::Key,
-        location: CacheLocation,
-        fetch: F,
-    ) -> RawFetch<E, ER, S, I>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
-        ER: Send + 'static + Debug,
-    {
-        self.fetch_inner(
-            key,
-            Default::default(),
-            location,
-            fetch,
-            &tokio::runtime::Handle::current().into(),
-        )
-    }
-
-    #[fastrace::trace(name = "foyer::memory::raw::fetch_advanced")]
-    pub fn fetch_advanced<F, FU, ER, ID>(
-        &self,
-        key: E::Key,
-        hint: E::Hint,
-        location: CacheLocation,
+        properties: E::Properties,
         fetch: F,
     ) -> RawFetch<E, ER, S, I>
     where
@@ -1074,7 +1000,7 @@ where
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
     {
-        self.fetch_inner(key, hint, location, fetch, &tokio::runtime::Handle::current().into())
+        self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
     }
 
     /// Advanced fetch with specified runtime.
@@ -1085,8 +1011,7 @@ where
     pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: E::Key,
-        hint: E::Hint,
-        location: CacheLocation,
+        properties: E::Properties,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
@@ -1131,17 +1056,20 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
+                let location = properties.location().unwrap_or_default();
                 let location = if let Some(store) = store.as_ref() {
                     if store.throttled {
-                        CacheLocation::InMem
+                        Location::InMem
                     } else {
                         location
                     }
                 } else {
                     location
                 };
-                let entry =
-                    cache.insert_advanced(key, value, hint, location, matches! {location, CacheLocation::OnDisk});
+                let properties = properties
+                    .with_location(location)
+                    .with_ephemeral(matches! {location, Location::OnDisk});
+                let entry = cache.insert_with_properties(key, value, properties);
                 Diversion {
                     target: Ok(entry),
                     store,
@@ -1164,10 +1092,11 @@ mod tests {
     use super::*;
     use crate::{
         eviction::{
-            fifo::{Fifo, FifoConfig, FifoHint},
-            lfu::{Lfu, LfuConfig, LfuHint},
-            lru::{Lru, LruConfig, LruHint},
-            s3fifo::{S3Fifo, S3FifoConfig, S3FifoHint},
+            fifo::{Fifo, FifoConfig},
+            lfu::{Lfu, LfuConfig},
+            lru::{Lru, LruConfig},
+            s3fifo::{S3Fifo, S3FifoConfig},
+            test_utils::TestProperties,
         },
         test_utils::PiecePipe,
     };
@@ -1176,13 +1105,16 @@ mod tests {
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<RawCache<Fifo<(), ()>>>();
-        is_send_sync_static::<RawCache<S3Fifo<(), ()>>>();
-        is_send_sync_static::<RawCache<Lfu<(), ()>>>();
-        is_send_sync_static::<RawCache<Lru<(), ()>>>();
+        is_send_sync_static::<RawCache<Fifo<(), (), TestProperties>>>();
+        is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>>>();
+        is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>>>();
+        is_send_sync_static::<RawCache<Lru<(), (), TestProperties>>>();
     }
 
-    fn fifo_cache_for_test() -> RawCache<Fifo<u64, u64>, ModRandomState, HashTableIndexer<Fifo<u64, u64>>> {
+    #[expect(clippy::type_complexity)]
+    fn fifo_cache_for_test(
+    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Fifo<u64, u64, TestProperties>>>
+    {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1194,7 +1126,10 @@ mod tests {
         })
     }
 
-    fn s3fifo_cache_for_test() -> RawCache<S3Fifo<u64, u64>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64>>> {
+    #[expect(clippy::type_complexity)]
+    fn s3fifo_cache_for_test(
+    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>>
+    {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1206,7 +1141,9 @@ mod tests {
         })
     }
 
-    fn lru_cache_for_test() -> RawCache<Lru<u64, u64>, ModRandomState, HashTableIndexer<Lru<u64, u64>>> {
+    #[expect(clippy::type_complexity)]
+    fn lru_cache_for_test(
+    ) -> RawCache<Lru<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1218,7 +1155,9 @@ mod tests {
         })
     }
 
-    fn lfu_cache_for_test() -> RawCache<Lfu<u64, u64>, ModRandomState, HashTableIndexer<Lfu<u64, u64>>> {
+    #[expect(clippy::type_complexity)]
+    fn lfu_cache_for_test(
+    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1230,16 +1169,16 @@ mod tests {
         })
     }
 
-    #[test]
+    #[test_log::test]
     fn test_insert_ephemeral() {
         let fifo = fifo_cache_for_test();
 
-        let e1 = fifo.insert_ephemeral(1, 1);
+        let e1 = fifo.insert_with_properties(1, 1, TestProperties::default().with_ephemeral(true));
         assert_eq!(fifo.usage(), 1);
         drop(e1);
         assert_eq!(fifo.usage(), 0);
 
-        let e2a = fifo.insert_ephemeral(2, 2);
+        let e2a = fifo.insert_with_properties(2, 2, TestProperties::default().with_ephemeral(true));
         assert_eq!(fifo.usage(), 1);
         let e2b = fifo.get(&2).expect("entry 2 should exist");
         drop(e2a);
@@ -1312,11 +1251,13 @@ mod tests {
     }
 
     mod fuzzy {
+        use foyer_common::properties::Hint;
+
         use super::*;
 
-        fn fuzzy<E>(cache: RawCache<E>, hints: Vec<E::Hint>)
+        fn fuzzy<E>(cache: RawCache<E>, hints: Vec<Hint>)
         where
-            E: Eviction<Key = u64, Value = u64>,
+            E: Eviction<Key = u64, Value = u64, Properties = TestProperties>,
         {
             let handles = (0..8)
                 .map(|i| {
@@ -1332,7 +1273,7 @@ mod tests {
                                 continue;
                             }
                             let hint = hints.choose(&mut rng).cloned().unwrap();
-                            c.insert_with_hint(key, key, hint);
+                            c.insert_with_properties(key, key, TestProperties::default().with_hint(hint));
                         }
                     })
                 })
@@ -1345,7 +1286,7 @@ mod tests {
 
         #[test_log::test]
         fn test_fifo_cache_fuzzy() {
-            let cache: RawCache<Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Fifo<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: FifoConfig::default(),
@@ -1354,13 +1295,13 @@ mod tests {
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
-            let hints = vec![FifoHint];
+            let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_s3fifo_cache_fuzzy() {
-            let cache: RawCache<S3Fifo<u64, u64>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<S3Fifo<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: S3FifoConfig::default(),
@@ -1369,13 +1310,13 @@ mod tests {
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
-            let hints = vec![S3FifoHint];
+            let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_lru_cache_fuzzy() {
-            let cache: RawCache<Lru<u64, u64>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Lru<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: LruConfig::default(),
@@ -1384,13 +1325,13 @@ mod tests {
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
-            let hints = vec![LruHint::HighPriority, LruHint::LowPriority];
+            let hints = vec![Hint::Normal, Hint::Low];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_lfu_cache_fuzzy() {
-            let cache: RawCache<Lfu<u64, u64>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Lfu<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: LfuConfig::default(),
@@ -1399,7 +1340,7 @@ mod tests {
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
-            let hints = vec![LfuHint];
+            let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
     }

@@ -32,8 +32,6 @@ pub mod event;
 pub mod future;
 /// Provisioned hashers.
 pub mod hasher;
-/// Preferred cache location for each cache entry.
-pub mod location;
 /// The shared metrics for foyer.
 pub mod metrics;
 /// Entry-level properties.

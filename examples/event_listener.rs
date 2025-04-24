@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer::{Cache, CacheBuilder, Event, EventListener, FifoConfig};
+use foyer::{Cache, CacheBuilder, CacheProperties, Event, EventListener, FifoConfig};
 
 struct EchoEventListener;
 
@@ -43,7 +43,7 @@ fn main() {
         .build();
 
     cache.insert(1, "Second".to_string());
-    cache.insert_ephemeral(2, "First".to_string());
+    cache.insert_with_properties(2, "First".to_string(), CacheProperties::default().with_ephemeral(true));
     cache.insert(3, "Third".to_string());
     cache.insert(3, "Forth".to_string());
 }
