@@ -19,29 +19,8 @@ use std::{
 };
 
 use bitflags::bitflags;
-use foyer_common::location::CacheLocation;
-use serde::{Deserialize, Serialize};
 
 use crate::eviction::Eviction;
-
-/// Hint for the cache eviction algorithm to decide the priority of the specific entry if needed.
-///
-/// The meaning of the hint differs in each cache eviction algorithm, and some of them can be ignore by specific
-/// algorithm.
-///
-/// If the given cache hint does not suitable for the cache eviction algorithm that is active, the algorithm may modify
-/// it to a proper one.
-///
-/// For more details, please refer to the document of each enum options.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CacheHint {
-    /// The default hint shared by all cache eviction algorithms.
-    Normal,
-    /// Suggest the priority of the entry is low.
-    ///
-    /// Used by LRU.
-    Low,
-}
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -58,10 +37,9 @@ where
 {
     pub key: E::Key,
     pub value: E::Value,
-    pub hint: E::Hint,
+    pub properties: E::Properties,
     pub hash: u64,
     pub weight: usize,
-    pub location: CacheLocation,
 }
 
 /// [`Record`] holds the information of the cached entry.
@@ -115,9 +93,9 @@ where
         &self.data.value
     }
 
-    /// Get the immutable reference of the record hint.
-    pub fn hint(&self) -> &E::Hint {
-        &self.data.hint
+    /// Get the immutable reference of the record properties.
+    pub fn properties(&self) -> &E::Properties {
+        &self.data.properties
     }
 
     /// Get the record hash.
@@ -128,11 +106,6 @@ where
     /// Get the record weight.
     pub fn weight(&self) -> usize {
         self.data.weight
-    }
-
-    /// Get the preferred cache location.
-    pub fn location(&self) -> CacheLocation {
-        self.data.location
     }
 
     /// Get the record state wrapped with [`UnsafeCell`].

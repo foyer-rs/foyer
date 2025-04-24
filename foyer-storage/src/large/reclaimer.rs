@@ -18,6 +18,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -48,17 +49,18 @@ pub struct Reclaimer {
 }
 
 impl Reclaimer {
-    pub fn open<K, V>(
+    pub fn open<K, V, P>(
         config: &GenericLargeStorageConfig<K, V>,
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         indexer: Indexer,
-        flushers: Vec<Flusher<K, V>>,
+        flushers: Vec<Flusher<K, V, P>>,
         metrics: Arc<Metrics>,
     ) -> Self
     where
         K: StorageKey,
         V: StorageValue,
+        P: Properties,
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
@@ -91,10 +93,11 @@ impl Reclaimer {
     }
 }
 
-struct ReclaimRunner<K, V>
+struct ReclaimRunner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     device: MonitoredDevice,
 
@@ -105,7 +108,7 @@ where
 
     indexer: Indexer,
 
-    flushers: Vec<Flusher<K, V>>,
+    flushers: Vec<Flusher<K, V, P>>,
 
     blob_index_size: usize,
     flush: bool,
@@ -117,10 +120,11 @@ where
     runtime: Runtime,
 }
 
-impl<K, V> ReclaimRunner<K, V>
+impl<K, V, P> ReclaimRunner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 

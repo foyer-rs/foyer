@@ -46,5 +46,5 @@ mod record;
 mod prelude;
 pub use prelude::*;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;

@@ -16,7 +16,7 @@ use std::{fmt::Debug, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
-    location::CacheLocation,
+    properties::Properties,
 };
 
 use crate::{record::Record, Eviction};
@@ -24,16 +24,16 @@ use crate::{record::Record, Eviction};
 /// A piece of record that is irrelevant to the eviction algorithm.
 ///
 /// With [`Piece`], the disk cache doesn't need to consider the eviction generic type.
-pub struct Piece<K, V> {
+pub struct Piece<K, V, P> {
     record: *const (),
     key: *const K,
     value: *const V,
     hash: u64,
-    location: CacheLocation,
+    properties: *const P,
     drop_fn: fn(*const ()),
 }
 
-impl<K, V> Debug for Piece<K, V> {
+impl<K, V, P> Debug for Piece<K, V, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Piece")
             .field("record", &self.record)
@@ -42,27 +42,39 @@ impl<K, V> Debug for Piece<K, V> {
     }
 }
 
-unsafe impl<K, V> Send for Piece<K, V> {}
-unsafe impl<K, V> Sync for Piece<K, V> {}
+unsafe impl<K, V, P> Send for Piece<K, V, P>
+where
+    K: Key,
+    V: Value,
+    P: Properties,
+{
+}
+unsafe impl<K, V, P> Sync for Piece<K, V, P>
+where
+    K: Key,
+    V: Value,
+    P: Properties,
+{
+}
 
-impl<K, V> Drop for Piece<K, V> {
+impl<K, V, P> Drop for Piece<K, V, P> {
     fn drop(&mut self) {
         (self.drop_fn)(self.record);
     }
 }
 
-impl<K, V> Piece<K, V> {
+impl<K, V, P> Piece<K, V, P> {
     /// Create a record piece from an record wrapped by [`Arc`].
     pub fn new<E>(record: Arc<Record<E>>) -> Self
     where
-        E: Eviction<Key = K, Value = V>,
+        E: Eviction<Key = K, Value = V, Properties = P>,
     {
         let raw = Arc::into_raw(record);
         let record = raw as *const ();
         let key = unsafe { (*raw).key() } as *const _;
         let value = unsafe { (*raw).value() } as *const _;
         let hash = unsafe { (*raw).hash() };
-        let location = unsafe { (*raw).location() };
+        let properties = unsafe { (*raw).properties() } as *const _;
         let drop_fn = |ptr| unsafe {
             let _ = Arc::from_raw(ptr as *const Record<E>);
         };
@@ -71,7 +83,7 @@ impl<K, V> Piece<K, V> {
             key,
             value,
             hash,
-            location,
+            properties,
             drop_fn,
         }
     }
@@ -91,9 +103,9 @@ impl<K, V> Piece<K, V> {
         self.hash
     }
 
-    /// Get the preferred cache location.
-    pub fn location(&self) -> CacheLocation {
-        self.location
+    /// Get the properties of the record.
+    pub fn properties(&self) -> &P {
+        unsafe { &*self.properties }
     }
 }
 
@@ -103,50 +115,60 @@ pub trait Pipe: Send + Sync + 'static + Debug {
     type Key;
     /// Type of the value of the record.
     type Value;
+    /// Type of the properties of the record.
+    type Properties;
 
     /// Decide whether to send evicted entry to pipe.
     fn is_enabled(&self) -> bool;
 
     /// Send the piece to the disk cache.
-    fn send(&self, piece: Piece<Self::Key, Self::Value>);
+    fn send(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>);
 
     /// Flush all the pieces to the disk cache in a asynchronous manner.
     ///
     /// This function is called when the in-memory cache is flushed.
     /// It is expected to obey the io throttle of the disk cache.
-    fn flush(&self, pieces: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+    fn flush(
+        &self,
+        pieces: Vec<Piece<Self::Key, Self::Value, Self::Properties>>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
 /// An no-op pipe that is never enabled.
-pub struct NoopPipe<K, V>(PhantomData<(K, V)>);
+pub struct NoopPipe<K, V, P>(PhantomData<(K, V, P)>);
 
-impl<K, V> Debug for NoopPipe<K, V> {
+impl<K, V, P> Debug for NoopPipe<K, V, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("NoopPipe").finish()
     }
 }
 
-impl<K, V> Default for NoopPipe<K, V> {
+impl<K, V, P> Default for NoopPipe<K, V, P> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<K, V> Pipe for NoopPipe<K, V>
+impl<K, V, P> Pipe for NoopPipe<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
 
     fn is_enabled(&self) -> bool {
         false
     }
 
-    fn send(&self, _: Piece<Self::Key, Self::Value>) {}
+    fn send(&self, _: Piece<Self::Key, Self::Value, Self::Properties>) {}
 
-    fn flush(&self, _: Vec<Piece<Self::Key, Self::Value>>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn flush(
+        &self,
+        _: Vec<Piece<Self::Key, Self::Value, Self::Properties>>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async {})
     }
 }
@@ -155,19 +177,18 @@ where
 mod tests {
     use super::*;
     use crate::{
-        eviction::fifo::{Fifo, FifoHint},
+        eviction::{fifo::Fifo, test_utils::TestProperties},
         record::Data,
     };
 
     #[test]
     fn test_piece() {
-        let r1 = Arc::new(Record::new(Data::<Fifo<Arc<Vec<u8>>, Arc<Vec<u8>>>> {
+        let r1 = Arc::new(Record::new(Data::<Fifo<Arc<Vec<u8>>, Arc<Vec<u8>>, TestProperties>> {
             key: Arc::new(vec![b'k'; 4096]),
             value: Arc::new(vec![b'k'; 16384]),
-            hint: FifoHint,
+            properties: TestProperties::default(),
             hash: 1,
             weight: 1,
-            location: Default::default(),
         }));
 
         let p1 = Piece::new(r1.clone());

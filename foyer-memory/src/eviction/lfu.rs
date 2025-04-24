@@ -17,6 +17,7 @@ use std::{mem::offset_of, sync::Arc};
 use cmsketch::CMSketchU16;
 use foyer_common::{
     code::{Key, Value},
+    properties::Properties,
     strict_assert, strict_assert_eq, strict_assert_ne,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
@@ -25,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use super::{Eviction, Op};
 use crate::{
     error::{Error, Result},
-    record::{CacheHint, Record},
+    record::Record,
 };
 
 /// w-TinyLFU eviction algorithm config.
@@ -66,22 +67,6 @@ impl Default for LfuConfig {
     }
 }
 
-/// w-TinyLFU eviction algorithm hint.
-#[derive(Debug, Clone, Default)]
-pub struct LfuHint;
-
-impl From<CacheHint> for LfuHint {
-    fn from(_: CacheHint) -> Self {
-        LfuHint
-    }
-}
-
-impl From<LfuHint> for CacheHint {
-    fn from(_: LfuHint) -> Self {
-        CacheHint::Normal
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Queue {
     None,
@@ -103,7 +88,7 @@ pub struct LfuState {
     queue: Queue,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> { ?offset = Record::<Lfu<K, V>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, P> = Arc<Record<Lfu<K, V, P>>>: Record<Lfu<K, V, P>> { ?offset = Record::<Lfu<K, V, P>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
 ///
@@ -117,14 +102,15 @@ intrusive_adapter! { Adapter<K, V> = Arc<Record<Lfu<K, V>>>: Record<Lfu<K, V>> {
 ///
 /// When evicting, the entry with a lower frequency from `window` or `probation` will be evicted first, then from
 /// `protected`.
-pub struct Lfu<K, V>
+pub struct Lfu<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
-    window: LinkedList<Adapter<K, V>>,
-    probation: LinkedList<Adapter<K, V>>,
-    protected: LinkedList<Adapter<K, V>>,
+    window: LinkedList<Adapter<K, V, P>>,
+    probation: LinkedList<Adapter<K, V, P>>,
+    protected: LinkedList<Adapter<K, V, P>>,
 
     window_weight: usize,
     probation_weight: usize,
@@ -142,10 +128,11 @@ where
     config: LfuConfig,
 }
 
-impl<K, V> Lfu<K, V>
+impl<K, V, P> Lfu<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     fn increase_queue_weight(&mut self, queue: Queue, weight: usize) {
         match queue {
@@ -175,15 +162,16 @@ where
     }
 }
 
-impl<K, V> Eviction for Lfu<K, V>
+impl<K, V, P> Eviction for Lfu<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     type Config = LfuConfig;
     type Key = K;
     type Value = V;
-    type Hint = LfuHint;
+    type Properties = P;
     type State = LfuState;
 
     fn new(capacity: usize, config: &Self::Config) -> Self
@@ -424,11 +412,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt, TestProperties},
         record::Data,
     };
 
-    impl<K, V> Dump for Lfu<K, V>
+    impl<K, V> Dump for Lfu<K, V, TestProperties>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -470,7 +458,7 @@ mod tests {
         }
     }
 
-    type TestLfu = Lfu<u64, u64>;
+    type TestLfu = Lfu<u64, u64, TestProperties>;
 
     #[test]
     fn test_lfu() {
@@ -479,10 +467,9 @@ mod tests {
                 Arc::new(Record::new(Data {
                     key: i,
                     value: i,
-                    hint: LfuHint,
+                    properties: TestProperties::default(),
                     hash: i,
                     weight: 1,
-                    location: Default::default(),
                 }))
             })
             .collect_vec();

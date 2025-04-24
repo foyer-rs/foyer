@@ -29,6 +29,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use foyer_memory::Piece;
 use futures_util::future::{join_all, try_join_all};
@@ -113,34 +114,37 @@ where
     }
 }
 
-pub struct GenericLargeStorage<K, V>
+pub struct GenericLargeStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
-    inner: Arc<GenericStoreInner<K, V>>,
+    inner: Arc<GenericStoreInner<K, V, P>>,
 }
 
-impl<K, V> Debug for GenericLargeStorage<K, V>
+impl<K, V, P> Debug for GenericLargeStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericStore").finish()
     }
 }
 
-struct GenericStoreInner<K, V>
+struct GenericStoreInner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     indexer: Indexer,
     device: MonitoredDevice,
     region_manager: RegionManager,
 
-    flushers: Vec<Flusher<K, V>>,
+    flushers: Vec<Flusher<K, V, P>>,
     reclaimers: Vec<Reclaimer>,
 
     submit_queue_size: Arc<AtomicUsize>,
@@ -160,10 +164,11 @@ where
     flush_holder: FlushHolder,
 }
 
-impl<K, V> Clone for GenericLargeStorage<K, V>
+impl<K, V, P> Clone for GenericLargeStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         Self {
@@ -172,10 +177,11 @@ where
     }
 }
 
-impl<K, V> GenericLargeStorage<K, V>
+impl<K, V, P> GenericLargeStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     async fn open(mut config: GenericLargeStorageConfig<K, V>) -> Result<Self> {
         if config.flushers + config.clean_region_threshold > config.device.regions() / 2 {
@@ -310,7 +316,7 @@ where
     }
 
     #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
-    fn enqueue(&self, piece: Piece<K, V>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -517,13 +523,15 @@ where
     }
 }
 
-impl<K, V> Storage for GenericLargeStorage<K, V>
+impl<K, V, P> Storage for GenericLargeStorage<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
     type Config = GenericLargeStorageConfig<K, V>;
 
     async fn open(config: Self::Config) -> Result<Self> {
@@ -534,7 +542,7 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         self.enqueue(piece, estimated_size)
     }
 
@@ -574,7 +582,7 @@ mod tests {
 
     use bytesize::ByteSize;
     use foyer_common::hasher::ModRandomState;
-    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig};
+    use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
     use tokio::runtime::Handle;
 
@@ -589,7 +597,7 @@ mod tests {
 
     const KB: usize = 1024;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
         CacheBuilder::new(10)
             .with_shards(1)
             .with_eviction_config(FifoConfig::default())
@@ -614,14 +622,14 @@ mod tests {
     }
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
-    async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>> {
+    async fn store_for_test(dir: impl AsRef<Path>) -> GenericLargeStorage<u64, Vec<u8>, TestProperties> {
         store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker>,
-    ) -> GenericLargeStorage<u64, Vec<u8>> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, TestProperties> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
@@ -650,7 +658,7 @@ mod tests {
     async fn store_for_test_with_tombstone_log(
         dir: impl AsRef<Path>,
         path: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>> {
+    ) -> GenericLargeStorage<u64, Vec<u8>, TestProperties> {
         let device = device_for_test(dir).await;
         let regions = 0..device.regions() as RegionId;
         let config = GenericLargeStorageConfig {
@@ -676,7 +684,10 @@ mod tests {
         GenericLargeStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericLargeStorage<u64, Vec<u8>>, entry: CacheEntry<u64, Vec<u8>, ModRandomState>) {
+    fn enqueue(
+        store: &GenericLargeStorage<u64, Vec<u8>, TestProperties>,
+        entry: CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+    ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
         store.enqueue(entry.piece(), estimated_size);
     }

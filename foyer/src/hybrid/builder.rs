@@ -29,7 +29,7 @@ use foyer_storage::{
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use super::cache::{HybridCacheOptions, HybridCachePipe};
-use crate::{HybridCache, HybridCachePolicy};
+use crate::{HybridCache, HybridCachePolicy, HybridCacheProperties};
 
 /// Hybrid cache builder.
 pub struct HybridCacheBuilder<K, V> {
@@ -225,8 +225,8 @@ where
     name: Cow<'static, str>,
     options: HybridCacheOptions,
     metrics: Arc<Metrics>,
-    memory: Cache<K, V, S>,
-    builder: StoreBuilder<K, V, S>,
+    memory: Cache<K, V, S, HybridCacheProperties>,
+    builder: StoreBuilder<K, V, S, HybridCacheProperties>,
 }
 
 impl<K, V, S> HybridCacheBuilderPhaseStorage<K, V, S>

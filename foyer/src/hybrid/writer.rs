@@ -19,10 +19,9 @@ use std::{
 
 use ahash::RandomState;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
-use foyer_memory::CacheHint;
 use foyer_storage::Pick;
 
-use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy};
+use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
 
 /// Writer for hybrid cache to support more flexible write APIs.
 pub struct HybridCacheWriter<K, V, S = RandomState>
@@ -50,9 +49,9 @@ where
         self.hybrid.insert(self.key, value)
     }
 
-    /// Insert the entry with hint to the hybrid cache.
-    pub fn insert_with_hint(self, value: V, hint: CacheHint) -> HybridCacheEntry<K, V, S> {
-        self.hybrid.insert_with_hint(self.key, value, hint)
+    /// Insert the entry with properties to the hybrid cache.
+    pub fn insert_with_properties(self, value: V, properties: HybridCacheProperties) -> HybridCacheEntry<K, V, S> {
+        self.hybrid.insert_with_properties(self.key, value, properties)
     }
 
     /// Convert [`HybridCacheWriter`] to [`HybridCacheStorageWriter`].
@@ -125,17 +124,17 @@ where
         self
     }
 
-    fn insert_inner(mut self, value: V, hint: Option<CacheHint>) -> Option<HybridCacheEntry<K, V, S>> {
+    fn insert_inner(mut self, value: V, properties: HybridCacheProperties) -> Option<HybridCacheEntry<K, V, S>> {
         let now = Instant::now();
 
         if !self.force && !self.may_pick().admitted() {
             return None;
         }
 
-        let entry = match hint {
-            Some(hint) => self.hybrid.memory().insert_ephemeral_with_hint(self.key, value, hint),
-            None => self.hybrid.memory().insert_ephemeral(self.key, value),
-        };
+        let entry = self
+            .hybrid
+            .memory()
+            .insert_with_properties(self.key, value, properties.with_ephemeral(true));
         if self.hybrid.policy() == HybridCachePolicy::WriteOnInsertion {
             self.hybrid.storage().enqueue(entry.piece(), true);
         }
@@ -150,11 +149,15 @@ where
 
     /// Insert the entry to the disk cache only.
     pub fn insert(self, value: V) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_inner(value, None)
+        self.insert_inner(value, HybridCacheProperties::default())
     }
 
-    /// Insert the entry with context to the disk cache only.
-    pub fn insert_with_context(self, value: V, context: CacheHint) -> Option<HybridCacheEntry<K, V, S>> {
-        self.insert_inner(value, Some(context))
+    /// Insert the entry with properties to the disk cache only.
+    pub fn insert_with_properties(
+        self,
+        value: V,
+        properties: HybridCacheProperties,
+    ) -> Option<HybridCacheEntry<K, V, S>> {
+        self.insert_inner(value, properties)
     }
 }

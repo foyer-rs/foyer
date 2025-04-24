@@ -19,35 +19,41 @@ use std::{
     sync::Arc,
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    properties::Properties,
+};
 use foyer_memory::Piece;
 
 use crate::{error::Result, storage::Storage, Statistics, Throttle};
 
-pub struct Noop<K, V>
+pub struct Noop<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     throttle: Arc<Throttle>,
     statistics: Arc<Statistics>,
-    _marker: PhantomData<(K, V)>,
+    _marker: PhantomData<(K, V, P)>,
 }
 
-impl<K, V> Debug for Noop<K, V>
+impl<K, V, P> Debug for Noop<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("NoneStore").finish()
     }
 }
 
-impl<K, V> Clone for Noop<K, V>
+impl<K, V, P> Clone for Noop<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         Self {
@@ -58,13 +64,15 @@ where
     }
 }
 
-impl<K, V> Storage for Noop<K, V>
+impl<K, V, P> Storage for Noop<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
     type Config = ();
 
     async fn open(_: Self::Config) -> Result<Self> {
@@ -81,7 +89,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _piece: Piece<Self::Key, Self::Value>, _estimated_size: usize) {}
+    fn enqueue(&self, _piece: Piece<Self::Key, Self::Value, Self::Properties>, _estimated_size: usize) {}
 
     fn load(&self, _: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
         ready(Ok(None))
@@ -112,12 +120,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use foyer_memory::{Cache, CacheBuilder, FifoConfig};
+    use foyer_common::hasher::ModRandomState;
+    use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 
     use super::*;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
         CacheBuilder::new(10)
+            .with_hash_builder(ModRandomState::default())
             .with_eviction_config(FifoConfig::default())
             .build()
     }
@@ -125,7 +135,7 @@ mod tests {
     #[tokio::test]
     async fn test_none_store() {
         let memory = cache_for_test();
-        let store: Noop<u64, Vec<u8>> = Noop::open(()).await.unwrap();
+        let store: Noop<u64, Vec<u8>, TestProperties> = Noop::open(()).await.unwrap();
 
         store.enqueue(memory.insert(0, vec![b'x'; 16384]).piece(), 16384);
         store.wait().await;

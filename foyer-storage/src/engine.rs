@@ -15,7 +15,10 @@
 use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
 use auto_enums::auto_enum;
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    properties::Properties,
+};
 use foyer_memory::Piece;
 
 use crate::{
@@ -29,19 +32,21 @@ use crate::{
     Statistics, Storage, Throttle,
 };
 
-pub struct SizeSelector<K, V>
+pub struct SizeSelector<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     threshold: usize,
-    _marker: PhantomData<(K, V)>,
+    _marker: PhantomData<(K, V, P)>,
 }
 
-impl<K, V> Debug for SizeSelector<K, V>
+impl<K, V, P> Debug for SizeSelector<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SizeSelector")
@@ -50,10 +55,11 @@ where
     }
 }
 
-impl<K, V> SizeSelector<K, V>
+impl<K, V, P> SizeSelector<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     pub fn new(threshold: usize) -> Self {
         Self {
@@ -63,15 +69,17 @@ where
     }
 }
 
-impl<K, V> Selector for SizeSelector<K, V>
+impl<K, V, P> Selector for SizeSelector<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
+    type Properties = P;
 
-    fn select(&self, _piece: &Piece<Self::Key, Self::Value>, estimated_size: usize) -> Selection {
+    fn select(&self, _piece: &Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection {
         if estimated_size < self.threshold {
             Selection::Left
         } else {
@@ -81,21 +89,23 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-pub enum EngineConfig<K, V>
+pub enum EngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     Noop,
     Large(GenericLargeStorageConfig<K, V>),
     Small(GenericSmallStorageConfig<K, V>),
-    Mixed(EitherConfig<K, V, GenericSmallStorage<K, V>, GenericLargeStorage<K, V>, SizeSelector<K, V>>),
+    Mixed(EitherConfig<K, V, GenericSmallStorage<K, V, P>, GenericLargeStorage<K, V, P>, SizeSelector<K, V, P>>),
 }
 
-impl<K, V> Debug for EngineConfig<K, V>
+impl<K, V, P> Debug for EngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -108,25 +118,27 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-pub enum EngineEnum<K, V>
+pub enum EngineEnum<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     /// No-op disk cache.
-    Noop(Noop<K, V>),
+    Noop(Noop<K, V, P>),
     /// Large object disk cache.
-    Large(GenericLargeStorage<K, V>),
+    Large(GenericLargeStorage<K, V, P>),
     /// Small object disk cache.
-    Small(GenericSmallStorage<K, V>),
+    Small(GenericSmallStorage<K, V, P>),
     /// Mixed large and small object disk cache.
-    Mixed(Either<K, V, GenericSmallStorage<K, V>, GenericLargeStorage<K, V>, SizeSelector<K, V>>),
+    Mixed(Either<K, V, P, GenericSmallStorage<K, V, P>, GenericLargeStorage<K, V, P>, SizeSelector<K, V, P>>),
 }
 
-impl<K, V> Debug for EngineEnum<K, V>
+impl<K, V, P> Debug for EngineEnum<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -138,10 +150,11 @@ where
     }
 }
 
-impl<K, V> Clone for EngineEnum<K, V>
+impl<K, V, P> Clone for EngineEnum<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         match self {
@@ -153,14 +166,16 @@ where
     }
 }
 
-impl<K, V> Storage for EngineEnum<K, V>
+impl<K, V, P> Storage for EngineEnum<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
+    P: Properties,
 {
     type Key = K;
     type Value = V;
-    type Config = EngineConfig<K, V>;
+    type Properties = P;
+    type Config = EngineConfig<K, V, P>;
 
     async fn open(config: Self::Config) -> Result<Self> {
         match config {
@@ -180,7 +195,7 @@ where
         }
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         match self {
             EngineEnum::Noop(storage) => storage.enqueue(piece, estimated_size),
             EngineEnum::Large(storage) => storage.enqueue(piece, estimated_size),

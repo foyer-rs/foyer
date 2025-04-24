@@ -14,35 +14,19 @@
 
 use std::{mem::offset_of, sync::Arc};
 
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    properties::Properties,
+};
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{
-    error::Result,
-    record::{CacheHint, Record},
-};
+use crate::{error::Result, record::Record};
 
 /// Fifo eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FifoConfig {}
-
-/// Fifo eviction algorithm hint.
-#[derive(Debug, Clone, Default)]
-pub struct FifoHint;
-
-impl From<CacheHint> for FifoHint {
-    fn from(_: CacheHint) -> Self {
-        FifoHint
-    }
-}
-
-impl From<FifoHint> for CacheHint {
-    fn from(_: FifoHint) -> Self {
-        CacheHint::Normal
-    }
-}
 
 /// Fifo eviction algorithm state.
 #[derive(Debug, Default)]
@@ -50,25 +34,27 @@ pub struct FifoState {
     link: LinkedListAtomicLink,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Fifo<K, V>>>: Record<Fifo<K, V>> { ?offset = Record::<Fifo<K, V>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, P> = Arc<Record<Fifo<K, V, P>>>: Record<Fifo<K, V, P>> { ?offset = Record::<Fifo<K, V, P>>::STATE_OFFSET + offset_of!(FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
 
-pub struct Fifo<K, V>
+pub struct Fifo<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
-    queue: LinkedList<Adapter<K, V>>,
+    queue: LinkedList<Adapter<K, V, P>>,
 }
 
-impl<K, V> Eviction for Fifo<K, V>
+impl<K, V, P> Eviction for Fifo<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     type Config = FifoConfig;
     type Key = K;
     type Value = V;
-    type Hint = FifoHint;
+    type Properties = P;
     type State = FifoState;
 
     fn new(_capacity: usize, _config: &Self::Config) -> Self
@@ -114,11 +100,11 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, Dump},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, Dump, TestProperties},
         record::Data,
     };
 
-    impl<K, V> Dump for Fifo<K, V>
+    impl<K, V> Dump for Fifo<K, V, TestProperties>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -138,7 +124,7 @@ pub mod tests {
         }
     }
 
-    type TestFifo = Fifo<u64, u64>;
+    type TestFifo = Fifo<u64, u64, TestProperties>;
 
     #[test]
     fn test_fifo() {
@@ -147,10 +133,9 @@ pub mod tests {
                 Arc::new(Record::new(Data {
                     key: i,
                     value: i,
-                    hint: FifoHint,
+                    properties: TestProperties::default(),
                     hash: i,
                     weight: 1,
-                    location: Default::default(),
                 }))
             })
             .collect_vec();

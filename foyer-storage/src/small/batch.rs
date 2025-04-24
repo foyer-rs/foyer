@@ -25,6 +25,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
 };
 use foyer_memory::Piece;
 use itertools::Itertools;
@@ -86,10 +87,11 @@ impl BatchMut {
         }
     }
 
-    pub fn insert<K, V>(&mut self, piece: Piece<K, V>, estimated_size: usize) -> bool
+    pub fn insert<K, V, P>(&mut self, piece: Piece<K, V, P>, estimated_size: usize) -> bool
     where
         K: StorageKey,
         V: StorageValue,
+        P: Properties,
     {
         // For the small object disk cache does NOT compress entries, `estimated_size` is actually `exact_size`.
         tracing::trace!("[sodc batch]: insert entry");

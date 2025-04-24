@@ -17,7 +17,10 @@ pub mod noop;
 
 use std::{fmt::Debug, future::Future, sync::Arc};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    properties::Properties,
+};
 use foyer_memory::Piece;
 
 use crate::{error::Result, Statistics, Throttle};
@@ -28,6 +31,8 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     type Key: StorageKey;
     /// Disk cache value type.
     type Value: StorageValue;
+    /// Disk cache properties type.
+    type Properties: Properties;
     /// Disk cache config type.
     type Config: Send + Debug + 'static;
 
@@ -42,7 +47,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Push a in-memory cache piece to the disk cache write queue.
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value>, estimated_size: usize);
+    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///

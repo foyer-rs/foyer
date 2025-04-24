@@ -14,16 +14,13 @@
 
 use std::sync::Arc;
 
-use foyer_common::code::{Key, Value};
+use foyer_common::{
+    code::{Key, Value},
+    properties::Properties,
+};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    error::Result,
-    record::{CacheHint, Record},
-};
-
-pub trait Hint: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
-impl<T> Hint for T where T: Send + Sync + 'static + Clone + Default + From<CacheHint> + Into<CacheHint> {}
+use crate::{error::Result, record::Record};
 
 pub trait State: Send + Sync + 'static + Default {}
 impl<T> State for T where T: Send + Sync + 'static + Default {}
@@ -92,8 +89,10 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     type Key: Key;
     /// Cache value. Generally, it is supposed to be a generic type of the implementation.
     type Value: Value;
-    /// Hint for a cache entry. Can be used to support priority at the entry granularity.
-    type Hint: Hint;
+    /// Properties for a cache entry, it is supposed to be a generic type of the implementation.
+    ///
+    /// Can be used to support priority at the entry granularity.
+    type Properties: Properties;
     /// State for a cache entry. Mutable state for maintaining the cache eviction algorithm implementation.
     type State: State;
 
@@ -145,5 +144,5 @@ pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;

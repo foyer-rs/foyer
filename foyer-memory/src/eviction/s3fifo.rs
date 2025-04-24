@@ -23,6 +23,7 @@ use std::{
 
 use foyer_common::{
     code::{Key, Value},
+    properties::Properties,
     strict_assert, strict_assert_eq,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use super::{Eviction, Op};
 use crate::{
     error::{Error, Result},
-    record::{CacheHint, Record},
+    record::Record,
 };
 
 /// S3Fifo eviction algorithm config.
@@ -52,22 +53,6 @@ impl Default for S3FifoConfig {
             ghost_queue_capacity_ratio: 1.0,
             small_to_main_freq_threshold: 1,
         }
-    }
-}
-
-/// S3Fifo eviction algorithm hint.
-#[derive(Debug, Clone, Default)]
-pub struct S3FifoHint;
-
-impl From<CacheHint> for S3FifoHint {
-    fn from(_: CacheHint) -> Self {
-        S3FifoHint
-    }
-}
-
-impl From<S3FifoHint> for CacheHint {
-    fn from(_: S3FifoHint) -> Self {
-        CacheHint::Normal
     }
 }
 
@@ -118,16 +103,17 @@ impl S3FifoState {
     }
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<S3Fifo<K, V>>>: Record<S3Fifo<K, V>> { ?offset = Record::<S3Fifo<K, V>>::STATE_OFFSET + offset_of!(S3FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, P> = Arc<Record<S3Fifo<K, V, P>>>: Record<S3Fifo<K, V, P>> { ?offset = Record::<S3Fifo<K, V, P>>::STATE_OFFSET + offset_of!(S3FifoState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
 
-pub struct S3Fifo<K, V>
+pub struct S3Fifo<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     ghost_queue: GhostQueue,
-    small_queue: LinkedList<Adapter<K, V>>,
-    main_queue: LinkedList<Adapter<K, V>>,
+    small_queue: LinkedList<Adapter<K, V, P>>,
+    main_queue: LinkedList<Adapter<K, V, P>>,
 
     small_weight_capacity: usize,
 
@@ -139,12 +125,13 @@ where
     config: S3FifoConfig,
 }
 
-impl<K, V> S3Fifo<K, V>
+impl<K, V, P> S3Fifo<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
-    fn evict(&mut self) -> Option<Arc<Record<S3Fifo<K, V>>>> {
+    fn evict(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if self.small_weight > self.small_weight_capacity {
             if let Some(record) = self.evict_small() {
@@ -158,7 +145,7 @@ where
     }
 
     #[expect(clippy::never_loop)]
-    fn evict_small_force(&mut self) -> Option<Arc<Record<S3Fifo<K, V>>>> {
+    fn evict_small_force(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         while let Some(record) = self.small_queue.pop_front() {
             let state = unsafe { &mut *record.state().get() };
             state.queue = Queue::None;
@@ -169,7 +156,7 @@ where
         None
     }
 
-    fn evict_small(&mut self) -> Option<Arc<Record<S3Fifo<K, V>>>> {
+    fn evict_small(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         while let Some(record) = self.small_queue.pop_front() {
             let state = unsafe { &mut *record.state().get() };
             if state.frequency() >= self.small_to_main_freq_threshold {
@@ -190,7 +177,7 @@ where
         None
     }
 
-    fn evict_main(&mut self) -> Option<Arc<Record<S3Fifo<K, V>>>> {
+    fn evict_main(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         while let Some(record) = self.main_queue.pop_front() {
             let state = unsafe { &mut *record.state().get() };
             if state.dec_frequency() > 0 {
@@ -205,15 +192,16 @@ where
     }
 }
 
-impl<K, V> Eviction for S3Fifo<K, V>
+impl<K, V, P> Eviction for S3Fifo<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     type Config = S3FifoConfig;
     type Key = K;
     type Value = V;
-    type Hint = S3FifoHint;
+    type Properties = P;
     type State = S3FifoState;
 
     fn new(capacity: usize, config: &Self::Config) -> Self
@@ -392,11 +380,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt, TestProperties},
         record::Data,
     };
 
-    impl<K, V> Dump for S3Fifo<K, V>
+    impl<K, V> Dump for S3Fifo<K, V, TestProperties>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -429,7 +417,7 @@ mod tests {
         }
     }
 
-    type TestS3Fifo = S3Fifo<u64, u64>;
+    type TestS3Fifo = S3Fifo<u64, u64, TestProperties>;
 
     fn assert_frequencies(rs: &[Arc<Record<TestS3Fifo>>], range: Range<usize>, count: u8) {
         rs[range]
@@ -444,10 +432,9 @@ mod tests {
                 Arc::new(Record::new(Data {
                     key: i,
                     value: i,
-                    hint: S3FifoHint,
+                    properties: TestProperties::default(),
                     hash: i,
                     weight: 1,
-                    location: Default::default(),
                 }))
             })
             .collect_vec();

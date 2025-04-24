@@ -16,6 +16,7 @@ use std::{mem::offset_of, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
+    properties::{Hint, Properties},
     strict_assert,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use super::{Eviction, Op};
 use crate::{
     error::{Error, Result},
-    record::{CacheHint, Record},
+    record::Record,
 };
 
 /// Lru eviction algorithm config.
@@ -49,37 +50,6 @@ impl Default for LruConfig {
     }
 }
 
-/// Lru eviction algorithm hint.
-#[derive(Debug, Clone)]
-pub enum LruHint {
-    HighPriority,
-    LowPriority,
-}
-
-impl Default for LruHint {
-    fn default() -> Self {
-        Self::HighPriority
-    }
-}
-
-impl From<CacheHint> for LruHint {
-    fn from(hint: CacheHint) -> Self {
-        match hint {
-            CacheHint::Normal => LruHint::HighPriority,
-            CacheHint::Low => LruHint::LowPriority,
-        }
-    }
-}
-
-impl From<LruHint> for CacheHint {
-    fn from(hint: LruHint) -> Self {
-        match hint {
-            LruHint::HighPriority => CacheHint::Normal,
-            LruHint::LowPriority => CacheHint::Low,
-        }
-    }
-}
-
 /// Lru eviction algorithm state.
 #[derive(Debug, Default)]
 pub struct LruState {
@@ -88,16 +58,17 @@ pub struct LruState {
     is_pinned: bool,
 }
 
-intrusive_adapter! { Adapter<K, V> = Arc<Record<Lru<K, V>>>: Record<Lru<K, V>> { ?offset = Record::<Lru<K, V>>::STATE_OFFSET + offset_of!(LruState, link) => LinkedListAtomicLink } where K: Key, V: Value }
+intrusive_adapter! { Adapter<K, V, P> = Arc<Record<Lru<K, V, P>>>: Record<Lru<K, V, P>> { ?offset = Record::<Lru<K, V, P>>::STATE_OFFSET + offset_of!(LruState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
 
-pub struct Lru<K, V>
+pub struct Lru<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
-    high_priority_list: LinkedList<Adapter<K, V>>,
-    list: LinkedList<Adapter<K, V>>,
-    pin_list: LinkedList<Adapter<K, V>>,
+    high_priority_list: LinkedList<Adapter<K, V, P>>,
+    list: LinkedList<Adapter<K, V, P>>,
+    pin_list: LinkedList<Adapter<K, V, P>>,
 
     high_priority_weight: usize,
     high_priority_weight_capacity: usize,
@@ -105,10 +76,11 @@ where
     config: LruConfig,
 }
 
-impl<K, V> Lru<K, V>
+impl<K, V, P> Lru<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     fn may_overflow_high_priority_pool(&mut self) {
         while self.high_priority_weight > self.high_priority_weight_capacity {
@@ -125,15 +97,16 @@ where
     }
 }
 
-impl<K, V> Eviction for Lru<K, V>
+impl<K, V, P> Eviction for Lru<K, V, P>
 where
     K: Key,
     V: Value,
+    P: Properties,
 {
     type Config = LruConfig;
     type Key = K;
     type Value = V;
-    type Hint = LruHint;
+    type Properties = P;
     type State = LruState;
 
     fn new(capacity: usize, config: &Self::Config) -> Self
@@ -188,15 +161,15 @@ where
 
         record.set_in_eviction(true);
 
-        match record.hint() {
-            LruHint::HighPriority => {
+        match record.properties().hint().unwrap_or_default() {
+            Hint::Normal => {
                 state.in_high_priority_pool = true;
                 self.high_priority_weight += record.weight();
                 self.high_priority_list.push_back(record);
 
                 self.may_overflow_high_priority_pool();
             }
-            LruHint::LowPriority => {
+            Hint::Low => {
                 state.in_high_priority_pool = false;
                 self.list.push_back(record);
             }
@@ -329,11 +302,11 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt},
+        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt, TestProperties},
         record::Data,
     };
 
-    impl<K, V> Dump for Lru<K, V>
+    impl<K, V> Dump for Lru<K, V, TestProperties>
     where
         K: Key + Clone,
         V: Value + Clone,
@@ -375,7 +348,7 @@ pub mod tests {
         }
     }
 
-    type TestLru = Lru<u64, u64>;
+    type TestLru = Lru<u64, u64, TestProperties>;
 
     #[test]
     fn test_lru() {
@@ -384,14 +357,13 @@ pub mod tests {
                 Arc::new(Record::new(Data {
                     key: i,
                     value: i,
-                    hint: if i < 10 {
-                        LruHint::HighPriority
+                    properties: if i < 10 {
+                        TestProperties::default().with_hint(Hint::Normal)
                     } else {
-                        LruHint::LowPriority
+                        TestProperties::default().with_hint(Hint::Low)
                     },
                     hash: i,
                     weight: 1,
-                    location: Default::default(),
                 }))
             })
             .collect_vec();
@@ -461,14 +433,13 @@ pub mod tests {
                 Arc::new(Record::new(Data {
                     key: i,
                     value: i,
-                    hint: if i < 10 {
-                        LruHint::HighPriority
+                    properties: if i < 10 {
+                        TestProperties::default().with_hint(Hint::Normal)
                     } else {
-                        LruHint::LowPriority
+                        TestProperties::default().with_hint(Hint::Low)
                     },
                     hash: i,
                     weight: 1,
-                    location: Default::default(),
                 }))
             })
             .collect_vec();

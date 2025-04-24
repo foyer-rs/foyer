@@ -28,6 +28,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
+    properties::Properties,
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -103,24 +104,26 @@ impl<K, V> Load<K, V> {
 }
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
-pub struct Store<K, V, S = RandomState>
+pub struct Store<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
-    inner: Arc<StoreInner<K, V, S>>,
+    inner: Arc<StoreInner<K, V, S, P>>,
 }
 
-struct StoreInner<K, V, S>
+struct StoreInner<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     hasher: Arc<S>,
 
-    engine: EngineEnum<K, V>,
+    engine: EngineEnum<K, V, P>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
     load_throttler: Option<IoThrottlerPicker>,
@@ -136,11 +139,12 @@ where
     load_throttle_switch: LoadThrottleSwitch,
 }
 
-impl<K, V, S> Debug for Store<K, V, S>
+impl<K, V, S, P> Debug for Store<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
@@ -153,11 +157,12 @@ where
     }
 }
 
-impl<K, V, S> Clone for Store<K, V, S>
+impl<K, V, S, P> Clone for Store<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     fn clone(&self) -> Self {
         Self {
@@ -166,11 +171,12 @@ where
     }
 }
 
-impl<K, V, S> Store<K, V, S>
+impl<K, V, S, P> Store<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     /// Close the disk cache gracefully.
     ///
@@ -185,7 +191,7 @@ where
     }
 
     /// Push a in-memory cache piece to the disk cache write queue.
-    pub fn enqueue(&self, piece: Piece<K, V>, force: bool) {
+    pub fn enqueue(&self, piece: Piece<K, V, P>, force: bool) {
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
@@ -432,14 +438,15 @@ pub enum RuntimeOptions {
 }
 
 /// The builder of the disk cache.
-pub struct StoreBuilder<K, V, S = RandomState>
+pub struct StoreBuilder<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     name: Cow<'static, str>,
-    memory: Cache<K, V, S>,
+    memory: Cache<K, V, S, P>,
     metrics: Arc<Metrics>,
 
     device_options: DeviceOptions,
@@ -455,11 +462,12 @@ where
     small: SmallEngineOptions<K, V, S>,
 }
 
-impl<K, V, S> Debug for StoreBuilder<K, V, S>
+impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreBuilder")
@@ -479,16 +487,17 @@ where
     }
 }
 
-impl<K, V, S> StoreBuilder<K, V, S>
+impl<K, V, S, P> StoreBuilder<K, V, S, P>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    P: Properties,
 {
     /// Setup disk cache store for the given in-memory cache.
     pub fn new(
         name: impl Into<Cow<'static, str>>,
-        memory: Cache<K, V, S>,
+        memory: Cache<K, V, S, P>,
         metrics: Arc<Metrics>,
         engine: Engine,
     ) -> Self {
@@ -586,7 +595,7 @@ where
     }
 
     /// Build the disk cache store with the given configuration.
-    pub async fn build(self) -> Result<Store<K, V, S>> {
+    pub async fn build(self) -> Result<Store<K, V, S, P>> {
         let memory = self.memory.clone();
         let metrics = self.metrics.clone();
         let mut admission_picker = self.admission_picker.clone();
