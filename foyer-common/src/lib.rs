@@ -36,6 +36,8 @@ pub mod hasher;
 pub mod location;
 /// The shared metrics for foyer.
 pub mod metrics;
+/// Entry-level properties.
+pub mod properties;
 /// A rate limiter that returns the wait duration for limitation.
 pub mod rate;
 ///  A ticket-based rate limiter.
