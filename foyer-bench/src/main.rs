@@ -285,6 +285,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     flush_on_close: bool,
+
+    #[arg(long, default_value_t = 0.1)]
+    lodc_fifo_probation_ratio: f64,
 }
 
 #[derive(Debug)]
@@ -550,7 +553,7 @@ async fn benchmark(args: Args) {
         .with_reclaimers(args.reclaimers)
         .with_eviction_pickers(vec![
             Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-            Box::<FifoPicker>::default(),
+            Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
         ])
         .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
         .with_blob_index_size(args.blob_index_size.as_u64() as _);

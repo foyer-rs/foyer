@@ -322,6 +322,11 @@ where
             return;
         }
 
+        tracing::trace!(
+            hash = piece.hash(),
+            source = ?piece.properties().source().unwrap_or_default(),
+            "[lodc]: enqueue"
+        );
         match piece.properties().source().unwrap_or_default() {
             Source::Populated(Populated { age }) => match age {
                 Age::Young => {
