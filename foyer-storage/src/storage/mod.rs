@@ -23,7 +23,7 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 
-use crate::{error::Result, Statistics, Throttle};
+use crate::{error::Result, Load, Statistics, Throttle};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
@@ -54,7 +54,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
     /// check if the returned key matches the given key.
     #[must_use]
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static;
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<Self::Key, Self::Value>>> + Send + 'static;
 
     /// Delete the cache entry with the given key from the disk cache.
     fn delete(&self, hash: u64);

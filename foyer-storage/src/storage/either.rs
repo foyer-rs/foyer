@@ -30,7 +30,7 @@ use futures_util::{
     FutureExt,
 };
 
-use crate::{error::Result, storage::Storage, Statistics, Throttle};
+use crate::{error::Result, storage::Storage, Load, Statistics, Throttle};
 
 /// Order of ops.
 #[derive(Debug, Clone, Copy)]
@@ -194,21 +194,21 @@ where
     }
 
     #[auto_enum(Future)]
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<Self::Key, Self::Value>>> + Send + 'static {
         let fleft = self.left.load(hash);
         let fright = self.right.load(hash);
         match self.load_order {
             // FIXME(MrCroxx): false-positive on hash collision.
             Order::LeftFirst => fleft.then(|res| match res {
-                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
                 Err(e) => ready(Err(e)).left_future(),
-                Ok(None) => fright.right_future(),
+                Ok(l @ Load::Entry { .. }) => ready(Ok(l)).left_future(),
+                Ok(_) => fright.right_future(),
             }),
             // FIXME(MrCroxx): false-positive on hash collision.
             Order::RightFirst => fright.then(|res| match res {
-                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future(),
                 Err(e) => ready(Err(e)).left_future(),
-                Ok(None) => fleft.right_future(),
+                Ok(l @ Load::Entry { .. }) => ready(Ok(l)).left_future(),
+                Ok(_) => fleft.right_future(),
             }),
             Order::Parallel => {
                 async move {
@@ -218,14 +218,14 @@ where
                     select(fleft, fright)
                         .then(|either| match either {
                             EitherFuture::Left((res, fr)) => match res {
-                                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().left_future(),
                                 Err(e) => ready(Err(e)).left_future().left_future(),
-                                Ok(None) => fr.right_future().left_future(),
+                                Ok(l @ Load::Entry { .. }) => ready(Ok(l)).left_future().left_future(),
+                                Ok(_) => fr.right_future().left_future(),
                             },
                             EitherFuture::Right((res, fl)) => match res {
-                                Ok(Some(kv)) => ready(Ok(Some(kv))).left_future().right_future(),
                                 Err(e) => ready(Err(e)).left_future().right_future(),
-                                Ok(None) => fl.right_future().right_future(),
+                                Ok(l @ Load::Entry { .. }) => ready(Ok(l)).left_future().right_future(),
+                                Ok(_) => fl.right_future().right_future(),
                             },
                         })
                         .await

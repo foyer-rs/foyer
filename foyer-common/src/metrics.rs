@@ -70,6 +70,7 @@ pub struct Metrics {
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
     pub storage_lodc_indexer_conflict: BoxedCounter,
+    pub storage_lodc_enqueue_skip: BoxedCounter,
     pub storage_lodc_buffer_efficiency: BoxedHistogram,
     pub storage_lodc_recover_duration: BoxedHistogram,
 
@@ -256,6 +257,7 @@ impl Metrics {
 
         let storage_lodc_indexer_conflict =
             foyer_storage_lodc_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
+        let storage_lodc_enqueue_skip = foyer_storage_lodc_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
         let storage_lodc_buffer_efficiency = foyer_storage_lodc_buffer_efficiency.histogram(&[name.clone()]);
         let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(&[name.clone()]);
 
@@ -326,6 +328,7 @@ impl Metrics {
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
             storage_lodc_indexer_conflict,
+            storage_lodc_enqueue_skip,
             storage_lodc_buffer_efficiency,
             storage_lodc_recover_duration,
 

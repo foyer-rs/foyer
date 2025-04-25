@@ -28,7 +28,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::Properties,
+    properties::{Populated, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -71,6 +71,8 @@ pub enum Load<K, V> {
         key: K,
         /// The value of the entry.
         value: V,
+        /// The populated source context of the entry.
+        populated: Populated,
     },
     /// The entry may be in the disk cache, the read io is throttled.
     Throttled,
@@ -80,9 +82,19 @@ pub enum Load<K, V> {
 
 impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
-    pub fn entry(self) -> Option<(K, V)> {
+    pub fn entry(self) -> Option<(K, V, Populated)> {
         match self {
-            Load::Entry { key, value } => Some((key, value)),
+            Load::Entry { key, value, populated } => Some((key, value, populated)),
+            _ => None,
+        }
+    }
+
+    /// Return `Some` with the entry if load success, otherwise return `None`.
+    ///
+    /// Only key and value will be returned.
+    pub fn kv(self) -> Option<(K, V)> {
+        match self {
+            Load::Entry { key, value, .. } => Some((key, value)),
             _ => None,
         }
     }
@@ -235,8 +247,16 @@ where
 
         let future = self.inner.engine.load(hash);
         match self.inner.runtime.read().spawn(future).await.unwrap() {
-            Ok(Some((key, value))) if key.equivalent(&key) => Ok(Load::Entry { key, value }),
-            Ok(_) => Ok(Load::Miss),
+            Ok(Load::Entry {
+                key: k,
+                value: v,
+                populated: p,
+            }) if key.equivalent(&k) => Ok(Load::Entry {
+                key: k,
+                value: v,
+                populated: p,
+            }),
+            Ok(l) => Ok(l),
             Err(e) => Err(e),
         }
     }

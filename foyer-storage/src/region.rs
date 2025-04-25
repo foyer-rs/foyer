@@ -18,7 +18,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -41,35 +41,36 @@ use crate::{
     picker::EvictionPicker,
 };
 
+/// Region statistics.
 #[derive(Debug, Default)]
 pub struct RegionStats {
+    /// Estimated invalid bytes in the region.
+    /// FIXME(MrCroxx): This value is way too coarse. Need fix.
     pub invalid: AtomicUsize,
+    /// Access count of the region.
     pub access: AtomicUsize,
+    /// Marked as `true` if the region is about to be evicted by some eviction picker.
+    pub probation: AtomicBool,
 }
 
 impl RegionStats {
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         self.invalid.store(0, Ordering::Relaxed);
         self.access.store(0, Ordering::Relaxed);
+        self.probation.store(false, Ordering::Relaxed);
     }
 }
 
-/// # Region format:
-///
-/// ```plain
-/// [ Header | Tombstone Pool | Entries ]
-/// ```
-///
-/// ## Header
-///
-/// ```plain
-/// [ MAGIC | Tombstone Pool Size ]
-/// ```
+#[derive(Debug)]
+struct RegionInner {
+    device: MonitoredDevice,
+    stats: Arc<RegionStats>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Region {
     id: RegionId,
-    device: MonitoredDevice,
-    stats: Arc<RegionStats>,
+    inner: Arc<RegionInner>,
 }
 
 impl Region {
@@ -78,37 +79,42 @@ impl Region {
     }
 
     pub fn stats(&self) -> &Arc<RegionStats> {
-        &self.stats
+        &self.inner.stats
     }
 
     pub async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
     {
-        self.device.write(buf, self.id, offset).await
+        self.inner.device.write(buf, self.id, offset).await
     }
 
     pub async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
     {
-        self.stats.access.fetch_add(1, Ordering::Relaxed);
-        self.device.read(buf, self.id, offset).await
+        self.inner.stats.access.fetch_add(1, Ordering::Relaxed);
+        self.inner.device.read(buf, self.id, offset).await
     }
 
     pub async fn flush(&self) -> Result<()> {
-        self.device.flush(Some(self.id)).await
+        self.inner.device.flush(Some(self.id)).await
     }
 
     pub fn size(&self) -> usize {
-        self.device.region_size()
+        self.inner.device.region_size()
     }
 }
 
 #[cfg(test)]
 impl Region {
-    pub fn new_for_test(id: RegionId, device: MonitoredDevice, stats: Arc<RegionStats>) -> Self {
-        Self { id, device, stats }
+    pub fn new_for_test(id: RegionId, device: MonitoredDevice) -> Self {
+        let inner = RegionInner {
+            device,
+            stats: Arc::<RegionStats>::default(),
+        };
+        let inner = Arc::new(inner);
+        Self { id, inner }
     }
 }
 
@@ -152,8 +158,10 @@ impl RegionManager {
         let regions = (0..device.regions() as RegionId)
             .map(|id| Region {
                 id,
-                device: device.clone(),
-                stats: Arc::new(RegionStats::default()),
+                inner: Arc::new(RegionInner {
+                    device: device.clone(),
+                    stats: Arc::<RegionStats>::default(),
+                }),
             })
             .collect_vec();
         let (clean_region_tx, clean_region_rx) = flume::unbounded();
@@ -177,21 +185,20 @@ impl RegionManager {
         }
     }
 
-    pub fn mark_evictable(&self, region: RegionId) {
+    pub fn mark_evictable(&self, rid: RegionId) {
         let mut eviction = self.inner.eviction.lock();
 
         // Update evictable map.
-        let res = eviction
-            .evictable
-            .insert(region, self.inner.regions[region as usize].stats.clone());
-        assert!(res.is_none());
+        let stats = self.region(rid).stats().clone();
+        let old = eviction.evictable.insert(rid, stats);
+        assert!(old.is_none());
 
         // Temporarily take pickers to make borrow checker happy.
         let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
-            picker.on_region_evictable(&eviction.evictable, region);
+            picker.on_region_evictable(&eviction.evictable, rid);
         }
 
         // Restore taken pickers after operations.
@@ -201,7 +208,7 @@ impl RegionManager {
 
         self.inner.metrics.storage_region_evictable.increase(1);
 
-        tracing::debug!("[region manager]: Region {region} is marked evictable.");
+        tracing::debug!("[region manager]: Region {rid} is marked evictable.");
     }
 
     pub fn evict(&self) -> Option<Region> {

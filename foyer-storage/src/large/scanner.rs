@@ -109,7 +109,6 @@ mod tests {
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
             serde::Sequence,
         },
-        region::RegionStats,
         Compression, DirectFsDeviceOptions, Runtime,
     };
 
@@ -208,10 +207,7 @@ mod tests {
 
         async fn extract(dev: &MonitoredDevice, region: RegionId) -> Vec<EntryInfo> {
             let mut infos = vec![];
-            let mut scanner = RegionScanner::new(
-                Region::new_for_test(region, dev.clone(), Arc::<RegionStats>::default()),
-                BLOB_INDEX_SIZE,
-            );
+            let mut scanner = RegionScanner::new(Region::new_for_test(region, dev.clone()), BLOB_INDEX_SIZE);
             while let Some(mut es) = scanner.next().await.unwrap() {
                 infos.append(&mut es);
             }
