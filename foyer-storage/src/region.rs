@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     fmt::Debug,
     future::Future,
     pin::Pin,
@@ -39,11 +39,12 @@ use crate::{
     error::Result,
     io::buffer::{IoBuf, IoBufMut},
     picker::EvictionPicker,
+    EvictionInfo,
 };
 
 /// Region statistics.
 #[derive(Debug, Default)]
-pub struct RegionStats {
+pub struct RegionStatistics {
     /// Estimated invalid bytes in the region.
     /// FIXME(MrCroxx): This value is way too coarse. Need fix.
     pub invalid: AtomicUsize,
@@ -53,7 +54,7 @@ pub struct RegionStats {
     pub probation: AtomicBool,
 }
 
-impl RegionStats {
+impl RegionStatistics {
     pub(crate) fn reset(&self) {
         self.invalid.store(0, Ordering::Relaxed);
         self.access.store(0, Ordering::Relaxed);
@@ -64,9 +65,10 @@ impl RegionStats {
 #[derive(Debug)]
 struct RegionInner {
     device: MonitoredDevice,
-    stats: Arc<RegionStats>,
+    statistics: Arc<RegionStatistics>,
 }
 
+/// A region is a logical partition of a device. It is used to manage the device's storage space.
 #[derive(Debug, Clone)]
 pub struct Region {
     id: RegionId,
@@ -74,44 +76,47 @@ pub struct Region {
 }
 
 impl Region {
+    /// Get region id.
     pub fn id(&self) -> RegionId {
         self.id
     }
 
-    pub fn stats(&self) -> &Arc<RegionStats> {
-        &self.inner.stats
+    /// Get Region Statistics.
+    pub fn statistics(&self) -> &Arc<RegionStatistics> {
+        &self.inner.statistics
     }
 
-    pub async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    /// Get region size.
+    pub fn size(&self) -> usize {
+        self.inner.device.region_size()
+    }
+
+    pub(crate) async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
     {
         self.inner.device.write(buf, self.id, offset).await
     }
 
-    pub async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
+    pub(crate) async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
     {
-        self.inner.stats.access.fetch_add(1, Ordering::Relaxed);
+        self.inner.statistics.access.fetch_add(1, Ordering::Relaxed);
         self.inner.device.read(buf, self.id, offset).await
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    pub(crate) async fn flush(&self) -> Result<()> {
         self.inner.device.flush(Some(self.id)).await
-    }
-
-    pub fn size(&self) -> usize {
-        self.inner.device.region_size()
     }
 }
 
 #[cfg(test)]
 impl Region {
-    pub fn new_for_test(id: RegionId, device: MonitoredDevice) -> Self {
+    pub(crate) fn new_for_test(id: RegionId, device: MonitoredDevice) -> Self {
         let inner = RegionInner {
             device,
-            stats: Arc::<RegionStats>::default(),
+            statistics: Arc::<RegionStatistics>::default(),
         };
         let inner = Arc::new(inner);
         Self { id, inner }
@@ -124,7 +129,7 @@ pub struct RegionManager {
 }
 
 struct Eviction {
-    evictable: HashMap<RegionId, Arc<RegionStats>>,
+    evictable: HashSet<RegionId>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
 }
 
@@ -160,7 +165,7 @@ impl RegionManager {
                 id,
                 inner: Arc::new(RegionInner {
                     device: device.clone(),
-                    stats: Arc::<RegionStats>::default(),
+                    statistics: Arc::<RegionStatistics>::default(),
                 }),
             })
             .collect_vec();
@@ -173,7 +178,7 @@ impl RegionManager {
             inner: Arc::new(RegionManagerInner {
                 regions,
                 eviction: Mutex::new(Eviction {
-                    evictable: HashMap::new(),
+                    evictable: HashSet::new(),
                     eviction_pickers,
                 }),
                 clean_region_tx,
@@ -189,16 +194,22 @@ impl RegionManager {
         let mut eviction = self.inner.eviction.lock();
 
         // Update evictable map.
-        let stats = self.region(rid).stats().clone();
-        let old = eviction.evictable.insert(rid, stats);
-        assert!(old.is_none());
+        let inserted = eviction.evictable.insert(rid);
+        assert!(inserted);
 
         // Temporarily take pickers to make borrow checker happy.
         let mut pickers = std::mem::take(&mut eviction.eviction_pickers);
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
-            picker.on_region_evictable(&eviction.evictable, rid);
+            picker.on_region_evictable(
+                EvictionInfo {
+                    regions: &self.inner.regions,
+                    evictable: &eviction.evictable,
+                    clean: self.inner.clean_region_tx.len(),
+                },
+                rid,
+            );
         }
 
         // Restore taken pickers after operations.
@@ -226,22 +237,34 @@ impl RegionManager {
 
         // Pick a region to evict with pickers.
         for picker in pickers.iter_mut() {
-            if let Some(region) = picker.pick(&eviction.evictable) {
+            if let Some(region) = picker.pick(EvictionInfo {
+                regions: &self.inner.regions,
+                evictable: &eviction.evictable,
+                clean: self.inner.clean_region_tx.len(),
+            }) {
                 picked = Some(region);
                 break;
             }
         }
 
         // If no region is selected, just randomly pick one.
-        let picked = picked.unwrap_or_else(|| eviction.evictable.keys().choose(&mut rand::rng()).copied().unwrap());
+        let picked = picked.unwrap_or_else(|| eviction.evictable.iter().choose(&mut rand::rng()).copied().unwrap());
 
         // Update evictable map.
-        eviction.evictable.remove(&picked).unwrap();
+        let removed = eviction.evictable.remove(&picked);
+        assert!(removed);
         self.inner.metrics.storage_region_evictable.decrease(1);
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
-            picker.on_region_evict(&eviction.evictable, picked);
+            picker.on_region_evict(
+                EvictionInfo {
+                    regions: &self.inner.regions,
+                    evictable: &eviction.evictable,
+                    clean: self.inner.clean_region_tx.len(),
+                },
+                picked,
+            );
         }
 
         // Restore taken pickers after operations.

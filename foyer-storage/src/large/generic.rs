@@ -458,7 +458,7 @@ where
             metrics.storage_hit.increase(1);
             metrics.storage_hit_duration.record(now.elapsed().as_secs_f64());
 
-            let age = match region.stats().probation.load(Ordering::Relaxed) {
+            let age = match region.statistics().probation.load(Ordering::Relaxed) {
                 true => Age::Old,
                 false => Age::Young,
             };
@@ -530,7 +530,7 @@ where
             let region = self.inner.region_manager.region(id).clone();
             async move {
                 let res = RegionCleaner::clean(&region, self.inner.flush).await;
-                region.stats().reset();
+                region.statistics().reset();
                 res
             }
         }))

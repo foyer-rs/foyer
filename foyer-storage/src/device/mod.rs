@@ -32,6 +32,11 @@ use crate::{
     DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
 };
 
+#[cfg(test)]
+pub mod test_utils;
+#[cfg(test)]
+use test_utils::NoopDevice;
+
 pub type RegionId = u32;
 
 /// Config for the device.
@@ -191,6 +196,8 @@ impl<T> DevExt for T where T: Dev {}
 pub enum DeviceConfig {
     DirectFile(DirectFileDeviceConfig),
     DirectFs(DirectFsDeviceConfig),
+    #[cfg(test)]
+    Noop,
 }
 
 impl From<DirectFileDeviceOptions> for DeviceConfig {
@@ -205,10 +212,19 @@ impl From<DirectFsDeviceOptions> for DeviceConfig {
     }
 }
 
+#[cfg(test)]
+impl From<()> for DeviceConfig {
+    fn from(_: ()) -> Self {
+        Self::Noop
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Device {
     DirectFile(DirectFileDevice),
     DirectFs(DirectFsDevice),
+    #[cfg(test)]
+    Noop(NoopDevice),
 }
 
 impl Dev for Device {
@@ -218,6 +234,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.capacity(),
             Device::DirectFs(dev) => dev.capacity(),
+            #[cfg(test)]
+            Device::Noop(dev) => dev.capacity(),
         }
     }
 
@@ -225,6 +243,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.region_size(),
             Device::DirectFs(dev) => dev.region_size(),
+            #[cfg(test)]
+            Device::Noop(dev) => dev.region_size(),
         }
     }
 
@@ -232,6 +252,8 @@ impl Dev for Device {
         match options {
             DeviceConfig::DirectFile(opts) => Ok(Self::DirectFile(DirectFileDevice::open(opts, runtime).await?)),
             DeviceConfig::DirectFs(opts) => Ok(Self::DirectFs(DirectFsDevice::open(opts, runtime).await?)),
+            #[cfg(test)]
+            DeviceConfig::Noop => Ok(Self::Noop(NoopDevice::open((), runtime).await?)),
         }
     }
 
@@ -239,6 +261,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.throttle(),
             Device::DirectFs(dev) => dev.throttle(),
+            #[cfg(test)]
+            Device::Noop(dev) => dev.throttle(),
         }
     }
 
@@ -249,6 +273,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.write(buf, region, offset).await,
             Device::DirectFs(dev) => dev.write(buf, region, offset).await,
+            #[cfg(test)]
+            Device::Noop(dev) => dev.write(buf, region, offset).await,
         }
     }
 
@@ -259,6 +285,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.read(buf, region, offset).await,
             Device::DirectFs(dev) => dev.read(buf, region, offset).await,
+            #[cfg(test)]
+            Device::Noop(dev) => dev.read(buf, region, offset).await,
         }
     }
 
@@ -266,6 +294,8 @@ impl Dev for Device {
         match self {
             Device::DirectFile(dev) => dev.flush(region).await,
             Device::DirectFs(dev) => dev.flush(region).await,
+            #[cfg(test)]
+            Device::Noop(dev) => dev.flush(region).await,
         }
     }
 }

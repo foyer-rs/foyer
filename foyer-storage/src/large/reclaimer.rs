@@ -244,7 +244,7 @@ where
             "[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}."
         );
 
-        region.stats().reset();
+        region.statistics().reset();
 
         self.region_manager.mark_clean(id).await;
         // These operations should be atomic:
