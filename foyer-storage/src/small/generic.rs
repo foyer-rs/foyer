@@ -26,7 +26,7 @@ use std::{
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
-    properties::Properties,
+    properties::{Age, Populated, Properties},
 };
 use foyer_memory::Piece;
 use futures_util::future::join_all;
@@ -40,7 +40,7 @@ use crate::{
         set_manager::SetManager,
     },
     storage::Storage,
-    Dev, Runtime, Statistics, Throttle,
+    Dev, Load, Runtime, Statistics, Throttle,
 };
 
 pub struct GenericSmallStorageConfig<K, V>
@@ -189,15 +189,28 @@ where
         self.inner.flushers[id].submit(Submission::Insertion { piece, estimated_size });
     }
 
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(K, V)>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
         let metrics = self.inner.metrics.clone();
 
         async move {
-            set_manager.load(hash).await.inspect_err(|e| {
-                tracing::error!(hash, ?e, "[sodc load]: fail to load");
-                metrics.storage_error.increase(1);
-            })
+            set_manager
+                .load(hash)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(hash, ?e, "[sodc load]: fail to load");
+                    metrics.storage_error.increase(1);
+                })
+                .map(|o| match o {
+                    Some((key, value)) => Load::Entry {
+                        key,
+                        value,
+                        // Always requires disk cache write for set-associated cache.
+                        // TODO(MrCroxx): use a better way to determine the age.
+                        populated: Populated { age: Age::Old },
+                    },
+                    None => Load::Miss,
+                })
         }
     }
 
@@ -254,7 +267,7 @@ where
         self.enqueue(piece, estimated_size);
     }
 
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<Self::Key, Self::Value>>> + Send + 'static {
         self.load(hash)
     }
 
@@ -354,7 +367,7 @@ mod tests {
         entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
     ) {
         assert_eq!(
-            store.load(entry.hash()).await.unwrap().unwrap(),
+            store.load(entry.hash()).await.unwrap().kv().unwrap(),
             (*entry.key(), entry.value().clone())
         );
     }
@@ -363,7 +376,7 @@ mod tests {
         store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
         entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
     ) {
-        assert!(store.load(entry.hash()).await.unwrap().is_none());
+        assert!(store.load(entry.hash()).await.unwrap().kv().is_none());
     }
 
     #[test_log::test(tokio::test)]

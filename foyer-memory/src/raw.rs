@@ -1011,7 +1011,7 @@ where
     pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: E::Key,
-        properties: E::Properties,
+        mut properties: E::Properties,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
@@ -1056,19 +1056,14 @@ where
                         return Diversion { target: Err(e), store };
                     }
                 };
-                let location = properties.location().unwrap_or_default();
-                let location = if let Some(store) = store.as_ref() {
-                    if store.throttled {
-                        Location::InMem
-                    } else {
-                        location
+                if let Some(ctx) = store.as_ref() {
+                    if ctx.throttled {
+                        properties = properties.with_location(Location::InMem)
                     }
-                } else {
-                    location
+                    properties = properties.with_source(ctx.source)
                 };
-                let properties = properties
-                    .with_location(location)
-                    .with_ephemeral(matches! {location, Location::OnDisk});
+                let location = properties.location().unwrap_or_default();
+                properties = properties.with_ephemeral(matches! {location, Location::OnDisk});
                 let entry = cache.insert_with_properties(key, value, properties);
                 Diversion {
                     target: Ok(entry),

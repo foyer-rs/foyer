@@ -28,7 +28,7 @@ use foyer_common::strict_assert;
 use itertools::Itertools;
 
 use super::{AdmissionPicker, EvictionPicker, Pick, ReinsertionPicker};
-use crate::{device::RegionId, io::throttle::IoThrottler, region::RegionStats, statistics::Statistics};
+use crate::{device::RegionId, io::throttle::IoThrottler, statistics::Statistics, RegionStats};
 
 /// Only admit on all chained admission pickers pick.
 #[derive(Debug, Default, Clone)]
@@ -192,13 +192,61 @@ impl AdmissionPicker for IoThrottlerPicker {
 }
 
 /// A picker that pick region to eviction with a FIFO behavior.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FifoPicker {
     queue: VecDeque<RegionId>,
+    regions: usize,
+    probations: usize,
+    probation_ratio: f64,
+}
+
+impl Default for FifoPicker {
+    fn default() -> Self {
+        Self::new(0.1)
+    }
+}
+
+impl FifoPicker {
+    /// Create a new [`FifoPicker`] with the given `probation_ratio` (0.0 ~ 1.0).
+    ///
+    /// The `probation_ratio` is the ratio of regions that will be marked as probation.
+    /// The regions that are marked as probation will be evicted first.
+    ///
+    /// The default value is 0.1.
+    pub fn new(probation_ratio: f64) -> Self {
+        assert!(
+            (0.0..=1.0).contains(&probation_ratio),
+            "probation ratio {} must be in [0.0, 1.0]",
+            probation_ratio
+        );
+        Self {
+            queue: VecDeque::new(),
+            regions: 0,
+            probations: 0,
+            probation_ratio,
+        }
+    }
+}
+
+impl FifoPicker {
+    fn mark_probation(&self, evictable: &HashMap<RegionId, Arc<RegionStats>>) {
+        self.queue.iter().take(self.probations).for_each(|rid| {
+            if let Some(stats) = evictable.get(rid) {
+                stats.probation.store(true, Ordering::Relaxed);
+            }
+        });
+    }
 }
 
 impl EvictionPicker for FifoPicker {
-    fn pick(&mut self, _: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
+    fn init(&mut self, regions: Range<RegionId>, _: usize) {
+        self.regions = regions.len();
+        let probations = (self.regions as f64 * self.probation_ratio).floor() as usize;
+        self.probations = probations.clamp(0, self.regions);
+    }
+
+    fn pick(&mut self, evictable: &HashMap<RegionId, Arc<RegionStats>>) -> Option<RegionId> {
+        self.mark_probation(evictable);
         let res = self.queue.front().copied();
         tracing::trace!("[fifo picker]: pick {res:?}");
         res
@@ -246,7 +294,7 @@ impl EvictionPicker for InvalidRatioPicker {
 
         let mut info = evictable
             .iter()
-            .map(|(region, stats)| (*region, stats.invalid.load(Ordering::Relaxed)))
+            .map(|(rid, stats)| (*rid, stats.invalid.load(Ordering::Relaxed)))
             .collect_vec();
         info.sort_by_key(|(_, invalid)| *invalid);
 

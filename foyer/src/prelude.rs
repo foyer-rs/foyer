@@ -17,7 +17,7 @@ pub use crate::{
         buf::{BufExt, BufMutExt},
         code::{Code, CodeError, CodeResult, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
-        properties::{Hint, Location, Source},
+        properties::{Age, Hint, Location, Source},
         tracing::TracingOptions,
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
@@ -34,7 +34,7 @@ pub use crate::{
         AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, Compression, Dev,
         DevConfig, DevExt, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine,
         EvictionPicker, FifoPicker, InvalidRatioPicker, IopsCounter, LargeEngineOptions, Load, Pick, RecoverMode,
-        ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, SmallEngineOptions, Statistics, Storage, Store,
-        StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+        RegionStats, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, SmallEngineOptions, Statistics,
+        Storage, Store, StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
     },
 };

@@ -66,13 +66,29 @@ impl Default for Location {
     }
 }
 
+/// Entry age in the disk cache. Used by hybrid cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Age {
+    /// THe entry is still young and will be reserved in the disk cache for a while.
+    Young,
+    /// The entry is old any will be eviction from the disk cache soon.
+    Old,
+}
+
+/// Source context for populated entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Populated {
+    /// The age of the entry.
+    pub age: Age,
+}
+
 /// Entry source used by hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     /// Comes from outer system of foyer.
     Outer,
     /// Populated from the disk cache.
-    Populated,
+    Populated(Populated),
 }
 
 impl Default for Source {

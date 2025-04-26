@@ -29,7 +29,7 @@ use crate::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    Statistics, Storage, Throttle,
+    Load, Statistics, Storage, Throttle,
 };
 
 pub struct SizeSelector<K, V, P>
@@ -205,7 +205,7 @@ where
     }
 
     #[auto_enum(Future)]
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Option<(Self::Key, Self::Value)>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<Self::Key, Self::Value>>> + Send + 'static {
         match self {
             EngineEnum::Noop(storage) => storage.load(hash),
             EngineEnum::Large(storage) => storage.load(hash),

@@ -479,9 +479,13 @@ where
             .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
             .await?
         {
-            Load::Entry { key, value } => {
+            Load::Entry { key, value, populated } => {
                 record_hit();
-                Some(self.memory.insert(key, value))
+                Some(self.memory.insert_with_properties(
+                    key,
+                    value,
+                    HybridCacheProperties::default().with_source(Source::Populated(populated)),
+                ))
             }
             Load::Throttled => {
                 record_throttled();
@@ -513,17 +517,32 @@ where
         let now = Instant::now();
 
         let guard = span.set_local_parent();
-        let fetch = self.memory.fetch(key.clone(), || {
-            let store = self.storage.clone();
-            async move {
-                match store.load(&key).await.map_err(anyhow::Error::from) {
-                    Ok(Load::Entry { key: _, value }) => Ok(value),
-                    Ok(Load::Throttled) => Err(ObtainFetchError::Throttled),
-                    Ok(Load::Miss) => Err(ObtainFetchError::NotExist),
-                    Err(e) => Err(ObtainFetchError::Err(e)),
+        let fetch = self.memory.fetch_inner(
+            key.clone(),
+            HybridCacheProperties::default(),
+            || {
+                let store = self.storage.clone();
+                async move {
+                    match store.load(&key).await.map_err(anyhow::Error::from) {
+                        Ok(Load::Entry {
+                            key: _,
+                            value,
+                            populated,
+                        }) => Diversion {
+                            target: Ok(value),
+                            store: Some(FetchContext {
+                                throttled: false,
+                                source: Source::Populated(populated),
+                            }),
+                        },
+                        Ok(Load::Throttled) => Err(ObtainFetchError::Throttled).into(),
+                        Ok(Load::Miss) => Err(ObtainFetchError::NotExist).into(),
+                        Err(e) => Err(ObtainFetchError::Err(e)).into(),
+                    }
                 }
-            }
-        });
+            },
+            &tokio::runtime::Handle::current().into(),
+        );
         drop(guard);
 
         let res = fetch.await;
@@ -771,14 +790,18 @@ where
 
                 async move {
                     let throttled = match store.load(&key).await.map_err(anyhow::Error::from) {
-                        Ok(Load::Entry { key: _, value }) => {
+                        Ok(Load::Entry {
+                            key: _,
+                            value,
+                            populated,
+                        }) => {
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                             return Diversion {
                                 target: Ok(value),
                                 store: Some(FetchContext {
                                     throttled: false,
-                                    source: Source::Populated,
+                                    source: Source::Populated(populated),
                                 }),
                             };
                         }
@@ -1269,7 +1292,7 @@ mod tests {
         hybrid.close().await.unwrap();
         let hybrid = open_with_flush_on_close(dir.path(), true).await;
         assert_eq!(
-            hybrid.storage().load(&1).await.unwrap().entry().unwrap(),
+            hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
             (1, vec![1; 7 * KB])
         );
     }
