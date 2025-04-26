@@ -584,7 +584,7 @@ where
                     if let Some(stats) = stats {
                         region_manager
                             .region(stats.region)
-                            .stats()
+                            .statistics()
                             .invalid
                             .fetch_add(stats.size, Ordering::Relaxed);
                     }

@@ -227,4 +227,15 @@ where
     pub fn metrics(&self) -> &Arc<Metrics> {
         &self.metrics
     }
+
+    #[cfg(test)]
+    pub fn new_for_test(device: D) -> Self {
+        use super::IopsCounter;
+
+        Self {
+            device,
+            stats: Arc::new(Statistics::new(IopsCounter::PerIo)),
+            metrics: Arc::new(Metrics::noop()),
+        }
+    }
 }
