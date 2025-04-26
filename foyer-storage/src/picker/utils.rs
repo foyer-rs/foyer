@@ -237,6 +237,7 @@ impl FifoPicker {
                     .statistics()
                     .probation
                     .store(true, Ordering::Relaxed);
+                tracing::trace!(rid, "[fifo picker]: mark  probation");
             }
         });
     }
@@ -250,6 +251,7 @@ impl EvictionPicker for FifoPicker {
     }
 
     fn pick(&mut self, info: EvictionInfo<'_>) -> Option<RegionId> {
+        tracing::trace!(evictable = ?info.evictable, clean = info.clean, "[fifo picker]: pick");
         self.mark_probation(info);
         let res = self.queue.front().copied();
         tracing::trace!("[fifo picker]: pick {res:?}");
@@ -332,41 +334,81 @@ mod tests {
     use super::*;
     use crate::{device::test_utils::NoopDevice, Region};
 
-    #[test]
+    #[test_log::test]
     fn test_fifo_picker() {
-        let mut picker = FifoPicker::default();
+        let mut picker = FifoPicker::new(0.1);
 
         let regions = (0..10)
             .map(|rid| Region::new_for_test(rid, NoopDevice::monitored()))
             .collect_vec();
-        let evictable = HashSet::new();
+        let mut evictable = HashSet::new();
 
-        let info = || EvictionInfo {
-            regions: &regions,
-            evictable: &evictable,
-            clean: regions.len() - evictable.len(),
-        };
+        fn info<'a>(regions: &'a [Region], evictable: &'a HashSet<RegionId>, dirty: usize) -> EvictionInfo<'a> {
+            EvictionInfo {
+                regions,
+                evictable,
+                clean: regions.len() - evictable.len() - dirty,
+            }
+        }
 
-        (0..10).for_each(|i| picker.on_region_evictable(info(), i));
+        fn check(regions: &[Region], probations: impl IntoIterator<Item = RegionId>) {
+            let probations = probations.into_iter().collect::<HashSet<_>>();
+            for rid in 0..regions.len() as RegionId {
+                if probations.contains(&rid) {
+                    assert!(
+                        regions[rid as usize].statistics().probation.load(Ordering::Relaxed),
+                        "probations {probations:?}, assert {rid} is probation failed"
+                    );
+                } else {
+                    assert!(
+                        !regions[rid as usize].statistics().probation.load(Ordering::Relaxed),
+                        "probations {probations:?}, assert {rid} is not probation failed"
+                    );
+                }
+            }
+        }
 
-        assert_eq!(picker.pick(info()), Some(0));
-        picker.on_region_evict(info(), 0);
-        assert_eq!(picker.pick(info()), Some(1));
-        picker.on_region_evict(info(), 1);
-        assert_eq!(picker.pick(info()), Some(2));
-        picker.on_region_evict(info(), 2);
+        picker.init(0..10, 0);
 
-        picker.on_region_evict(info(), 3);
-        picker.on_region_evict(info(), 5);
-        picker.on_region_evict(info(), 7);
-        picker.on_region_evict(info(), 9);
+        // mark 0..10 evictable in order
+        (0..10).for_each(|i| {
+            evictable.insert(i as _);
+            picker.on_region_evictable(info(&regions, &evictable, 0), i);
+        });
 
-        assert_eq!(picker.pick(info()), Some(4));
-        picker.on_region_evict(info(), 4);
-        assert_eq!(picker.pick(info()), Some(6));
-        picker.on_region_evict(info(), 6);
-        assert_eq!(picker.pick(info()), Some(8));
-        picker.on_region_evict(info(), 8);
+        // evict 0, mark 0 probation.
+        assert_eq!(picker.pick(info(&regions, &evictable, 0)), Some(0));
+        check(&regions, [0]);
+        evictable.remove(&0);
+        picker.on_region_evict(info(&regions, &evictable, 1), 0);
+
+        // evict 1, with 1 dirty region, mark 1 probation.
+        assert_eq!(picker.pick(info(&regions, &evictable, 1)), Some(1));
+        check(&regions, [0, 1]);
+        evictable.remove(&1);
+        picker.on_region_evict(info(&regions, &evictable, 2), 1);
+
+        // evict 2 with 1 dirty region, mark no region probation.
+        assert_eq!(picker.pick(info(&regions, &evictable, 1)), Some(2));
+        check(&regions, [0, 1]);
+        evictable.remove(&2);
+        picker.on_region_evict(info(&regions, &evictable, 2), 2);
+
+        picker.on_region_evict(info(&regions, &evictable, 3), 3);
+        evictable.remove(&3);
+        picker.on_region_evict(info(&regions, &evictable, 4), 5);
+        evictable.remove(&5);
+        picker.on_region_evict(info(&regions, &evictable, 5), 7);
+        evictable.remove(&7);
+        picker.on_region_evict(info(&regions, &evictable, 6), 9);
+        evictable.remove(&9);
+
+        picker.on_region_evict(info(&regions, &evictable, 7), 4);
+        evictable.remove(&4);
+        picker.on_region_evict(info(&regions, &evictable, 8), 6);
+        evictable.remove(&6);
+        picker.on_region_evict(info(&regions, &evictable, 9), 8);
+        evictable.remove(&8);
     }
 
     #[test]
@@ -384,76 +426,28 @@ mod tests {
             evictable.insert(i as RegionId);
         });
 
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
+        fn info<'a>(regions: &'a [Region], evictable: &'a HashSet<RegionId>) -> EvictionInfo<'a> {
+            EvictionInfo {
+                regions,
+                evictable,
                 clean: regions.len() - evictable.len(),
-            }),
-            Some(9)
-        );
+            }
+        }
 
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            Some(9)
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(9));
+
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(9));
         evictable.remove(&9);
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            Some(8)
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(8));
         evictable.remove(&8);
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            Some(7)
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(7));
         evictable.remove(&7);
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            Some(6)
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(6));
         evictable.remove(&6);
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            Some(5)
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), Some(5));
         evictable.remove(&5);
 
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            None
-        );
-        assert_eq!(
-            picker.pick(EvictionInfo {
-                regions: &regions,
-                evictable: &evictable,
-                clean: regions.len() - evictable.len(),
-            }),
-            None
-        );
+        assert_eq!(picker.pick(info(&regions, &evictable)), None);
+        assert_eq!(picker.pick(info(&regions, &evictable)), None);
     }
 }
