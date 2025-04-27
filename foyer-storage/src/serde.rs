@@ -90,7 +90,7 @@ where
 pub struct EntrySerializer;
 
 impl EntrySerializer {
-    #[fastrace::trace(name = "foyer::storage::serde::serialize")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::serde::serialize"))]
     pub fn serialize<K, V, W>(key: &K, value: &V, compression: Compression, mut writer: W) -> Result<KvInfo>
     where
         K: StorageKey,
@@ -157,7 +157,7 @@ impl EntrySerializer {
 pub struct EntryDeserializer;
 
 impl EntryDeserializer {
-    #[fastrace::trace(name = "foyer::storage::serde::deserialize")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::serde::deserialize"))]
     pub fn deserialize<K, V>(
         buffer: &[u8],
         ken_len: usize,
@@ -188,7 +188,10 @@ impl EntryDeserializer {
         Ok((key, value))
     }
 
-    #[fastrace::trace(name = "foyer::storage::serde::deserialize_key")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::serde::deserialize_key")
+    )]
     fn deserialize_key<K>(buf: &[u8]) -> Result<K>
     where
         K: StorageKey,
@@ -196,7 +199,10 @@ impl EntryDeserializer {
         K::decode(&mut &buf[..]).map_err(Error::from)
     }
 
-    #[fastrace::trace(name = "foyer::storage::serde::deserialize_value")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::serde::deserialize_value")
+    )]
     fn deserialize_value<V>(buf: &[u8], compression: Compression) -> Result<V>
     where
         V: StorageValue,

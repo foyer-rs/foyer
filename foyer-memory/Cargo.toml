@@ -17,7 +17,7 @@ arc-swap = "1"
 bitflags = "2"
 cmsketch = "0.2.1"
 equivalent = { workspace = true }
-fastrace = { workspace = true }
+fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 hashbrown = { workspace = true }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }

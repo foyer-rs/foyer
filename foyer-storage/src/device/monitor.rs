@@ -68,7 +68,10 @@ where
         })
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::monitor::write")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::monitor::write")
+    )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
@@ -90,7 +93,7 @@ where
         res
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::monitor::read")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::device::monitor::read"))]
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
@@ -112,7 +115,10 @@ where
         res
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::monitor::flush")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::monitor::flush")
+    )]
     async fn flush(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
@@ -171,7 +177,11 @@ where
 }
 
 impl Monitored<DirectFileDevice> {
-    #[fastrace::trace(name = "foyer::storage::device::monitor::pwrite")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::monitor::pwrite")
+    )]
+    #[cfg_attr(not(feature = "tracing"), expect(dead_code))]
     pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
@@ -193,7 +203,10 @@ impl Monitored<DirectFileDevice> {
         res
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::monitor::pread")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::monitor::pread")
+    )]
     pub async fn pread<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,

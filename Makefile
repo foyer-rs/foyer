@@ -50,7 +50,7 @@ example:
 	cargo run --example export_metrics_prometheus_hyper
 	cargo run --features serde --example serde
 
-full: check-all test-all example machete udeps
+all: ffmt check-all test-all example machete udeps
 
 fast: ffmt check test example machete
 

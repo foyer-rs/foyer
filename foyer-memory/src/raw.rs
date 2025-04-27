@@ -25,6 +25,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use equivalent::Equivalent;
+#[cfg(feature = "tracing")]
 use fastrace::{
     future::{FutureExt, InSpan},
     Span,
@@ -178,7 +179,7 @@ where
         record
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::remove")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::remove"))]
     fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -201,7 +202,7 @@ where
         Some(record)
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::get_noop")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::get_noop"))]
     fn get_noop<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -209,7 +210,10 @@ where
         self.get_inner(hash, key)
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::get_immutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::get_immutable")
+    )]
     fn get_immutable<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -218,7 +222,10 @@ where
             .inspect(|record| self.acquire_immutable(record))
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::get_mutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::get_mutable")
+    )]
     fn get_mutable<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -226,7 +233,7 @@ where
         self.get_inner(hash, key).inspect(|record| self.acquire_mutable(record))
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::get_inner")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::get_inner"))]
     fn get_inner<Q>(&self, hash: u64, key: &Q) -> Option<Arc<Record<E>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -251,7 +258,7 @@ where
         Some(record)
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::clear")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::clear"))]
     fn clear(&mut self, garbages: &mut Vec<Arc<Record<E>>>) {
         let records = self.indexer.drain().collect_vec();
         self.eviction.clear();
@@ -269,7 +276,10 @@ where
         self.metrics.memory_remove.increase(count);
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::acquire_immutable")
+    )]
     fn acquire_immutable(&self, record: &Arc<Record<E>>) {
         match E::acquire() {
             Op::Immutable(f) => f(&self.eviction, record),
@@ -277,7 +287,10 @@ where
         }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::acquire_mutable")
+    )]
     fn acquire_mutable(&mut self, record: &Arc<Record<E>>) {
         match E::acquire() {
             Op::Mutable(mut f) => f(&mut self.eviction, record),
@@ -285,7 +298,10 @@ where
         }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::release_immutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::release_immutable")
+    )]
     fn release_immutable(&self, record: &Arc<Record<E>>) {
         match E::release() {
             Op::Immutable(f) => f(&self.eviction, record),
@@ -293,7 +309,10 @@ where
         }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::release_mutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::release_mutable")
+    )]
     fn release_mutable(&mut self, record: &Arc<Record<E>>) {
         match E::release() {
             Op::Mutable(mut f) => f(&mut self.eviction, record),
@@ -301,7 +320,7 @@ where
         }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop"))]
     fn fetch_noop(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
         E::Key: Clone,
@@ -313,7 +332,10 @@ where
         self.fetch_queue(key.clone())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")
+    )]
     fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
         E::Key: Clone,
@@ -325,7 +347,10 @@ where
         self.fetch_queue(key.clone())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")
+    )]
     fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
     where
         E::Key: Clone,
@@ -337,16 +362,23 @@ where
         self.fetch_queue(key.clone())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")
+    )]
     fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, S, I> {
         match self.waiters.lock().entry(key) {
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
                 o.get_mut().push(tx);
                 self.metrics.memory_queue.increase(1);
-                RawShardFetch::Wait(rx.in_span(Span::enter_with_local_parent(
+                #[cfg(feature = "tracing")]
+                let wait = rx.in_span(Span::enter_with_local_parent(
                     "foyer::memory::raw::fetch_with_runtime::wait",
-                )))
+                ));
+                #[cfg(not(feature = "tracing"))]
+                let wait = rx;
+                RawShardFetch::Wait(wait)
             }
             HashMapEntry::Vacant(v) => {
                 v.insert(vec![]);
@@ -382,7 +414,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    #[fastrace::trace(name = "foyer::memory::raw::inner::clear")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::inner::clear"))]
     fn clear(&self) {
         let mut garbages = vec![];
 
@@ -471,7 +503,7 @@ where
         Self { inner: Arc::new(inner) }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::resize")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::resize"))]
     pub fn resize(&self, capacity: usize) -> Result<()> {
         let shards = self.inner.shards.len();
         let shard_capacity = capacity / shards;
@@ -518,12 +550,15 @@ where
         Ok(())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::insert")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert"))]
     pub fn insert(&self, key: E::Key, value: E::Value) -> RawCacheEntry<E, S, I> {
         self.insert_with_properties(key, value, Default::default())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::insert_with_properties")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::insert_with_properties")
+    )]
     pub fn insert_with_properties(
         &self,
         key: E::Key,
@@ -579,7 +614,7 @@ where
     }
 
     /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
-    #[fastrace::trace(name = "foyer::memory::raw::evict_all")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::evict_all"))]
     pub fn evict_all(&self) {
         let mut garbages = vec![];
         for shard in self.inner.shards.iter() {
@@ -605,7 +640,7 @@ where
     ///
     /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
     /// Therefore, this function is asynchronous.
-    #[fastrace::trace(name = "foyer::memory::raw::flush")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::flush"))]
     pub async fn flush(&self) {
         let mut garbages = vec![];
         for shard in self.inner.shards.iter() {
@@ -627,7 +662,7 @@ where
         }
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::remove")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::remove"))]
     pub fn remove<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, S, I>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -650,7 +685,7 @@ where
             })
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::get")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get"))]
     pub fn get<Q>(&self, key: &Q) -> Option<RawCacheEntry<E, S, I>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -673,7 +708,7 @@ where
         })
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::contains")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::contains"))]
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -685,7 +720,7 @@ where
             .with(|shard| shard.indexer.get(hash, key).is_some())
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::touch")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::touch"))]
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -704,7 +739,7 @@ where
         .is_some()
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::clear")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::clear"))]
     pub fn clear(&self) {
         self.inner.clear();
     }
@@ -909,7 +944,7 @@ where
     I: Indexer<Eviction = E>,
 {
     Hit(Arc<Record<E>>),
-    Wait(InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>),
+    Wait(RawFetchWait<E, S, I>),
     Miss,
 }
 
@@ -917,7 +952,10 @@ pub type RawFetch<E, ER, S = ahash::RandomState, I = HashTableIndexer<E>> =
     DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
+#[cfg(feature = "tracing")]
 type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
+#[cfg(not(feature = "tracing"))]
+type RawFetchWait<E, S, I> = oneshot::Receiver<RawCacheEntry<E, S, I>>;
 type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
 
 #[pin_project(project = RawFetchInnerProj)]
@@ -972,7 +1010,7 @@ where
     I: Indexer<Eviction = E>,
     E::Key: Clone,
 {
-    #[fastrace::trace(name = "foyer::memory::raw::fetch")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
     pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
@@ -987,7 +1025,10 @@ where
         )
     }
 
-    #[fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
+    )]
     pub fn fetch_with_properties<F, FU, ER, ID>(
         &self,
         key: E::Key,
@@ -1007,7 +1048,7 @@ where
     ///
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
-    #[fastrace::trace(name = "foyer::memory::raw::fetch_inner")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
     pub fn fetch_inner<F, FU, ER, ID>(
         &self,
         key: E::Key,
@@ -1042,12 +1083,16 @@ where
 
         let cache = self.clone();
         let future = fetch();
-        let join = runtime.spawn(
-            async move {
+        let join = runtime.spawn({
+            let task = async move {
+                #[cfg(feature = "tracing")]
                 let Diversion { target, store } = future
                     .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
                     .await
                     .into();
+                #[cfg(not(feature = "tracing"))]
+                let Diversion { target, store } = future.await.into();
+
                 let value = match target {
                     Ok(value) => value,
                     Err(e) => {
@@ -1069,11 +1114,13 @@ where
                     target: Ok(entry),
                     store,
                 }
-            }
-            .in_span(Span::enter_with_local_parent(
+            };
+            #[cfg(feature = "tracing")]
+            let task = task.in_span(Span::enter_with_local_parent(
                 "foyer::memory::generic::fetch_with_runtime::spawn",
-            )),
-        );
+            ));
+            task
+        });
 
         RawFetch::new(RawFetchInner::Miss(join))
     }

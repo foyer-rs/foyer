@@ -19,7 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 ahash = { workspace = true }
 anyhow = { workspace = true }
 equivalent = { workspace = true }
-fastrace = { workspace = true }
+fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }

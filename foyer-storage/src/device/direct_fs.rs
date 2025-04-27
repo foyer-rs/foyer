@@ -130,7 +130,10 @@ impl Dev for DirectFsDevice {
         &self.inner.throttle
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_fs::open")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_fs::open")
+    )]
     async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         options.verify()?;
 
@@ -175,7 +178,10 @@ impl Dev for DirectFsDevice {
         })
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_fs::write")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_fs::write")
+    )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
@@ -214,7 +220,10 @@ impl Dev for DirectFsDevice {
         .await
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_fs::read")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_fs::read")
+    )]
     async fn read<B>(&self, mut buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
@@ -253,7 +262,10 @@ impl Dev for DirectFsDevice {
         .await
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_fs::flush")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_fs::flush")
+    )]
     async fn flush(&self, region: Option<super::RegionId>) -> Result<()> {
         let flush = |region: RegionId| {
             let file = self.file(region).clone();

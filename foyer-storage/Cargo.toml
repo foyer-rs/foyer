@@ -22,7 +22,7 @@ auto_enums = { version = "0.8", features = ["futures03"] }
 bytes = { workspace = true }
 clap = { workspace = true }
 equivalent = { workspace = true }
-fastrace = { workspace = true }
+fastrace = { workspace = true, optional = true }
 flume = "0.11"
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }

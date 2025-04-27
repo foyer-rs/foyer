@@ -122,7 +122,10 @@ impl DirectFileDevice {
     /// # Safety
     ///
     /// Reads and writes MUST be 4K-aligned.
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::pwrite")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::pwrite")
+    )]
     pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
@@ -166,7 +169,10 @@ impl DirectFileDevice {
     /// # Safety
     ///
     /// Reads and writes MUST be 4K-aligned.
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::pread")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::pread")
+    )]
     pub async fn pread<B>(&self, mut buf: B, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
@@ -221,7 +227,10 @@ impl Dev for DirectFileDevice {
         &self.throttle
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::open")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::open")
+    )]
     async fn open(options: Self::Config, runtime: Runtime) -> Result<Self> {
         options.verify()?;
 
@@ -267,7 +276,10 @@ impl Dev for DirectFileDevice {
         })
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::write")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::write")
+    )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBuf,
@@ -281,7 +293,10 @@ impl Dev for DirectFileDevice {
         self.pwrite(buf, poffset).await
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::read")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::read")
+    )]
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
         B: IoBufMut,
@@ -295,7 +310,10 @@ impl Dev for DirectFileDevice {
         self.pread(buf, poffset).await
     }
 
-    #[fastrace::trace(name = "foyer::storage::device::direct_file::flush")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::device::direct_file::flush")
+    )]
     async fn flush(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
         asyncify_with_runtime(self.runtime.write(), move || file.sync_all().map_err(Error::from)).await

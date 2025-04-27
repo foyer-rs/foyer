@@ -18,23 +18,22 @@ use std::{
     hash::Hash,
     ops::Deref,
     pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     task::{ready, Context, Poll},
     time::Instant,
 };
 
 use ahash::RandomState;
 use equivalent::Equivalent;
+#[cfg(feature = "tracing")]
 use fastrace::prelude::*;
+#[cfg(feature = "tracing")]
+use foyer_common::tracing::{InRootSpan, TracingConfig, TracingOptions};
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     future::Diversion,
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
-    tracing::{InRootSpan, TracingConfig, TracingOptions},
 };
 use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, Piece, Pipe};
 use foyer_storage::{IoThrottler, Load, Statistics, Store};
@@ -45,6 +44,7 @@ use tokio::sync::oneshot;
 use super::writer::HybridCacheStorageWriter;
 use crate::HybridCacheWriter;
 
+#[cfg(feature = "tracing")]
 macro_rules! root_span {
     ($self:ident, mut $name:ident, $label:expr) => {
         root_span!($self, (mut) $name, $label)
@@ -61,6 +61,14 @@ macro_rules! root_span {
     };
 }
 
+#[cfg(not(feature = "tracing"))]
+macro_rules! root_span {
+    ($self:ident, mut $name:ident, $label:expr) => {};
+    ($self:ident, $name:ident, $label:expr) => {};
+    ($self:ident, ($($mut:tt)?) $name:ident, $label:expr) => {};
+}
+
+#[cfg(feature = "tracing")]
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
         if let Some(elapsed) = $span.elapsed() {
@@ -69,6 +77,11 @@ macro_rules! try_cancel {
             }
         }
     };
+}
+
+#[cfg(not(feature = "tracing"))]
+macro_rules! try_cancel {
+    ($self:ident, $span:ident, $threshold:ident) => {};
 }
 
 /// Entry properties for in-memory only cache.
@@ -254,16 +267,18 @@ pub type HybridCacheEntry<K, V, S = RandomState> = CacheEntry<K, V, S, HybridCac
 #[derive(Debug)]
 pub struct HybridCacheOptions {
     pub policy: HybridCachePolicy,
-    pub tracing_options: TracingOptions,
     pub flush_on_close: bool,
+    #[cfg(feature = "tracing")]
+    pub tracing_options: TracingOptions,
 }
 
 impl Default for HybridCacheOptions {
     fn default() -> Self {
         Self {
             policy: HybridCachePolicy::default(),
-            tracing_options: TracingOptions::default(),
             flush_on_close: true,
+            #[cfg(feature = "tracing")]
+            tracing_options: TracingOptions::default(),
         }
     }
 }
@@ -290,10 +305,12 @@ where
     policy: HybridCachePolicy,
     flush_on_close: bool,
     metrics: Arc<Metrics>,
-    tracing_config: Arc<TracingConfig>,
-    tracing: Arc<AtomicBool>,
     memory: Cache<K, V, S, HybridCacheProperties>,
     storage: Store<K, V, S, HybridCacheProperties>,
+    #[cfg(feature = "tracing")]
+    tracing: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "tracing")]
+    tracing_config: Arc<TracingConfig>,
 }
 
 impl<K, V, S> Debug for HybridCache<K, V, S>
@@ -303,14 +320,15 @@ where
     S: HashBuilder + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HybridCache")
-            .field("policy", &self.policy)
+        let mut r = f.debug_struct("HybridCache");
+        r.field("policy", &self.policy)
             .field("flush_on_close", &self.flush_on_close)
-            .field("tracing", &self.tracing)
-            .field("tracing_config", &self.tracing_config)
             .field("memory", &self.memory)
-            .field("storage", &self.storage)
-            .finish()
+            .field("storage", &self.storage);
+        #[cfg(feature = "tracing")]
+        r.field("tracing", &self.tracing)
+            .field("tracing_config", &self.tracing_config);
+        r.finish()
     }
 }
 
@@ -327,8 +345,10 @@ where
             memory: self.memory.clone(),
             storage: self.storage.clone(),
             metrics: self.metrics.clone(),
-            tracing_config: self.tracing_config.clone(),
+            #[cfg(feature = "tracing")]
             tracing: self.tracing.clone(),
+            #[cfg(feature = "tracing")]
+            tracing_config: self.tracing_config.clone(),
         }
     }
 }
@@ -347,17 +367,24 @@ where
     ) -> Self {
         let policy = options.policy;
         let flush_on_close = options.flush_on_close;
-        let tracing_config = Arc::<TracingConfig>::default();
-        tracing_config.update(options.tracing_options);
-        let tracing = Arc::new(AtomicBool::new(false));
+        #[cfg(feature = "tracing")]
+        let tracing_config = {
+            let cfg = Arc::<TracingConfig>::default();
+            cfg.update(options.tracing_options);
+            cfg
+        };
+        #[cfg(feature = "tracing")]
+        let tracing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         Self {
             policy,
             flush_on_close,
             memory,
             storage,
             metrics,
-            tracing_config,
+            #[cfg(feature = "tracing")]
             tracing,
+            #[cfg(feature = "tracing")]
+            tracing_config,
         }
     }
 
@@ -367,6 +394,7 @@ where
     }
 
     /// Access the trace config with options.
+    #[cfg(feature = "tracing")]
     pub fn update_tracing_options(&self, options: TracingOptions) {
         self.tracing_config.update(options);
     }
@@ -377,24 +405,28 @@ where
     }
 
     /// Enable tracing.
+    #[cfg(feature = "tracing")]
     pub fn enable_tracing(&self) {
-        self.tracing.store(true, Ordering::Relaxed);
+        self.tracing.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Disable tracing.
+    #[cfg(feature = "tracing")]
     pub fn disable_tracing(&self) {
-        self.tracing.store(true, Ordering::Relaxed);
+        self.tracing.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Return `true` if tracing is enabled.
+    #[cfg(feature = "tracing")]
     pub fn is_tracing_enabled(&self) -> bool {
-        self.tracing.load(Ordering::Relaxed)
+        self.tracing.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Insert cache entry to the hybrid cache.
     pub fn insert(&self, key: K, value: V) -> HybridCacheEntry<K, V, S> {
         root_span!(self, span, "foyer::hybrid::cache::insert");
 
+        #[cfg(feature = "tracing")]
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -421,6 +453,7 @@ where
     ) -> HybridCacheEntry<K, V, S> {
         root_span!(self, span, "foyer::hybrid::cache::insert");
 
+        #[cfg(feature = "tracing")]
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -465,20 +498,25 @@ where
                 .record(now.elapsed().as_secs_f64());
         };
 
+        #[cfg(feature = "tracing")]
         let guard = span.set_local_parent();
         if let Some(entry) = self.memory.get(key) {
             record_hit();
             try_cancel!(self, span, record_hybrid_get_threshold);
             return Ok(Some(entry));
         }
+        #[cfg(feature = "tracing")]
         drop(guard);
 
-        let entry = match self
+        #[cfg(feature = "tracing")]
+        let load = self
             .storage
             .load(key)
-            .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span))
-            .await?
-        {
+            .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
+        #[cfg(not(feature = "tracing"))]
+        let load = self.storage.load(key);
+
+        let entry = match load.await? {
             Load::Entry { key, value, populated } => {
                 record_hit();
                 Some(self.memory.insert_with_properties(
@@ -516,7 +554,9 @@ where
 
         let now = Instant::now();
 
+        #[cfg(feature = "tracing")]
         let guard = span.set_local_parent();
+
         let fetch = self.memory.fetch_inner(
             key.clone(),
             HybridCacheProperties::default(),
@@ -543,6 +583,7 @@ where
             },
             &tokio::runtime::Handle::current().into(),
         );
+        #[cfg(feature = "tracing")]
         drop(guard);
 
         let res = fetch.await;
@@ -586,6 +627,7 @@ where
     {
         root_span!(self, span, "foyer::hybrid::cache::remove");
 
+        #[cfg(feature = "tracing")]
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -675,7 +717,12 @@ impl From<oneshot::error::RecvError> for ObtainFetchError {
 }
 
 /// The future generated by [`HybridCache::fetch`].
+#[cfg(feature = "tracing")]
 pub type HybridFetch<K, V, S = RandomState> = InRootSpan<HybridFetchInner<K, V, S>>;
+
+/// The future generated by [`HybridCache::fetch`].
+#[cfg(not(feature = "tracing"))]
+pub type HybridFetch<K, V, S = RandomState> = HybridFetchInner<K, V, S>;
 
 /// A future that is used to get entry value from the remote storage for the hybrid cache.
 #[pin_project]
@@ -774,6 +821,7 @@ where
     {
         root_span!(self, span, "foyer::hybrid::cache::fetch");
 
+        #[cfg(feature = "tracing")]
         let _guard = span.set_local_parent();
 
         let now = Instant::now();
@@ -821,8 +869,9 @@ where
                                 source: Source::Outer,
                             }),
                         }
-                    }
-                    .in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+                    };
+                    #[cfg(feature = "tracing")]
+                    let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
 
                     runtime.user().spawn(fut).await.unwrap()
                 }
@@ -841,7 +890,10 @@ where
             storage: self.storage.clone(),
         };
 
-        InRootSpan::new(inner, span).with_threshold(self.tracing_config.record_hybrid_fetch_threshold())
+        let f = inner;
+        #[cfg(feature = "tracing")]
+        let f = InRootSpan::new(f, span).with_threshold(self.tracing_config.record_hybrid_fetch_threshold());
+        f
     }
 }
 
