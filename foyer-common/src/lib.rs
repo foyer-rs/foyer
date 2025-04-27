@@ -43,6 +43,7 @@ pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
 /// Tracing related components.
+#[cfg(feature = "tracing")]
 pub mod tracing;
 /// Useful helpers.
 pub mod utils;

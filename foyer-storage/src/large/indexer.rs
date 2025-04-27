@@ -51,7 +51,10 @@ impl Indexer {
         }
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::indexer::insert_batch")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large::indexer::insert_batch")
+    )]
     pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
         let shards: HashMap<usize, Vec<HashedEntryAddress>> =
             batch.into_iter().into_group_map_by(|haddr| self.shard(haddr.hash));
@@ -71,19 +74,25 @@ impl Indexer {
         olds
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::indexer::get")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::large::indexer::get"))]
     pub fn get(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         self.shards[shard].read().get(&hash).cloned()
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::indexer::remove")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large::indexer::remove")
+    )]
     pub fn remove(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         self.shards[shard].write().remove(&hash)
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::indexer::remove_batch")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large::indexer::remove_batch")
+    )]
     pub fn remove_batch(&self, hashes: &[u64]) -> Vec<EntryAddress> {
         let shards = hashes.iter().into_group_map_by(|&hash| self.shard(*hash));
 
@@ -99,7 +108,7 @@ impl Indexer {
         olds
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::indexer::clear")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::large::indexer::clear"))]
     pub fn clear(&self) {
         self.shards.iter().for_each(|shard| shard.write().clear());
     }

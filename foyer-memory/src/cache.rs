@@ -605,7 +605,7 @@ where
     P: Properties,
 {
     /// Update capacity and evict overflowed entries.
-    #[fastrace::trace(name = "foyer::memory::cache::resize")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::resize"))]
     pub fn resize(&self, capacity: usize) -> Result<()> {
         match self {
             Cache::Fifo(cache) => cache.resize(capacity),
@@ -616,7 +616,7 @@ where
     }
 
     /// Insert cache entry to the in-memory cache.
-    #[fastrace::trace(name = "foyer::memory::cache::insert")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::insert"))]
     pub fn insert(&self, key: K, value: V) -> CacheEntry<K, V, S, P> {
         match self {
             Cache::Fifo(cache) => cache.insert(key, value).into(),
@@ -627,7 +627,10 @@ where
     }
 
     /// Insert cache entry to the in-memory cache with properties.
-    #[fastrace::trace(name = "foyer::memory::cache::insert_with_properties")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::cache::insert_with_properties")
+    )]
     pub fn insert_with_properties(&self, key: K, value: V, properties: P) -> CacheEntry<K, V, S, P> {
         match self {
             Cache::Fifo(cache) => cache.insert_with_properties(key, value, properties).into(),
@@ -638,7 +641,7 @@ where
     }
 
     /// Remove a cached entry with the given key from the in-memory cache.
-    #[fastrace::trace(name = "foyer::memory::cache::remove")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::remove"))]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>
     where
         Q: Hash + Equivalent<K> + ?Sized,
@@ -652,7 +655,7 @@ where
     }
 
     /// Get cached entry with the given key from the in-memory cache.
-    #[fastrace::trace(name = "foyer::memory::cache::get")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get"))]
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>
     where
         Q: Hash + Equivalent<K> + ?Sized,
@@ -666,7 +669,7 @@ where
     }
 
     /// Check if the in-memory cache contains a cached entry with the given key.
-    #[fastrace::trace(name = "foyer::memory::cache::contains")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::contains"))]
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<K> + ?Sized,
@@ -682,7 +685,7 @@ where
     /// Access the cached entry with the given key but don't return.
     ///
     /// Note: This method can be used to update the cache eviction information and order based on the algorithm.
-    #[fastrace::trace(name = "foyer::memory::cache::touch")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::touch"))]
     pub fn touch<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<K> + ?Sized,
@@ -696,7 +699,7 @@ where
     }
 
     /// Clear the in-memory cache.
-    #[fastrace::trace(name = "foyer::memory::cache::clear")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::clear"))]
     pub fn clear(&self) {
         match self {
             Cache::Fifo(cache) => cache.clear(),
@@ -782,7 +785,7 @@ where
     ///
     /// This function obeys the io throttler of the disk cache and make sure all entries will be offloaded.
     /// Therefore, this function is asynchronous.
-    #[fastrace::trace(name = "foyer::memory::raw::offload")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::offload"))]
     pub async fn flush(&self) {
         match self {
             Cache::Fifo(cache) => cache.flush().await,
@@ -921,7 +924,7 @@ where
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    #[fastrace::trace(name = "foyer::memory::cache::fetch")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
     pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S, P>
     where
         F: FnOnce() -> FU,
@@ -941,7 +944,7 @@ where
     /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
     ///
     /// The concurrent fetch requests will be deduplicated.
-    #[fastrace::trace(name = "foyer::memory::cache::fetch")]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
     pub fn fetch_with_properties<F, FU, ER>(&self, key: K, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
     where
         F: FnOnce() -> FU,

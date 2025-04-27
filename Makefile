@@ -1,21 +1,21 @@
 SHELL := /bin/bash
-.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt machete
+.PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt machete misc
 
 deps:
 	./scripts/install-deps.sh
 
-check:
+misc:
 	typos
 	shellcheck ./scripts/*
 	./scripts/minimize-dashboards.sh
+
+check:
 	cargo sort -w
 	taplo fmt
 	cargo fmt --all
 	cargo clippy --all-targets
 
 check-all:
-	shellcheck ./scripts/*
-	./scripts/minimize-dashboards.sh
 	cargo sort -w
 	taplo fmt
 	cargo fmt --all
@@ -50,10 +50,6 @@ example:
 	cargo run --example export_metrics_prometheus_hyper
 	cargo run --features serde --example serde
 
-full: check-all test-all example machete udeps
-
-fast: ffmt check test example machete
-
 msrv:
 	shellcheck ./scripts/*
 	./scripts/minimize-dashboards.sh
@@ -80,3 +76,7 @@ clear:
 
 ffmt:
 	cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml
+
+all: misc ffmt check-all test-all example machete udeps
+
+fast: misc ffmt check test example machete

@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "tracing")]
+pub use crate::common::tracing::TracingOptions;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
         code::{Code, CodeError, CodeResult, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
         properties::{Age, Hint, Location, Source},
-        tracing::TracingOptions,
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
     hybrid::{

@@ -286,7 +286,7 @@ Contributions for *foyer* are warmly welcomed! 🥰
 
 Don't forget to pass `make fast` (which means fast check & test) locally before submitting a PR. 🚀
 
-If you want to run a broader range of checks locally, run `make full`. 🙌
+If you want to run a broader range of checks locally, run `make all`. 🙌
 
 Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
 

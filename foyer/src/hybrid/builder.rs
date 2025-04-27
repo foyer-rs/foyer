@@ -15,11 +15,12 @@
 use std::{borrow::Cow, fmt::Debug, sync::Arc};
 
 use ahash::RandomState;
+#[cfg(feature = "tracing")]
+use foyer_common::tracing::TracingOptions;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     event::EventListener,
     metrics::Metrics,
-    tracing::TracingOptions,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
@@ -87,6 +88,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
     /// Set tracing options.
     ///
     /// Default: Only operations over 1s will be recorded.
+    #[cfg(feature = "tracing")]
     pub fn with_tracing_options(mut self, tracing_options: TracingOptions) -> Self {
         self.options.tracing_options = tracing_options;
         self

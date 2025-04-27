@@ -24,6 +24,7 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "tracing")]
 use fastrace::prelude::*;
 use foyer_common::{
     bits,
@@ -315,7 +316,10 @@ where
         Ok(())
     }
 
-    #[fastrace::trace(name = "foyer::storage::large::generic::enqueue")]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large::generic::enqueue")
+    )]
     fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
@@ -360,7 +364,7 @@ where
         let metrics = self.inner.metrics.clone();
         let region_manager = self.inner.region_manager.clone();
 
-        async move {
+        let load = async move {
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
@@ -468,8 +472,10 @@ where
                 value,
                 populated: Populated { age },
             })
-        }
-        .in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"))
+        };
+        #[cfg(feature = "tracing")]
+        let load = load.in_span(Span::enter_with_local_parent("foyer::storage::large::generic::load"));
+        load
     }
 
     fn delete(&self, hash: u64) {

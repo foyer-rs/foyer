@@ -16,7 +16,7 @@ ahash = { workspace = true }
 bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = "1"
-fastrace = { workspace = true }
+fastrace = { workspace = true, optional = true }
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
