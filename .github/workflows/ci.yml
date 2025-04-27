@@ -205,6 +205,9 @@ jobs:
       - name: Run rust clippy check (stable)
         if: matrix.rust_toolchain == 'stable'
         run: |
+          cargo clippy -p foyer
+          cargo clippy -p foyer --features "tracing"
+          cargo clippy -p foyer --no-default-features
           cargo clippy --all-targets ${{ matrix.serde }} --features tokio-console -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features deadlock -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features tracing -- -D warnings
