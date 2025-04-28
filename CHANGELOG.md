@@ -9,6 +9,38 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-04-28
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.17.0 |
+| foyer-common | 0.17.0 |
+| foyer-memory | 0.17.0 |
+| foyer-storage | 0.17.0 |
+| foyer-bench | 0.17.0 |
+
+### Changes
+
+- Refine entry-level properties.
+  - Packing `ephemeral`, `hint`, `location` into `CacheProperties` and `HybridCacheProperties`, use `insert_with_properties()` and `fetch_with_properties()` for setting them.
+  - Migration from `foyer < v0.17.0`: Repleace `.insert_with_hint(..)`, `.insert_ephemeral(..)`, etc with `insert_with_properties(..)` and `fetch_with_properties(..)`.
+- Refine disk cache insertion with entries populated from the disk cache.
+  - Use an age-based FIFO policy to manager large object disk cache.
+  - Track the source of in-memory cache entries.
+  - When an in-memory cache entry is being inserted into the disk cache, the disk cache will determine if to skip it according to its resource and age. Entries populated from the disk cache and are not going to evicted soon will be skipped.
+- Support flush entries in the in-memory cache to the disk cache on closing the hybrid cache.
+  - Migration from `foyer < v0.17.0`: Enable by `.with_flush_on_close(true)` with the hybrid cache builder.
+- Refine io throttling.
+  - Support advanced io throttling by read/write IOPS/throughput, and support count IOs by IO count or by IO count with IO size.
+  - Migration from `foyer < v0.17.0`: Please set io throttling for device, instead of using `RateLimiterAmissionPicker`.
+- Support request deduplication and one-flight optimization with `fetch(..)` interface for the disk cache.
+  - Migration from `foyer < v0.17.0`: Use `.fetch_with_properties(..)` API and set the `location` of `HybridCacheProperties` to `Location::OnDisk`.
+- Miscs:
+  - Opt-out tracing dependency by default, enable it by enabling `tracing` feature.
+  - Bump `mixtrics` to `v0.1`.
+
 ## 2025-04-22
 
 ### Releases
