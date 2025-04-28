@@ -41,6 +41,130 @@ date: 2023-05-12T11:02:09+08:00
   - Opt-out tracing dependency by default, enable it by enabling `tracing` feature.
   - Bump `mixtrics` to `v0.1`.
 
+Latest `foyer-bench` usage:
+
+```
+bench tool for foyer - Hybrid cache for Rust
+
+Usage: foyer-bench [OPTIONS] <--file <FILE>|--dir <DIR>|--no-disk>
+
+Options:
+      --no-disk
+          Run with in-memory cache compatible mode
+  -f, --file <FILE>
+          File for disk cache data. Use `DirectFile` as device
+  -d, --dir <DIR>
+          Directory for disk cache data. Use `DirectFs` as device
+      --mem <MEM>
+          In-memory cache capacity [default: "1.0 GiB"]
+      --disk <DISK>
+          Disk cache capacity [default: "1.0 GiB"]
+  -t, --time <TIME>
+          (s) [default: 60]
+      --report-interval <REPORT_INTERVAL>
+          (s) [default: 2]
+      --w-rate <W_RATE>
+          Write rate limit per writer [default: "0 B"]
+      --r-rate <R_RATE>
+          Read rate limit per reader [default: "0 B"]
+      --entry-size-min <ENTRY_SIZE_MIN>
+          Min entry size [default: "64.0 KiB"]
+      --entry-size-max <ENTRY_SIZE_MAX>
+          Max entry size [default: "64.0 KiB"]
+      --get-range <GET_RANGE>
+          Reader lookup key range [default: 10000]
+      --region-size <REGION_SIZE>
+          Disk cache region size [default: "64.0 MiB"]
+      --flushers <FLUSHERS>
+          Flusher count [default: 4]
+      --reclaimers <RECLAIMERS>
+          Reclaimer count [default: 4]
+      --writers <WRITERS>
+          Writer count [default: 16]
+      --readers <READERS>
+          Reader count [default: 16]
+      --recover-mode <RECOVER_MODE>
+          [default: none] [possible values: none, quiet, strict]
+      --recover-concurrency <RECOVER_CONCURRENCY>
+          Recover concurrency [default: 16]
+      --disk-write-iops <DISK_WRITE_IOPS>
+          Disk write iops throttle [default: 0]
+      --disk-read-iops <DISK_READ_IOPS>
+          Disk read iops throttle [default: 0]
+      --disk-write-throughput <DISK_WRITE_THROUGHPUT>
+          Disk write throughput throttle [default: "0 B"]
+      --disk-read-throughput <DISK_READ_THROUGHPUT>
+          Disk read throughput throttle [default: "0 B"]
+      --clean-region-threshold <CLEAN_REGION_THRESHOLD>
+          `0` means use default [default: 0]
+      --shards <SHARDS>
+          Shards of both in-memory cache and disk cache indexer [default: 64]
+      --metrics
+          weigher to enable metrics exporter
+      --user-runtime-worker-threads <USER_RUNTIME_WORKER_THREADS>
+          Benchmark user runtime worker threads [default: 0]
+      --runtime <RUNTIME>
+          Dedicated runtime type [default: disabled] [possible values: disabled, unified, separated]
+      --runtime-worker-threads <RUNTIME_WORKER_THREADS>
+          Dedicated runtime worker threads [default: 0]
+      --runtime-max-blocking-threads <RUNTIME_MAX_BLOCKING_THREADS>
+          Max threads for blocking io [default: 0]
+      --write-runtime-worker-threads <WRITE_RUNTIME_WORKER_THREADS>
+          Dedicated runtime for writes worker threads [default: 0]
+      --write-runtime-max-blocking-threads <WRITE_RUNTIME_MAX_BLOCKING_THREADS>
+          Dedicated runtime for writes Max threads for blocking io [default: 0]
+      --read-runtime-worker-threads <READ_RUNTIME_WORKER_THREADS>
+          Dedicated runtime for reads worker threads [default: 0]
+      --read-runtime-max-blocking-threads <READ_RUNTIME_MAX_BLOCKING_THREADS>
+          Dedicated runtime for writes max threads for blocking io [default: 0]
+      --compression <COMPRESSION>
+          compression algorithm [default: none] [possible values: none, zstd, lz4]
+      --engine <ENGINE>
+          Disk cache engine [default: large]
+      --distribution <DISTRIBUTION>
+          Time-series operation distribution [default: none]
+      --distribution-zipf-n <DISTRIBUTION_ZIPF_N>
+          For `--distribution zipf` only [default: 100]
+      --distribution-zipf-s <DISTRIBUTION_ZIPF_S>
+          For `--distribution zipf` only [default: 0.5]
+      --warm-up <WARM_UP>
+          [default: 2]
+      --flush
+          
+      --invalid-ratio <INVALID_RATIO>
+          [default: 0.8]
+      --eviction <EVICTION>
+          [default: lru] [possible values: lru, lfu, fifo, s3fifo]
+      --policy <POLICY>
+          [default: eviction] [possible values: eviction, insertion]
+      --buffer-pool-size <BUFFER_POOL_SIZE>
+          [default: "16.0 MiB"]
+      --blob-index-size <BLOB_INDEX_SIZE>
+          [default: "4.0 KiB"]
+      --set-size <SET_SIZE>
+          [default: "16.0 KiB"]
+      --set-cache-capacity <SET_CACHE_CAPACITY>
+          [default: 64]
+      --trace-insert <TRACE_INSERT>
+          Record insert trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-get <TRACE_GET>
+          Record get trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-obtain <TRACE_OBTAIN>
+          Record obtain trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-remove <TRACE_REMOVE>
+          Record remove trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-fetch <TRACE_FETCH>
+          Record fetch trace threshold. Only effective with "tracing" feature [default: 1s]
+      --flush-on-close
+          
+      --lodc-fifo-probation-ratio <LODC_FIFO_PROBATION_RATIO>
+          [default: 0.1]
+  -h, --help
+          Print help (see more with '--help')
+  -V, --version
+          Print version
+```
+
 ## 2025-04-22
 
 ### Releases
