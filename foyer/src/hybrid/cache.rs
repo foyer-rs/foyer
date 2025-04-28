@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use super::writer::HybridCacheStorageWriter;
-use crate::HybridCacheWriter;
+use crate::{HybridCacheBuilder, HybridCacheWriter};
 
 #[cfg(feature = "tracing")]
 macro_rules! root_span {
@@ -350,6 +350,17 @@ where
             #[cfg(feature = "tracing")]
             tracing_config: self.tracing_config.clone(),
         }
+    }
+}
+
+impl<K, V> HybridCache<K, V, RandomState>
+where
+    K: StorageKey,
+    V: StorageValue,
+{
+    /// Create a new hybrid cache builder.
+    pub fn builder() -> HybridCacheBuilder<K, V> {
+        HybridCacheBuilder::new()
     }
 }
 
