@@ -46,7 +46,6 @@ zstd = "0.13"
 [dev-dependencies]
 bytesize = { workspace = true }
 foyer-memory = { workspace = true, features = ["test_utils"] }
-foyer-storage = { workspace = true, features = ["test_utils"] }
 tempfile = "3"
 test-log = { workspace = true }
 
@@ -86,3 +85,7 @@ strict_assertions = [
 
 [lints]
 workspace = true
+
+[[test]]
+name = "storage_fuzzy_test"
+required-features = ["test_utils"]
