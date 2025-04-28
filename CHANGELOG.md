@@ -38,6 +38,7 @@ date: 2023-05-12T11:02:09+08:00
 - Support request deduplication and one-flight optimization with `fetch(..)` interface for the disk cache.
   - Migration from `foyer < v0.17.0`: Use `.fetch_with_properties(..)` API and set the `location` of `HybridCacheProperties` to `Location::OnDisk`.
 - Miscs:
+  - Add `builder()` API for `Cache` and `HybridCache` to create builders.
   - Opt-out tracing dependency by default, enable it by enabling `tracing` feature.
   - Bump `mixtrics` to `v0.1`.
 
