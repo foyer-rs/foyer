@@ -169,6 +169,13 @@ impl EntryDeserializer {
         K: StorageKey,
         V: StorageValue,
     {
+        if buffer.len() < value_len + ken_len {
+            return Err(Error::OutOfRange {
+                valid: 0..buffer.len(),
+                get: 0..value_len + ken_len,
+            });
+        }
+
         // deserialize value
         let buf = &buffer[..value_len];
         let value = Self::deserialize_value(buf, compression)?;
