@@ -44,7 +44,7 @@ pub trait DevConfig: Send + Sync + 'static + Debug {}
 impl<T: Send + Sync + 'static + Debug> DevConfig for T {}
 
 /// Device iops counter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IopsCounter {
     /// Count 1 iops for each read/write.
@@ -76,7 +76,7 @@ impl IopsCounter {
 }
 
 /// Throttle config for the device.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Throttle {
     /// The maximum write iops for the device.
