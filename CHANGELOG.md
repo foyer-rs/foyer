@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-05-09
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.17.1 |
+| foyer-common | 0.17.1 |
+| foyer-memory | 0.17.1 |
+| foyer-storage | 0.17.1 |
+| foyer-bench | 0.17.1 |
+
+### Changes
+
+- Refine load error handling to prevent from panics on disk data corruption.
+- Derive `Partial, Eq` for `Throttle` and `IopsCounter`.
+
 ## 2025-04-28
 
 ### Releases
