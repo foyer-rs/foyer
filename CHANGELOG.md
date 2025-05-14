@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-05-14
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.17.2 |
+| foyer-common | 0.17.2 |
+| foyer-memory | 0.17.2 |
+| foyer-storage | 0.17.2 |
+| foyer-bench | 0.17.2 |
+
+### Changes
+
+- Fix disk cache return wrong entry on key hash collision.
+
 ## 2025-05-09
 
 ### Releases

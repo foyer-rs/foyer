@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.17.1"
+version = "0.17.2"
 edition = "2021"
 rust-version = "1.81.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -23,10 +23,10 @@ readme = "README.md"
 
 [workspace.dependencies]
 # foyer components
-foyer-common = { version = "0.17.1", path = "foyer-common" }
-foyer-memory = { version = "0.17.1", path = "foyer-memory" }
-foyer-storage = { version = "0.17.1", path = "foyer-storage" }
-foyer = { version = "0.17.1", path = "foyer" }
+foyer-common = { version = "0.17.2", path = "foyer-common" }
+foyer-memory = { version = "0.17.2", path = "foyer-memory" }
+foyer-storage = { version = "0.17.2", path = "foyer-storage" }
+foyer = { version = "0.17.2", path = "foyer" }
 
 # dependencies
 ahash = "0.8"
