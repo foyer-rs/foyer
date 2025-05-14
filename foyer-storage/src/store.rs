@@ -1137,6 +1137,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use foyer_common::hasher::ModRandomState;
     use foyer_memory::CacheBuilder;
 
     use super::*;
@@ -1156,5 +1157,43 @@ mod tests {
             .build()
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_entry_hash_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u128, String, ModRandomState> = CacheBuilder::new(10)
+            .with_hash_builder(ModRandomState::default())
+            .build();
+
+        // let k1 = 1u128;
+        // let k2 = 1u128 + 1 + u64::MAX as u128;
+
+        let e1 = memory.insert(1, "foo".to_string());
+        let e2 = memory.insert(1 + 1 + u64::MAX as u128, "bar".to_string());
+
+        assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
+
+        let store = StoreBuilder::new("test", memory, metrics, Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir.path())
+                    .with_capacity(4 * 1024 * 1024)
+                    .with_file_size(1024 * 1024),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        store.enqueue(e1.piece(), true);
+        store.enqueue(e2.piece(), true);
+        store.wait().await;
+
+        let l1 = store.load(e1.key()).await.unwrap();
+        let l2 = store.load(e2.key()).await.unwrap();
+
+        assert!(matches!(l1, Load::Miss));
+        assert!(matches!(l2, Load::Entry { .. }));
+        assert_eq!(l2.entry().unwrap().1, "bar");
     }
 }
