@@ -1167,9 +1167,6 @@ mod tests {
             .with_hash_builder(ModRandomState::default())
             .build();
 
-        // let k1 = 1u128;
-        // let k2 = 1u128 + 1 + u64::MAX as u128;
-
         let e1 = memory.insert(1, "foo".to_string());
         let e2 = memory.insert(1 + 1 + u64::MAX as u128, "bar".to_string());
 
