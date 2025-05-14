@@ -256,7 +256,8 @@ where
                 value: v,
                 populated: p,
             }),
-            Ok(l) => Ok(l),
+            Ok(Load::Entry { .. }) | Ok(Load::Miss) => Ok(Load::Miss),
+            Ok(Load::Throttled) => Ok(Load::Throttled),
             Err(e) => Err(e),
         }
     }
