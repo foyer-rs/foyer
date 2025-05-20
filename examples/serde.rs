@@ -49,7 +49,7 @@ impl Code for Bar {
         reader.read_exact(&mut buf)?;
         let b_len = u64::from_le_bytes(buf) as usize;
         let bytes = vec![0u8; b_len];
-        let b = String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let b = String::from_utf8(bytes).map_err(std::io::Error::other)?;
         Ok(Self { a, b })
     }
 
