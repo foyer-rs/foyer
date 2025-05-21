@@ -23,10 +23,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
-use foyer_storage::{
-    AdmissionPicker, Compression, DeviceOptions, Engine, LargeEngineOptions, RecoverMode, RuntimeOptions,
-    SmallEngineOptions, StoreBuilder,
-};
+use foyer_storage::{AdmissionPicker, Compression, DeviceOptions, Engine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use super::cache::{HybridCacheOptions, HybridCachePipe};
@@ -312,34 +309,6 @@ where
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_options(self, runtime_options: RuntimeOptions) -> Self {
         let builder = self.builder.with_runtime_options(runtime_options);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Setup the large object disk cache engine with the given options.
-    ///
-    /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
-    pub fn with_large_object_disk_cache_options(self, options: LargeEngineOptions<K, V, S>) -> Self {
-        let builder = self.builder.with_large_object_disk_cache_options(options);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Setup the small object disk cache engine with the given options.
-    ///
-    /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
-    pub fn with_small_object_disk_cache_options(self, options: SmallEngineOptions<K, V, S>) -> Self {
-        let builder = self.builder.with_small_object_disk_cache_options(options);
         Self {
             name: self.name,
             options: self.options,

@@ -12,17 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    borrow::Cow,
-    fmt::{Debug, Display},
-    hash::Hash,
-    marker::PhantomData,
-    str::FromStr,
-    sync::Arc,
-    time::Instant,
-};
+use std::{borrow::Cow, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc, time::Instant};
 
-use ahash::RandomState;
 use equivalent::Equivalent;
 use foyer_common::{
     bits,
@@ -345,26 +336,23 @@ impl From<DirectFsDeviceOptions> for DeviceOptions {
 /// If [`Engine::Mixed`] is used, it will use the `Either` engine
 /// with the small object disk cache as the left engine,
 /// and the large object disk cache as the right engine.
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
 pub enum Engine {
-    /// All space are used as the large object disk cache.
-    Large,
-    /// All space are used as the small object disk cache.
-    Small,
-    /// Mixed the large object disk cache and the small object disk cache.
-    ///
-    /// The argument controls the ratio of the small object disk cache.
-    ///
-    /// Range: [0 ~ 1]
-    Mixed(f64),
-}
-
-impl Default for Engine {
-    fn default() -> Self {
-        // TODO(MrCroxx): Use Mixed cache after small object disk cache is ready.
-        Self::Large
-    }
+    /// Large object disk cache storage engine.
+    Large(LargeEngineOptions),
+    /// Small object disk cache storage engine.
+    Small(SmallEngineOptions),
+    /// Mixed large object disk cache and small object disk cache.
+    Mixed {
+        /// The ratio of the small object disk cache.
+        ///
+        /// Range: [0 ~ 1]
+        ratio: f64,
+        /// Large object disk cache storage engine options.
+        large: LargeEngineOptions,
+        /// Small object disk cache storage engine options.
+        small: SmallEngineOptions,
+    },
 }
 
 impl Engine {
@@ -373,51 +361,25 @@ impl Engine {
     /// Check the large object disk cache first, for checking it does NOT involve disk ops.
     pub const MIXED_LOAD_ORDER: Order = Order::RightFirst;
 
-    /// Default large object disk cache only config.
+    /// Large object disk cache storage engine with default configurations.
     pub fn large() -> Self {
-        Self::Large
+        Self::Large(LargeEngineOptions::default())
     }
 
-    /// Default small object disk cache only config.
+    /// Small object disk cache storage engine with default configurations.
     pub fn small() -> Self {
-        Self::Small
+        Self::Small(SmallEngineOptions::default())
     }
 
-    /// Default mixed large object disk cache and small object disk cache config.
+    /// Mixed large and small object disk cache storage engine with default configurations.
+    ///
+    /// The ratio of the small object disk cache is set to `0.1`.
     pub fn mixed() -> Self {
-        Self::Mixed(0.1)
-    }
-}
-
-impl Display for Engine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Engine::Large => write!(f, "large"),
-            Engine::Small => write!(f, "small"),
-            Engine::Mixed(ratio) => write!(f, "mixed({ratio})"),
+        Self::Mixed {
+            ratio: 0.1,
+            large: LargeEngineOptions::default(),
+            small: SmallEngineOptions::default(),
         }
-    }
-}
-
-impl FromStr for Engine {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        const MIXED_PREFIX: &str = "mixed=";
-
-        match s {
-            "large" => return Ok(Engine::Large),
-            "small" => return Ok(Engine::Small),
-            _ => {}
-        }
-
-        if s.starts_with(MIXED_PREFIX) {
-            if let Ok(ratio) = s[MIXED_PREFIX.len()..s.len()].parse::<f64>() {
-                return Ok(Engine::Mixed(ratio));
-            }
-        }
-
-        Err(format!("invalid input: {s}"))
     }
 }
 
@@ -478,9 +440,6 @@ where
     compression: Compression,
     recover_mode: RecoverMode,
     flush: bool,
-
-    large: LargeEngineOptions<K, V, S>,
-    small: SmallEngineOptions<K, V, S>,
 }
 
 impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
@@ -502,8 +461,6 @@ where
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
             .field("flush", &self.flush)
-            .field("large", &self.large)
-            .field("small", &self.small)
             .finish()
     }
 }
@@ -522,7 +479,7 @@ where
         metrics: Arc<Metrics>,
         engine: Engine,
     ) -> Self {
-        if matches!(engine, Engine::Mixed(ratio) if !(0.0..=1.0).contains(&ratio)) {
+        if matches!(engine, Engine::Mixed{ ratio, .. } if !(0.0..=1.0).contains(&ratio)) {
             panic!("mixed engine small object disk cache ratio must be a f64 in range [0.0, 1.0]");
         }
 
@@ -539,9 +496,6 @@ where
             compression: Compression::None,
             recover_mode: RecoverMode::Quiet,
             flush: false,
-
-            large: LargeEngineOptions::new(),
-            small: SmallEngineOptions::new(),
         }
     }
 
@@ -590,28 +544,6 @@ where
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
         self.runtime_config = runtime_options;
-        self
-    }
-
-    /// Setup the large object disk cache engine with the given options.
-    ///
-    /// Otherwise, the default options will be used. See [`LargeEngineOptions`].
-    pub fn with_large_object_disk_cache_options(mut self, options: LargeEngineOptions<K, V, S>) -> Self {
-        if matches!(self.engine, Engine::Small) {
-            tracing::warn!("[store builder]: Setting up large object disk cache options, but only small object disk cache is enabled.");
-        }
-        self.large = options;
-        self
-    }
-
-    /// Setup the small object disk cache engine with the given options.
-    ///
-    /// Otherwise, the default options will be used. See [`SmallEngineOptions`].
-    pub fn with_small_object_disk_cache_options(mut self, options: SmallEngineOptions<K, V, S>) -> Self {
-        if matches!(self.engine, Engine::Large) {
-            tracing::warn!("[store builder]: Setting up small object disk cache options, but only large object disk cache is enabled.");
-        }
-        self.small = options;
         self
     }
 
@@ -684,61 +616,61 @@ where
                             Err(e) =>return Err(e),
                         };
                         match self.engine {
-                            Engine::Large => {
+                            Engine::Large(large) => {
                                 let regions = 0..device.regions() as RegionId;
                                 EngineEnum::open(EngineConfig::Large(GenericLargeStorageConfig {
                                     device,
                                     regions,
                                     compression: self.compression,
                                     flush: self.flush,
-                                    indexer_shards: self.large.indexer_shards,
+                                    indexer_shards: large.indexer_shards,
                                     recover_mode: self.recover_mode,
-                                    recover_concurrency: self.large.recover_concurrency,
-                                    flushers: self.large.flushers,
-                                    reclaimers: self.large.reclaimers,
-                                    clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
-                                    eviction_pickers: self.large.eviction_pickers,
-                                    reinsertion_picker: self.large.reinsertion_picker,
-                                    tombstone_log_config: self.large.tombstone_log_config,
-                                    buffer_pool_size: self.large.buffer_pool_size,
-                                    blob_index_size: self.large.blob_index_size,
-                                    submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                    recover_concurrency: large.recover_concurrency,
+                                    flushers: large.flushers,
+                                    reclaimers: large.reclaimers,
+                                    clean_region_threshold: large.clean_region_threshold.unwrap_or(large.reclaimers),
+                                    eviction_pickers: large.eviction_pickers,
+                                    reinsertion_picker: large.reinsertion_picker,
+                                    tombstone_log_config: large.tombstone_log_config,
+                                    buffer_pool_size: large.buffer_pool_size,
+                                    blob_index_size: large.blob_index_size,
+                                    submit_queue_size_threshold: large.submit_queue_size_threshold.unwrap_or(large.buffer_pool_size * 2),
                                     runtime,
                                     marker: PhantomData,
                                 }))
                                 .await
                             }
-                            Engine::Small => {
+                            Engine::Small(small) => {
                                 let regions = 0..device.regions() as RegionId;
                                 EngineEnum::open(EngineConfig::Small(GenericSmallStorageConfig {
-                                    set_size: self.small.set_size,
-                                    set_cache_capacity: self.small.set_cache_capacity,
-                                    set_cache_shards: self.small.set_cache_shards,
+                                    set_size: small.set_size,
+                                    set_cache_capacity: small.set_cache_capacity,
+                                    set_cache_shards: small.set_cache_shards,
                                     device,
                                     regions,
                                     flush: self.flush,
-                                    flushers: self.small.flushers,
-                                    buffer_pool_size: self.small.buffer_pool_size,
+                                    flushers: small.flushers,
+                                    buffer_pool_size: small.buffer_pool_size,
                                     runtime,
                                     marker: PhantomData,
                                 }))
                                 .await
                             }
-                            Engine::Mixed(ratio) => {
+                            Engine::Mixed{ratio, large, small} => {
                                 let small_region_count = std::cmp::max((device.regions() as f64 * ratio) as usize,1);
                                 let small_regions = 0..small_region_count as RegionId;
                                 let large_regions = small_region_count as RegionId..device.regions() as RegionId;
                                 EngineEnum::open(EngineConfig::Mixed(EitherConfig {
                                     selector: SizeSelector::new(Engine::OBJECT_SIZE_THRESHOLD),
                                     left: GenericSmallStorageConfig {
-                                        set_size: self.small.set_size,
-                                        set_cache_capacity: self.small.set_cache_capacity,
-                                        set_cache_shards: self.small.set_cache_shards,
+                                        set_size: small.set_size,
+                                        set_cache_capacity: small.set_cache_capacity,
+                                        set_cache_shards: small.set_cache_shards,
                                         device: device.clone(),
                                         regions: small_regions,
                                         flush: self.flush,
-                                        flushers: self.small.flushers,
-                                        buffer_pool_size: self.small.buffer_pool_size,
+                                        flushers: small.flushers,
+                                        buffer_pool_size: small.buffer_pool_size,
                                         runtime: runtime.clone(),
                                         marker: PhantomData,
                                     },
@@ -747,18 +679,18 @@ where
                                         regions: large_regions,
                                         compression: self.compression,
                                         flush: self.flush,
-                                        indexer_shards: self.large.indexer_shards,
+                                        indexer_shards: large.indexer_shards,
                                         recover_mode: self.recover_mode,
-                                        recover_concurrency: self.large.recover_concurrency,
-                                        flushers: self.large.flushers,
-                                        reclaimers: self.large.reclaimers,
-                                        clean_region_threshold: self.large.clean_region_threshold.unwrap_or(self.large.reclaimers),
-                                        eviction_pickers: self.large.eviction_pickers,
-                                        reinsertion_picker: self.large.reinsertion_picker,
-                                        tombstone_log_config: self.large.tombstone_log_config,
-                                        buffer_pool_size: self.large.buffer_pool_size,
-                                        blob_index_size: self.large.blob_index_size,
-                                        submit_queue_size_threshold: self.large.submit_queue_size_threshold.unwrap_or(self.large.buffer_pool_size * 2),
+                                        recover_concurrency: large.recover_concurrency,
+                                        flushers: large.flushers,
+                                        reclaimers: large.reclaimers,
+                                        clean_region_threshold: large.clean_region_threshold.unwrap_or(large.reclaimers),
+                                        eviction_pickers: large.eviction_pickers,
+                                        reinsertion_picker: large.reinsertion_picker,
+                                        tombstone_log_config: large.tombstone_log_config,
+                                        buffer_pool_size: large.buffer_pool_size,
+                                        blob_index_size: large.blob_index_size,
+                                        submit_queue_size_threshold: large.submit_queue_size_threshold.unwrap_or(large.buffer_pool_size * 2),
                                         runtime,
                                         marker: PhantomData,
                                     },
@@ -819,12 +751,8 @@ where
 }
 
 /// Large object disk cache engine default options.
-pub struct LargeEngineOptions<K, V, S = RandomState>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+#[derive(Debug)]
+pub struct LargeEngineOptions {
     indexer_shards: usize,
     recover_concurrency: usize,
     flushers: usize,
@@ -836,50 +764,15 @@ where
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
     tombstone_log_config: Option<TombstoneLogConfig>,
-
-    _marker: PhantomData<(K, V, S)>,
 }
 
-impl<K, V, S> Debug for LargeEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LargeEngineOptions")
-            .field("indexer_shards", &self.indexer_shards)
-            .field("recover_concurrency", &self.recover_concurrency)
-            .field("flushers", &self.flushers)
-            .field("reclaimers", &self.reclaimers)
-            .field("buffer_pool_size", &self.buffer_pool_size)
-            .field("blob_index_size", &self.blob_index_size)
-            .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
-            .field("clean_region_threshold", &self.clean_region_threshold)
-            .field("eviction_pickers", &self.eviction_pickers)
-            .field("reinsertion_picker", &self.reinsertion_picker)
-            .field("tombstone_log_config", &self.tombstone_log_config)
-            .finish()
-    }
-}
-
-impl<K, V, S> Default for LargeEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+impl Default for LargeEngineOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V, S> LargeEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+impl LargeEngineOptions {
     /// Create large object disk cache engine default options.
     pub fn new() -> Self {
         Self {
@@ -894,7 +787,6 @@ where
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
             tombstone_log_config: None,
-            _marker: PhantomData,
         }
     }
 
@@ -1021,56 +913,23 @@ where
 }
 
 /// Small object disk cache engine default options.
-pub struct SmallEngineOptions<K, V, S = RandomState>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+#[derive(Debug)]
+pub struct SmallEngineOptions {
     set_size: usize,
     set_cache_capacity: usize,
     set_cache_shards: usize,
     buffer_pool_size: usize,
     flushers: usize,
-
-    _marker: PhantomData<(K, V, S)>,
 }
 
-impl<K, V, S> Debug for SmallEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SmallEngineOptions")
-            .field("set_size", &self.set_size)
-            .field("set_cache_capacity", &self.set_cache_capacity)
-            .field("set_cache_shards", &self.set_cache_shards)
-            .field("buffer_pool_size", &self.buffer_pool_size)
-            .field("flushers", &self.flushers)
-            .finish()
-    }
-}
-
-impl<K, V, S> Default for SmallEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+impl Default for SmallEngineOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
 /// Create small object disk cache engine default options.
-impl<K, V, S> SmallEngineOptions<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
+impl SmallEngineOptions {
     /// Create small object disk cache engine default options.
     pub fn new() -> Self {
         Self {
@@ -1079,7 +938,6 @@ where
             set_cache_shards: 4,
             flushers: 1,
             buffer_pool_size: 4 * 1024 * 1024, // 4 MiB
-            _marker: PhantomData,
         }
     }
 
@@ -1147,16 +1005,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
-        let _ = StoreBuilder::new("test", memory, metrics, Engine::Large)
-            .with_device_options(DirectFsDeviceOptions::new(dir.path()))
-            .with_large_object_disk_cache_options(
+        let _ = StoreBuilder::new(
+            "test",
+            memory,
+            metrics,
+            Engine::Large(
                 LargeEngineOptions::new()
                     .with_flushers(3)
                     .with_buffer_pool_size(128 * 1024 * 1024),
-            )
-            .build()
-            .await
-            .unwrap();
+            ),
+        )
+        .with_device_options(DirectFsDeviceOptions::new(dir.path()))
+        .build()
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -1172,7 +1034,7 @@ mod tests {
 
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
-        let store = StoreBuilder::new("test", memory, metrics, Engine::Large)
+        let store = StoreBuilder::new("test", memory, metrics, Engine::Large(LargeEngineOptions::default()))
             .with_device_options(
                 DirectFsDeviceOptions::new(dir.path())
                     .with_capacity(4 * 1024 * 1024)

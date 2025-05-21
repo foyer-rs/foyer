@@ -107,20 +107,24 @@ fn basic(
     recorder: &Arc<Recorder>,
 ) -> StoreBuilder<u64, Vec<u8>, ModRandomState, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
-    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()), Engine::Large)
-        .with_device_options(
-            DirectFsDeviceOptions::new(path)
-                .with_capacity(4 * MB)
-                .with_file_size(MB),
-        )
-        .with_admission_picker(recorder.clone())
-        .with_flush(true)
-        .with_large_object_disk_cache_options(
+    StoreBuilder::new(
+        "test",
+        memory.clone(),
+        Arc::new(Metrics::noop()),
+        Engine::Large(
             LargeEngineOptions::new()
                 .with_recover_concurrency(2)
                 .with_indexer_shards(4)
                 .with_reinsertion_picker(recorder.clone()),
-        )
+        ),
+    )
+    .with_device_options(
+        DirectFsDeviceOptions::new(path)
+            .with_capacity(4 * MB)
+            .with_file_size(MB),
+    )
+    .with_admission_picker(recorder.clone())
+    .with_flush(true)
 }
 
 #[test_log::test(tokio::test)]
