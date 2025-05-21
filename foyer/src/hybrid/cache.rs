@@ -928,7 +928,7 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::Large)
+            .storage(Engine::large())
             .with_device_options(
                 DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
@@ -948,7 +948,7 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::Large)
+            .storage(Engine::large())
             .with_device_options(
                 DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
@@ -970,7 +970,7 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::Large)
+            .storage(Engine::large())
             .with_device_options(
                 DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
@@ -992,7 +992,7 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::Large)
+            .storage(Engine::large())
             .with_device_options(
                 DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)
@@ -1015,7 +1015,7 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModRandomState::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::Large)
+            .storage(Engine::large())
             .with_device_options(
                 DirectFsDeviceOptions::new(dir)
                     .with_capacity(16 * MB)

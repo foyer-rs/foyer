@@ -37,7 +37,27 @@ async fn main() -> Result<()> {
         })
         .with_hash_builder(ahash::RandomState::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage(Engine::Mixed(0.1))
+        .storage(Engine::Mixed {
+            ratio: 0.1,
+            large: LargeEngineOptions::new()
+                .with_indexer_shards(64)
+                .with_recover_concurrency(8)
+                .with_flushers(2)
+                .with_reclaimers(2)
+                .with_buffer_pool_size(256 * 1024 * 1024)
+                .with_clean_region_threshold(4)
+                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
+                .with_tombstone_log_config(
+                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
+                        .with_flush(true)
+                        .build(),
+                ),
+            small: SmallEngineOptions::new()
+                .with_set_size(16 * 1024)
+                .with_set_cache_capacity(64)
+                .with_flushers(2),
+        })
         .with_device_options(
             DirectFsDeviceOptions::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
@@ -65,28 +85,6 @@ async fn main() -> Result<()> {
                 max_blocking_threads: 8,
             },
         })
-        .with_large_object_disk_cache_options(
-            LargeEngineOptions::new()
-                .with_indexer_shards(64)
-                .with_recover_concurrency(8)
-                .with_flushers(2)
-                .with_reclaimers(2)
-                .with_buffer_pool_size(256 * 1024 * 1024)
-                .with_clean_region_threshold(4)
-                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
-                .with_tombstone_log_config(
-                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                        .with_flush(true)
-                        .build(),
-                ),
-        )
-        .with_small_object_disk_cache_options(
-            SmallEngineOptions::new()
-                .with_set_size(16 * 1024)
-                .with_set_cache_capacity(64)
-                .with_flushers(2),
-        )
         .build()
         .await?;
 

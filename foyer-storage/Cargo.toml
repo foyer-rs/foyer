@@ -12,7 +12,6 @@ license = { workspace = true }
 readme = { workspace = true }
 
 [dependencies]
-ahash = { workspace = true }
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
 allocator-api2 = "0.2"
 anyhow = "1.0"

@@ -220,8 +220,8 @@ struct Args {
 
     // TODO(MrCroxx): use mixed engine by default.
     /// Disk cache engine.
-    #[arg(long, default_value_t = Engine::Large)]
-    engine: Engine,
+    #[arg(long, default_value = "large")]
+    engine: String,
 
     /// Time-series operation distribution.
     ///
@@ -496,9 +496,42 @@ async fn benchmark(args: Args) {
         create_dir_all(dir).unwrap();
     }
 
+    let mut large = LargeEngineOptions::new()
+        .with_indexer_shards(args.shards)
+        .with_recover_concurrency(args.recover_concurrency)
+        .with_flushers(args.flushers)
+        .with_reclaimers(args.reclaimers)
+        .with_eviction_pickers(vec![
+            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+            Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
+        ])
+        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
+        .with_blob_index_size(args.blob_index_size.as_u64() as _);
+
+    let small = SmallEngineOptions::new()
+        .with_flushers(args.flushers)
+        .with_set_size(args.set_size.as_u64() as _)
+        .with_set_cache_capacity(args.set_cache_capacity);
+
+    if args.clean_region_threshold > 0 {
+        large = large.with_clean_region_threshold(args.clean_region_threshold);
+    }
+
+    let hint = r#"incorrect engine format, supported: "large", "small", "mixed=<ratio>"."#;
+    let engine = match args.engine.as_str() {
+        "large" => Engine::Large(large),
+        "small" => Engine::Small(small),
+        s if s.starts_with("mixed=") => Engine::Mixed {
+            ratio: s[6..].parse::<f64>().expect(hint),
+            large,
+            small,
+        },
+        _ => panic!("{hint}"),
+    };
+
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
-        .storage(args.engine);
+        .storage(engine);
 
     let throttle = Throttle::default()
         .with_read_iops(args.disk_read_iops)
@@ -546,33 +579,7 @@ async fn benchmark(args: Args) {
             _ => unreachable!(),
         });
 
-    let mut large = LargeEngineOptions::new()
-        .with_indexer_shards(args.shards)
-        .with_recover_concurrency(args.recover_concurrency)
-        .with_flushers(args.flushers)
-        .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![
-            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-            Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
-        ])
-        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
-        .with_blob_index_size(args.blob_index_size.as_u64() as _);
-
-    let small = SmallEngineOptions::new()
-        .with_flushers(args.flushers)
-        .with_set_size(args.set_size.as_u64() as _)
-        .with_set_cache_capacity(args.set_cache_capacity);
-
-    if args.clean_region_threshold > 0 {
-        large = large.with_clean_region_threshold(args.clean_region_threshold);
-    }
-
-    let hybrid = builder
-        .with_large_object_disk_cache_options(large)
-        .with_small_object_disk_cache_options(small)
-        .build()
-        .await
-        .unwrap();
+    let hybrid = builder.build().await.unwrap();
 
     #[cfg(feature = "tracing")]
     hybrid.enable_tracing();

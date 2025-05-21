@@ -64,7 +64,7 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
     let hybrid: HybridCache<u64, V> = HybridCacheBuilder::new()
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(64 * 1024 * 1024)
-        .storage(Engine::Large) // use large object disk cache engine only
+        .storage(Engine::large()) // use large object disk cache engine only
         .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
         .build()
         .await?;
