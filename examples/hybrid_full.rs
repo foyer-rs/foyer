@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use chrono::Datelike;
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         .with_eviction_config(LruConfig {
             high_priority_pool_ratio: 0.1,
         })
-        .with_hash_builder(ahash::RandomState::default())
+        .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
         .storage(Engine::Mixed {
             ratio: 0.1,

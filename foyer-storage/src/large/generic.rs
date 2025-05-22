@@ -358,6 +358,8 @@ where
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
+        tracing::trace!(hash, "[lodc]: load");
+
         let now = Instant::now();
 
         let indexer = self.inner.indexer.clone();

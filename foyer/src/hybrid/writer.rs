@@ -14,17 +14,18 @@
 
 use std::{
     fmt::Debug,
+    hash::BuildHasherDefault,
     time::{Duration, Instant},
 };
 
-use ahash::RandomState;
+use ahash::AHasher;
 use foyer_common::code::{HashBuilder, StorageKey, StorageValue};
 use foyer_storage::Pick;
 
 use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
 
 /// Writer for hybrid cache to support more flexible write APIs.
-pub struct HybridCacheWriter<K, V, S = RandomState>
+pub struct HybridCacheWriter<K, V, S = BuildHasherDefault<AHasher>>
 where
     K: StorageKey,
     V: StorageValue,
@@ -61,7 +62,7 @@ where
 }
 
 /// Writer for disk cache of a hybrid cache to support more flexible write APIs.
-pub struct HybridCacheStorageWriter<K, V, S = RandomState>
+pub struct HybridCacheStorageWriter<K, V, S = BuildHasherDefault<AHasher>>
 where
     K: StorageKey,
     V: StorageValue,
