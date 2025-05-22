@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{borrow::Cow, fmt::Debug, hash::BuildHasherDefault, sync::Arc};
+use std::{borrow::Cow, fmt::Debug, sync::Arc};
 
-use ahash::AHasher;
 #[cfg(feature = "tracing")]
 use foyer_common::tracing::TracingOptions;
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     event::EventListener,
     metrics::Metrics,
 };
@@ -113,7 +112,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
     }
 
     /// Continue to modify the in-memory cache configurations.
-    pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, BuildHasherDefault<AHasher>>
+    pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, DefaultHasher>
     where
         K: StorageKey,
         V: StorageValue,

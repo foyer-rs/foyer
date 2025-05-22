@@ -16,7 +16,6 @@ features = ["serde", "tracing", "nightly", "deadlock", "strict_assertions"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-ahash = { workspace = true }
 anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
