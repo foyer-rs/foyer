@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-05-22
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.17.3 |
+| foyer-common | 0.17.3 |
+| foyer-memory | 0.17.3 |
+| foyer-storage | 0.17.3 |
+| foyer-bench | 0.17.3 |
+
+### Changes
+
+- Use `DefaultHasher` (alias for `std::hash::BuilderHasherDefault<ahash::AHaser>`) as the default hasher to guarantee hash algorithm stable across runs.
+
 ## 2025-05-14
 
 ### Releases
