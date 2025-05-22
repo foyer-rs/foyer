@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hash};
+use std::hash::{BuildHasher, BuildHasherDefault, Hash};
 
 /// Key trait for the in-memory cache.
 pub trait Key: Send + Sync + 'static + Hash + Eq {}
@@ -25,6 +25,11 @@ impl<T: Send + Sync + 'static> Value for T {}
 /// Hash builder trait.
 pub trait HashBuilder: BuildHasher + Send + Sync + 'static {}
 impl<T> HashBuilder for T where T: BuildHasher + Send + Sync + 'static {}
+
+/// The default hasher for foyer.
+///
+/// It is guaranteed that the hash results of the same key are the same across different runs.
+pub type DefaultHasher = BuildHasherDefault<ahash::AHasher>;
 
 /// Code error.
 #[derive(Debug, thiserror::Error)]

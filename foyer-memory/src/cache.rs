@@ -14,10 +14,9 @@
 
 use std::{borrow::Cow, fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
 
-use ahash::RandomState;
 use equivalent::Equivalent;
 use foyer_common::{
-    code::{HashBuilder, Key, Value},
+    code::{DefaultHasher, HashBuilder, Key, Value},
     event::EventListener,
     future::Diversion,
     metrics::Metrics,
@@ -108,25 +107,25 @@ impl Properties for CacheProperties {
     }
 }
 
-pub type FifoCache<K, V, S = RandomState, P = CacheProperties> = RawCache<Fifo<K, V, P>, S>;
-pub type FifoCacheEntry<K, V, S = RandomState, P = CacheProperties> = RawCacheEntry<Fifo<K, V, P>, S>;
-pub type FifoFetch<K, V, ER, S = RandomState, P = CacheProperties> = RawFetch<Fifo<K, V, P>, ER, S>;
+pub type FifoCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<Fifo<K, V, P>, S>;
+pub type FifoCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<Fifo<K, V, P>, S>;
+pub type FifoFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<Fifo<K, V, P>, ER, S>;
 
-pub type S3FifoCache<K, V, S = RandomState, P = CacheProperties> = RawCache<S3Fifo<K, V, P>, S>;
-pub type S3FifoCacheEntry<K, V, S = RandomState, P = CacheProperties> = RawCacheEntry<S3Fifo<K, V, P>, S>;
-pub type S3FifoFetch<K, V, ER, S = RandomState, P = CacheProperties> = RawFetch<S3Fifo<K, V, P>, ER, S>;
+pub type S3FifoCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<S3Fifo<K, V, P>, S>;
+pub type S3FifoCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<S3Fifo<K, V, P>, S>;
+pub type S3FifoFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<S3Fifo<K, V, P>, ER, S>;
 
-pub type LruCache<K, V, S = RandomState, P = CacheProperties> = RawCache<Lru<K, V, P>, S>;
-pub type LruCacheEntry<K, V, S = RandomState, P = CacheProperties> = RawCacheEntry<Lru<K, V, P>, S>;
-pub type LruFetch<K, V, ER, S = RandomState, P = CacheProperties> = RawFetch<Lru<K, V, P>, ER, S>;
+pub type LruCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<Lru<K, V, P>, S>;
+pub type LruCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<Lru<K, V, P>, S>;
+pub type LruFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<Lru<K, V, P>, ER, S>;
 
-pub type LfuCache<K, V, S = RandomState, P = CacheProperties> = RawCache<Lfu<K, V, P>, S>;
-pub type LfuCacheEntry<K, V, S = RandomState, P = CacheProperties> = RawCacheEntry<Lfu<K, V, P>, S>;
-pub type LfuFetch<K, V, ER, S = RandomState, P = CacheProperties> = RawFetch<Lfu<K, V, P>, ER, S>;
+pub type LfuCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<Lfu<K, V, P>, S>;
+pub type LfuCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<Lfu<K, V, P>, S>;
+pub type LfuFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<Lfu<K, V, P>, ER, S>;
 
 /// A cached entry holder of the in-memory cache.
 #[derive(Debug)]
-pub enum CacheEntry<K, V, S = RandomState, P = CacheProperties>
+pub enum CacheEntry<K, V, S = DefaultHasher, P = CacheProperties>
 where
     K: Key,
     V: Value,
@@ -374,7 +373,7 @@ where
     metrics: Option<Arc<Metrics>>,
 }
 
-impl<K, V> CacheBuilder<K, V, RandomState>
+impl<K, V> CacheBuilder<K, V, DefaultHasher>
 where
     K: Key,
     V: Value,
@@ -388,7 +387,7 @@ where
             shards: 8,
             eviction_config: LruConfig::default().into(),
 
-            hash_builder: RandomState::default(),
+            hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
 
@@ -535,7 +534,7 @@ where
 }
 
 /// In-memory cache with plug-and-play algorithms.
-pub enum Cache<K, V, S = RandomState, P = CacheProperties>
+pub enum Cache<K, V, S = DefaultHasher, P = CacheProperties>
 where
     K: Key,
     V: Value,
@@ -586,13 +585,13 @@ where
     }
 }
 
-impl<K, V> Cache<K, V, RandomState, CacheProperties>
+impl<K, V> Cache<K, V, DefaultHasher, CacheProperties>
 where
     K: Key,
     V: Value,
 {
     /// Create a new in-memory cache builder with capacity.
-    pub fn builder(capacity: usize) -> CacheBuilder<K, V, RandomState> {
+    pub fn builder(capacity: usize) -> CacheBuilder<K, V, DefaultHasher> {
         CacheBuilder::new(capacity)
     }
 }
@@ -798,7 +797,7 @@ where
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
 #[pin_project(project = FetchProj)]
-pub enum Fetch<K, V, ER, S = RandomState, P = CacheProperties>
+pub enum Fetch<K, V, ER, S = DefaultHasher, P = CacheProperties>
 where
     K: Key,
     V: Value,

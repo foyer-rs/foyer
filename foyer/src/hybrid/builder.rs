@@ -14,11 +14,10 @@
 
 use std::{borrow::Cow, fmt::Debug, sync::Arc};
 
-use ahash::RandomState;
 #[cfg(feature = "tracing")]
 use foyer_common::tracing::TracingOptions;
 use foyer_common::{
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     event::EventListener,
     metrics::Metrics,
 };
@@ -113,7 +112,7 @@ impl<K, V> HybridCacheBuilder<K, V> {
     }
 
     /// Continue to modify the in-memory cache configurations.
-    pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, RandomState>
+    pub fn memory(self, capacity: usize) -> HybridCacheBuilderPhaseMemory<K, V, DefaultHasher>
     where
         K: StorageKey,
         V: StorageValue,

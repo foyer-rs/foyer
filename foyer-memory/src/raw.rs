@@ -1251,6 +1251,26 @@ mod tests {
         assert_eq!(pieces, expected);
     }
 
+    #[test]
+    fn test_insert_size_over_capacity() {
+        let cache: RawCache<Fifo<Vec<u8>, Vec<u8>, TestProperties>, ModRandomState> = RawCache::new(RawCacheConfig {
+            capacity: 4 * 1024, // 4KB
+            shards: 1,
+            eviction_config: FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|k, v| k.len() + v.len()),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        });
+
+        let key = vec![b'k'; 1024]; // 1KB
+        let value = vec![b'v'; 5 * 1024]; // 5KB
+
+        cache.insert(key.clone(), value.clone());
+        assert_eq!(cache.usage(), 6 * 1024);
+        assert_eq!(cache.get(&key).unwrap().value(), &value);
+    }
+
     fn test_resize<E>(cache: &RawCache<E, ModRandomState, HashTableIndexer<E>>)
     where
         E: Eviction<Key = u64, Value = u64>,
