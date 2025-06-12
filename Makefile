@@ -23,6 +23,7 @@ check-all:
 	cargo clippy --all-targets --features tokio-console -- -A "clippy::large_enum_variant"
 	cargo clippy --all-targets --features tracing
 	cargo clippy --all-targets --features serde
+	cargo clippy --all-targets --features clap
 	cargo clippy --all-targets
 
 test:
