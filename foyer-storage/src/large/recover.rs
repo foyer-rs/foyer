@@ -43,7 +43,7 @@ use crate::{
 };
 
 /// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum RecoverMode {
@@ -53,6 +53,7 @@ pub enum RecoverMode {
     /// entry when reopen.
     None,
     /// Recover disk cache and skip errors.
+    #[default]
     Quiet,
     /// Recover disk cache and panic on errors.
     Strict,
