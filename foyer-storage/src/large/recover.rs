@@ -20,7 +20,6 @@ use std::{
     time::Instant,
 };
 
-use clap::ValueEnum;
 use foyer_common::code::{StorageKey, StorageValue};
 use futures_util::future::try_join_all;
 use itertools::Itertools;
@@ -44,8 +43,9 @@ use crate::{
 };
 
 /// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum RecoverMode {
     /// Do not recover disk cache.
     ///
@@ -53,6 +53,7 @@ pub enum RecoverMode {
     /// entry when reopen.
     None,
     /// Recover disk cache and skip errors.
+    #[default]
     Quiet,
     /// Recover disk cache and panic on errors.
     Strict,

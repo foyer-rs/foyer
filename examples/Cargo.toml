@@ -12,6 +12,17 @@ license = { workspace = true }
 readme = { workspace = true }
 publish = false
 
+[features]
+serde = ["foyer/serde"]
+jaeger = ["fastrace-jaeger"]
+ot = [
+  "fastrace-opentelemetry",
+  "opentelemetry",
+  "opentelemetry-otlp",
+  "opentelemetry-semantic-conventions",
+  "opentelemetry_sdk",
+]
+
 [dependencies]
 anyhow = { workspace = true }
 chrono = "0.4"
@@ -39,17 +50,6 @@ serde = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
 tracing = { workspace = true }
-
-[features]
-serde = ["foyer/serde"]
-jaeger = ["fastrace-jaeger"]
-ot = [
-  "fastrace-opentelemetry",
-  "opentelemetry",
-  "opentelemetry-otlp",
-  "opentelemetry-semantic-conventions",
-  "opentelemetry_sdk",
-]
 
 [[example]]
 name = "memory"

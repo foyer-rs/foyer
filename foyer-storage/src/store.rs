@@ -493,8 +493,8 @@ where
             runtime_config: RuntimeOptions::Disabled,
 
             admission_picker: Arc::<AdmitAllPicker>::default(),
-            compression: Compression::None,
-            recover_mode: RecoverMode::Quiet,
+            compression: Compression::default(),
+            recover_mode: RecoverMode::default(),
             flush: false,
         }
     }

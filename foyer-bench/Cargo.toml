@@ -11,6 +11,15 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 
+[features]
+default = ["jemalloc"]
+deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
+tokio-console = ["dep:console-subscriber"]
+strict_assertions = ["foyer/strict_assertions"]
+jemalloc = ["dep:tikv-jemallocator"]
+jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
+tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+
 [dependencies]
 anyhow = { workspace = true }
 bytesize = { workspace = true }
@@ -18,7 +27,7 @@ clap = { workspace = true }
 console-subscriber = { version = "0.4", optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { version = "0.7", optional = true }
-foyer = { workspace = true, features = ["tracing"] }
+foyer = { workspace = true, features = ["tracing", "clap"] }
 futures-util = { workspace = true }
 hdrhistogram = "7"
 http-body-util = "0.1"
@@ -36,9 +45,6 @@ rand = { workspace = true }
 rand_distr = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.6", optional = true }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
@@ -62,14 +68,8 @@ tokio = { package = "tokio", version = "1", features = [
   "fs",
 ] }
 
-[features]
-default = ["jemalloc"]
-deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
-tokio-console = ["dep:console-subscriber"]
-strict_assertions = ["foyer/strict_assertions"]
-jemalloc = ["dep:tikv-jemallocator"]
-jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
-tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [lints]
 workspace = true

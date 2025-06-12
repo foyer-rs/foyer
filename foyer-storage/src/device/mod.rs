@@ -17,7 +17,12 @@ pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
 
-use std::{fmt::Debug, future::Future, num::NonZeroUsize};
+use std::{
+    fmt::{Debug, Display},
+    future::Future,
+    num::NonZeroUsize,
+    str::FromStr,
+};
 
 use direct_file::DirectFileDeviceConfig;
 use direct_fs::DirectFsDeviceConfig;
@@ -75,19 +80,50 @@ impl IopsCounter {
     }
 }
 
+impl Display for IopsCounter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IopsCounter::PerIo => write!(f, "PerIo"),
+            IopsCounter::PerIoSize(size) => write!(f, "PerIoSize({})", size),
+        }
+    }
+}
+
+impl FromStr for IopsCounter {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.trim() {
+            "PerIo" => Ok(IopsCounter::PerIo),
+            _ if s.starts_with("PerIoSize(") && s.ends_with(')') => {
+                let num = &s[10..s.len() - 1];
+                let v = num.parse::<NonZeroUsize>()?;
+                Ok(IopsCounter::PerIoSize(v))
+            }
+            _ => Err(anyhow::anyhow!("Invalid IopsCounter format: {}", s)),
+        }
+    }
+}
+
 /// Throttle config for the device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct Throttle {
     /// The maximum write iops for the device.
+    #[cfg_attr(feature = "clap", clap(long))]
     pub write_iops: Option<NonZeroUsize>,
     /// The maximum read iops for the device.
+    #[cfg_attr(feature = "clap", clap(long))]
     pub read_iops: Option<NonZeroUsize>,
     /// The maximum write throughput for the device.
+    #[cfg_attr(feature = "clap", clap(long))]
     pub write_throughput: Option<NonZeroUsize>,
     /// The maximum read throughput for the device.
+    #[cfg_attr(feature = "clap", clap(long))]
     pub read_throughput: Option<NonZeroUsize>,
     /// The iops counter for the device.
+    #[cfg_attr(feature = "clap", clap(long, default_value = "PerIo"))]
     pub iops_counter: IopsCounter,
 }
 

@@ -14,15 +14,15 @@
 
 // TODO(MrCroxx): unify compress interface?
 
-use clap::ValueEnum;
-
 use crate::error::Error;
 
 /// The compression algorithm of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Compression {
     /// No compression enabled.
+    #[default]
     None,
     /// Use zstd compression.
     Zstd,
