@@ -10,13 +10,11 @@ misc:
 	./scripts/minimize-dashboards.sh
 
 check:
-	cargo sort -w
 	taplo fmt
 	cargo fmt --all
 	cargo clippy --all-targets
 
 check-all:
-	cargo sort -w
 	taplo fmt
 	cargo fmt --all
 	cargo clippy --all-targets --features deadlock
