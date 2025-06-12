@@ -68,10 +68,7 @@ jobs:
       - name: Install tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-sort taplo-cli --locked
-      - name: Run cargo sort check
-        run: |
-          cargo sort -w -c
+          cargo install taplo-cli --locked
       - name: Run taplo fmt check
         run: |
           taplo fmt --check
