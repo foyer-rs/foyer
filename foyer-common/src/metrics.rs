@@ -160,7 +160,7 @@ impl Metrics {
             &["name", "op"],
         );
         let foyer_storage_disk_io_bytes = registry.register_counter_vec(
-            "foyer_storage_disk_io_bytes".into(),
+            "foyer_storage_disk_io_bytes_total".into(),
             "foyer disk cache disk io bytes".into(),
             &["name", "op"],
         );
