@@ -24,6 +24,5 @@ types:
   - ci
   - chore
   - revert
-  - deps
 
 targetUrl: https://github.com/foyer-rs/foyer/blob/main/.github/semantic.yml
