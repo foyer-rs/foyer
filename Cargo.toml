@@ -42,7 +42,8 @@ futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
 itertools = "0.14"
-mixtrics = "0.1"
+# TODO(MrCroxx): switch to a released version
+mixtrics = { git = "https://github.com/foyer-rs/mixtrics", rev = "02208d006003fe8eed001228ca1ffe1a56597ba0" }
 parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
