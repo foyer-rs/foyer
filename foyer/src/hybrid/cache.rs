@@ -703,6 +703,12 @@ where
         HybridCacheStorageWriter::new(self.clone(), key)
     }
 
+    /// Return `true` if the hybrid cache is running in real hybrid cache mode.
+    /// Return `false` if the hybrid cache is running in in-memory mode but with hybrid cache compatible APIs.
+    pub fn is_hybrid(&self) -> bool {
+        self.storage.is_enabled()
+    }
+
     pub(crate) fn storage(&self) -> &Store<K, V, S, HybridCacheProperties> {
         &self.storage
     }

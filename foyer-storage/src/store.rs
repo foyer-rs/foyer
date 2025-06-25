@@ -308,6 +308,11 @@ where
     pub fn load_throttle_switch(&self) -> &LoadThrottleSwitch {
         &self.inner.load_throttle_switch
     }
+
+    /// If the disk cache is enabled.
+    pub fn is_enabled(&self) -> bool {
+        !matches! { self.inner.engine, EngineEnum::Noop(_)}
+    }
 }
 
 /// The configurations for the device.
