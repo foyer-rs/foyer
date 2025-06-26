@@ -127,7 +127,7 @@ where
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
     ) -> Arc<Record<E>> {
-        std::mem::swap(waiters, &mut self.waiters.lock().remove(&data.key).unwrap_or_default());
+        *waiters = self.waiters.lock().remove(&data.key).unwrap_or_default();
 
         let weight = data.weight;
         let old_usage = self.usage;

@@ -351,7 +351,7 @@ pub async fn monitor(
             &new_metrics_dump,
         );
         println!("[{}s/{}s]", start.elapsed().as_secs(), total_secs.as_secs());
-        println!("{}", analysis);
+        println!("{analysis}");
         stat = new_stat;
         metrics_dump = new_metrics_dump;
     }

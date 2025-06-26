@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod allocator;
 pub mod direct_file;
 pub mod direct_fs;
 pub mod monitor;
@@ -84,7 +83,7 @@ impl Display for IopsCounter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IopsCounter::PerIo => write!(f, "PerIo"),
-            IopsCounter::PerIoSize(size) => write!(f, "PerIoSize({})", size),
+            IopsCounter::PerIoSize(size) => write!(f, "PerIoSize({size})"),
         }
     }
 }
