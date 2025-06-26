@@ -320,7 +320,7 @@ impl TimeSeriesDistribution {
                     interval,
                 }
             }
-            other => panic!("unsupported distribution: {}", other),
+            other => panic!("unsupported distribution: {other}"),
         }
     }
 }
@@ -412,7 +412,7 @@ fn teardown() {
 
 fn main() {
     let args = Args::parse();
-    println!("{:#?}", args);
+    println!("{args:#?}");
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     if args.user_runtime_worker_threads != 0 {
@@ -442,7 +442,7 @@ async fn benchmark(args: Args) {
 
             println!("{} deadlocks detected", deadlocks.len());
             for (i, threads) in deadlocks.iter().enumerate() {
-                println!("Deadlock #{}", i);
+                println!("Deadlock #{i}");
                 for t in threads {
                     println!("Thread Id {:#?}", t.thread_id());
                     println!("{:#?}", t.backtrace());
@@ -628,7 +628,7 @@ async fn benchmark(args: Args) {
     handle_monitor.abort();
     handle_signal.abort();
 
-    println!("\nTotal:\n{}", analysis);
+    println!("\nTotal:\n{analysis}");
     println!("Close takes: {close:?}");
 
     teardown();

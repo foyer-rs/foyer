@@ -119,7 +119,7 @@ mod tests {
         let mut eratios = vec![];
         for handle in handles {
             let eratio = handle.join().unwrap();
-            assert!(eratio < ERATIO, "eratio: {} < ERATIO: {}", eratio, ERATIO);
+            assert!(eratio < ERATIO, "eratio: {eratio} < ERATIO: {ERATIO}");
             eratios.push(eratio);
         }
         println!("========== RatedTicket error ratio begin ==========");

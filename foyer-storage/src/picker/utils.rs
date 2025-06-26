@@ -216,8 +216,7 @@ impl FifoPicker {
     pub fn new(probation_ratio: f64) -> Self {
         assert!(
             (0.0..=1.0).contains(&probation_ratio),
-            "probation ratio {} must be in [0.0, 1.0]",
-            probation_ratio
+            "probation ratio {probation_ratio} must be in [0.0, 1.0]"
         );
         Self {
             queue: VecDeque::new(),

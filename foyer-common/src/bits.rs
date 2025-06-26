@@ -72,13 +72,13 @@ pub fn is_pow2<U: Unsigned>(v: U) -> bool {
 /// Assert that the given value is a power of 2.
 #[inline(always)]
 pub fn assert_pow2<U: Unsigned>(v: U) {
-    assert_eq!(v & (v - U::from(1)), U::from(0), "v: {}", v);
+    assert_eq!(v & (v - U::from(1)), U::from(0), "v: {v}");
 }
 
 /// Debug assert that the given value is a power of 2.
 #[inline(always)]
 pub fn debug_assert_pow2<U: Unsigned>(v: U) {
-    debug_assert_eq!(v & (v - U::from(1)), U::from(0), "v: {}", v);
+    debug_assert_eq!(v & (v - U::from(1)), U::from(0), "v: {v}");
 }
 
 /// Check if the given value is aligned with the given align.
@@ -96,7 +96,7 @@ pub fn is_aligned<U: Unsigned>(align: U, v: U) -> bool {
 #[inline(always)]
 pub fn assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
-    assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
+    assert!(is_aligned(align, v), "align: {align}, v: {v}");
 }
 
 /// Debug assert that the given value is aligned with the given align.
@@ -105,7 +105,7 @@ pub fn assert_aligned<U: Unsigned>(align: U, v: U) {
 #[inline(always)]
 pub fn debug_assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
-    debug_assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
+    debug_assert!(is_aligned(align, v), "align: {align}, v: {v}");
 }
 
 /// Align up the given value with the given align.
