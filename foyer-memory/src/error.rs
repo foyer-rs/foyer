@@ -40,9 +40,9 @@ impl Display for MultipleError {
         write!(f, "multiple errors: [")?;
         if let Some((last, errs)) = self.0.as_slice().split_last() {
             for err in errs {
-                write!(f, "{}, ", err)?;
+                write!(f, "{err}, ")?;
             }
-            write!(f, "{}", last)?;
+            write!(f, "{last}")?;
         }
         write!(f, "]")?;
         Ok(())
