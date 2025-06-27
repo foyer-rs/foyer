@@ -1000,7 +1000,7 @@ impl SmallEngineOptions {
 
 #[cfg(test)]
 mod tests {
-    use foyer_common::hasher::ModRandomState;
+    use foyer_common::hasher::ModHasher;
     use foyer_memory::CacheBuilder;
 
     use super::*;
@@ -1030,9 +1030,8 @@ mod tests {
     async fn test_entry_hash_collision() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u128, String, ModRandomState> = CacheBuilder::new(10)
-            .with_hash_builder(ModRandomState::default())
-            .build();
+        let memory: Cache<u128, String, ModHasher> =
+            CacheBuilder::new(10).with_hash_builder(ModHasher::default()).build();
 
         let e1 = memory.insert(1, "foo".to_string());
         let e2 = memory.insert(1 + 1 + u64::MAX as u128, "bar".to_string());

@@ -14,15 +14,13 @@
 
 use std::hash::{BuildHasher, Hasher};
 
-pub use ahash::RandomState as AhashRandomState;
-
 /// A hasher return u64 mod result.
 #[derive(Debug, Default)]
-pub struct ModRandomState {
+pub struct ModHasher {
     state: u64,
 }
 
-impl Hasher for ModRandomState {
+impl Hasher for ModHasher {
     fn finish(&self) -> u64 {
         self.state
     }
@@ -82,7 +80,7 @@ impl Hasher for ModRandomState {
     }
 }
 
-impl BuildHasher for ModRandomState {
+impl BuildHasher for ModHasher {
     type Hasher = Self;
 
     fn build_hasher(&self) -> Self::Hasher {
@@ -97,7 +95,7 @@ mod tests {
     #[test]
     fn test_mod_hasher() {
         for i in 0..255u8 {
-            assert_eq!(i, ModRandomState::default().hash_one(i) as u8,)
+            assert_eq!(i, ModHasher::default().hash_one(i) as u8,)
         }
     }
 }
