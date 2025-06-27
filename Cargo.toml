@@ -24,7 +24,7 @@ readme = "README.md"
 [workspace.dependencies]
 
 # dependencies
-ahash = "0.8"
+twox-hash = "2"
 anyhow = "1"
 bincode = "1"
 bytes = "1"

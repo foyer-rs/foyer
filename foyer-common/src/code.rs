@@ -14,6 +14,8 @@
 
 use std::hash::{BuildHasher, BuildHasherDefault, Hash};
 
+use twox_hash::XxHash64;
+
 /// Key trait for the in-memory cache.
 pub trait Key: Send + Sync + 'static + Hash + Eq {}
 /// Value trait for the in-memory cache.
@@ -29,7 +31,7 @@ impl<T> HashBuilder for T where T: BuildHasher + Send + Sync + 'static {}
 /// The default hasher for foyer.
 ///
 /// It is guaranteed that the hash results of the same key are the same across different runs.
-pub type DefaultHasher = BuildHasherDefault<ahash::AHasher>;
+pub type DefaultHasher = BuildHasherDefault<XxHash64>;
 
 /// Code error.
 #[derive(Debug, thiserror::Error)]

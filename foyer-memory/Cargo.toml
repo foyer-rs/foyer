@@ -19,7 +19,6 @@ strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
 
 [dependencies]
-ahash = { workspace = true }
 arc-swap = "1"
 bitflags = "2"
 cmsketch = "0.2.1"

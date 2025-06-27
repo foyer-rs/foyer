@@ -432,7 +432,7 @@ where
     }
 }
 
-pub struct RawCache<E, S = ahash::RandomState, I = HashTableIndexer<E>>
+pub struct RawCache<E, S, I = HashTableIndexer<E>>
 where
     E: Eviction,
     S: HashBuilder,
@@ -773,7 +773,7 @@ where
     }
 }
 
-pub struct RawCacheEntry<E, S = ahash::RandomState, I = HashTableIndexer<E>>
+pub struct RawCacheEntry<E, S, I = HashTableIndexer<E>>
 where
     E: Eviction,
     S: HashBuilder,
@@ -948,7 +948,7 @@ where
     Miss,
 }
 
-pub type RawFetch<E, ER, S = ahash::RandomState, I = HashTableIndexer<E>> =
+pub type RawFetch<E, ER, S, I = HashTableIndexer<E>> =
     DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
@@ -1128,7 +1128,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use foyer_common::hasher::ModRandomState;
+    use foyer_common::hasher::ModHasher;
     use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
 
     use super::*;
@@ -1147,16 +1147,15 @@ mod tests {
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<RawCache<Fifo<(), (), TestProperties>>>();
-        is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>>>();
-        is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>>>();
-        is_send_sync_static::<RawCache<Lru<(), (), TestProperties>>>();
+        is_send_sync_static::<RawCache<Fifo<(), (), TestProperties>, ModHasher>>();
+        is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>, ModHasher>>();
+        is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>, ModHasher>>();
+        is_send_sync_static::<RawCache<Lru<(), (), TestProperties>, ModHasher>>();
     }
 
     #[expect(clippy::type_complexity)]
     fn fifo_cache_for_test(
-    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Fifo<u64, u64, TestProperties>>>
-    {
+    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1170,8 +1169,7 @@ mod tests {
 
     #[expect(clippy::type_complexity)]
     fn s3fifo_cache_for_test(
-    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>>
-    {
+    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1185,7 +1183,7 @@ mod tests {
 
     #[expect(clippy::type_complexity)]
     fn lru_cache_for_test(
-    ) -> RawCache<Lru<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
+    ) -> RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1199,7 +1197,7 @@ mod tests {
 
     #[expect(clippy::type_complexity)]
     fn lfu_cache_for_test(
-    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
+    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1253,7 +1251,7 @@ mod tests {
 
     #[test]
     fn test_insert_size_over_capacity() {
-        let cache: RawCache<Fifo<Vec<u8>, Vec<u8>, TestProperties>, ModRandomState> = RawCache::new(RawCacheConfig {
+        let cache: RawCache<Fifo<Vec<u8>, Vec<u8>, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
             capacity: 4 * 1024, // 4KB
             shards: 1,
             eviction_config: FifoConfig::default(),
@@ -1271,7 +1269,7 @@ mod tests {
         assert_eq!(cache.get(&key).unwrap().value(), &value);
     }
 
-    fn test_resize<E>(cache: &RawCache<E, ModRandomState, HashTableIndexer<E>>)
+    fn test_resize<E>(cache: &RawCache<E, ModHasher, HashTableIndexer<E>>)
     where
         E: Eviction<Key = u64, Value = u64>,
     {
@@ -1317,9 +1315,10 @@ mod tests {
 
         use super::*;
 
-        fn fuzzy<E>(cache: RawCache<E>, hints: Vec<Hint>)
+        fn fuzzy<E, S>(cache: RawCache<E, S>, hints: Vec<Hint>)
         where
             E: Eviction<Key = u64, Value = u64, Properties = TestProperties>,
+            S: HashBuilder,
         {
             let handles = (0..8)
                 .map(|i| {
@@ -1348,7 +1347,7 @@ mod tests {
 
         #[test_log::test]
         fn test_fifo_cache_fuzzy() {
-            let cache: RawCache<Fifo<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: FifoConfig::default(),
@@ -1363,7 +1362,7 @@ mod tests {
 
         #[test_log::test]
         fn test_s3fifo_cache_fuzzy() {
-            let cache: RawCache<S3Fifo<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: S3FifoConfig::default(),
@@ -1378,7 +1377,7 @@ mod tests {
 
         #[test_log::test]
         fn test_lru_cache_fuzzy() {
-            let cache: RawCache<Lru<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Lru<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: LruConfig::default(),
@@ -1393,7 +1392,7 @@ mod tests {
 
         #[test_log::test]
         fn test_lfu_cache_fuzzy() {
-            let cache: RawCache<Lfu<u64, u64, TestProperties>> = RawCache::new(RawCacheConfig {
+            let cache: RawCache<Lfu<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
                 capacity: 256,
                 shards: 4,
                 eviction_config: LfuConfig::default(),
