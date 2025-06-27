@@ -616,7 +616,7 @@ mod tests {
     use std::{fs::File, path::Path};
 
     use bytesize::ByteSize;
-    use foyer_common::hasher::ModRandomState;
+    use foyer_common::hasher::ModHasher;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
     use tokio::runtime::Handle;
@@ -632,11 +632,11 @@ mod tests {
 
     const KB: usize = 1024;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher, TestProperties> {
         CacheBuilder::new(10)
             .with_shards(1)
             .with_eviction_config(FifoConfig::default())
-            .with_hash_builder(ModRandomState::default())
+            .with_hash_builder(ModHasher::default())
             .build()
     }
 
@@ -721,7 +721,7 @@ mod tests {
 
     fn enqueue(
         store: &GenericLargeStorage<u64, Vec<u8>, TestProperties>,
-        entry: CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+        entry: CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
         store.enqueue(entry.piece(), estimated_size);

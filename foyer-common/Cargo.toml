@@ -11,8 +11,16 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 
+[package.metadata.cargo-udeps.ignore]
+# Only used in benches and with `serde` feature enabled.
+development = ["criterion", "serde_bytes"]
+
+[features]
+serde = ["dep:serde", "dep:bincode"]
+strict_assertions = []
+tracing = ["fastrace/enable"]
+
 [dependencies]
-ahash = { workspace = true }
 bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = "1"
@@ -23,16 +31,7 @@ parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-bytes = { version = "1", features = ["serde"] }
-criterion = { workspace = true }
-futures-util = { workspace = true }
-mixtrics = { workspace = true, features = ["test-utils"] }
-paste = { workspace = true }
-rand = { workspace = true }
-serde = { workspace = true }
-serde_bytes = "0.11"
+twox-hash = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
@@ -56,10 +55,15 @@ tokio = { package = "tokio", version = "1", features = [
   "fs",
 ] }
 
-[features]
-serde = ["dep:serde", "dep:bincode"]
-strict_assertions = []
-tracing = ["fastrace/enable"]
+[dev-dependencies]
+bytes = { version = "1", features = ["serde"] }
+criterion = { workspace = true }
+futures-util = { workspace = true }
+mixtrics = { workspace = true, features = ["test-utils"] }
+paste = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_bytes = "0.11"
 
 [lints]
 workspace = true
@@ -67,7 +71,3 @@ workspace = true
 [[bench]]
 name = "bench_serde"
 harness = false
-
-[package.metadata.cargo-udeps.ignore]
-# Only used in benches and with `serde` feature enabled.
-development = ["criterion", "serde_bytes"]

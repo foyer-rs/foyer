@@ -11,8 +11,14 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 
+[features]
+nightly = ["hashbrown/nightly"]
+test_utils = []
+deadlock = ["parking_lot/deadlock_detection"]
+strict_assertions = ["foyer-common/strict_assertions"]
+tracing = ["fastrace/enable", "foyer-common/tracing"]
+
 [dependencies]
-ahash = { workspace = true }
 arc-swap = "1"
 bitflags = "2"
 cmsketch = "0.2.1"
@@ -28,14 +34,6 @@ pin-project = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-csv = "1.3.0"
-futures-util = { workspace = true }
-moka = { version = "0.12", features = ["sync"] }
-rand = { workspace = true, features = ["small_rng"] }
-rand_distr = { workspace = true }
-test-log = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
@@ -59,12 +57,13 @@ tokio = { package = "tokio", version = "1", features = [
   "fs",
 ] }
 
-[features]
-nightly = ["hashbrown/nightly"]
-test_utils = []
-deadlock = ["parking_lot/deadlock_detection"]
-strict_assertions = ["foyer-common/strict_assertions"]
-tracing = ["fastrace/enable", "foyer-common/tracing"]
+[dev-dependencies]
+csv = "1.3.0"
+futures-util = { workspace = true }
+moka = { version = "0.12", features = ["sync"] }
+rand = { workspace = true, features = ["small_rng"] }
+rand_distr = { workspace = true }
+test-log = { workspace = true }
 
 [[bench]]
 name = "bench_hit_ratio"

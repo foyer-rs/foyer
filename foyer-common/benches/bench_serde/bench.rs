@@ -152,19 +152,19 @@ fn decode<V: StorageValue>(b: &mut Bencher, v: V, size: usize) {
 
 pub fn bench_encode(c: &mut Criterion) {
     for (s, size) in [("64K", 64 * K), ("4M", 4 * M)] {
-        c.bench_function(&format!("Vec<u8> value encode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value encode - {s}"), |b| {
             encode(b, VecU8Value::new(size), size);
         });
-        c.bench_function(&format!("Vec<u8> value serde encode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value serde encode - {s}"), |b| {
             encode(b, VecU8ValueSerde::new(size), size);
         });
-        c.bench_function(&format!("Vec<u8> value serde_bytes encode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value serde_bytes encode - {s}"), |b| {
             encode(b, VecU8ValueSerdeBytes::new(size), size);
         });
-        c.bench_function(&format!("Bytes value encode - {}", s), |b| {
+        c.bench_function(&format!("Bytes value encode - {s}"), |b| {
             encode(b, BytesValue::new(size), size);
         });
-        c.bench_function(&format!("Bytes value serde encode - {}", s), |b| {
+        c.bench_function(&format!("Bytes value serde encode - {s}"), |b| {
             encode(b, BytesValueSerde::new(size), size);
         });
     }
@@ -172,19 +172,19 @@ pub fn bench_encode(c: &mut Criterion) {
 
 pub fn bench_decode(c: &mut Criterion) {
     for (s, size) in [("64K", 64 * K), ("4M", 4 * M)] {
-        c.bench_function(&format!("Vec<u8> value decode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value decode - {s}"), |b| {
             decode(b, VecU8Value::new(size), size);
         });
-        c.bench_function(&format!("Vec<u8> value serde decode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value serde decode - {s}"), |b| {
             decode(b, VecU8ValueSerde::new(size), size);
         });
-        c.bench_function(&format!("Vec<u8> value serde_bytes decode - {}", s), |b| {
+        c.bench_function(&format!("Vec<u8> value serde_bytes decode - {s}"), |b| {
             decode(b, VecU8ValueSerdeBytes::new(size), size);
         });
-        c.bench_function(&format!("Bytes value decode - {}", s), |b| {
+        c.bench_function(&format!("Bytes value decode - {s}"), |b| {
             decode(b, BytesValue::new(size), size);
         });
-        c.bench_function(&format!("Bytes value serde decode - {}", s), |b| {
+        c.bench_function(&format!("Bytes value serde decode - {s}"), |b| {
             decode(b, BytesValueSerde::new(size), size);
         });
     }

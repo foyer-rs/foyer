@@ -11,6 +11,15 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 
+[features]
+default = ["jemalloc"]
+deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
+tokio-console = ["dep:console-subscriber"]
+strict_assertions = ["foyer/strict_assertions"]
+jemalloc = ["dep:tikv-jemallocator"]
+jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
+tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+
 [dependencies]
 anyhow = { workspace = true }
 bytesize = { workspace = true }
@@ -37,9 +46,6 @@ rand_distr = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.6", optional = true }
-
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",
@@ -62,14 +68,8 @@ tokio = { package = "tokio", version = "1", features = [
   "fs",
 ] }
 
-[features]
-default = ["jemalloc"]
-deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
-tokio-console = ["dep:console-subscriber"]
-strict_assertions = ["foyer/strict_assertions"]
-jemalloc = ["dep:tikv-jemallocator"]
-jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
-tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [lints]
 workspace = true
