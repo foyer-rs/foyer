@@ -18,8 +18,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
 };
@@ -27,7 +27,7 @@ use std::{
 use flume::{Receiver, Sender};
 use foyer_common::{countdown::Countdown, metrics::Metrics};
 use futures_core::future::BoxFuture;
-use futures_util::{future::Shared, FutureExt};
+use futures_util::{FutureExt, future::Shared};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use pin_project::pin_project;
@@ -35,11 +35,11 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
+    EvictionInfo,
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::Result,
     io::buffer::{IoBuf, IoBufMut},
     picker::EvictionPicker,
-    EvictionInfo,
 };
 
 /// Region statistics.

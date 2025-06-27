@@ -18,7 +18,7 @@ use foyer_common::{
     code::{Key, Value},
     properties::Properties,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{error::Result, record::Record};
 

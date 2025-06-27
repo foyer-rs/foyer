@@ -14,7 +14,7 @@
 
 use std::{
     fmt::Debug,
-    future::{ready, Future},
+    future::{Future, ready},
     pin::pin,
     sync::Arc,
 };
@@ -26,11 +26,11 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 use futures_util::{
-    future::{join, select, try_join, Either as EitherFuture},
     FutureExt,
+    future::{Either as EitherFuture, join, select, try_join},
 };
 
-use crate::{error::Result, storage::Storage, Load, Statistics, Throttle};
+use crate::{Load, Statistics, Throttle, error::Result, storage::Storage};
 
 /// Order of ops.
 #[derive(Debug, Clone, Copy)]

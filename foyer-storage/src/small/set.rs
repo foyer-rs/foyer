@@ -28,10 +28,10 @@ use foyer_common::{
 
 use super::{batch::Item, bloom_filter::BloomFilterU64, serde::EntryHeader};
 use crate::{
+    Compression,
     error::Result,
     io::buffer::IoBuffer,
     serde::{Checksummer, EntryDeserializer},
-    Compression,
 };
 
 pub type SetId = u64;
@@ -367,7 +367,7 @@ mod tests {
     use foyer_memory::{Cache, CacheBuilder, CacheEntry};
 
     use super::*;
-    use crate::{io::PAGE, serde::EntrySerializer, Compression};
+    use crate::{Compression, io::PAGE, serde::EntrySerializer};
 
     fn to_bytes(entry: &CacheEntry<u64, Vec<u8>>) -> Bytes {
         let mut buf = vec![];

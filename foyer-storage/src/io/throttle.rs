@@ -142,14 +142,14 @@ impl IoThrottler {
 mod tests {
     use std::{
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         time::Duration,
     };
 
     use itertools::Itertools;
-    use rand::{rng, Rng};
+    use rand::{Rng, rng};
 
     use super::*;
 

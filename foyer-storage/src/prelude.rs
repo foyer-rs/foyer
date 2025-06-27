@@ -15,9 +15,9 @@
 pub use crate::{
     compress::Compression,
     device::{
+        Dev, DevConfig, DevExt, IopsCounter, Throttle,
         direct_file::{DirectFileDevice, DirectFileDeviceOptions},
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-        Dev, DevConfig, DevExt, IopsCounter, Throttle,
     },
     error::{Error, Result},
     io::{
@@ -29,16 +29,16 @@ pub use crate::{
         tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
     },
     picker::{
+        AdmissionPicker, EvictionInfo, EvictionPicker, Pick, ReinsertionPicker,
         utils::{
             AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
             IoThrottlerPicker, IoThrottlerTarget, RejectAllPicker,
         },
-        AdmissionPicker, EvictionInfo, EvictionPicker, Pick, ReinsertionPicker,
     },
     region::{Region, RegionStatistics},
     runtime::Runtime,
     statistics::Statistics,
-    storage::{either::Order, Storage},
+    storage::{Storage, either::Order},
     store::{
         DeviceOptions, Engine, LargeEngineOptions, Load, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
         TokioRuntimeOptions,

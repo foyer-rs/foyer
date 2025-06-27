@@ -27,8 +27,8 @@ use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::{
-    future::{FutureExt, InSpan},
     Span,
+    future::{FutureExt, InSpan},
 };
 use foyer_common::{
     code::HashBuilder,
@@ -46,12 +46,12 @@ use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
+    Piece, Pipe,
     error::{Error, Result},
     eviction::{Eviction, Op},
-    indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
+    indexer::{Indexer, hash_table::HashTableIndexer, sentry::Sentry},
     pipe::NoopPipe,
     record::{Data, Record},
-    Piece, Pipe,
 };
 
 /// The weighter for the in-memory cache.
@@ -1075,7 +1075,7 @@ where
                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
                     record,
                     inner: self.inner.clone(),
-                })))
+                })));
             }
             RawShardFetch::Wait(future) => return RawFetch::new(RawFetchInner::Wait(future)),
             RawShardFetch::Miss => {}
@@ -1129,7 +1129,7 @@ where
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModRandomState;
-    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{
@@ -1154,9 +1154,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn fifo_cache_for_test(
-    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Fifo<u64, u64, TestProperties>>>
-    {
+    fn fifo_cache_for_test()
+    -> RawCache<Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1169,8 +1168,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn s3fifo_cache_for_test(
-    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>>
+    fn s3fifo_cache_for_test()
+    -> RawCache<S3Fifo<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>>
     {
         RawCache::new(RawCacheConfig {
             capacity: 256,
@@ -1184,8 +1183,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lru_cache_for_test(
-    ) -> RawCache<Lru<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
+    fn lru_cache_for_test()
+    -> RawCache<Lru<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1198,8 +1197,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lfu_cache_for_test(
-    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
+    fn lfu_cache_for_test()
+    -> RawCache<Lfu<u64, u64, TestProperties>, ModRandomState, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,

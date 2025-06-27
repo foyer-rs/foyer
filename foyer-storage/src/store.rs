@@ -28,29 +28,29 @@ use tokio::runtime::Handle;
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
 use crate::{
+    ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
+    Pick, Throttle,
     compress::Compression,
     device::{
-        monitor::{Monitored, MonitoredConfig},
         DeviceConfig, RegionId,
+        monitor::{Monitored, MonitoredConfig},
     },
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     io::PAGE,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
-        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
+        utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
     },
     runtime::Runtime,
     serde::EntrySerializer,
     small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
-        either::{EitherConfig, Order},
         Storage,
+        either::{EitherConfig, Order},
     },
-    ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
-    Pick, Throttle,
 };
 
 /// Load result.

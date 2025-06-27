@@ -18,17 +18,17 @@ use std::{
     collections::HashSet,
     fmt::Debug,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use parking_lot::Mutex;
 
 use crate::{
+    Pick,
     picker::{AdmissionPicker, ReinsertionPicker},
     statistics::Statistics,
-    Pick,
 };
 
 /// A picker that only admits hash from the given list.

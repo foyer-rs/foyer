@@ -19,7 +19,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Instant,
 };
 
@@ -70,10 +70,10 @@ macro_rules! root_span {
 #[cfg(feature = "tracing")]
 macro_rules! try_cancel {
     ($self:ident, $span:ident, $threshold:ident) => {
-        if let Some(elapsed) = $span.elapsed() {
-            if elapsed < $self.tracing_config.$threshold() {
-                $span.cancel();
-            }
+        if let Some(elapsed) = $span.elapsed()
+            && elapsed < $self.tracing_config.$threshold()
+        {
+            $span.cancel();
         }
     };
 }
@@ -766,16 +766,13 @@ where
         let mut this = self.project();
         let res = ready!(this.inner.as_mut().poll(cx));
 
-        if let Ok(entry) = res.as_ref() {
-            if entry.properties().location() != Location::InMem
-                && *this.policy == HybridCachePolicy::WriteOnInsertion
-                && this.inner.store().is_some()
-            {
-                let throttled = this.inner.store().as_ref().unwrap().throttled;
-                if !throttled {
-                    this.storage.enqueue(entry.piece(), false);
-                }
-            }
+        if let Ok(entry) = res.as_ref()
+            && entry.properties().location() != Location::InMem
+            && *this.policy == HybridCachePolicy::WriteOnInsertion
+            && this.inner.store().is_some()
+            && !this.inner.store().as_ref().unwrap().throttled
+        {
+            this.storage.enqueue(entry.piece(), false);
         }
 
         Poll::Ready(res)

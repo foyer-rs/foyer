@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{monitor::Monitored, Dev, Device, MonitoredDevice, RegionId, Throttle};
-use crate::{error::Result, runtime::Runtime, IoBuf, IoBufMut};
+use super::{Dev, Device, MonitoredDevice, RegionId, Throttle, monitor::Monitored};
+use crate::{IoBuf, IoBufMut, error::Result, runtime::Runtime};
 
 #[derive(Debug, Clone, Default)]
 pub struct NoopDevice(Throttle);

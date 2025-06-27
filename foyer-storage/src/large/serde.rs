@@ -62,7 +62,9 @@ impl EntryHeader {
 
         let v = buf.get_u32();
 
-        tracing::trace!("read entry header, key len: {key_len}, value_len: {value_len}, hash: {hash}, sequence: {sequence}, checksum: {checksum}, extra: {v}");
+        tracing::trace!(
+            "read entry header, key len: {key_len}, value_len: {value_len}, hash: {hash}, sequence: {sequence}, checksum: {checksum}, extra: {v}"
+        );
 
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {

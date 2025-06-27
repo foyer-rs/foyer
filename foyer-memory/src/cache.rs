@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::{
+    Piece, Pipe, Result,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -36,7 +37,6 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoConfig},
     },
     raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
-    Piece, Pipe, Result,
 };
 
 /// Entry properties for in-memory only cache.
@@ -994,7 +994,7 @@ mod tests {
 
     use futures_util::future::join_all;
     use itertools::Itertools;
-    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
     use super::*;
     use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};
