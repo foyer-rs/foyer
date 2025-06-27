@@ -12,7 +12,6 @@ license = { workspace = true }
 readme = { workspace = true }
 
 [dependencies]
-ahash = { workspace = true }
 bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = "1"
@@ -23,6 +22,7 @@ parking_lot = { workspace = true }
 pin-project = "1"
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
+twox-hash = { workspace = true }
 
 [dev-dependencies]
 bytes = { version = "1", features = ["serde"] }

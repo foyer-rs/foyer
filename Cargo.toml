@@ -29,7 +29,7 @@ foyer-storage = { version = "0.17.3", path = "foyer-storage" }
 foyer = { version = "0.17.3", path = "foyer" }
 
 # dependencies
-ahash = "0.8"
+twox-hash = "2"
 anyhow = "1"
 bincode = "1"
 bytes = "1"
