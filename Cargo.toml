@@ -22,28 +22,28 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
-# foyer components
-foyer-common = { version = "0.17.3", path = "foyer-common" }
-foyer-memory = { version = "0.17.3", path = "foyer-memory" }
-foyer-storage = { version = "0.17.3", path = "foyer-storage" }
-foyer = { version = "0.17.3", path = "foyer" }
-
-# dependencies
-twox-hash = "2"
 anyhow = "1"
 bincode = "1"
 bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
+criterion = "0.5"
 equivalent = "1"
 fastrace = "0.7"
+foyer = { version = "0.17.3", path = "foyer" }
+# foyer components
+foyer-common = { version = "0.17.3", path = "foyer-common" }
+foyer-memory = { version = "0.17.3", path = "foyer-memory" }
+foyer-storage = { version = "0.17.3", path = "foyer-storage" }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
 itertools = "0.14"
+mixtrics = "0.1"
 parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
+prometheus = "0.14"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
@@ -53,9 +53,9 @@ test-log = { version = "0.2", default-features = false, features = [
 ] }
 thiserror = "2"
 tracing = "0.1"
-prometheus = "0.14"
-mixtrics = "0.1"
-criterion = "0.5"
+
+# dependencies
+twox-hash = "2"
 
 [workspace.lints.rust]
 missing_docs = "warn"

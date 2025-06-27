@@ -11,8 +11,19 @@ authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
 
+[features]
+default = []
+serde = ["dep:serde"]
+tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
+nightly = ["allocator-api2/nightly"]
+test_utils = []
+deadlock = ["parking_lot/deadlock_detection"]
+strict_assertions = [
+  "foyer-common/strict_assertions",
+  "foyer-memory/strict_assertions",
+]
+
 [dependencies]
-ahash = { workspace = true }
 # TODO(MrCroxx): Remove this after `allocator_api` is stable.
 allocator-api2 = "0.2"
 anyhow = "1.0"
@@ -43,12 +54,6 @@ tracing = { workspace = true }
 twox-hash = "2"
 zstd = "0.13"
 
-[dev-dependencies]
-bytesize = { workspace = true }
-foyer-memory = { workspace = true, features = ["test_utils"] }
-tempfile = "3"
-test-log = { workspace = true }
-
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",
@@ -71,17 +76,11 @@ tokio = { package = "tokio", version = "1", features = [
   "fs",
 ] }
 
-[features]
-default = []
-serde = ["dep:serde"]
-tracing = ["fastrace/enable", "foyer-common/tracing", "foyer-memory/tracing"]
-nightly = ["allocator-api2/nightly"]
-test_utils = []
-deadlock = ["parking_lot/deadlock_detection"]
-strict_assertions = [
-  "foyer-common/strict_assertions",
-  "foyer-memory/strict_assertions",
-]
+[dev-dependencies]
+bytesize = { workspace = true }
+foyer-memory = { workspace = true, features = ["test_utils"] }
+tempfile = "3"
+test-log = { workspace = true }
 
 [lints]
 workspace = true

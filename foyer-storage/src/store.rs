@@ -22,11 +22,10 @@ use std::{
     time::Instant,
 };
 
-use ahash::RandomState;
 use equivalent::Equivalent;
 use foyer_common::{
     bits,
-    code::{HashBuilder, StorageKey, StorageValue},
+    code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
     properties::{Populated, Properties},
     runtime::BackgroundShutdownRuntime,
@@ -819,7 +818,7 @@ where
 }
 
 /// Large object disk cache engine default options.
-pub struct LargeEngineOptions<K, V, S = RandomState>
+pub struct LargeEngineOptions<K, V, S = DefaultHasher>
 where
     K: StorageKey,
     V: StorageValue,
@@ -1021,7 +1020,7 @@ where
 }
 
 /// Small object disk cache engine default options.
-pub struct SmallEngineOptions<K, V, S = RandomState>
+pub struct SmallEngineOptions<K, V, S = DefaultHasher>
 where
     K: StorageKey,
     V: StorageValue,
