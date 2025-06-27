@@ -18,8 +18,8 @@ use std::{
     num::NonZeroUsize,
     ops::Range,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -331,7 +331,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::{device::test_utils::NoopDevice, Region};
+    use crate::{Region, device::test_utils::NoopDevice};
 
     #[test_log::test]
     fn test_fifo_picker() {

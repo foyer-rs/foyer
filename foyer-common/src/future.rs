@@ -17,7 +17,7 @@ use std::{
     marker::PhantomData,
     ops::Deref,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use pin_project::pin_project;

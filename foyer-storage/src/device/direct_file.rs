@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    fs::{create_dir_all, File, OpenOptions},
+    fs::{File, OpenOptions, create_dir_all},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -23,12 +23,12 @@ use fs4::free_space;
 
 use super::{Dev, RegionId, Throttle};
 use crate::{
+    Runtime,
     error::{Error, Result},
     io::{
-        buffer::{IoBuf, IoBufMut},
         PAGE,
+        buffer::{IoBuf, IoBufMut},
     },
-    Runtime,
 };
 
 #[derive(Debug, Clone)]

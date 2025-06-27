@@ -23,7 +23,7 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 
-use crate::{error::Result, Load, Statistics, Throttle};
+use crate::{Load, Statistics, Throttle, error::Result};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {

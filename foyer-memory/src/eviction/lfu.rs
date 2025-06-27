@@ -20,7 +20,7 @@ use foyer_common::{
     properties::Properties,
     strict_assert, strict_assert_eq, strict_assert_ne,
 };
-use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
+use intrusive_collections::{LinkedList, LinkedListAtomicLink, intrusive_adapter};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
@@ -412,7 +412,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_vec_eq, Dump, OpExt, TestProperties},
+        eviction::test_utils::{Dump, OpExt, TestProperties, assert_ptr_eq, assert_ptr_vec_vec_eq},
         record::Data,
     };
 

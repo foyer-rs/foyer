@@ -17,7 +17,7 @@ pub use crate::eviction::test_utils::TestProperties;
 pub use crate::{
     cache::{Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, Fetch},
     error::{Error, Result},
-    eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
+    eviction::{Eviction, Op, fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
     pipe::{Piece, Pipe},
     raw::{FetchContext, FetchState, Weighter},
 };

@@ -22,12 +22,12 @@ use foyer_common::{
 };
 
 use crate::{
+    SharedIoSlice,
     compress::Compression,
     error::Error,
-    io::{buffer::IoBuffer, PAGE},
+    io::{PAGE, buffer::IoBuffer},
     large::serde::{EntryHeader, Sequence},
     serde::{Checksummer, EntrySerializer},
-    SharedIoSlice,
 };
 
 /// [`EntryIndex`] index entry in a blob, which can be used to speed up recovery.
