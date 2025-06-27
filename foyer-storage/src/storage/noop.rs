@@ -120,14 +120,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use foyer_common::hasher::ModRandomState;
+    use foyer_common::hasher::ModHasher;
     use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 
     use super::*;
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher, TestProperties> {
         CacheBuilder::new(10)
-            .with_hash_builder(ModRandomState::default())
+            .with_hash_builder(ModHasher::default())
             .with_eviction_config(FifoConfig::default())
             .build()
     }

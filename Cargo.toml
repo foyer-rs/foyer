@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.17.3"
+version = "0.17.4"
 edition = "2024"
 rust-version = "1.88.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -22,9 +22,7 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
-
-# dependencies
-ahash = "0.8"
+twox-hash = "2"
 anyhow = "1"
 bincode = "1"
 bytes = "1"
@@ -33,11 +31,10 @@ clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 equivalent = "1"
 fastrace = "0.7"
-foyer = { version = "0.17.3", path = "foyer" }
-# foyer components
-foyer-common = { version = "0.17.3", path = "foyer-common" }
-foyer-memory = { version = "0.17.3", path = "foyer-memory" }
-foyer-storage = { version = "0.17.3", path = "foyer-storage" }
+foyer = { version = "0.17.4", path = "foyer" }
+foyer-common = { version = "0.17.4", path = "foyer-common" }
+foyer-memory = { version = "0.17.4", path = "foyer-memory" }
+foyer-storage = { version = "0.17.4", path = "foyer-storage" }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"

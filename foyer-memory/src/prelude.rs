@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use ahash::RandomState;
-
 #[cfg(any(test, feature = "test_utils"))]
 pub use crate::eviction::test_utils::TestProperties;
 pub use crate::{

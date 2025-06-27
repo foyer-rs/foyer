@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-06-27
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.17.4 |
+| foyer-common | 0.17.4 |
+| foyer-memory | 0.17.4 |
+| foyer-storage | 0.17.4 |
+| foyer-bench | 0.17.4 |
+
+### Changes
+
+- Use `BuildHasherDefault<XxHash64>` as `DefaultHasher` to make hash results consistent across runs.
+
 ## 2025-05-22
 
 ### Releases

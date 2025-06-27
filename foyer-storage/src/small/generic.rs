@@ -301,7 +301,7 @@ mod tests {
     use std::path::Path;
 
     use bytesize::ByteSize;
-    use foyer_common::{hasher::ModRandomState, metrics::Metrics};
+    use foyer_common::{hasher::ModHasher, metrics::Metrics};
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use tokio::runtime::Handle;
 
@@ -315,10 +315,10 @@ mod tests {
         serde::EntrySerializer,
     };
 
-    fn cache_for_test() -> Cache<u64, Vec<u8>, ModRandomState, TestProperties> {
+    fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher, TestProperties> {
         CacheBuilder::new(10)
             .with_shards(1)
-            .with_hash_builder(ModRandomState::default())
+            .with_hash_builder(ModHasher::default())
             .with_eviction_config(FifoConfig::default())
             .build()
     }
@@ -364,7 +364,7 @@ mod tests {
 
     async fn assert_some(
         store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
-        entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+        entry: &CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         assert_eq!(
             store.load(entry.hash()).await.unwrap().kv().unwrap(),
@@ -374,7 +374,7 @@ mod tests {
 
     async fn assert_none(
         store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
-        entry: &CacheEntry<u64, Vec<u8>, ModRandomState, TestProperties>,
+        entry: &CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         assert!(store.load(entry.hash()).await.unwrap().kv().is_none());
     }
