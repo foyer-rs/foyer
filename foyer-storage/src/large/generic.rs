@@ -32,7 +32,6 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Age, Populated, Properties, Source},
 };
-use foyer_memory::Piece;
 use futures_util::future::{join_all, try_join_all};
 use tokio::sync::Semaphore;
 
@@ -49,6 +48,7 @@ use crate::{
     device::{Dev, DevExt, MonitoredDevice, RegionId},
     error::{Error, Result},
     io::{buffer::IoBuffer, PAGE},
+    keeper::PieceRef,
     large::{
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
@@ -320,7 +320,7 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::large::generic::enqueue")
     )]
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -577,7 +577,7 @@ where
         self.close().await
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         self.enqueue(piece, estimated_size)
     }
 
@@ -724,7 +724,7 @@ mod tests {
         entry: CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-        store.enqueue(entry.piece(), estimated_size);
+        store.enqueue(entry.piece().into(), estimated_size);
     }
 
     #[test_log::test(tokio::test)]

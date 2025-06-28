@@ -30,7 +30,6 @@ use foyer_common::{
     metrics::Metrics,
     properties::Properties,
 };
-use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
     future::{try_join, try_join_all},
@@ -45,6 +44,7 @@ use crate::{
     device::{MonitoredDevice, RegionId},
     error::{Error, Result},
     io::{buffer::IoBuffer, PAGE},
+    keeper::PieceRef,
     large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         generic::GenericLargeStorageConfig,
@@ -65,7 +65,7 @@ where
     P: Properties,
 {
     CacheEntry {
-        piece: Piece<K, V, P>,
+        piece: PieceRef<K, V, P>,
         estimated_size: usize,
         sequence: Sequence,
     },

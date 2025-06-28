@@ -36,6 +36,7 @@ use crate::{
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     io::PAGE,
+    keeper::Keeper,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
@@ -126,6 +127,7 @@ where
 {
     hasher: Arc<S>,
 
+    keeper: Option<Keeper<K, V, P>>,
     engine: EngineEnum<K, V, P>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
@@ -151,6 +153,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
+            .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("load_throttler", &self.inner.load_throttler)
@@ -200,7 +203,11 @@ where
 
         if force || self.pick(piece.hash()).admitted() {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
-            self.inner.engine.enqueue(piece, estimated_size);
+            let rpiece = match self.inner.keeper.as_ref() {
+                Some(keeper) => keeper.insert(piece),
+                None => piece.into(),
+            };
+            self.inner.engine.enqueue(rpiece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -438,6 +445,7 @@ where
     metrics: Arc<Metrics>,
 
     device_options: DeviceOptions,
+    keeper: bool,
     engine: Engine,
     runtime_config: RuntimeOptions,
 
@@ -460,6 +468,7 @@ where
             .field("memory", &self.memory)
             .field("metrics", &self.metrics)
             .field("device_options", &self.device_options)
+            .field("keeper", &self.keeper)
             .field("engine", &self.engine)
             .field("runtime_config", &self.runtime_config)
             .field("admission_picker", &self.admission_picker)
@@ -494,6 +503,7 @@ where
             metrics,
 
             device_options: DeviceOptions::None,
+            keeper: true,
             engine,
             runtime_config: RuntimeOptions::Disabled,
 
@@ -515,6 +525,17 @@ where
     /// Default: `false`.
     pub fn with_flush(mut self, flush: bool) -> Self {
         self.flush = flush;
+        self
+    }
+
+    /// Enable/disable keeper.
+    ///
+    /// Keeper is a indexer for disk cache enqueued not yet written entries.
+    /// Enable it will make entries in the write queue queryable.
+    ///
+    /// Default: `true`.
+    pub fn with_keeper(mut self, keeper: bool) -> Self {
+        self.keeper = keeper;
         self
     }
 
@@ -729,9 +750,12 @@ where
             IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
         );
 
+        let keeper = self.keeper.then(|| Keeper::new(memory.shards()));
+
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
             hasher,
+            keeper,
             engine,
             admission_picker,
             load_throttler,

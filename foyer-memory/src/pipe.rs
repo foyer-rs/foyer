@@ -21,10 +21,7 @@ use foyer_common::{
 
 use crate::{record::Record, Eviction};
 
-/// A piece of record that is irrelevant to the eviction algorithm.
-///
-/// With [`Piece`], the disk cache doesn't need to consider the eviction generic type.
-pub struct Piece<K, V, P> {
+struct Inner<K, V, P> {
     record: *const (),
     key: *const K,
     value: *const V,
@@ -33,23 +30,38 @@ pub struct Piece<K, V, P> {
     drop_fn: fn(*const ()),
 }
 
+/// A piece of record that is irrelevant to the eviction algorithm.
+///
+/// With [`Piece`], the disk cache doesn't need to consider the eviction generic type.
+pub struct Piece<K, V, P> {
+    inner: Arc<Inner<K, V, P>>,
+}
+
 impl<K, V, P> Debug for Piece<K, V, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Piece")
-            .field("record", &self.record)
-            .field("hash", &self.hash)
+            .field("record", &self.inner.record)
+            .field("hash", &self.inner.hash)
             .finish()
     }
 }
 
-unsafe impl<K, V, P> Send for Piece<K, V, P>
+impl<K, V, P> Clone for Piece<K, V, P> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+unsafe impl<K, V, P> Send for Inner<K, V, P>
 where
     K: Key,
     V: Value,
     P: Properties,
 {
 }
-unsafe impl<K, V, P> Sync for Piece<K, V, P>
+unsafe impl<K, V, P> Sync for Inner<K, V, P>
 where
     K: Key,
     V: Value,
@@ -57,7 +69,7 @@ where
 {
 }
 
-impl<K, V, P> Drop for Piece<K, V, P> {
+impl<K, V, P> Drop for Inner<K, V, P> {
     fn drop(&mut self) {
         (self.drop_fn)(self.record);
     }
@@ -78,34 +90,36 @@ impl<K, V, P> Piece<K, V, P> {
         let drop_fn = |ptr| unsafe {
             let _ = Arc::from_raw(ptr as *const Record<E>);
         };
-        Self {
+        let inner = Inner {
             record,
             key,
             value,
             hash,
             properties,
             drop_fn,
-        }
+        };
+        let inner = Arc::new(inner);
+        Self { inner }
     }
 
     /// Get the key of the record.
     pub fn key(&self) -> &K {
-        unsafe { &*self.key }
+        unsafe { &*self.inner.key }
     }
 
     /// Get the value of the record.
     pub fn value(&self) -> &V {
-        unsafe { &*self.value }
+        unsafe { &*self.inner.value }
     }
 
     /// Get the hash of the record.
     pub fn hash(&self) -> u64 {
-        self.hash
+        self.inner.hash
     }
 
     /// Get the properties of the record.
     pub fn properties(&self) -> &P {
-        unsafe { &*self.properties }
+        unsafe { &*self.inner.properties }
     }
 }
 

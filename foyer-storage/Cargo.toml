@@ -54,6 +54,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 twox-hash = "2"
 zstd = "0.13"
+hashbrown = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [

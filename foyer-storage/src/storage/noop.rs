@@ -23,9 +23,8 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_memory::Piece;
 
-use crate::{error::Result, storage::Storage, Load, Statistics, Throttle};
+use crate::{error::Result, keeper::PieceRef, storage::Storage, Load, Statistics, Throttle};
 
 pub struct Noop<K, V, P>
 where
@@ -89,7 +88,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, _piece: Piece<Self::Key, Self::Value, Self::Properties>, _estimated_size: usize) {}
+    fn enqueue(&self, _piece: PieceRef<Self::Key, Self::Value, Self::Properties>, _estimated_size: usize) {}
 
     fn load(&self, _: u64) -> impl Future<Output = Result<Load<Self::Key, Self::Value>>> + Send + 'static {
         ready(Ok(Load::Miss))
@@ -137,7 +136,7 @@ mod tests {
         let memory = cache_for_test();
         let store: Noop<u64, Vec<u8>, TestProperties> = Noop::open(()).await.unwrap();
 
-        store.enqueue(memory.insert(0, vec![b'x'; 16384]).piece(), 16384);
+        store.enqueue(memory.insert(0, vec![b'x'; 16384]).piece().into(), 16384);
         store.wait().await;
         assert!(store.load(memory.hash(&0)).await.unwrap().is_miss());
         store.delete(memory.hash(&0));
