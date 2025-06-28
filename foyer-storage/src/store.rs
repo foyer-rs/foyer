@@ -19,7 +19,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Populated, Properties},
+    properties::{Age, Populated, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -60,12 +60,13 @@ pub enum Load<K, V> {
     /// Load entry success.
     Entry {
         /// The key of the entry.
-        key: K,
+        key: Arc<K>,
         /// The value of the entry.
-        value: V,
+        value: Arc<V>,
         /// The populated source context of the entry.
         populated: Populated,
     },
+    /// Load from keeper.
     /// The entry may be in the disk cache, the read io is throttled.
     Throttled,
     /// Disk cache miss.
@@ -74,7 +75,7 @@ pub enum Load<K, V> {
 
 impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
-    pub fn entry(self) -> Option<(K, V, Populated)> {
+    pub fn entry(self) -> Option<(Arc<K>, Arc<V>, Populated)> {
         match self {
             Load::Entry { key, value, populated } => Some((key, value, populated)),
             _ => None,
@@ -84,7 +85,7 @@ impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
     ///
     /// Only key and value will be returned.
-    pub fn kv(self) -> Option<(K, V)> {
+    pub fn kv(self) -> Option<(Arc<K>, Arc<V>)> {
         match self {
             Load::Entry { key, value, .. } => Some((key, value)),
             _ => None,
@@ -223,6 +224,17 @@ where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         let hash = self.inner.hasher.hash_one(key);
+
+        if let Some(keeper) = self.inner.keeper.as_ref() {
+            if let Some(piece) = keeper.get(hash, key) {
+                tracing::trace!(hash, "[store]: load from keeper");
+                return Ok(Load::Entry {
+                    key: piece.arc_key().clone(),
+                    value: piece.arc_value().clone(),
+                    populated: Populated { age: Age::Young },
+                });
+            }
+        }
 
         #[cfg(feature = "test_utils")]
         if self.inner.load_throttle_switch.is_throttled() {
@@ -1081,6 +1093,6 @@ mod tests {
 
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
-        assert_eq!(l2.entry().unwrap().1, "bar");
+        assert_eq!(l2.entry().unwrap().1.as_str(), "bar");
     }
 }

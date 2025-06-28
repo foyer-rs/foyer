@@ -203,8 +203,8 @@ where
                 })
                 .map(|o| match o {
                     Some((key, value)) => Load::Entry {
-                        key,
-                        value,
+                        key: Arc::new(key),
+                        value: Arc::new(value),
                         // Always requires disk cache write for set-associated cache.
                         // TODO(MrCroxx): use a better way to determine the age.
                         populated: Populated { age: Age::Old },
@@ -369,10 +369,9 @@ mod tests {
         store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
         entry: &CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
-        assert_eq!(
-            store.load(entry.hash()).await.unwrap().kv().unwrap(),
-            (*entry.key(), entry.value().clone())
-        );
+        let (k, v) = store.load(entry.hash()).await.unwrap().kv().unwrap();
+        assert_eq!(k.as_ref(), entry.key(),);
+        assert_eq!(v.as_ref(), entry.value(),);
     }
 
     async fn assert_none(

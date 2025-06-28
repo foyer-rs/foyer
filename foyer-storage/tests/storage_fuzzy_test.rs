@@ -55,7 +55,7 @@ async fn test_store(
     for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
         let value = store.load(&i).await.unwrap().kv().map(|(_, v)| v);
         if remains.contains(&i) {
-            assert_eq!(value, Some(vec![i as u8; 1 * KB]));
+            assert_eq!(value, Some(vec![i as u8; 1 * KB].into()));
         } else {
             assert!(value.is_none());
         }
@@ -71,7 +71,11 @@ async fn test_store(
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             let value = store.load(&i).await.unwrap().kv().map(|(_, v)| v);
             if remains.contains(&i) {
-                assert_eq!(value, Some(vec![i as u8; 1 * KB]), "value mismatch, loop: {l}, i: {i}");
+                assert_eq!(
+                    value,
+                    Some(Arc::new(vec![i as u8; 1 * KB])),
+                    "value mismatch, loop: {l}, i: {i}"
+                );
             } else {
                 assert!(value.is_none(), "phantom value, loop: {l}, i: {i}");
             }
@@ -91,7 +95,7 @@ async fn test_store(
         for i in 0..INSERTS as u64 * (LOOPS + 1) as u64 {
             let value = store.load(&i).await.unwrap().kv().map(|(_, v)| v);
             if remains.contains(&i) {
-                assert_eq!(value, Some(vec![i as u8; 1 * KB]));
+                assert_eq!(value, Some(vec![i as u8; 1 * KB].into()));
             } else {
                 assert!(value.is_none());
             }

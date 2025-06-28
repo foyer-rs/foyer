@@ -469,6 +469,9 @@ where
                 false => Age::Young,
             };
 
+            let key = Arc::new(key);
+            let value = Arc::new(value);
+
             Ok(Load::Entry {
                 key,
                 value,
@@ -744,9 +747,9 @@ mod tests {
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        assert_eq!(r1, (1.into(), vec![1; 7 * KB].into()));
         let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
-        assert_eq!(r2, (2, vec![2; 3 * KB]));
+        assert_eq!(r2, (2.into(), vec![2; 3 * KB].into()));
 
         // [ [e1, e2], [e3, e4], [], [] ]
         store.hold_flush();
@@ -758,13 +761,13 @@ mod tests {
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        assert_eq!(r1, (1.into(), vec![1; 7 * KB].into()));
         let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
-        assert_eq!(r2, (2, vec![2; 3 * KB]));
+        assert_eq!(r2, (2.into(), vec![2; 3 * KB].into()));
         let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
-        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        assert_eq!(r3, (3.into(), vec![3; 7 * KB].into()));
         let r4 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
-        assert_eq!(r4, (4, vec![4; 2 * KB]));
+        assert_eq!(r4, (4.into(), vec![4; 2 * KB].into()));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
         let e5 = memory.insert(5, vec![5; 11 * KB]);
@@ -772,15 +775,15 @@ mod tests {
         store.wait().await;
 
         let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        assert_eq!(r1, (1.into(), vec![1; 7 * KB].into()));
         let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
-        assert_eq!(r2, (2, vec![2; 3 * KB]));
+        assert_eq!(r2, (2.into(), vec![2; 3 * KB].into()));
         let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
-        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        assert_eq!(r3, (3.into(), vec![3; 7 * KB].into()));
         let r4 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
-        assert_eq!(r4, (4, vec![4; 2 * KB]));
+        assert_eq!(r4, (4.into(), vec![4; 2 * KB].into()));
         let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
-        assert_eq!(r5, (5, vec![5; 11 * KB]));
+        assert_eq!(r5, (5.into(), vec![5; 11 * KB].into()));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
         store.hold_flush();
@@ -794,13 +797,13 @@ mod tests {
         assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
         assert!(store.load(memory.hash(&2)).await.unwrap().kv().is_none());
         let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
-        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        assert_eq!(r3, (3.into(), vec![3; 7 * KB].into()));
         let r4v2 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
-        assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
+        assert_eq!(r4v2, (4.into(), vec![!4; 3 * KB].into()));
         let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
-        assert_eq!(r5, (5, vec![5; 11 * KB]));
+        assert_eq!(r5, (5.into(), vec![5; 11 * KB].into()));
         let r6 = store.load(memory.hash(&6)).await.unwrap().kv().unwrap();
-        assert_eq!(r6, (6, vec![6; 7 * KB]));
+        assert_eq!(r6, (6.into(), vec![6; 7 * KB].into()));
 
         store.close().await.unwrap();
         enqueue(&store, e1);
@@ -813,13 +816,13 @@ mod tests {
         assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
         assert!(store.load(memory.hash(&2)).await.unwrap().kv().is_none());
         let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
-        assert_eq!(r3, (3, vec![3; 7 * KB]));
+        assert_eq!(r3, (3.into(), vec![3; 7 * KB].into()));
         let r4v2 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
-        assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
+        assert_eq!(r4v2, (4.into(), vec![!4; 3 * KB].into()));
         let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
-        assert_eq!(r5, (5, vec![5; 11 * KB]));
+        assert_eq!(r5, (5.into(), vec![5; 11 * KB].into()));
         let r6 = store.load(memory.hash(&6)).await.unwrap().kv().unwrap();
-        assert_eq!(r6, (6, vec![6; 7 * KB]));
+        assert_eq!(r6, (6.into(), vec![6; 7 * KB].into()));
     }
 
     #[test_log::test(tokio::test)]
@@ -840,7 +843,7 @@ mod tests {
         for i in 0..9 {
             assert_eq!(
                 store.load(memory.hash(&i)).await.unwrap().kv(),
-                Some((i, vec![i as u8; 3 * KB]))
+                Some((i.into(), vec![i as u8; 3 * KB].into()))
             );
         }
 
@@ -856,7 +859,7 @@ mod tests {
             if i != 3 {
                 assert_eq!(
                     store.load(memory.hash(&i)).await.unwrap().kv(),
-                    Some((i, vec![i as u8; 3 * KB]))
+                    Some((i.into(), vec![i as u8; 3 * KB].into()))
                 );
             } else {
                 assert_eq!(store.load(memory.hash(&3)).await.unwrap().kv(), None);
@@ -867,7 +870,7 @@ mod tests {
         store.wait().await;
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
-            Some((3, vec![3; 3 * KB]))
+            Some((3.into(), vec![3; 3 * KB].into()))
         );
 
         store.close().await.unwrap();
@@ -877,7 +880,7 @@ mod tests {
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
-            Some((3, vec![3; 3 * KB]))
+            Some((3.into(), vec![3; 3 * KB].into()))
         );
     }
 
@@ -901,7 +904,7 @@ mod tests {
         for i in 0..9 {
             assert_eq!(
                 store.load(memory.hash(&i)).await.unwrap().kv(),
-                Some((i, vec![i as u8; 3 * KB]))
+                Some((i.into(), vec![i as u8; 3 * KB].into()))
             );
         }
 
@@ -923,7 +926,7 @@ mod tests {
         store.wait().await;
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
-            Some((3, vec![3; 3 * KB]))
+            Some((3.into(), vec![3; 3 * KB].into()))
         );
 
         store.close().await.unwrap();
@@ -933,7 +936,7 @@ mod tests {
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
-            Some((3, vec![3; 3 * KB]))
+            Some((3.into(), vec![3; 3 * KB].into()))
         );
     }
 
@@ -978,7 +981,7 @@ mod tests {
 
         for i in 0..9 {
             let r = store.load(memory.hash(&i)).await.unwrap().kv().unwrap();
-            assert_eq!(r, (i, vec![i as u8; 3 * KB]));
+            assert_eq!(r, (i.into(), vec![i as u8; 3 * KB].into()));
         }
 
         // [[], [(3), (4), (5)], [(6), (7), (8)], [(9), (10), (1)]]
@@ -996,16 +999,16 @@ mod tests {
             res,
             vec![
                 None,
-                Some((1, vec![1; 3 * KB])),
+                Some((1.into(), vec![1; 3 * KB].into())),
                 None,
-                Some((3, vec![3; 3 * KB])),
-                Some((4, vec![4; 3 * KB])),
-                Some((5, vec![5; 3 * KB])),
-                Some((6, vec![6; 3 * KB])),
-                Some((7, vec![7; 3 * KB])),
-                Some((8, vec![8; 3 * KB])),
-                Some((9, vec![9; 3 * KB])),
-                Some((10, vec![10; 3 * KB])),
+                Some((3.into(), vec![3; 3 * KB].into())),
+                Some((4.into(), vec![4; 3 * KB].into())),
+                Some((5.into(), vec![5; 3 * KB].into())),
+                Some((6.into(), vec![6; 3 * KB].into())),
+                Some((7.into(), vec![7; 3 * KB].into())),
+                Some((8.into(), vec![8; 3 * KB].into())),
+                Some((9.into(), vec![9; 3 * KB].into())),
+                Some((10.into(), vec![10; 3 * KB].into())),
             ]
         );
 
@@ -1024,17 +1027,17 @@ mod tests {
             res,
             vec![
                 None,
-                Some((1, vec![1; 3 * KB])),
+                Some((1.into(), vec![1; 3 * KB].into())),
                 None,
-                Some((3, vec![3; 3 * KB])),
+                Some((3.into(), vec![3; 3 * KB].into())),
                 None,
-                Some((5, vec![5; 3 * KB])),
-                Some((6, vec![6; 3 * KB])),
-                Some((7, vec![7; 3 * KB])),
-                Some((8, vec![8; 3 * KB])),
-                Some((9, vec![9; 3 * KB])),
-                Some((10, vec![10; 3 * KB])),
-                Some((11, vec![11; 3 * KB])),
+                Some((5.into(), vec![5; 3 * KB].into())),
+                Some((6.into(), vec![6; 3 * KB].into())),
+                Some((7.into(), vec![7; 3 * KB].into())),
+                Some((8.into(), vec![8; 3 * KB].into())),
+                Some((9.into(), vec![9; 3 * KB].into())),
+                Some((10.into(), vec![10; 3 * KB].into())),
+                Some((11.into(), vec![11; 3 * KB].into())),
             ]
         );
 
@@ -1058,20 +1061,20 @@ mod tests {
             res,
             vec![
                 None,
-                Some((1, vec![1; 3 * KB])),
+                Some((1.into(), vec![1; 3 * KB].into())),
                 None,
-                Some((3, vec![3; 3 * KB])),
+                Some((3.into(), vec![3; 3 * KB].into())),
                 None,
-                Some((5, vec![5; 3 * KB])),
+                Some((5.into(), vec![5; 3 * KB].into())),
                 None,
                 None,
                 None,
-                Some((9, vec![9; 3 * KB])),
-                Some((10, vec![10; 3 * KB])),
-                Some((11, vec![11; 3 * KB])),
-                Some((12, vec![12; 3 * KB])),
-                Some((13, vec![13; 3 * KB])),
-                Some((14, vec![14; 3 * KB])),
+                Some((9.into(), vec![9; 3 * KB].into())),
+                Some((10.into(), vec![10; 3 * KB].into())),
+                Some((11.into(), vec![11; 3 * KB].into())),
+                Some((12.into(), vec![12; 3 * KB].into())),
+                Some((13.into(), vec![13; 3 * KB].into())),
+                Some((14.into(), vec![14; 3 * KB].into())),
             ]
         );
     }
@@ -1090,7 +1093,7 @@ mod tests {
 
         // check entry 1
         let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
+        assert_eq!(r1, (1.into(), vec![1; 7 * KB].into()));
 
         // corrupt entry and header
         for entry in std::fs::read_dir(dir.path()).unwrap() {

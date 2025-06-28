@@ -15,7 +15,10 @@
 use std::{
     cell::UnsafeCell,
     fmt::Debug,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use bitflags::bitflags;
@@ -35,8 +38,8 @@ pub struct Data<E>
 where
     E: Eviction,
 {
-    pub key: E::Key,
-    pub value: E::Value,
+    pub key: Arc<E::Key>,
+    pub value: Arc<E::Value>,
     pub properties: E::Properties,
     pub hash: u64,
     pub weight: usize,
@@ -90,6 +93,16 @@ where
 
     /// Get the immutable reference of the record value.
     pub fn value(&self) -> &E::Value {
+        &self.data.value
+    }
+
+    /// Get the immutable arc reference of the record key.
+    pub fn arc_key(&self) -> &Arc<E::Key> {
+        &self.data.key
+    }
+
+    /// Get the immutable arc reference of the record value.
+    pub fn arc_value(&self) -> &Arc<E::Value> {
         &self.data.value
     }
 

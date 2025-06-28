@@ -87,7 +87,7 @@ where
     capacity: usize,
 
     #[expect(clippy::type_complexity)]
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
+    waiters: Mutex<HashMap<Arc<E::Key>, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
     metrics: Arc<Metrics>,
     _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -321,52 +321,43 @@ where
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop"))]
-    fn fetch_noop(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
-    where
-        E::Key: Clone,
-    {
-        if let Some(record) = self.get_noop(hash, key) {
+    fn fetch_noop(&self, hash: u64, key: Arc<E::Key>) -> RawShardFetch<E, S, I> {
+        if let Some(record) = self.get_noop(hash, key.as_ref()) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")
     )]
-    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
-    where
-        E::Key: Clone,
-    {
-        if let Some(record) = self.get_immutable(hash, key) {
+    fn fetch_immutable(&self, hash: u64, key: Arc<E::Key>) -> RawShardFetch<E, S, I> {
+        if let Some(record) = self.get_immutable(hash, key.as_ref()) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")
     )]
-    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
-    where
-        E::Key: Clone,
-    {
-        if let Some(record) = self.get_mutable(hash, key) {
+    fn fetch_mutable(&mut self, hash: u64, key: Arc<E::Key>) -> RawShardFetch<E, S, I> {
+        if let Some(record) = self.get_mutable(hash, key.as_ref()) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")
     )]
-    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, S, I> {
+    fn fetch_queue(&self, key: Arc<E::Key>) -> RawShardFetch<E, S, I> {
         match self.waiters.lock().entry(key) {
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
@@ -559,12 +550,18 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::insert_with_properties")
     )]
-    pub fn insert_with_properties(
+    pub fn insert_with_properties<AK, AV>(
         &self,
-        key: E::Key,
-        value: E::Value,
+        key: AK,
+        value: AV,
         properties: E::Properties,
-    ) -> RawCacheEntry<E, S, I> {
+    ) -> RawCacheEntry<E, S, I>
+    where
+        AK: Into<Arc<E::Key>>,
+        AV: Into<Arc<E::Value>>,
+    {
+        let key = key.into();
+        let value = value.into();
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
 
@@ -1008,14 +1005,16 @@ where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    E::Key: Clone,
+    E::Key:,
 {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, ER, S, I>
+    pub fn fetch<F, FU, ER, AK, AV>(&self, key: AK, fetch: F) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<AV, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
+        AK: Into<Arc<E::Key>>,
+        AV: Into<Arc<E::Value>>,
     {
         self.fetch_inner(
             key,
@@ -1029,9 +1028,9 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
     )]
-    pub fn fetch_with_properties<F, FU, ER, ID>(
+    pub fn fetch_with_properties<F, FU, ER, ID, AK, AV>(
         &self,
-        key: E::Key,
+        key: AK,
         properties: E::Properties,
         fetch: F,
     ) -> RawFetch<E, ER, S, I>
@@ -1039,7 +1038,9 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<AV, ER>, FetchContext>>,
+        AK: Into<Arc<E::Key>>,
+        AV: Into<Arc<E::Value>>,
     {
         self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
     }
@@ -1049,9 +1050,9 @@ where
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<F, FU, ER, ID>(
+    pub fn fetch_inner<F, FU, ER, ID, AK, AV>(
         &self,
-        key: E::Key,
+        key: AK,
         mut properties: E::Properties,
         fetch: F,
         runtime: &SingletonHandle,
@@ -1060,14 +1061,20 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<AV, ER>, FetchContext>>,
+        AK: Into<Arc<E::Key>>,
+        AV: Into<Arc<E::Value>>,
     {
+        let key = key.into();
         let hash = self.inner.hash_builder.hash_one(&key);
 
-        let raw = match E::acquire() {
-            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
-            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
-            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
+        let raw = {
+            let key = key.clone();
+            match E::acquire() {
+                Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, key),
+                Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, key),
+                Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, key),
+            }
         };
 
         match raw {

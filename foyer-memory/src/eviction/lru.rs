@@ -308,8 +308,8 @@ pub mod tests {
 
     impl<K, V> Dump for Lru<K, V, TestProperties>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        K: Key,
+        V: Value,
     {
         type Output = Vec<Vec<Arc<Record<Self>>>>;
         fn dump(&self) -> Self::Output {
@@ -355,8 +355,8 @@ pub mod tests {
         let rs = (0..20)
             .map(|i| {
                 Arc::new(Record::new(Data {
-                    key: i,
-                    value: i,
+                    key: Arc::new(i),
+                    value: Arc::new(i),
                     properties: if i < 10 {
                         TestProperties::default().with_hint(Hint::Normal)
                     } else {
@@ -431,8 +431,8 @@ pub mod tests {
         let rs = (0..20)
             .map(|i| {
                 Arc::new(Record::new(Data {
-                    key: i,
-                    value: i,
+                    key: Arc::new(i),
+                    value: Arc::new(i),
                     properties: if i < 10 {
                         TestProperties::default().with_hint(Hint::Normal)
                     } else {

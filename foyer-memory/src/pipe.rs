@@ -23,8 +23,8 @@ use crate::{record::Record, Eviction};
 
 struct Inner<K, V, P> {
     record: *const (),
-    key: *const K,
-    value: *const V,
+    key: Arc<K>,
+    value: Arc<V>,
     hash: u64,
     properties: *const P,
     drop_fn: fn(*const ()),
@@ -81,10 +81,10 @@ impl<K, V, P> Piece<K, V, P> {
     where
         E: Eviction<Key = K, Value = V, Properties = P>,
     {
+        let key = record.arc_key().clone();
+        let value = record.arc_value().clone();
         let raw = Arc::into_raw(record);
         let record = raw as *const ();
-        let key = unsafe { (*raw).key() } as *const _;
-        let value = unsafe { (*raw).value() } as *const _;
         let hash = unsafe { (*raw).hash() };
         let properties = unsafe { (*raw).properties() } as *const _;
         let drop_fn = |ptr| unsafe {
@@ -104,12 +104,22 @@ impl<K, V, P> Piece<K, V, P> {
 
     /// Get the key of the record.
     pub fn key(&self) -> &K {
-        unsafe { &*self.inner.key }
+        &self.inner.key
     }
 
     /// Get the value of the record.
     pub fn value(&self) -> &V {
-        unsafe { &*self.inner.value }
+        &self.inner.value
+    }
+
+    /// Get the arc key of the record.
+    pub fn arc_key(&self) -> &Arc<K> {
+        &self.inner.key
+    }
+
+    /// Get the arc value of the record.
+    pub fn arc_value(&self) -> &Arc<V> {
+        &self.inner.value
     }
 
     /// Get the hash of the record.
@@ -197,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_piece() {
-        let r1 = Arc::new(Record::new(Data::<Fifo<Arc<Vec<u8>>, Arc<Vec<u8>>, TestProperties>> {
+        let r1 = Arc::new(Record::new(Data::<Fifo<Vec<u8>, Vec<u8>, TestProperties>> {
             key: Arc::new(vec![b'k'; 4096]),
             value: Arc::new(vec![b'k'; 16384]),
             properties: TestProperties::default(),

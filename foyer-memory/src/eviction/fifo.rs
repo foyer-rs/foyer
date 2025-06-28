@@ -106,8 +106,8 @@ pub mod tests {
 
     impl<K, V> Dump for Fifo<K, V, TestProperties>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        K: Key,
+        V: Value,
     {
         type Output = Vec<Arc<Record<Self>>>;
         fn dump(&self) -> Self::Output {
@@ -131,8 +131,8 @@ pub mod tests {
         let rs = (0..8)
             .map(|i| {
                 Arc::new(Record::new(Data {
-                    key: i,
-                    value: i,
+                    key: Arc::new(i),
+                    value: Arc::new(i),
                     properties: TestProperties::default(),
                     hash: i,
                     weight: 1,

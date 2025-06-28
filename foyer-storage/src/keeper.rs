@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, ops::Deref, sync::Arc};
+use std::{fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
 
 use foyer_common::code::StorageKey;
 use foyer_memory::Piece;
@@ -76,6 +76,15 @@ where
             piece,
             shard: Some(shard),
         }
+    }
+
+    pub fn get<Q>(&self, hash: u64, key: &Q) -> Option<Piece<K, V, P>>
+    where
+        Q: Hash + equivalent::Equivalent<K> + ?Sized,
+    {
+        let shard = self.shard(hash);
+        let shard = shard.read();
+        shard.find(hash, |p| key.equivalent(p.key())).cloned()
     }
 
     fn shard(&self, hash: u64) -> Arc<RwLock<Shard<K, V, P>>> {
