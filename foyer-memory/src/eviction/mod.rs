@@ -143,6 +143,7 @@ pub mod fifo;
 pub mod lfu;
 pub mod lru;
 pub mod s3fifo;
+pub mod sieve;
 
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;
