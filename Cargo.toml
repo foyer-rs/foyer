@@ -22,8 +22,6 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
-
-# dependencies
 twox-hash = "2"
 anyhow = "1"
 bincode = "1"
@@ -33,6 +31,7 @@ clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 equivalent = "1"
 fastrace = "0.7"
+futures = "0.3"
 foyer = { version = "0.17.4", path = "foyer" }
 foyer-common = { version = "0.17.4", path = "foyer-common" }
 foyer-memory = { version = "0.17.4", path = "foyer-memory" }

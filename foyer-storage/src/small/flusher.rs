@@ -19,7 +19,6 @@ use foyer_common::{
     metrics::Metrics,
     properties::Properties,
 };
-use foyer_memory::Piece;
 use futures_util::future::try_join_all;
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
@@ -28,7 +27,10 @@ use super::{
     generic::GenericSmallStorageConfig,
     set_manager::SetManager,
 };
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    keeper::PieceRef,
+};
 
 pub enum Submission<K, V, P>
 where
@@ -37,7 +39,7 @@ where
     P: Properties,
 {
     Insertion {
-        piece: Piece<K, V, P>,
+        piece: PieceRef<K, V, P>,
         estimated_size: usize,
     },
     Deletion {

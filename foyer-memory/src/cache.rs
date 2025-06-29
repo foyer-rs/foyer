@@ -630,7 +630,11 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::insert_with_properties")
     )]
-    pub fn insert_with_properties(&self, key: K, value: V, properties: P) -> CacheEntry<K, V, S, P> {
+    pub fn insert_with_properties<AK, AV>(&self, key: AK, value: AV, properties: P) -> CacheEntry<K, V, S, P>
+    where
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
+    {
         match self {
             Cache::Fifo(cache) => cache.insert_with_properties(key, value, properties).into(),
             Cache::S3Fifo(cache) => cache.insert_with_properties(key, value, properties).into(),
@@ -913,7 +917,7 @@ where
 
 impl<K, V, S, P> Cache<K, V, S, P>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
@@ -924,11 +928,13 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S, P>
+    pub fn fetch<F, FU, ER, AK, AV>(&self, key: AK, fetch: F) -> Fetch<K, V, ER, S, P>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<AV, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
@@ -944,11 +950,13 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch_with_properties<F, FU, ER>(&self, key: K, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
+    pub fn fetch_with_properties<F, FU, ER, AK, AV>(&self, key: AK, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        FU: Future<Output = std::result::Result<AV, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
@@ -966,9 +974,9 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, ID>(
+    pub fn fetch_inner<F, FU, ER, ID, AK, AV>(
         &self,
-        key: K,
+        key: AK,
         properties: P,
         fetch: F,
         runtime: &SingletonHandle,
@@ -977,7 +985,9 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<AV, ER>, FetchContext>>,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),

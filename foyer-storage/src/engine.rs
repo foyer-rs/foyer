@@ -19,10 +19,10 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_memory::Piece;
 
 use crate::{
     error::Result,
+    keeper::PieceRef,
     large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
     small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
     storage::{
@@ -79,7 +79,7 @@ where
     type Value = V;
     type Properties = P;
 
-    fn select(&self, _piece: &Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection {
+    fn select(&self, _piece: &PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection {
         if estimated_size < self.threshold {
             Selection::Left
         } else {
@@ -195,7 +195,7 @@ where
         }
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         match self {
             EngineEnum::Noop(storage) => storage.enqueue(piece, estimated_size),
             EngineEnum::Large(storage) => storage.enqueue(piece, estimated_size),

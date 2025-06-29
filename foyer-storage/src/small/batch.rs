@@ -27,13 +27,13 @@ use foyer_common::{
     metrics::Metrics,
     properties::Properties,
 };
-use foyer_memory::Piece;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 use zstd::zstd_safe::WriteBuf;
 
 use crate::{
     io::PAGE,
+    keeper::PieceRef,
     serde::EntrySerializer,
     small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
     Compression,
@@ -87,7 +87,7 @@ impl BatchMut {
         }
     }
 
-    pub fn insert<K, V, P>(&mut self, piece: Piece<K, V, P>, estimated_size: usize) -> bool
+    pub fn insert<K, V, P>(&mut self, piece: PieceRef<K, V, P>, estimated_size: usize) -> bool
     where
         K: StorageKey,
         V: StorageValue,

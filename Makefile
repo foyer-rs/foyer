@@ -1,6 +1,10 @@
 SHELL := /bin/bash
 .PHONY: deps check test test-ignored test-all all fast monitor clear madsim example msrv udeps ffmt machete misc
 
+all: misc ffmt check-all test-all example machete udeps
+
+fast: misc ffmt check test example machete
+
 deps:
 	./scripts/install-deps.sh
 
@@ -75,7 +79,3 @@ clear:
 
 ffmt:
 	cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml
-
-all: misc ffmt check-all test-all example machete udeps
-
-fast: misc ffmt check test example machete
