@@ -1138,6 +1138,7 @@ mod tests {
             lfu::{Lfu, LfuConfig},
             lru::{Lru, LruConfig},
             s3fifo::{S3Fifo, S3FifoConfig},
+            sieve::{Sieve, SieveConfig},
             test_utils::TestProperties,
         },
         test_utils::PiecePipe,
@@ -1151,6 +1152,7 @@ mod tests {
         is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>, ModHasher>>();
         is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>, ModHasher>>();
         is_send_sync_static::<RawCache<Lru<(), (), TestProperties>, ModHasher>>();
+        is_send_sync_static::<RawCache<Sieve<(), (), TestProperties>, ModHasher>>();
     }
 
     #[expect(clippy::type_complexity)]
@@ -1202,6 +1204,20 @@ mod tests {
             capacity: 256,
             shards: 4,
             eviction_config: LfuConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        })
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn sieve_cache_for_test(
+    ) -> RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Sieve<u64, u64, TestProperties>>> {
+        RawCache::new(RawCacheConfig {
+            capacity: 256,
+            shards: 4,
+            eviction_config: SieveConfig {},
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
             event_listener: None,
@@ -1310,6 +1326,12 @@ mod tests {
         test_resize(&cache);
     }
 
+    #[test]
+    fn test_sieve_cache_resize() {
+        let cache = sieve_cache_for_test();
+        test_resize(&cache);
+    }
+
     mod fuzzy {
         use foyer_common::properties::Hint;
 
@@ -1396,6 +1418,21 @@ mod tests {
                 capacity: 256,
                 shards: 4,
                 eviction_config: LfuConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
+            });
+            let hints = vec![Hint::Normal];
+            fuzzy(cache, hints);
+        }
+
+        #[test_log::test]
+        fn test_sieve_cache_fuzzy() {
+            let cache: RawCache<Sieve<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
+                capacity: 256,
+                shards: 4,
+                eviction_config: SieveConfig {},
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
                 event_listener: None,

@@ -34,6 +34,7 @@ use crate::{
         lfu::{Lfu, LfuConfig},
         lru::{Lru, LruConfig},
         s3fifo::{S3Fifo, S3FifoConfig},
+        sieve::{Sieve, SieveConfig},
     },
     raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     Piece, Pipe, Result,
@@ -123,6 +124,10 @@ pub type LfuCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<Lfu<K
 pub type LfuCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<Lfu<K, V, P>, S>;
 pub type LfuFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<Lfu<K, V, P>, ER, S>;
 
+pub type SieveCache<K, V, S = DefaultHasher, P = CacheProperties> = RawCache<Sieve<K, V, P>, S>;
+pub type SieveCacheEntry<K, V, S = DefaultHasher, P = CacheProperties> = RawCacheEntry<Sieve<K, V, P>, S>;
+pub type SieveFetch<K, V, ER, S = DefaultHasher, P = CacheProperties> = RawFetch<Sieve<K, V, P>, ER, S>;
+
 /// A cached entry holder of the in-memory cache.
 #[derive(Debug)]
 pub enum CacheEntry<K, V, S = DefaultHasher, P = CacheProperties>
@@ -140,6 +145,8 @@ where
     Lru(LruCacheEntry<K, V, S, P>),
     /// A cached entry holder of the in-memory LFU cache.
     Lfu(LfuCacheEntry<K, V, S, P>),
+    /// A cached entry holder of the in-memory Sieve cache.
+    Sieve(SieveCacheEntry<K, V, S, P>),
 }
 
 impl<K, V, S, P> Clone for CacheEntry<K, V, S, P>
@@ -155,6 +162,7 @@ where
             Self::Lru(entry) => Self::Lru(entry.clone()),
             Self::Lfu(entry) => Self::Lfu(entry.clone()),
             Self::S3Fifo(entry) => Self::S3Fifo(entry.clone()),
+            Self::Sieve(entry) => Self::Sieve(entry.clone()),
         }
     }
 }
@@ -174,6 +182,7 @@ where
             CacheEntry::Lru(entry) => entry.deref(),
             CacheEntry::Lfu(entry) => entry.deref(),
             CacheEntry::S3Fifo(entry) => entry.deref(),
+            CacheEntry::Sieve(entry) => entry.deref(),
         }
     }
 }
@@ -226,6 +235,18 @@ where
     }
 }
 
+impl<K, V, S, P> From<SieveCacheEntry<K, V, S, P>> for CacheEntry<K, V, S, P>
+where
+    K: Key,
+    V: Value,
+    S: HashBuilder,
+    P: Properties,
+{
+    fn from(entry: SieveCacheEntry<K, V, S, P>) -> Self {
+        Self::Sieve(entry)
+    }
+}
+
 impl<K, V, S, P> CacheEntry<K, V, S, P>
 where
     K: Key,
@@ -240,6 +261,7 @@ where
             CacheEntry::Lru(entry) => entry.hash(),
             CacheEntry::Lfu(entry) => entry.hash(),
             CacheEntry::S3Fifo(entry) => entry.hash(),
+            CacheEntry::Sieve(entry) => entry.hash(),
         }
     }
 
@@ -250,6 +272,7 @@ where
             CacheEntry::Lru(entry) => entry.key(),
             CacheEntry::Lfu(entry) => entry.key(),
             CacheEntry::S3Fifo(entry) => entry.key(),
+            CacheEntry::Sieve(entry) => entry.key(),
         }
     }
 
@@ -260,6 +283,7 @@ where
             CacheEntry::Lru(entry) => entry.value(),
             CacheEntry::Lfu(entry) => entry.value(),
             CacheEntry::S3Fifo(entry) => entry.value(),
+            CacheEntry::Sieve(entry) => entry.value(),
         }
     }
 
@@ -270,6 +294,7 @@ where
             CacheEntry::Lru(entry) => entry.properties(),
             CacheEntry::Lfu(entry) => entry.properties(),
             CacheEntry::S3Fifo(entry) => entry.properties(),
+            CacheEntry::Sieve(entry) => entry.properties(),
         }
     }
 
@@ -280,6 +305,7 @@ where
             CacheEntry::Lru(entry) => entry.weight(),
             CacheEntry::Lfu(entry) => entry.weight(),
             CacheEntry::S3Fifo(entry) => entry.weight(),
+            CacheEntry::Sieve(entry) => entry.weight(),
         }
     }
 
@@ -290,6 +316,7 @@ where
             CacheEntry::Lru(entry) => entry.refs(),
             CacheEntry::Lfu(entry) => entry.refs(),
             CacheEntry::S3Fifo(entry) => entry.refs(),
+            CacheEntry::Sieve(entry) => entry.refs(),
         }
     }
 
@@ -300,6 +327,7 @@ where
             CacheEntry::Lru(entry) => entry.is_outdated(),
             CacheEntry::Lfu(entry) => entry.is_outdated(),
             CacheEntry::S3Fifo(entry) => entry.is_outdated(),
+            CacheEntry::Sieve(entry) => entry.is_outdated(),
         }
     }
 
@@ -310,6 +338,7 @@ where
             CacheEntry::Lru(entry) => entry.piece(),
             CacheEntry::Lfu(entry) => entry.piece(),
             CacheEntry::S3Fifo(entry) => entry.piece(),
+            CacheEntry::Sieve(entry) => entry.piece(),
         }
     }
 }
@@ -325,6 +354,8 @@ pub enum EvictionConfig {
     Lru(LruConfig),
     /// LFU eviction algorithm config.
     Lfu(LfuConfig),
+    /// Sieve eviction algorithm config.
+    Sieve(SieveConfig),
 }
 
 impl From<FifoConfig> for EvictionConfig {
@@ -348,6 +379,12 @@ impl From<LruConfig> for EvictionConfig {
 impl From<LfuConfig> for EvictionConfig {
     fn from(value: LfuConfig) -> EvictionConfig {
         EvictionConfig::Lfu(value)
+    }
+}
+
+impl From<SieveConfig> for EvictionConfig {
+    fn from(value: SieveConfig) -> EvictionConfig {
+        EvictionConfig::Sieve(value)
     }
 }
 
@@ -529,6 +566,15 @@ where
                 event_listener: self.event_listener,
                 metrics,
             }))),
+            EvictionConfig::Sieve(eviction_config) => Cache::Sieve(Arc::new(RawCache::new(RawCacheConfig {
+                capacity: self.capacity,
+                shards: self.shards,
+                eviction_config,
+                hash_builder: self.hash_builder,
+                weighter: self.weighter,
+                event_listener: self.event_listener,
+                metrics,
+            }))),
         }
     }
 }
@@ -549,6 +595,8 @@ where
     Lfu(Arc<LfuCache<K, V, S, P>>),
     /// In-memory S3FIFO cache.
     S3Fifo(Arc<S3FifoCache<K, V, S, P>>),
+    /// In-memory Sieve cache.
+    Sieve(Arc<SieveCache<K, V, S, P>>),
 }
 
 impl<K, V, S, P> Debug for Cache<K, V, S, P>
@@ -564,6 +612,7 @@ where
             Self::S3Fifo(_) => f.debug_tuple("Cache::S3FifoCache").finish(),
             Self::Lru(_) => f.debug_tuple("Cache::LruCache").finish(),
             Self::Lfu(_) => f.debug_tuple("Cache::LfuCache").finish(),
+            Self::Sieve(_) => f.debug_tuple("Cache::SieveCache").finish(),
         }
     }
 }
@@ -581,6 +630,7 @@ where
             Self::S3Fifo(cache) => Self::S3Fifo(cache.clone()),
             Self::Lru(cache) => Self::Lru(cache.clone()),
             Self::Lfu(cache) => Self::Lfu(cache.clone()),
+            Self::Sieve(cache) => Self::Sieve(cache.clone()),
         }
     }
 }
@@ -611,6 +661,7 @@ where
             Cache::S3Fifo(cache) => cache.resize(capacity),
             Cache::Lru(cache) => cache.resize(capacity),
             Cache::Lfu(cache) => cache.resize(capacity),
+            Cache::Sieve(cache) => cache.resize(capacity),
         }
     }
 
@@ -622,6 +673,7 @@ where
             Cache::S3Fifo(cache) => cache.insert(key, value).into(),
             Cache::Lru(cache) => cache.insert(key, value).into(),
             Cache::Lfu(cache) => cache.insert(key, value).into(),
+            Cache::Sieve(cache) => cache.insert(key, value).into(),
         }
     }
 
@@ -636,6 +688,7 @@ where
             Cache::S3Fifo(cache) => cache.insert_with_properties(key, value, properties).into(),
             Cache::Lru(cache) => cache.insert_with_properties(key, value, properties).into(),
             Cache::Lfu(cache) => cache.insert_with_properties(key, value, properties).into(),
+            Cache::Sieve(cache) => cache.insert_with_properties(key, value, properties).into(),
         }
     }
 
@@ -650,6 +703,7 @@ where
             Cache::S3Fifo(cache) => cache.remove(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.remove(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.remove(key).map(CacheEntry::from),
+            Cache::Sieve(cache) => cache.remove(key).map(CacheEntry::from),
         }
     }
 
@@ -664,6 +718,7 @@ where
             Cache::S3Fifo(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lru(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.get(key).map(CacheEntry::from),
+            Cache::Sieve(cache) => cache.get(key).map(CacheEntry::from),
         }
     }
 
@@ -678,6 +733,7 @@ where
             Cache::S3Fifo(cache) => cache.contains(key),
             Cache::Lru(cache) => cache.contains(key),
             Cache::Lfu(cache) => cache.contains(key),
+            Cache::Sieve(cache) => cache.contains(key),
         }
     }
 
@@ -694,6 +750,7 @@ where
             Cache::S3Fifo(cache) => cache.touch(key),
             Cache::Lru(cache) => cache.touch(key),
             Cache::Lfu(cache) => cache.touch(key),
+            Cache::Sieve(cache) => cache.touch(key),
         }
     }
 
@@ -705,6 +762,7 @@ where
             Cache::S3Fifo(cache) => cache.clear(),
             Cache::Lru(cache) => cache.clear(),
             Cache::Lfu(cache) => cache.clear(),
+            Cache::Sieve(cache) => cache.clear(),
         }
     }
 
@@ -715,6 +773,7 @@ where
             Cache::S3Fifo(cache) => cache.capacity(),
             Cache::Lru(cache) => cache.capacity(),
             Cache::Lfu(cache) => cache.capacity(),
+            Cache::Sieve(cache) => cache.capacity(),
         }
     }
 
@@ -725,6 +784,7 @@ where
             Cache::S3Fifo(cache) => cache.usage(),
             Cache::Lru(cache) => cache.usage(),
             Cache::Lfu(cache) => cache.usage(),
+            Cache::Sieve(cache) => cache.usage(),
         }
     }
 
@@ -743,6 +803,7 @@ where
             Cache::S3Fifo(cache) => cache.hash_builder(),
             Cache::Lru(cache) => cache.hash_builder(),
             Cache::Lfu(cache) => cache.hash_builder(),
+            Cache::Sieve(cache) => cache.hash_builder(),
         }
     }
 
@@ -753,6 +814,7 @@ where
             Cache::S3Fifo(cache) => cache.shards(),
             Cache::Lru(cache) => cache.shards(),
             Cache::Lfu(cache) => cache.shards(),
+            Cache::Sieve(cache) => cache.shards(),
         }
     }
 
@@ -764,6 +826,7 @@ where
             Cache::S3Fifo(cache) => cache.set_pipe(pipe),
             Cache::Lru(cache) => cache.set_pipe(pipe),
             Cache::Lfu(cache) => cache.set_pipe(pipe),
+            Cache::Sieve(cache) => cache.set_pipe(pipe),
         }
     }
 
@@ -777,6 +840,7 @@ where
             Cache::S3Fifo(cache) => cache.evict_all(),
             Cache::Lru(cache) => cache.evict_all(),
             Cache::Lfu(cache) => cache.evict_all(),
+            Cache::Sieve(cache) => cache.evict_all(),
         }
     }
 
@@ -791,6 +855,7 @@ where
             Cache::S3Fifo(cache) => cache.flush().await,
             Cache::Lru(cache) => cache.flush().await,
             Cache::Lfu(cache) => cache.flush().await,
+            Cache::Sieve(cache) => cache.flush().await,
         }
     }
 }
@@ -812,6 +877,8 @@ where
     Lru(#[pin] LruFetch<K, V, ER, S, P>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
     Lfu(#[pin] LfuFetch<K, V, ER, S, P>),
+    /// A future that is used to get entry value from the remote storage for the in-memory sieve cache.
+    Sieve(#[pin] SieveFetch<K, V, ER, S, P>),
 }
 
 impl<K, V, ER, S, P> From<FifoFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
@@ -862,6 +929,18 @@ where
     }
 }
 
+impl<K, V, ER, S, P> From<SieveFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
+where
+    K: Key,
+    V: Value,
+    S: HashBuilder,
+    P: Properties,
+{
+    fn from(entry: SieveFetch<K, V, ER, S, P>) -> Self {
+        Self::Sieve(entry)
+    }
+}
+
 impl<K, V, ER, S, P> Future for Fetch<K, V, ER, S, P>
 where
     K: Key,
@@ -878,6 +957,7 @@ where
             FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
             FetchProj::Lru(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
             FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
+            FetchProj::Sieve(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
         }
     }
 }
@@ -896,6 +976,7 @@ where
             Fetch::S3Fifo(fetch) => fetch.state(),
             Fetch::Lru(fetch) => fetch.state(),
             Fetch::Lfu(fetch) => fetch.state(),
+            Fetch::Sieve(fetch) => fetch.state(),
         }
     }
 
@@ -907,6 +988,7 @@ where
             Fetch::S3Fifo(fetch) => fetch.store(),
             Fetch::Lru(fetch) => fetch.store(),
             Fetch::Lfu(fetch) => fetch.store(),
+            Fetch::Sieve(fetch) => fetch.store(),
         }
     }
 }
@@ -935,6 +1017,7 @@ where
             Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
             Cache::Lru(cache) => Fetch::from(cache.fetch(key, fetch)),
             Cache::Lfu(cache) => Fetch::from(cache.fetch(key, fetch)),
+            Cache::Sieve(cache) => Fetch::from(cache.fetch(key, fetch)),
         }
     }
 
@@ -955,6 +1038,7 @@ where
             Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
             Cache::Lru(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
             Cache::Lfu(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
+            Cache::Sieve(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
         }
     }
 
@@ -984,6 +1068,7 @@ where
             Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
             Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
             Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
+            Cache::Sieve(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
         }
     }
 }
@@ -1041,6 +1126,13 @@ mod tests {
                 ghost_queue_capacity_ratio: 10.0,
                 small_to_main_freq_threshold: 2,
             })
+            .build()
+    }
+
+    fn sieve() -> Cache<u64, u64> {
+        CacheBuilder::new(CAPACITY)
+            .with_shards(SHARDS)
+            .with_eviction_config(SieveConfig {})
             .build()
     }
 
@@ -1122,5 +1214,10 @@ mod tests {
     #[tokio::test]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
+    }
+
+    #[tokio::test]
+    async fn test_sieve_cache() {
+        case(sieve()).await
     }
 }
