@@ -27,27 +27,31 @@ fn init_jaeger_exporter() {
 
 #[cfg(feature = "ot")]
 fn init_opentelemetry_exporter() {
-    use opentelemetry_otlp::WithExportConfig;
+    use std::borrow::Cow;
 
-    let exporter = opentelemetry_otlp::new_exporter()
-        .tonic()
-        .with_endpoint("http://127.0.0.1:4317")
-        .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-        .with_timeout(Duration::from_secs(
-            opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
-        ))
-        .build_span_exporter()
-        .unwrap();
-    let reporter = fastrace_opentelemetry::OpenTelemetryReporter::new(
-        exporter,
-        opentelemetry::trace::SpanKind::Server,
-        std::borrow::Cow::Owned(opentelemetry_sdk::Resource::new([opentelemetry::KeyValue::new(
-            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-            "example",
-        )])),
-        opentelemetry::InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
+    use fastrace::collector::Config;
+    use fastrace_opentelemetry::OpenTelemetryReporter;
+    use opentelemetry::{InstrumentationScope, KeyValue};
+    use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
+    use opentelemetry_sdk::Resource;
+
+    let reporter = OpenTelemetryReporter::new(
+        SpanExporter::builder()
+            .with_tonic()
+            .with_protocol(Protocol::Grpc)
+            .with_endpoint("http://127.0.0.1:4317")
+            .build()
+            .unwrap(),
+        Cow::Owned(
+            Resource::builder()
+                .with_attributes([KeyValue::new("service.name", "foyer")])
+                .build(),
+        ),
+        InstrumentationScope::builder("foyer")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build(),
     );
-    fastrace::set_reporter(reporter, fastrace::collector::Config::default());
+    fastrace::set_reporter(reporter, Config::default());
 }
 
 fn init_exporter() {

@@ -23,14 +23,16 @@ readme = "README.md"
 
 [workspace.dependencies]
 
-# dependencies
+hyper = { version = "1", default-features = false }
+hyper-util = { version = "0.1", default-features = false }
 twox-hash = "2"
+# dependencies
 anyhow = "1"
 bincode = "1"
 bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 clap = { version = "4", features = ["derive"] }
-criterion = "0.5"
+criterion = "0.6"
 equivalent = "1"
 fastrace = "0.7"
 foyer = { version = "0.17.4", path = "foyer" }
@@ -46,15 +48,43 @@ parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
 prometheus = "0.14"
+tempfile = "3"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
-test-log = { version = "0.2", default-features = false, features = [
-  "trace",
-  "color",
-] }
+test-log = "0.2"
 thiserror = "2"
 tracing = "0.1"
+csv = "1"
+moka = "0.12"
+cmsketch = "0.2"
+arc-swap = "1"
+bitflags = "2"
+intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
+console-subscriber = "0.4"
+allocator-api2 = "0.2"
+chrono = "0.4"
+fastrace-jaeger = "0.7"
+fastrace-opentelemetry = "0.12"
+http-body-util = "0.1"
+opentelemetry = "0.30"
+opentelemetry-otlp = "0.30"
+opentelemetry-semantic-conventions = "0.30"
+opentelemetry_sdk = "0.30"
+tokio = "1"
+flume = "0.11"
+fs4 = { version = "0.13", default-features = false }
+libc = "0.2"
+lz4 = "1"
+ordered_hash_map = "0.4"
+zstd = "0.13"
+auto_enums = "0.8"
+cfg-if = "1"
+serde_bytes = "0.11"
+hdrhistogram = "7"
+humantime = "2"
+tracing-subscriber = "0.3"
+tikv-jemallocator = "0.6"
 
 [workspace.lints.rust]
 missing_docs = "warn"
