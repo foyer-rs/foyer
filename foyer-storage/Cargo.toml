@@ -25,35 +25,43 @@ strict_assertions = [
 ]
 
 [dependencies]
-# TODO(MrCroxx): Remove this after `allocator_api` is stable.
-allocator-api2 = "0.2"
-anyhow = "1.0"
-# TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
-array-util = "1"
-auto_enums = { version = "0.8", features = ["futures03"] }
+allocator-api2 = { workspace = true }
+anyhow = { workspace = true }
+auto_enums = { workspace = true, features = ["futures03"] }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
-flume = "0.11"
+flume = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-fs4 = { version = "0.13", default-features = false }
+fs4 = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
-libc = "0.2"
-lz4 = "1.24"
-ordered_hash_map = "0.4"
+libc = { workspace = true }
+lz4 = { workspace = true }
+ordered_hash_map = { workspace = true }
 parking_lot = { workspace = true }
 paste = { workspace = true }
-pin-project = "1"
+pin-project = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-twox-hash = "2"
-zstd = "0.13"
+twox-hash = { workspace = true }
+zstd = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
@@ -66,22 +74,11 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
   "fs",
 ] }
 
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { package = "tokio", version = "1", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [dev-dependencies]
 bytesize = { workspace = true }
 foyer-memory = { workspace = true, features = ["test_utils"] }
-tempfile = "3"
-test-log = { workspace = true }
+tempfile = { workspace = true }
+test-log = { workspace = true, features = ["trace", "color"] }
 
 [lints]
 workspace = true

@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
 };
 
-use array_util::SliceExt;
 use bytes::{Buf, BufMut};
 use foyer_common::{bits, metrics::Metrics};
 use futures_util::future::try_join_all;
@@ -174,9 +173,8 @@ impl TombstoneLog {
                 let mut hash = 0;
                 let mut tombstones = vec![];
 
-                // TODO(MrCroxx): use `array_chunks` after `#![feature(array_chunks)]` is stable.
-                for (slot, buf) in buffer.array_chunks_ext::<{ Tombstone::serialized_len() }>().enumerate() {
-                    let tombstone = Tombstone::read(&buf[..]);
+                for (slot, buf) in buffer.chunks_exact(Tombstone::serialized_len()).enumerate() {
+                    let tombstone = Tombstone::read(buf);
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
                         addr = offset + slot * Tombstone::serialized_len();

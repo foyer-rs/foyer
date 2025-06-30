@@ -19,21 +19,32 @@ strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["fastrace/enable", "foyer-common/tracing"]
 
 [dependencies]
-arc-swap = "1"
-bitflags = "2"
-cmsketch = "0.2.1"
+arc-swap = { workspace = true }
+bitflags = { workspace = true }
+cmsketch = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 hashbrown = { workspace = true }
-intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
+intrusive-collections = { workspace = true }
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
-pin-project = "1"
+pin-project = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
@@ -46,24 +57,13 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
   "fs",
 ] }
 
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { package = "tokio", version = "1", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [dev-dependencies]
-csv = "1.3.0"
+csv = { workspace = true }
 futures-util = { workspace = true }
-moka = { version = "0.12", features = ["sync"] }
+moka = { workspace = true, features = ["sync"] }
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr = { workspace = true }
-test-log = { workspace = true }
+test-log = { workspace = true, features = ["trace", "color"] }
 
 [[bench]]
 name = "bench_hit_ratio"

@@ -45,6 +45,17 @@ pin-project = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
+] }
+
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",
@@ -56,21 +67,10 @@ tokio = { package = "madsim-tokio", version = "0.2", features = [
   "fs",
 ] }
 
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { package = "tokio", version = "1", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [dev-dependencies]
 foyer-storage = { workspace = true, features = ["test_utils"] }
-tempfile = "3"
-test-log = { workspace = true }
+tempfile = { workspace = true }
+test-log = { workspace = true, features = ["trace", "color"] }
 
 [lints]
 workspace = true
