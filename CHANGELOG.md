@@ -553,7 +553,7 @@ Options:
 ### Changes
 
 - Support windows (for `foyer` only).
-- Bump rust toolchain to `1.81.0`.
+- Bump rust toolchain to `1.82.0`.
 - Expose in-memory cache builder and cache entry.
 - Reduce page fault and vec growth overhead.
 - Use bytes size for `foyer-bench`.
