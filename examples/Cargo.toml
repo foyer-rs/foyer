@@ -19,36 +19,38 @@ ot = [
   "fastrace-opentelemetry",
   "opentelemetry",
   "opentelemetry-otlp",
-  "opentelemetry-semantic-conventions",
   "opentelemetry_sdk",
 ]
 
 [dependencies]
 anyhow = { workspace = true }
-chrono = "0.4"
+chrono = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
-fastrace-jaeger = { version = "0.7", optional = true }
-fastrace-opentelemetry = { version = "0.7", optional = true }
+fastrace-jaeger = { workspace = true, optional = true }
+fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true }
-http-body-util = "0.1"
-hyper = { version = "1", default-features = false, features = [
+http-body-util = { workspace = true }
+hyper = { workspace = true, default-features = false, features = [
   "server",
   "http1",
 ] }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+hyper-util = { workspace = true, default-features = false, features = [
+  "tokio",
+] }
 mixtrics = { workspace = true, features = ["prometheus"] }
-opentelemetry = { version = "0.26", optional = true }
-opentelemetry-otlp = { version = "0.26", optional = true }
-opentelemetry-semantic-conventions = { version = "0.26", optional = true }
-opentelemetry_sdk = { version = "0.26", features = [
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, features = [
+  "grpc-tonic",
+], optional = true }
+opentelemetry_sdk = { workspace = true, features = [
   "rt-tokio",
   "trace",
 ], optional = true }
 prometheus = { workspace = true }
 serde = { workspace = true }
-tempfile = "3"
-tokio = { version = "1", features = ["rt"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 
 [[example]]
