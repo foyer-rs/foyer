@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{Parser, Subcommand};
-use colored::Colorize;
 use std::{
     ffi::OsStr,
     io::{stdin, stdout, Write},
     process::{exit, Command as StdCommand, Stdio},
 };
+
+use clap::{Parser, Subcommand};
+use colored::Colorize;
 
 fn check_and_install(name: &str, check: &str, install: &str, yes: bool) {
     if StdCommand::new("sh")
@@ -140,7 +141,8 @@ fn check(fast: bool) {
     run("cargo sort -w");
     run("taplo fmt");
     run("cargo fmt --all");
-    run("cargo +nightly fmt --all");
+    run("cargo +nightly-2024-08-30 fmt --all -- --config-path rustfmt.nightly.toml");
+
     if !fast {
         run("cargo clippy --all-targets --features deadlock");
         run(r#"cargo clippy --all-targets --features tokio-console -- -A "clippy::large_enum_variant""#);
