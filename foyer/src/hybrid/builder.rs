@@ -331,6 +331,6 @@ where
             memory.set_pipe(Box::new(pipe));
         }
 
-        Ok(HybridCache::new(self.options, memory, storage, self.metrics))
+        Ok(HybridCache::new(self.name, self.options, memory, storage, self.metrics))
     }
 }
