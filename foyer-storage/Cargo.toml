@@ -52,8 +52,8 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 zstd = { workspace = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
+[target.'cfg(madsim)'.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",
   "rt-multi-thread",
   "sync",
@@ -63,8 +63,8 @@ tokio = { workspace = true, features = [
   "fs",
 ] }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { workspace = true, features = [
   "rt",
   "rt-multi-thread",
   "sync",
