@@ -8,6 +8,7 @@ members = [
   "foyer-common",
   "foyer-memory",
   "foyer-storage",
+  "xtask",
 ]
 
 [workspace.package]
@@ -22,69 +23,70 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [workspace.dependencies]
-
-hyper = { version = "1", default-features = false }
-hyper-util = { version = "0.1", default-features = false }
-twox-hash = "2"
+allocator-api2 = "0.2"
 # dependencies
 anyhow = "1"
+arc-swap = "1"
+auto_enums = "0.8"
 bincode = "1"
+bitflags = "2"
 bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
+cfg-if = "1"
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+cmsketch = "0.2"
+colored = "3"
+console-subscriber = "0.4"
 criterion = "0.6"
+csv = "1"
 equivalent = "1"
 fastrace = "0.7"
+fastrace-jaeger = "0.7"
+fastrace-opentelemetry = "0.12"
+flume = "0.11"
 foyer = { version = "0.17.4", path = "foyer" }
 foyer-common = { version = "0.17.4", path = "foyer-common" }
 foyer-memory = { version = "0.17.4", path = "foyer-memory" }
 foyer-storage = { version = "0.17.4", path = "foyer-storage" }
+fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"
-itertools = "0.14"
-mixtrics = "0.2"
-parking_lot = { version = "0.12" }
-paste = "1"
-pin-project = "1"
-prometheus = "0.14"
-tempfile = "3"
-rand = { version = "0.9" }
-rand_distr = { version = "0.5" }
-serde = { version = "1", features = ["derive"] }
-test-log = "0.2"
-thiserror = "2"
-tracing = "0.1"
-csv = "1"
-moka = "0.12"
-cmsketch = "0.2"
-arc-swap = "1"
-bitflags = "2"
-intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
-console-subscriber = "0.4"
-allocator-api2 = "0.2"
-chrono = "0.4"
-fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.12"
+hdrhistogram = "7"
 http-body-util = "0.1"
+humantime = "2"
+
+hyper = { version = "1", default-features = false }
+hyper-util = { version = "0.1", default-features = false }
+intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
+itertools = "0.14"
+libc = "0.2"
+lz4 = "1"
+mixtrics = "0.2"
+moka = "0.12"
 opentelemetry = "0.30"
 opentelemetry-otlp = "0.30"
 opentelemetry-semantic-conventions = "0.30"
 opentelemetry_sdk = "0.30"
-tokio = "1"
-flume = "0.11"
-fs4 = { version = "0.13", default-features = false }
-libc = "0.2"
-lz4 = "1"
 ordered_hash_map = "0.4"
-zstd = "0.13"
-auto_enums = "0.8"
-cfg-if = "1"
+parking_lot = { version = "0.12" }
+paste = "1"
+pin-project = "1"
+prometheus = "0.14"
+rand = { version = "0.9" }
+rand_distr = { version = "0.5" }
+serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
-hdrhistogram = "7"
-humantime = "2"
-tracing-subscriber = "0.3"
+tempfile = "3"
+test-log = "0.2"
+thiserror = "2"
 tikv-jemallocator = "0.6"
+tokio = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+twox-hash = "2"
+zstd = "0.13"
 
 [workspace.lints.rust]
 missing_docs = "warn"
