@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod monitor;
+
 use std::{
     ffi::OsStr,
     io::{stdin, stdout, Write},
@@ -311,6 +313,9 @@ enum Command {
     Msrv,
     /// Minimize Grafana Dashboard json files.
     Json(JsonArgs),
+    /// Setup monitoring environment for foyer benchmark.
+    #[clap(subcommand)]
+    Monitor(monitor::MonitorCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -335,6 +340,7 @@ fn main() {
         Command::Madsim => madsim(),
         Command::Msrv => msrv(),
         Command::Json(args) => json(args.check),
+        Command::Monitor(cmd) => monitor::run(cmd),
     }
 
     println!("{}", "Done!".green());
