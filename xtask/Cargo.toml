@@ -28,3 +28,4 @@ publish = true
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 colored = { workspace = true }
+serde_json = { workspace = true }

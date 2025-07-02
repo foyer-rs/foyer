@@ -15,6 +15,7 @@
 use std::{
     ffi::OsStr,
     io::{stdin, stdout, Write},
+    path::Path,
     process::{exit, Command as StdCommand, Stdio},
 };
 
@@ -138,6 +139,7 @@ fn tools(yes: bool) {
 
 fn check(fast: bool) {
     run("typos");
+    json(false);
     run("cargo sort -w");
     run("taplo fmt");
     run("cargo fmt --all");
@@ -239,6 +241,42 @@ fn msrv() {
     );
 }
 
+fn json(check: bool) {
+    const DIR: &str = "etc/grafana/dashboards";
+    let entries = std::fs::read_dir(DIR).expect("Failed to read directory");
+    let mut diff = false;
+    for entry in entries {
+        let entry = entry.expect("Failed to read entry");
+        let path = entry.path();
+        if path.extension().and_then(OsStr::to_str) == Some("json") {
+            println!("Minimizing JSON file: {}", path.to_string_lossy().green());
+            let d = minimize_json(&path, check);
+            if check && d {
+                println!(
+                    "Json file {} is not minimized. Please run `cargo xtask json` to minimize it.",
+                    path.to_string_lossy().red()
+                );
+            }
+            diff |= d;
+        }
+    }
+    if check && diff {
+        exit(1);
+    }
+}
+
+fn minimize_json(path: impl AsRef<Path>, check: bool) -> bool {
+    let file_path = path.as_ref();
+    let content = std::fs::read_to_string(file_path).expect("Failed to read JSON file");
+    let json: serde_json::Value = serde_json::from_str(&content).expect("Failed to parse JSON");
+    let minimized = serde_json::to_string(&json).expect("Failed to serialize JSON");
+    let diff = content != minimized;
+    if !check {
+        std::fs::write(file_path, minimized).expect("Failed to write minimized JSON");
+    }
+    diff
+}
+
 #[derive(Debug, Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -271,6 +309,14 @@ enum Command {
     Madsim,
     /// Run checks and tests with MSRV toolchain.
     Msrv,
+    /// Minimize Grafana Dashboard json files.
+    Json(JsonArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct JsonArgs {
+    #[clap(short, long, default_value_t = false)]
+    check: bool,
 }
 
 fn main() {
@@ -288,6 +334,7 @@ fn main() {
         Command::License => license(),
         Command::Madsim => madsim(),
         Command::Msrv => msrv(),
+        Command::Json(args) => json(args.check),
     }
 
     println!("{}", "Done!".green());

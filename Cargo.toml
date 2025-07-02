@@ -56,7 +56,6 @@ hashbrown = "0.15"
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
-
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
@@ -78,6 +77,7 @@ rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
+serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 thiserror = "2"
