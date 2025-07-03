@@ -197,7 +197,6 @@ where
             indexer,
             tombstone_log,
             compression: config.compression,
-            flush: config.flush,
             runtime: runtime.clone(),
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
@@ -293,7 +292,6 @@ where
     tombstone_log: Option<TombstoneLog>,
 
     compression: Compression,
-    flush: bool,
 
     _device: MonitoredDevice,
 
@@ -463,7 +461,6 @@ where
             .map(|(i, (Region { blob_parts }, region_handle))| {
                 let indexer = self.indexer.clone();
                 let region_manager = self.region_manager.clone();
-                let flush = self.flush;
                 let metrics = self.metrics.clone();
 
                 async move {
@@ -524,10 +521,6 @@ where
                                         );
                                     }
                                     res?;
-
-                                    if flush {
-                                        region.flush().await?;
-                                    }
                                 } else {
                                     tracing::trace!(
                                         id,

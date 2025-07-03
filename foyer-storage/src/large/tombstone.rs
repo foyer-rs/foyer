@@ -299,7 +299,7 @@ where
         self.buffer = Some(buf);
         res?;
         if self.sync {
-            self.device.flush(Some(self.region)).await?;
+            self.device.sync(Some(self.region)).await?;
         }
         Ok(())
     }

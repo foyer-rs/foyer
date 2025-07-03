@@ -209,7 +209,7 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
 
     /// Flush the device, make sure all modifications are persisted safely on the device.
     #[must_use]
-    fn flush(&self, region: Option<RegionId>) -> impl Future<Output = Result<()>> + Send;
+    fn sync(&self, region: Option<RegionId>) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// Device extend interfaces.
@@ -325,12 +325,12 @@ impl Dev for Device {
         }
     }
 
-    async fn flush(&self, region: Option<RegionId>) -> Result<()> {
+    async fn sync(&self, region: Option<RegionId>) -> Result<()> {
         match self {
-            Device::DirectFile(dev) => dev.flush(region).await,
-            Device::DirectFs(dev) => dev.flush(region).await,
+            Device::DirectFile(dev) => dev.sync(region).await,
+            Device::DirectFs(dev) => dev.sync(region).await,
             #[cfg(test)]
-            Device::Noop(dev) => dev.flush(region).await,
+            Device::Noop(dev) => dev.sync(region).await,
         }
     }
 }

@@ -71,7 +71,6 @@ async fn main() -> Result<()> {
                         .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
                 ),
         )
-        .with_flush(true)
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)

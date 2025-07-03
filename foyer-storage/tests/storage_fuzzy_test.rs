@@ -124,7 +124,6 @@ fn basic(
             .with_file_size(MB),
     )
     .with_admission_picker(recorder.clone())
-    .with_flush(true)
 }
 
 #[test_log::test(tokio::test)]
