@@ -317,6 +317,23 @@ where
         }
     }
 
+    /// Enable/disable keeper.
+    ///
+    /// Keeper is a indexer for disk cache enqueued not yet written entries.
+    /// Enable it will make entries in the write queue queryable.
+    ///
+    /// Default: `true`.
+    pub fn with_keeper(self, keeper: bool) -> Self {
+        let builder = self.builder.with_keeper(keeper);
+        Self {
+            name: self.name,
+            options: self.options,
+            metrics: self.metrics,
+            memory: self.memory,
+            builder,
+        }
+    }
+
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
         let builder = self.builder;
