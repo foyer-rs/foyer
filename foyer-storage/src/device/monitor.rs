@@ -119,10 +119,10 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::device::monitor::flush")
     )]
-    async fn flush(&self, region: Option<RegionId>) -> Result<()> {
+    async fn sync(&self, region: Option<RegionId>) -> Result<()> {
         let now = Instant::now();
 
-        let res = self.device.flush(region).await;
+        let res = self.device.sync(region).await;
 
         self.stats.record_disk_flush();
 
@@ -171,8 +171,8 @@ where
         self.read(buf, region, offset).await
     }
 
-    async fn flush(&self, region: Option<RegionId>) -> Result<()> {
-        self.flush(region).await
+    async fn sync(&self, region: Option<RegionId>) -> Result<()> {
+        self.sync(region).await
     }
 }
 

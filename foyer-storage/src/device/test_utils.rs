@@ -57,7 +57,7 @@ impl Dev for NoopDevice {
         (buf, Ok(()))
     }
 
-    async fn flush(&self, _: Option<super::RegionId>) -> Result<()> {
+    async fn sync(&self, _: Option<super::RegionId>) -> Result<()> {
         Ok(())
     }
 }

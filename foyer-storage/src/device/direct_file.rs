@@ -314,7 +314,7 @@ impl Dev for DirectFileDevice {
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::device::direct_file::flush")
     )]
-    async fn flush(&self, _: Option<RegionId>) -> Result<()> {
+    async fn sync(&self, _: Option<RegionId>) -> Result<()> {
         let file = self.file.clone();
         asyncify_with_runtime(self.runtime.write(), move || file.sync_all().map_err(Error::from)).await
     }
@@ -462,7 +462,7 @@ mod tests {
         res.unwrap();
         assert_eq!(&buf[..], &b[..]);
 
-        device.flush(None).await.unwrap();
+        device.sync(None).await.unwrap();
 
         drop(device);
 

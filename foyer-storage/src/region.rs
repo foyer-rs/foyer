@@ -106,8 +106,9 @@ impl Region {
         self.inner.device.read(buf, self.id, offset).await
     }
 
-    pub(crate) async fn flush(&self) -> Result<()> {
-        self.inner.device.flush(Some(self.id)).await
+    #[expect(unused)]
+    pub(crate) async fn sync(&self) -> Result<()> {
+        self.inner.device.sync(Some(self.id)).await
     }
 }
 

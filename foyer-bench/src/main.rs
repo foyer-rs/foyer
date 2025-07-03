@@ -557,7 +557,6 @@ async fn benchmark(args: Args) {
     };
 
     builder = builder
-        .with_flush(args.flush)
         .with_recover_mode(args.recover_mode)
         .with_compression(args.compression)
         .with_runtime_options(match args.runtime.as_str() {
