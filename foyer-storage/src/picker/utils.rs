@@ -250,20 +250,20 @@ impl EvictionPicker for FifoPicker {
     }
 
     fn pick(&mut self, info: EvictionInfo<'_>) -> Option<RegionId> {
-        tracing::trace!(evictable = ?info.evictable, clean = info.clean, "[fifo picker]: pick");
+        tracing::info!(evictable = ?info.evictable, clean = info.clean, "[fifo picker]: pick");
         self.mark_probation(info);
         let res = self.queue.front().copied();
-        tracing::trace!("[fifo picker]: pick {res:?}");
+        tracing::info!("[fifo picker]: pick {res:?}");
         res
     }
 
     fn on_region_evictable(&mut self, _: EvictionInfo<'_>, region: RegionId) {
-        tracing::trace!("[fifo picker]: {region} is evictable");
+        tracing::info!("[fifo picker]: {region} is evictable");
         self.queue.push_back(region);
     }
 
     fn on_region_evict(&mut self, _: EvictionInfo<'_>, region: RegionId) {
-        tracing::trace!("[fifo picker]: {region} is evicted");
+        tracing::info!("[fifo picker]: {region} is evicted");
         let index = self.queue.iter().position(|r| r == &region).unwrap();
         self.queue.remove(index);
     }
