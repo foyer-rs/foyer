@@ -6,6 +6,6 @@
 
 - [ ] I have written the necessary rustdoc comments
 - [ ] I have added the necessary unit tests and integration tests
-- [ ] I have passed `make all` (or `make fast` instead if the old tests are not modified) in my local environment.
+- [ ] I have passed `cargo x` (or `cargo x --fast` instead if the old tests are not modified) in my local environment.
 
 ## Related issues or PRs (optional)

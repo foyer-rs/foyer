@@ -53,7 +53,6 @@ where
     pub set_cache_shards: usize,
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
-    pub flush: bool,
     pub flushers: usize,
     pub buffer_pool_size: usize,
     pub runtime: Runtime,
@@ -72,7 +71,6 @@ where
             .field("set_cache_shards", &self.set_cache_shards)
             .field("device", &self.device)
             .field("regions", &self.regions)
-            .field("flush", &self.flush)
             .field("flushers", &self.flushers)
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("runtime", &self.runtime)
@@ -348,7 +346,6 @@ mod tests {
             set_cache_shards: 1,
             device,
             regions,
-            flush: false,
             flushers: 1,
             buffer_pool_size: ByteSize::kib(64).as_u64() as _,
             runtime: Runtime::new(None, None, Handle::current()),

@@ -165,7 +165,6 @@ async fn main() -> Result<()> {
                         .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
                 ),
         )
-        .with_flush(true)
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
@@ -285,9 +284,9 @@ The development state and the roadmap can be found in [foyer - Development Roadm
 
 Contributions for *foyer* are warmly welcomed! 🥰
 
-Don't forget to pass `make fast` (which means fast check & test) locally before submitting a PR. 🚀
+Don't forget to pass `cargo x --fast` (which runs most necessary checks and tests) locally before submitting a PR. 🚀
 
-If you want to run a broader range of checks locally, run `make all`. 🙌
+If you want to run a broader range of checks locally, run `cargo x`. 🙌
 
 Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
 

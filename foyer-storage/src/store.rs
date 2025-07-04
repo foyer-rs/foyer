@@ -464,7 +464,6 @@ where
     admission_picker: Arc<dyn AdmissionPicker>,
     compression: Compression,
     recover_mode: RecoverMode,
-    flush: bool,
 }
 
 impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
@@ -486,7 +485,6 @@ where
             .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
-            .field("flush", &self.flush)
             .finish()
     }
 }
@@ -522,21 +520,12 @@ where
             admission_picker: Arc::<AdmitAllPicker>::default(),
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
-            flush: false,
         }
     }
 
     /// Set device options for the disk cache store.
     pub fn with_device_options(mut self, device_options: impl Into<DeviceOptions>) -> Self {
         self.device_options = device_options.into();
-        self
-    }
-
-    /// Enable/disable `sync` after writes.
-    ///
-    /// Default: `false`.
-    pub fn with_flush(mut self, flush: bool) -> Self {
-        self.flush = flush;
         self
     }
 
@@ -660,7 +649,6 @@ where
                                     device,
                                     regions,
                                     compression: self.compression,
-                                    flush: self.flush,
                                     indexer_shards: large.indexer_shards,
                                     recover_mode: self.recover_mode,
                                     recover_concurrency: large.recover_concurrency,
@@ -686,7 +674,6 @@ where
                                     set_cache_shards: small.set_cache_shards,
                                     device,
                                     regions,
-                                    flush: self.flush,
                                     flushers: small.flushers,
                                     buffer_pool_size: small.buffer_pool_size,
                                     runtime,
@@ -706,7 +693,6 @@ where
                                         set_cache_shards: small.set_cache_shards,
                                         device: device.clone(),
                                         regions: small_regions,
-                                        flush: self.flush,
                                         flushers: small.flushers,
                                         buffer_pool_size: small.buffer_pool_size,
                                         runtime: runtime.clone(),
@@ -716,7 +702,6 @@ where
                                         device,
                                         regions: large_regions,
                                         compression: self.compression,
-                                        flush: self.flush,
                                         indexer_shards: large.indexer_shards,
                                         recover_mode: self.recover_mode,
                                         recover_concurrency: large.recover_concurrency,

@@ -71,7 +71,6 @@ where
     pub device: MonitoredDevice,
     pub regions: Range<RegionId>,
     pub compression: Compression,
-    pub flush: bool,
     pub indexer_shards: usize,
     pub recover_mode: RecoverMode,
     pub recover_concurrency: usize,
@@ -97,7 +96,6 @@ where
         f.debug_struct("GenericStoreConfig")
             .field("device", &self.device)
             .field("compression", &self.compression)
-            .field("flush", &self.flush)
             .field("indexer_shards", &self.indexer_shards)
             .field("recover_mode", &self.recover_mode)
             .field("recover_concurrency", &self.recover_concurrency)
@@ -150,8 +148,6 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
-
-    flush: bool,
 
     sequence: AtomicSequence,
 
@@ -290,7 +286,6 @@ where
                 reclaimers,
                 submit_queue_size,
                 submit_queue_size_threshold: config.submit_queue_size_threshold,
-                flush: config.flush,
                 sequence,
                 runtime: config.runtime,
                 active: AtomicBool::new(true),
@@ -540,7 +535,7 @@ where
         try_join_all((0..self.inner.region_manager.regions() as RegionId).map(|id| {
             let region = self.inner.region_manager.region(id).clone();
             async move {
-                let res = RegionCleaner::clean(&region, self.inner.flush).await;
+                let res = RegionCleaner::clean(&region).await;
                 region.statistics().reset();
                 res
             }
@@ -674,7 +669,6 @@ mod tests {
             device,
             regions,
             compression: Compression::None,
-            flush: true,
             indexer_shards: 4,
             recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,
@@ -703,7 +697,6 @@ mod tests {
             device,
             regions,
             compression: Compression::None,
-            flush: true,
             indexer_shards: 4,
             recover_mode: RecoverMode::Strict,
             recover_concurrency: 2,

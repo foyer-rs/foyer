@@ -69,7 +69,6 @@ struct SetManagerInner {
     set_size: usize,
     device: MonitoredDevice,
     regions: Range<RegionId>,
-    flush: bool,
 
     metrics: Arc<Metrics>,
 }
@@ -90,7 +89,6 @@ impl Debug for SetManager {
             .field("set_size", &self.inner.set_size)
             .field("device", &self.inner.device)
             .field("regions", &self.inner.regions)
-            .field("flush", &self.inner.flush)
             .field("metrics", &self.inner.metrics)
             .finish()
     }
@@ -129,7 +127,6 @@ impl SetManager {
             set_size: config.set_size,
             device,
             regions,
-            flush: config.flush,
             metrics: config.device.metrics().clone(),
         };
         let inner = Arc::new(inner);
@@ -193,9 +190,6 @@ impl SetManager {
         let (region, offset) = self.locate(sid);
         let (_, res) = self.inner.device.write(buffer, region, offset).await;
         res?;
-        if self.inner.flush {
-            self.inner.device.flush(Some(region)).await?;
-        }
 
         // Release set lock.
         drop(set);

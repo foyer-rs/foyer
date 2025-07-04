@@ -245,20 +245,6 @@ where
         }
     }
 
-    /// Enable/disable `sync` after writes.
-    ///
-    /// Default: `false`.
-    pub fn with_flush(self, flush: bool) -> Self {
-        let builder = self.builder.with_flush(flush);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
     /// Set the recover mode for the disk cache store.
     ///
     /// See more in [`RecoverMode`].
@@ -348,6 +334,6 @@ where
             memory.set_pipe(Box::new(pipe));
         }
 
-        Ok(HybridCache::new(self.options, memory, storage, self.metrics))
+        Ok(HybridCache::new(self.name, self.options, memory, storage, self.metrics))
     }
 }

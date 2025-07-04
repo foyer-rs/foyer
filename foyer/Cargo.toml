@@ -40,14 +40,14 @@ fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
+futures = { workspace = true }
 mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
-futures = { workspace = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
+[target.'cfg(madsim)'.dependencies]
+tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",
   "rt-multi-thread",
   "sync",
@@ -57,8 +57,8 @@ tokio = { workspace = true, features = [
   "fs",
 ] }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
+[target.'cfg(not(madsim))'.dependencies]
+tokio = { workspace = true, features = [
   "rt",
   "rt-multi-thread",
   "sync",

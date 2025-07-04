@@ -72,7 +72,6 @@ impl Reclaimer {
             flushers,
             reinsertion_picker: config.reinsertion_picker.clone(),
             blob_index_size: config.blob_index_size,
-            flush: config.flush,
             _metrics: metrics,
             wait_rx,
             runtime: config.runtime.clone(),
@@ -111,7 +110,6 @@ where
     flushers: Vec<Flusher<K, V, P>>,
 
     blob_index_size: usize,
-    flush: bool,
 
     _metrics: Arc<Metrics>,
 
@@ -236,7 +234,7 @@ where
         });
         self.indexer.remove_batch(&unpicked);
 
-        if let Err(e) = RegionCleaner::clean(&region, self.flush).await {
+        if let Err(e) = RegionCleaner::clean(&region).await {
             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
         }
 
@@ -263,14 +261,11 @@ where
 pub struct RegionCleaner;
 
 impl RegionCleaner {
-    pub async fn clean(region: &Region, flush: bool) -> Result<()> {
+    pub async fn clean(region: &Region) -> Result<()> {
         let mut page = IoBuffer::new(PAGE);
         page.fill(0);
         let (_, res) = region.write(page, 0).await;
         res?;
-        if flush {
-            region.flush().await?;
-        }
         Ok(())
     }
 }
