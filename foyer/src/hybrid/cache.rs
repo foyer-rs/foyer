@@ -37,6 +37,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, Piece, Pipe};
 use foyer_storage::{IoThrottler, Load, Statistics, Store};
+use futures::FutureExt;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -835,7 +836,7 @@ where
 
 impl<K, V, S> HybridCache<K, V, S>
 where
-    K: StorageKey + Clone,
+    K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
@@ -843,10 +844,12 @@ where
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
+    pub fn fetch<F, FU, AK, AV>(&self, key: AK, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         self.fetch_inner(key, HybridCacheProperties::default(), fetch)
     }
@@ -855,23 +858,27 @@ where
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_properties<F, FU>(
+    pub fn fetch_with_properties<F, FU, AK, AV>(
         &self,
-        key: K,
+        key: AK,
         properties: HybridCacheProperties,
         fetch: F,
     ) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         self.fetch_inner(key, properties, fetch)
     }
 
-    fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
+    fn fetch_inner<F, FU, AK, AV>(&self, key: AK, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        AK: Into<Arc<K>>,
+        AV: Into<Arc<V>>,
     {
         root_span!(self, span, "foyer::hybrid::cache::fetch");
 
@@ -881,8 +888,9 @@ where
         let now = Instant::now();
 
         let store = self.inner.storage.clone();
+        let key = key.into();
 
-        let future = fetch();
+        let future = fetch().map(|r| r.map(|v| v.into()));
         let inner = self.inner.memory.fetch_inner(
             key.clone(),
             properties,
@@ -891,7 +899,7 @@ where
                 let runtime = self.storage().runtime().clone();
 
                 async move {
-                    let throttled = match store.load(&key).await.map_err(anyhow::Error::from) {
+                    let throttled = match store.load(key.as_ref()).await.map_err(anyhow::Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -1157,7 +1165,7 @@ mod tests {
         hybrid.storage().wait().await;
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         hybrid
@@ -1185,7 +1193,7 @@ mod tests {
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
             hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
-            vec![3; 7 * KB]
+            vec![3; 7 * KB].into()
         );
 
         // Test hybrid cache that write disk cache on insertion.
@@ -1205,7 +1213,7 @@ mod tests {
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         hybrid
@@ -1232,7 +1240,7 @@ mod tests {
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
             hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
-            vec![3; 7 * KB]
+            vec![3; 7 * KB].into()
         );
     }
 
@@ -1253,7 +1261,7 @@ mod tests {
         hybrid.storage().wait().await;
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         hybrid.insert_with_properties(
@@ -1275,7 +1283,7 @@ mod tests {
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
             hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
-            vec![3; 7 * KB]
+            vec![3; 7 * KB].into()
         );
 
         // Test hybrid cache that write disk cache on insertion.
@@ -1292,7 +1300,7 @@ mod tests {
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         hybrid.insert_with_properties(
@@ -1313,7 +1321,7 @@ mod tests {
         assert!(hybrid.memory().get(&3).is_none());
         assert_eq!(
             hybrid.storage().load(&3).await.unwrap().entry().unwrap().1,
-            vec![3; 7 * KB]
+            vec![3; 7 * KB].into()
         );
     }
 
@@ -1335,7 +1343,7 @@ mod tests {
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         // 3. throttle all reads
@@ -1365,7 +1373,7 @@ mod tests {
         hybrid.storage().wait().await;
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().entry().unwrap().1,
-            vec![1; 7 * KB]
+            vec![1; 7 * KB].into()
         );
 
         // 3. throttle all reads
@@ -1402,7 +1410,7 @@ mod tests {
         let hybrid = open_with_flush_on_close(dir.path(), true).await;
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
-            (1, vec![1; 7 * KB])
+            (1.into(), vec![1; 7 * KB].into())
         );
     }
 

@@ -50,6 +50,7 @@ foyer-common = { version = "0.17.4", path = "foyer-common" }
 foyer-memory = { version = "0.17.4", path = "foyer-memory" }
 foyer-storage = { version = "0.17.4", path = "foyer-storage" }
 fs4 = { version = "0.13", default-features = false }
+futures = "0.3"
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hashbrown = "0.15"

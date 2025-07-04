@@ -21,9 +21,8 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_memory::Piece;
 
-use crate::{error::Result, Load, Statistics, Throttle};
+use crate::{error::Result, keeper::PieceRef, Load, Statistics, Throttle};
 
 /// The storage trait for the disk cache storage engine.
 pub trait Storage: Send + Sync + 'static + Clone + Debug {
@@ -47,7 +46,7 @@ pub trait Storage: Send + Sync + 'static + Clone + Debug {
     fn close(&self) -> impl Future<Output = Result<()>> + Send;
 
     /// Push a in-memory cache piece to the disk cache write queue.
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize);
+    fn enqueue(&self, piece: PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///

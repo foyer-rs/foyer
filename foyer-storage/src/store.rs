@@ -19,7 +19,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Populated, Properties},
+    properties::{Age, Populated, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -36,6 +36,7 @@ use crate::{
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     io::PAGE,
+    keeper::Keeper,
     large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
@@ -59,12 +60,13 @@ pub enum Load<K, V> {
     /// Load entry success.
     Entry {
         /// The key of the entry.
-        key: K,
+        key: Arc<K>,
         /// The value of the entry.
-        value: V,
+        value: Arc<V>,
         /// The populated source context of the entry.
         populated: Populated,
     },
+    /// Load from keeper.
     /// The entry may be in the disk cache, the read io is throttled.
     Throttled,
     /// Disk cache miss.
@@ -73,7 +75,7 @@ pub enum Load<K, V> {
 
 impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
-    pub fn entry(self) -> Option<(K, V, Populated)> {
+    pub fn entry(self) -> Option<(Arc<K>, Arc<V>, Populated)> {
         match self {
             Load::Entry { key, value, populated } => Some((key, value, populated)),
             _ => None,
@@ -83,7 +85,7 @@ impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
     ///
     /// Only key and value will be returned.
-    pub fn kv(self) -> Option<(K, V)> {
+    pub fn kv(self) -> Option<(Arc<K>, Arc<V>)> {
         match self {
             Load::Entry { key, value, .. } => Some((key, value)),
             _ => None,
@@ -126,6 +128,7 @@ where
 {
     hasher: Arc<S>,
 
+    keeper: Option<Keeper<K, V, P>>,
     engine: EngineEnum<K, V, P>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
@@ -151,6 +154,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
+            .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("load_throttler", &self.inner.load_throttler)
@@ -200,7 +204,11 @@ where
 
         if force || self.pick(piece.hash()).admitted() {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
-            self.inner.engine.enqueue(piece, estimated_size);
+            let rpiece = match self.inner.keeper.as_ref() {
+                Some(keeper) => keeper.insert(piece),
+                None => piece.into(),
+            };
+            self.inner.engine.enqueue(rpiece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -216,6 +224,17 @@ where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         let hash = self.inner.hasher.hash_one(key);
+
+        if let Some(keeper) = self.inner.keeper.as_ref() {
+            if let Some(piece) = keeper.get(hash, key) {
+                tracing::trace!(hash, "[store]: load from keeper");
+                return Ok(Load::Entry {
+                    key: piece.arc_key().clone(),
+                    value: piece.arc_value().clone(),
+                    populated: Populated { age: Age::Young },
+                });
+            }
+        }
 
         #[cfg(feature = "test_utils")]
         if self.inner.load_throttle_switch.is_throttled() {
@@ -438,6 +457,7 @@ where
     metrics: Arc<Metrics>,
 
     device_options: DeviceOptions,
+    keeper: bool,
     engine: Engine,
     runtime_config: RuntimeOptions,
 
@@ -459,6 +479,7 @@ where
             .field("memory", &self.memory)
             .field("metrics", &self.metrics)
             .field("device_options", &self.device_options)
+            .field("keeper", &self.keeper)
             .field("engine", &self.engine)
             .field("runtime_config", &self.runtime_config)
             .field("admission_picker", &self.admission_picker)
@@ -492,6 +513,7 @@ where
             metrics,
 
             device_options: DeviceOptions::None,
+            keeper: true,
             engine,
             runtime_config: RuntimeOptions::Disabled,
 
@@ -504,6 +526,17 @@ where
     /// Set device options for the disk cache store.
     pub fn with_device_options(mut self, device_options: impl Into<DeviceOptions>) -> Self {
         self.device_options = device_options.into();
+        self
+    }
+
+    /// Enable/disable keeper.
+    ///
+    /// Keeper is a indexer for disk cache enqueued not yet written entries.
+    /// Enable it will make entries in the write queue queryable.
+    ///
+    /// Default: `true`.
+    pub fn with_keeper(mut self, keeper: bool) -> Self {
+        self.keeper = keeper;
         self
     }
 
@@ -714,9 +747,12 @@ where
             IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
         );
 
+        let keeper = self.keeper.then(|| Keeper::new(memory.shards()));
+
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
             hasher,
+            keeper,
             engine,
             admission_picker,
             load_throttler,
@@ -1042,6 +1078,6 @@ mod tests {
 
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
-        assert_eq!(l2.entry().unwrap().1, "bar");
+        assert_eq!(l2.entry().unwrap().1.as_str(), "bar");
     }
 }

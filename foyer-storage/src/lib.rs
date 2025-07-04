@@ -22,6 +22,7 @@ mod device;
 mod engine;
 mod error;
 mod io;
+mod keeper;
 mod large;
 mod picker;
 mod region;

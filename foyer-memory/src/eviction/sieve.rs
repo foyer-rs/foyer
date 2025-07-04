@@ -203,8 +203,8 @@ pub mod tests {
         let rs = (0..8)
             .map(|i| {
                 Arc::new(Record::new(Data {
-                    key: i,
-                    value: i,
+                    key: i.into(),
+                    value: i.into(),
                     properties: TestProperties::default(),
                     hash: i,
                     weight: 1,

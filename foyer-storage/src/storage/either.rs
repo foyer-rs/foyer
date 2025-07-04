@@ -24,13 +24,12 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_memory::Piece;
 use futures_util::{
     future::{join, select, try_join, Either as EitherFuture},
     FutureExt,
 };
 
-use crate::{error::Result, storage::Storage, Load, Statistics, Throttle};
+use crate::{error::Result, keeper::PieceRef, storage::Storage, Load, Statistics, Throttle};
 
 /// Order of ops.
 #[derive(Debug, Clone, Copy)]
@@ -91,7 +90,7 @@ pub trait Selector: Send + Sync + 'static + Debug {
     type Value: StorageValue;
     type Properties: Properties;
 
-    fn select(&self, piece: &Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection;
+    fn select(&self, piece: &PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) -> Selection;
 }
 
 pub struct Either<K, V, P, SL, SR, SE>
@@ -180,7 +179,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         match self.selector.select(&piece, estimated_size) {
             Selection::Left => {
                 self.right.delete(piece.hash());

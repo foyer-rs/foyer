@@ -28,13 +28,13 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Age, Populated, Properties},
 };
-use foyer_memory::Piece;
 use futures_util::future::join_all;
 use itertools::Itertools;
 
 use crate::{
     device::{MonitoredDevice, RegionId},
     error::Result,
+    keeper::PieceRef,
     small::{
         flusher::{Flusher, Submission},
         set_manager::SetManager,
@@ -176,7 +176,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -201,8 +201,8 @@ where
                 })
                 .map(|o| match o {
                     Some((key, value)) => Load::Entry {
-                        key,
-                        value,
+                        key: Arc::new(key),
+                        value: Arc::new(value),
                         // Always requires disk cache write for set-associated cache.
                         // TODO(MrCroxx): use a better way to determine the age.
                         populated: Populated { age: Age::Old },
@@ -261,7 +261,7 @@ where
         Ok(())
     }
 
-    fn enqueue(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<Self::Key, Self::Value, Self::Properties>, estimated_size: usize) {
         self.enqueue(piece, estimated_size);
     }
 
@@ -354,7 +354,10 @@ mod tests {
         GenericSmallStorage::open(config).await.unwrap()
     }
 
-    fn enqueue(store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>, piece: Piece<u64, Vec<u8>, TestProperties>) {
+    fn enqueue(
+        store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
+        piece: PieceRef<u64, Vec<u8>, TestProperties>,
+    ) {
         let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
         store.enqueue(piece, estimated_size);
     }
@@ -363,10 +366,9 @@ mod tests {
         store: &GenericSmallStorage<u64, Vec<u8>, TestProperties>,
         entry: &CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
-        assert_eq!(
-            store.load(entry.hash()).await.unwrap().kv().unwrap(),
-            (*entry.key(), entry.value().clone())
-        );
+        let (k, v) = store.load(entry.hash()).await.unwrap().kv().unwrap();
+        assert_eq!(k.as_ref(), entry.key(),);
+        assert_eq!(v.as_ref(), entry.value(),);
     }
 
     async fn assert_none(
@@ -384,7 +386,7 @@ mod tests {
         let store = store_for_test(dir.path()).await;
 
         let e1 = memory.insert(1, vec![1; 42]);
-        enqueue(&store, e1.piece());
+        enqueue(&store, e1.piece().into());
         store.wait().await;
 
         assert_some(&store, &e1).await;
@@ -397,9 +399,9 @@ mod tests {
         let e2 = memory.insert(2, vec![2; 192]);
         let e3 = memory.insert(3, vec![3; 168]);
 
-        enqueue(&store, e1.piece());
-        enqueue(&store, e2.piece());
-        enqueue(&store, e3.piece());
+        enqueue(&store, e1.piece().into());
+        enqueue(&store, e2.piece().into());
+        enqueue(&store, e3.piece().into());
         store.wait().await;
 
         assert_some(&store, &e1).await;
