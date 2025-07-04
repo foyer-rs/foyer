@@ -236,7 +236,7 @@ impl FifoPicker {
                     .statistics()
                     .probation
                     .store(true, Ordering::Relaxed);
-                tracing::trace!(rid, "[fifo picker]: mark  probation");
+                tracing::trace!(rid, "[fifo picker]: mark probation");
             }
         });
     }
@@ -252,9 +252,9 @@ impl EvictionPicker for FifoPicker {
     fn pick(&mut self, info: EvictionInfo<'_>) -> Option<RegionId> {
         tracing::trace!(evictable = ?info.evictable, clean = info.clean, "[fifo picker]: pick");
         self.mark_probation(info);
-        let res = self.queue.front().copied();
-        tracing::trace!("[fifo picker]: pick {res:?}");
-        res
+        let candidate = self.queue.front().copied();
+        tracing::trace!("[fifo picker]: pick {candidate:?}");
+        candidate
     }
 
     fn on_region_evictable(&mut self, _: EvictionInfo<'_>, region: RegionId) {
