@@ -19,7 +19,10 @@ use std::{
     hash::Hash,
     ops::Deref,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
     time::Instant,
 };
@@ -293,12 +296,73 @@ where
     policy: HybridCachePolicy,
     flush_on_close: bool,
     metrics: Arc<Metrics>,
+    closed: Arc<AtomicBool>,
     memory: Cache<K, V, S, HybridCacheProperties>,
     storage: Store<K, V, S, HybridCacheProperties>,
     #[cfg(feature = "tracing")]
     tracing: std::sync::atomic::AtomicBool,
     #[cfg(feature = "tracing")]
     tracing_config: TracingConfig,
+}
+
+impl<K, V, S> Inner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    async fn close_inner(
+        closed: Arc<AtomicBool>,
+        memory: Cache<K, V, S, HybridCacheProperties>,
+        storage: Store<K, V, S, HybridCacheProperties>,
+        flush_on_close: bool,
+    ) -> anyhow::Result<()> {
+        if closed.fetch_or(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if flush_on_close {
+            let bytes = memory.usage();
+            tracing::info!(bytes, "[hybrid]: flush all in-memory cached entries to disk on close");
+            memory.flush().await;
+        }
+        storage.close().await?;
+        let elapsed = now.elapsed();
+        tracing::info!("[hybrid]: close consumes {elapsed:?}");
+        Ok(())
+    }
+
+    async fn close(&self) -> anyhow::Result<()> {
+        Self::close_inner(
+            self.closed.clone(),
+            self.memory.clone(),
+            self.storage.clone(),
+            self.flush_on_close,
+        )
+        .await
+    }
+}
+
+impl<K, V, S> Drop for Inner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn drop(&mut self) {
+        let name = self.name.clone();
+        let closed = self.closed.clone();
+        let memory = self.memory.clone();
+        let storage = self.storage.clone();
+        let flush_on_close = self.flush_on_close;
+
+        self.storage.runtime().user().spawn(async move {
+            if let Err(e) = Self::close_inner(closed, memory, storage, flush_on_close).await {
+                tracing::error!(?name, ?e, "[hybrid]: failed to close hybrid cache");
+            }
+        });
+    }
 }
 
 /// Hybrid cache that integrates in-memory cache and disk cache.
@@ -389,10 +453,12 @@ where
         };
         #[cfg(feature = "tracing")]
         let tracing = std::sync::atomic::AtomicBool::new(false);
+        let closed = Arc::new(AtomicBool::new(false));
         let inner = Inner {
             name,
             policy,
             flush_on_close,
+            closed,
             memory,
             storage,
             metrics,
@@ -713,17 +779,10 @@ where
     /// Based on the `flush_on_close` option, `close` will flush all in-memory cached entries to the disk cache.
     ///
     /// For more details, please refer to [`super::builder::HybridCacheBuilder::with_flush_on_close()`].
+    ///
+    /// If `close` is not called explicitly, the hybrid cache will be closed when its last copy is dropped.
     pub async fn close(&self) -> anyhow::Result<()> {
-        let now = Instant::now();
-        if self.inner.flush_on_close {
-            let bytes = self.inner.memory.usage();
-            tracing::info!(bytes, "[hybrid]: flush all in-memory cached entries to disk on close");
-            self.inner.memory.flush().await;
-        }
-        self.inner.storage.close().await?;
-        let elapsed = now.elapsed();
-        tracing::info!("[hybrid]: close consumes {elapsed:?}",);
-        Ok(())
+        self.inner.close().await
     }
 
     /// Return the statistics information of the hybrid cache.
