@@ -215,10 +215,17 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
+        let now = Instant::now();
+
         let hash = self.inner.hasher.hash_one(key);
 
         #[cfg(feature = "test_utils")]
         if self.inner.load_throttle_switch.is_throttled() {
+            self.inner.metrics.storage_throttled.increase(1);
+            self.inner
+                .metrics
+                .storage_throttled_duration
+                .record(now.elapsed().as_secs_f64());
             return Ok(Load::Throttled);
         }
 
@@ -228,8 +235,18 @@ where
                 Pick::Reject => unreachable!(),
                 Pick::Throttled(_) => {
                     if self.inner.engine.may_contains(hash) {
+                        self.inner.metrics.storage_throttled.increase(1);
+                        self.inner
+                            .metrics
+                            .storage_throttled_duration
+                            .record(now.elapsed().as_secs_f64());
                         return Ok(Load::Throttled);
                     } else {
+                        self.inner.metrics.storage_miss.increase(1);
+                        self.inner
+                            .metrics
+                            .storage_miss_duration
+                            .record(now.elapsed().as_secs_f64());
                         return Ok(Load::Miss);
                     }
                 }
@@ -242,14 +259,38 @@ where
                 key: k,
                 value: v,
                 populated: p,
-            }) if key.equivalent(&k) => Ok(Load::Entry {
-                key: k,
-                value: v,
-                populated: p,
-            }),
-            Ok(Load::Entry { .. }) | Ok(Load::Miss) => Ok(Load::Miss),
-            Ok(Load::Throttled) => Ok(Load::Throttled),
-            Err(e) => Err(e),
+            }) if key.equivalent(&k) => {
+                self.inner.metrics.storage_hit.increase(1);
+                self.inner
+                    .metrics
+                    .storage_hit_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Entry {
+                    key: k,
+                    value: v,
+                    populated: p,
+                })
+            }
+            Ok(Load::Entry { .. }) | Ok(Load::Miss) => {
+                self.inner.metrics.storage_miss.increase(1);
+                self.inner
+                    .metrics
+                    .storage_miss_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Miss)
+            }
+            Ok(Load::Throttled) => {
+                self.inner.metrics.storage_throttled.increase(1);
+                self.inner
+                    .metrics
+                    .storage_throttled_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Throttled)
+            }
+            Err(e) => {
+                self.inner.metrics.storage_error.increase(1);
+                Err(e)
+            }
         }
     }
 
@@ -258,8 +299,16 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
+        let now = Instant::now();
+
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.delete(hash)
+        self.inner.engine.delete(hash);
+
+        self.inner.metrics.storage_delete.increase(1);
+        self.inner
+            .metrics
+            .storage_delete_duration
+            .record(now.elapsed().as_secs_f64());
     }
 
     /// Check if the disk cache contains a cached entry with the given key.

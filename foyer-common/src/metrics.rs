@@ -36,12 +36,14 @@ pub struct Metrics {
     pub storage_enqueue: BoxedCounter,
     pub storage_hit: BoxedCounter,
     pub storage_miss: BoxedCounter,
+    pub storage_throttled: BoxedCounter,
     pub storage_delete: BoxedCounter,
     pub storage_error: BoxedCounter,
 
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
     pub storage_miss_duration: BoxedHistogram,
+    pub storage_throttled_duration: BoxedHistogram,
     pub storage_delete_duration: BoxedHistogram,
 
     pub storage_queue_rotate: BoxedCounter,
@@ -217,11 +219,13 @@ impl Metrics {
         let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
         let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
         let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]);
+        let storage_throttled = foyer_storage_op_total.counter(&[name.clone(), "throttled".into()]);
         let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
 
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
         let storage_miss_duration = foyer_storage_op_duration.histogram(&[name.clone(), "miss".into()]);
+        let storage_throttled_duration = foyer_storage_op_duration.histogram(&[name.clone(), "throttled".into()]);
         let storage_delete_duration = foyer_storage_op_duration.histogram(&[name.clone(), "delete".into()]);
 
         let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_rotate".into()]);
@@ -303,11 +307,13 @@ impl Metrics {
             storage_enqueue,
             storage_hit,
             storage_miss,
+            storage_throttled,
             storage_delete,
             storage_error,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,
+            storage_throttled_duration,
             storage_delete_duration,
             storage_queue_rotate,
             storage_queue_rotate_duration,

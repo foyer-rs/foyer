@@ -92,7 +92,7 @@ where
 
     active: AtomicBool,
 
-    metrics: Arc<Metrics>,
+    _metrics: Arc<Metrics>,
     _runtime: Runtime,
 }
 
@@ -155,7 +155,7 @@ where
             device: config.device,
             set_manager,
             active: AtomicBool::new(true),
-            metrics,
+            _metrics: metrics,
             _runtime: config.runtime,
         };
         let inner = Arc::new(inner);
@@ -189,7 +189,6 @@ where
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
         let set_manager = self.inner.set_manager.clone();
-        let metrics = self.inner.metrics.clone();
 
         async move {
             set_manager
@@ -197,7 +196,6 @@ where
                 .await
                 .inspect_err(|e| {
                     tracing::error!(hash, ?e, "[sodc load]: fail to load");
-                    metrics.storage_error.increase(1);
                 })
                 .map(|o| match o {
                     Some((key, value)) => Load::Entry {
