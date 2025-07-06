@@ -355,8 +355,6 @@ where
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
         tracing::trace!(hash, "[lodc]: load");
 
-        let now = Instant::now();
-
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
         let region_manager = self.inner.region_manager.clone();
@@ -365,8 +363,6 @@ where
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
-                    metrics.storage_miss.increase(1);
-                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(Load::Miss);
                 }
             };
@@ -381,13 +377,10 @@ where
                 Err(e @ Error::InvalidIoRange { .. }) => {
                     tracing::warn!(?e, "[lodc load]: invalid io range, remove this entry and skip");
                     indexer.remove(hash);
-                    metrics.storage_miss.increase(1);
-                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(Load::Miss);
                 }
                 Err(e) => {
                     tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
-                    metrics.storage_error.increase(1);
                     return Err(e);
                 }
             }
@@ -406,13 +399,10 @@ where
                         "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
                     );
                     indexer.remove(hash);
-                    metrics.storage_miss.increase(1);
-                    metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
                     return Ok(Load::Miss);
                 }
                 Err(e) => {
                     tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
-                    metrics.storage_error.increase(1);
                     return Err(e);
                 }
             };
@@ -439,14 +429,10 @@ where
                             "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
                         );
                         indexer.remove(hash);
-                        metrics.storage_miss.increase(1);
-                        metrics.storage_miss_duration.record(now.elapsed().as_secs_f64());
-                        metrics.storage_error.increase(1);
                         return Ok(Load::Miss);
                     }
                     Err(e) => {
                         tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
-                        metrics.storage_error.increase(1);
                         return Err(e);
                     }
                 };
@@ -455,9 +441,6 @@ where
                     .record(now.elapsed().as_secs_f64());
                 res
             };
-
-            metrics.storage_hit.increase(1);
-            metrics.storage_hit_duration.record(now.elapsed().as_secs_f64());
 
             let age = match region.statistics().probation.load(Ordering::Relaxed) {
                 true => Age::Old,
@@ -476,8 +459,6 @@ where
     }
 
     fn delete(&self, hash: u64) {
-        let now = Instant::now();
-
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot delete entry after closed");
             return;
@@ -500,12 +481,6 @@ where
                 stats,
             });
         });
-
-        self.inner.metrics.storage_delete.increase(1);
-        self.inner
-            .metrics
-            .storage_miss_duration
-            .record(now.elapsed().as_secs_f64());
     }
 
     fn may_contains(&self, hash: u64) -> bool {
