@@ -570,7 +570,9 @@ where
         let user_runtime_handle = Handle::current();
         let (read_runtime, write_runtime) = match self.runtime_config {
             RuntimeOptions::Disabled => {
-                tracing::warn!("[store]: Dedicated runtime is disabled");
+                tracing::info!(
+                    "[store]: Dedicated runtime is disabled. This may lead to spikes in latency under high load. Hint: Consider configuring a dedicated runtime."
+                );
                 (None, None)
             }
             RuntimeOptions::Unified(runtime_config) => {
