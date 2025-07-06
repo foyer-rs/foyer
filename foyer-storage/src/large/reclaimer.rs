@@ -221,7 +221,7 @@ where
                     });
                     picked_count += 1;
                 } else {
-                    unpicked.push(info.hash);
+                    unpicked.push((info.hash, info.addr.sequence));
                 }
             }
         }
@@ -232,7 +232,7 @@ where
         self.runtime.write().spawn(async move {
             join_all(waits).await;
         });
-        self.indexer.remove_batch(&unpicked);
+        self.indexer.remove_batch(unpicked);
 
         if let Err(e) = RegionCleaner::clean(&region).await {
             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
