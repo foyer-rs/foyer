@@ -22,7 +22,22 @@ use parking_lot::RwLock;
 
 use crate::{device::RegionId, large::serde::Sequence};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum Index {
+    Address(EntryAddress),
+    Tombstone(Sequence),
+}
+
+impl Index {
+    fn sequence(&self) -> Sequence {
+        match self {
+            Index::Address(addr) => addr.sequence,
+            Index::Tombstone(seq) => *seq,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct HashedEntryAddress {
     pub hash: u64,
     pub address: EntryAddress,
@@ -37,10 +52,12 @@ pub struct EntryAddress {
     pub sequence: Sequence,
 }
 
+type IndexerShard = HashMap<u64, Index>;
+
 /// [`Indexer`] records key hash to entry address on fs.
 #[derive(Debug, Clone)]
 pub struct Indexer {
-    shards: Arc<Vec<RwLock<HashMap<u64, EntryAddress>>>>,
+    shards: Arc<Vec<RwLock<IndexerShard>>>,
 }
 
 impl Indexer {
@@ -49,6 +66,16 @@ impl Indexer {
         Self {
             shards: Arc::new(shards),
         }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large::indexer::insert_tombstone")
+    )]
+    pub fn insert_tombstone(&self, hash: u64, sequence: Sequence) -> Option<EntryAddress> {
+        let shard = self.shard(hash);
+        let mut shard = self.shards[shard].write();
+        self.insert_inner(&mut shard, hash, Index::Tombstone(sequence))
     }
 
     #[cfg_attr(
@@ -63,7 +90,7 @@ impl Indexer {
         for (s, batch) in shards {
             let mut shard = self.shards[s].write();
             for haddr in batch {
-                if let Some(old) = self.insert_inner(&mut shard, haddr.hash, haddr.address) {
+                if let Some(old) = self.insert_inner(&mut shard, haddr.hash, Index::Address(haddr.address)) {
                     olds.push(HashedEntryAddress {
                         hash: haddr.hash,
                         address: old,
@@ -77,7 +104,13 @@ impl Indexer {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::large::indexer::get"))]
     pub fn get(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
-        self.shards[shard].read().get(&hash).cloned()
+        match self.shards[shard].read().get(&hash) {
+            Some(index) => match index {
+                Index::Address(addr) => Some(addr.clone()),
+                Index::Tombstone(_) => None,
+            },
+            None => None,
+        }
     }
 
     #[cfg_attr(
@@ -86,22 +119,38 @@ impl Indexer {
     )]
     pub fn remove(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
-        self.shards[shard].write().remove(&hash)
+        match self.shards[shard].write().entry(hash) {
+            Entry::Occupied(o) => match o.get() {
+                Index::Address(_) => self.extract_address(o.remove()),
+                Index::Tombstone(_) => None,
+            },
+            Entry::Vacant(_) => None,
+        }
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::large::indexer::remove_batch")
     )]
-    pub fn remove_batch(&self, hashes: &[u64]) -> Vec<EntryAddress> {
-        let shards = hashes.iter().into_group_map_by(|&hash| self.shard(*hash));
+    pub fn remove_batch<I>(&self, batch: I) -> Vec<EntryAddress>
+    where
+        I: IntoIterator<Item = (u64, Sequence)>,
+    {
+        let shards = batch.into_iter().into_group_map_by(|(hash, _)| self.shard(*hash));
 
         let mut olds = vec![];
         for (s, hashes) in shards {
             let mut shard = self.shards[s].write();
-            for hash in hashes {
-                if let Some(old) = shard.remove(hash) {
-                    olds.push(old);
+            for (hash, sequence) in hashes {
+                match shard.entry(hash) {
+                    Entry::Occupied(o) => {
+                        if sequence >= o.get().sequence() {
+                            if let Some(addr) = self.extract_address(o.remove()) {
+                                olds.push(addr);
+                            }
+                        }
+                    }
+                    Entry::Vacant(_) => {}
                 }
             }
         }
@@ -118,26 +167,28 @@ impl Indexer {
         hash as usize % self.shards.len()
     }
 
-    fn insert_inner(
-        &self,
-        shard: &mut HashMap<u64, EntryAddress>,
-        hash: u64,
-        addr: EntryAddress,
-    ) -> Option<EntryAddress> {
+    fn insert_inner(&self, shard: &mut IndexerShard, hash: u64, index: Index) -> Option<EntryAddress> {
         match shard.entry(hash) {
             Entry::Occupied(mut o) => {
                 // `>` for updates.
                 // '=' for reinsertions.
-                if addr.sequence >= o.get().sequence {
-                    Some(o.insert(addr))
+                if index.sequence() >= o.get().sequence() {
+                    self.extract_address(o.insert(index))
                 } else {
-                    Some(addr)
+                    self.extract_address(index)
                 }
             }
             Entry::Vacant(v) => {
-                v.insert(addr);
+                v.insert(index);
                 None
             }
+        }
+    }
+
+    fn extract_address(&self, index: Index) -> Option<EntryAddress> {
+        match index {
+            Index::Address(addr) => Some(addr),
+            Index::Tombstone(_) => None,
         }
     }
 }

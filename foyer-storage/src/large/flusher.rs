@@ -242,13 +242,13 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InvalidStats {
     pub region: RegionId,
     pub size: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TombstoneInfo {
     pub tombstone: Tombstone,
     pub stats: Option<InvalidStats>,
@@ -259,6 +259,7 @@ struct IoTaskCtx {
     waiters: Vec<oneshot::Sender<()>>,
     init: Instant,
     io_slice: SharedIoSlice,
+    tombstone_infos: Vec<TombstoneInfo>,
 }
 
 struct Runner<K, V, P>
@@ -363,11 +364,11 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice,tombstone_infos } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_region_handle = handle;
                     }
-                    self.handle_io_complete(waiters, init);
+                    self.handle_io_complete(waiters,  tombstone_infos,init);
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_buffer();
                 }
@@ -569,6 +570,7 @@ where
         let future = {
             let region_manager = self.region_manager.clone();
             let tombstone_log = self.tombstone_log.clone();
+            let tombstone_infos = tombstone_infos.clone();
             async move {
                 if let Some(log) = tombstone_log {
                     log.append(tombstone_infos.iter().map(|info| &info.tombstone)).await?;
@@ -597,6 +599,7 @@ where
                     waiters,
                     init,
                     io_slice,
+                    tombstone_infos,
                 },
                 Ok(Err(e)) => {
                     tracing::error!(id, ?e, "[lodc flusher]: io task error");
@@ -605,6 +608,7 @@ where
                         waiters,
                         init,
                         io_slice,
+                        tombstone_infos,
                     }
                 }
                 Err(e) => {
@@ -614,6 +618,7 @@ where
                         waiters,
                         init,
                         io_slice,
+                        tombstone_infos,
                     }
                 }
             })
@@ -622,7 +627,18 @@ where
         handle
     }
 
-    fn handle_io_complete(&self, waiters: Vec<oneshot::Sender<()>>, init: Instant) {
+    fn handle_io_complete(
+        &self,
+        waiters: Vec<oneshot::Sender<()>>,
+        tombstone_infos: Vec<TombstoneInfo>,
+        init: Instant,
+    ) {
+        self.indexer.remove_batch(
+            tombstone_infos
+                .iter()
+                .map(|info| (info.tombstone.hash, info.tombstone.sequence)),
+        );
+
         for waiter in waiters {
             let _ = waiter.send(());
         }

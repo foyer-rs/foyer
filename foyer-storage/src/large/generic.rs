@@ -345,7 +345,7 @@ where
 
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
 
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
+        self.inner.flushers[piece.hash() as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
             piece,
             estimated_size,
             sequence,
@@ -483,15 +483,19 @@ where
             return;
         }
 
-        let stats = self.inner.indexer.remove(hash).map(|addr| InvalidStats {
-            region: addr.region,
-            size: bits::align_up(self.inner.device.align(), addr.len as usize),
-        });
+        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+        let stats = self
+            .inner
+            .indexer
+            .insert_tombstone(hash, sequence)
+            .map(|addr| InvalidStats {
+                region: addr.region,
+                size: bits::align_up(self.inner.device.align(), addr.len as usize),
+            });
 
         let this = self.clone();
         self.inner.runtime.write().spawn(async move {
-            let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-            this.inner.flushers[sequence as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
+            this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
                 tombstone: Tombstone { hash, sequence },
                 stats,
             });
@@ -516,7 +520,7 @@ where
         // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
 
-        self.inner.flushers[sequence as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
+        self.inner.flushers[0].submit(Submission::Tombstone {
             tombstone: Tombstone { hash: 0, sequence },
             stats: None,
         });
