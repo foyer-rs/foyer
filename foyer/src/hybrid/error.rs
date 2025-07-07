@@ -31,7 +31,70 @@ impl Error {
     pub fn other<E: std::error::Error + Send + Sync + 'static>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
+
+    /// Downcast error to a specific type.
+    ///
+    /// Only `Other` variant can be downcasted.
+    /// If the error is not `Other`, it will return an error indicating that downcasting is not possible.
+    pub fn downcast<T>(self) -> std::result::Result<Box<T>, Self>
+    where
+        T: std::error::Error + 'static,
+    {
+        match self {
+            Self::Other(e) => e.downcast::<T>().map_err(|e| {
+                let e: Box<dyn std::error::Error + Send + Sync + 'static> =
+                    format!("cannot downcast error: {e}").into();
+                Self::Other(e)
+            }),
+            _ => {
+                let e: Box<dyn std::error::Error + Send + Sync + 'static> = "only other error can be downcast".into();
+                Err(e.into())
+            }
+        }
+    }
 }
 
 /// Result type for foyer.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_other_error_downcast() {
+        #[derive(Debug, PartialEq, Eq)]
+        struct TestError(String);
+
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "TestError: {}", self.0)
+            }
+        }
+
+        impl std::error::Error for TestError {}
+
+        let e = Error::Other(Box::new(TestError(
+            "Error or not error, that is a question.".to_string(),
+        )));
+
+        let res = match e {
+            Error::Memory(_) | Error::Storage(_) => unreachable!(),
+            Error::Other(e) => e.downcast::<TestError>(),
+        }
+        .unwrap();
+        assert_eq!(
+            res,
+            Box::new(TestError("Error or not error, that is a question.".to_string(),))
+        );
+
+        let e = Error::Other(Box::new(TestError(
+            "Error or not error, that is a question.".to_string(),
+        )));
+        let res = e.downcast::<TestError>().unwrap();
+        assert_eq!(
+            res,
+            Box::new(TestError("Error or not error, that is a question.".to_string(),))
+        );
+    }
+}
