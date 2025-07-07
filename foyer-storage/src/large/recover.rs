@@ -36,7 +36,6 @@ use crate::{
         indexer::HashedEntryAddress,
         scanner::{EntryInfo, RegionScanner},
         serde::{AtomicSequence, Sequence},
-        tombstone::Tombstone,
     },
     region::{Region, RegionManager},
     runtime::Runtime,
@@ -69,7 +68,6 @@ impl RecoverRunner {
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager,
-        tombstones: &[Tombstone],
         runtime: Runtime,
     ) -> Result<()>
     where
@@ -101,15 +99,9 @@ impl RecoverRunner {
             return Err(Error::multiple(errs));
         }
 
-        #[derive(Debug)]
-        enum EntryAddressOrTombstone {
-            EntryAddress(EntryAddress),
-            Tombstone,
-        }
-
         // Dedup entries.
         let mut latest_sequence = 0;
-        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstone)>> = HashMap::new();
+        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddress)>> = HashMap::new();
         let mut clean_regions = vec![];
         let mut evictable_regions = vec![];
         for (region, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
@@ -123,31 +115,15 @@ impl RecoverRunner {
 
             for EntryInfo { hash, addr } in infos {
                 latest_sequence = latest_sequence.max(addr.sequence);
-                indices
-                    .entry(hash)
-                    .or_default()
-                    .push((addr.sequence, EntryAddressOrTombstone::EntryAddress(addr)));
+                indices.entry(hash).or_default().push((addr.sequence, addr));
             }
         }
-        tombstones.iter().for_each(|tombstone| {
-            latest_sequence = latest_sequence.max(tombstone.sequence);
-            indices
-                .entry(tombstone.hash)
-                .or_default()
-                .push((tombstone.sequence, EntryAddressOrTombstone::Tombstone))
-        });
         let indices = indices
             .into_iter()
             .filter_map(|(hash, mut versions)| {
                 versions.sort_by_key(|(sequence, _)| *sequence);
                 tracing::trace!("[recover runner]: hash {hash} has versions: {versions:?}");
-                match versions.pop() {
-                    None => None,
-                    Some((_, EntryAddressOrTombstone::Tombstone)) => None,
-                    Some((_, EntryAddressOrTombstone::EntryAddress(address))) => {
-                        Some(HashedEntryAddress { hash, address })
-                    }
-                }
+                versions.pop().map(|(_, address)| HashedEntryAddress { hash, address })
             })
             .collect_vec();
         // let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();

@@ -24,10 +24,7 @@ pub use crate::{
         buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
         throttle::IoThrottler,
     },
-    large::{
-        recover::RecoverMode,
-        tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
-    },
+    large::recover::RecoverMode,
     picker::{
         utils::{
             AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,

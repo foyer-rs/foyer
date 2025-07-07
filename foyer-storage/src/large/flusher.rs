@@ -33,7 +33,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
+    future::{join_all, try_join_all},
     FutureExt,
 };
 use itertools::Itertools;
@@ -51,7 +51,6 @@ use crate::{
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
         reclaimer::Reinsertion,
         serde::Sequence,
-        tombstone::{Tombstone, TombstoneLog},
     },
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
@@ -69,9 +68,8 @@ where
         estimated_size: usize,
         sequence: Sequence,
     },
-    Tombstone {
-        tombstone: Tombstone,
-        stats: Option<InvalidStats>,
+    Invalidate {
+        ctxs: Vec<InvalidateCtx>,
     },
     Reinsertion {
         reinsertion: Reinsertion,
@@ -99,11 +97,7 @@ where
                 .field("estimated_size", estimated_size)
                 .field("sequence", sequence)
                 .finish(),
-            Self::Tombstone { tombstone, stats } => f
-                .debug_struct("Tombstone")
-                .field("tombstone", tombstone)
-                .field("stats", stats)
-                .finish(),
+            Self::Invalidate { ctxs } => f.debug_struct("Tombstone").field("ctxs", ctxs).finish(),
             Self::Reinsertion { reinsertion } => {
                 f.debug_struct("Reinsertion").field("reinsertion", reinsertion).finish()
             }
@@ -156,7 +150,6 @@ where
         region_manager: RegionManager,
         device: MonitoredDevice,
         submit_queue_size: Arc<AtomicUsize>,
-        tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
         #[cfg(test)] flush_holder: FlushHolder,
@@ -187,7 +180,7 @@ where
             rx: Some(rx),
             buffer,
             ctx,
-            tombstone_infos: vec![],
+            invalidates: vec![],
             waiters: vec![],
             rotate_buffer,
             queue_init: None,
@@ -195,7 +188,6 @@ where
             region_manager,
             _device: device,
             indexer,
-            tombstone_log,
             compression: config.compression,
             runtime: runtime.clone(),
             metrics: metrics.clone(),
@@ -242,24 +234,33 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct InvalidStats {
-    pub region: RegionId,
-    pub size: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct TombstoneInfo {
-    pub tombstone: Tombstone,
-    pub stats: Option<InvalidStats>,
-}
-
+#[derive(Debug)]
 struct IoTaskCtx {
     handle: Option<GetCleanRegionHandle>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Instant,
     io_slice: SharedIoSlice,
-    tombstone_infos: Vec<TombstoneInfo>,
+    invalidates: Vec<InvalidateCtx>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidateAddr {
+    pub region: RegionId,
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidateCtx {
+    pub addr: Option<InvalidateAddr>,
+    pub len: u32,
+    pub hash: u64,
+    pub sequence: Sequence,
+}
+
+#[derive(Debug)]
+struct RegionIoTaskCtx {
+    handle: GetCleanRegionHandle,
+    invalidates: Vec<InvalidateCtx>,
 }
 
 struct Runner<K, V, P>
@@ -275,7 +276,7 @@ where
     // NOTE: writer is always `Some(..)`.
     buffer: Option<Buffer>,
     ctx: SplitCtx,
-    tombstone_infos: Vec<TombstoneInfo>,
+    invalidates: Vec<InvalidateCtx>,
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
@@ -290,7 +291,6 @@ where
 
     region_manager: RegionManager,
     indexer: Indexer,
-    tombstone_log: Option<TombstoneLog>,
 
     compression: Compression,
 
@@ -334,9 +334,8 @@ where
             #[cfg(test)]
             let can_flush = !self.flush_holder.is_held() && rx.is_empty();
 
-            let need_flush = !self.buffer.as_ref().unwrap().is_empty()
-                || !self.waiters.is_empty()
-                || !self.tombstone_infos.is_empty();
+            let need_flush =
+                !self.buffer.as_ref().unwrap().is_empty() || !self.waiters.is_empty() || !self.invalidates.is_empty();
             let no_io_task = self.io_tasks.is_empty();
 
             if can_flush && need_flush && no_io_task {
@@ -349,12 +348,12 @@ where
                 let shared_io_slice = io_buffer.into_shared_io_slice();
                 let batch = Splitter::split(&mut self.ctx, shared_io_slice, infos);
 
-                let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
+                let invalidates = std::mem::take(&mut self.invalidates);
                 let waiters = std::mem::take(&mut self.waiters);
 
                 let init = self.queue_init.take().unwrap();
 
-                let io_task = self.submit_io_task(batch, tombstone_infos, waiters, init);
+                let io_task = self.submit_io_task(batch, invalidates, waiters, init);
                 self.io_tasks.push_back(io_task);
 
                 let io_buffer = self.rotate_buffer.take().unwrap();
@@ -364,11 +363,12 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice,tombstone_infos } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice, invalidates } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_region_handle = handle;
                     }
-                    self.handle_io_complete(waiters,  tombstone_infos,init);
+                    self.invalidates(&invalidates).await;
+                    self.handle_io_complete(waiters, invalidates, init);
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_buffer();
                 }
@@ -411,7 +411,10 @@ where
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
-            Submission::Tombstone { tombstone, stats } => self.tombstone_infos.push(TombstoneInfo { tombstone, stats }),
+            Submission::Invalidate { ctxs } => {
+                tracing::trace!(id = self.id, ?ctxs, "[lodc flusher]: push invalidates");
+                self.invalidates.extend(ctxs)
+            }
             Submission::Reinsertion { reinsertion } => {
                 // Skip reinsertion if the entry is not in the indexer.
                 if self.indexer.get(reinsertion.hash).is_some() {
@@ -429,7 +432,7 @@ where
     fn submit_io_task(
         &self,
         batch: Batch,
-        tombstone_infos: Vec<TombstoneInfo>,
+        invalidates: Vec<InvalidateCtx>,
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
     ) -> BoxFuture<'static, IoTaskCtx> {
@@ -438,7 +441,7 @@ where
         tracing::trace!(
             id,
             ?batch,
-            ?tombstone_infos,
+            ?invalidates,
             waiters = waiters.len(),
             "[flusher] commit batch"
         );
@@ -555,6 +558,20 @@ where
 
                     let olds = indexer.insert_batch(addrs);
                     metrics.storage_lodc_indexer_conflict.increase(olds.len() as _);
+                    let invalidates = olds
+                        .into_iter()
+                        .map(|old| InvalidateCtx {
+                            addr: Some(InvalidateAddr {
+                                region: old.address.region,
+                                offset: old.address.offset,
+                            }),
+                            len: old.address.len,
+                            hash: old.hash,
+                            sequence: old.address.sequence,
+                        })
+                        .collect_vec();
+
+                    tracing::trace!(id, ?invalidates, "[flusher]: olds entries to invalidate");
 
                     // Window expect window is full, make it evictable.
                     if i != regions - 1 {
@@ -562,45 +579,37 @@ where
                     }
                     tracing::trace!(id, "[flusher]: write region {id} finish.", id = region.id());
 
-                    Ok::<_, Error>(region_handle)
+                    let ctx = RegionIoTaskCtx {
+                        handle: region_handle,
+                        invalidates,
+                    };
+
+                    Ok::<_, Error>(ctx)
                 }
             })
             .collect_vec();
 
-        let future = {
-            let region_manager = self.region_manager.clone();
-            let tombstone_log = self.tombstone_log.clone();
-            let tombstone_infos = tombstone_infos.clone();
-            async move {
-                if let Some(log) = tombstone_log {
-                    log.append(tombstone_infos.iter().map(|info| &info.tombstone)).await?;
-                }
-                for TombstoneInfo { tombstone: _, stats } in tombstone_infos {
-                    if let Some(stats) = stats {
-                        region_manager
-                            .region(stats.region)
-                            .statistics()
-                            .invalid
-                            .fetch_add(stats.size, Ordering::Relaxed);
-                    }
-                }
-                Ok::<_, Error>(())
-            }
-        };
-
-        let f: BoxFuture<'_, Result<(Vec<GetCleanRegionHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
+        let f = try_join_all(futures);
         let handle = self
             .runtime
             .write()
             .spawn(f)
             .map(move |jres| match jres {
-                Ok(Ok((mut states, ()))) => IoTaskCtx {
-                    handle: states.pop(),
-                    waiters,
-                    init,
-                    io_slice,
-                    tombstone_infos,
-                },
+                Ok(Ok(ctxs)) => {
+                    let handle = ctxs.last().map(|ctx| ctx.handle.clone());
+                    let invalidates = ctxs
+                        .into_iter()
+                        .flat_map(|ctx| ctx.invalidates)
+                        .chain(invalidates)
+                        .collect_vec();
+                    IoTaskCtx {
+                        handle,
+                        waiters,
+                        init,
+                        io_slice,
+                        invalidates,
+                    }
+                }
                 Ok(Err(e)) => {
                     tracing::error!(id, ?e, "[lodc flusher]: io task error");
                     IoTaskCtx {
@@ -608,7 +617,7 @@ where
                         waiters,
                         init,
                         io_slice,
-                        tombstone_infos,
+                        invalidates: vec![],
                     }
                 }
                 Err(e) => {
@@ -618,7 +627,7 @@ where
                         waiters,
                         init,
                         io_slice,
-                        tombstone_infos,
+                        invalidates: vec![],
                     }
                 }
             })
@@ -627,17 +636,40 @@ where
         handle
     }
 
-    fn handle_io_complete(
-        &self,
-        waiters: Vec<oneshot::Sender<()>>,
-        tombstone_infos: Vec<TombstoneInfo>,
-        init: Instant,
-    ) {
-        self.indexer.remove_batch(
-            tombstone_infos
-                .iter()
-                .map(|info| (info.tombstone.hash, info.tombstone.sequence)),
-        );
+    fn invalidates(&self, invalidates: &[InvalidateCtx]) -> impl Future<Output = ()> + Send + use<'_, K, V, P> {
+        tracing::trace!(id = self.id, ?invalidates, "[flusher]: handle invalidates");
+        let mut page = IoBuffer::new(PAGE);
+        page.fill(0);
+        let page = page.into_shared_io_slice();
+        let mut futures = vec![];
+
+        for invalidate in invalidates.iter().cloned() {
+            if let Some(addr) = invalidate.addr.clone() {
+                let region = self.region_manager.region(addr.region);
+                let page = page.clone();
+                futures.push(async move {
+                    let (_, res) = region.write(page, addr.offset as _).await;
+                    match res {
+                        Ok(()) => {
+                            region
+                                .statistics()
+                                .invalid
+                                .fetch_add(invalidate.len as _, Ordering::Relaxed);
+                        }
+                        Err(e) => {
+                            tracing::error!(?invalidate, ?e, "[flusher]: failed to invalidate entry");
+                        }
+                    }
+                });
+            }
+        }
+
+        join_all(futures).map(|_| ())
+    }
+
+    fn handle_io_complete(&self, waiters: Vec<oneshot::Sender<()>>, invalidates: Vec<InvalidateCtx>, init: Instant) {
+        self.indexer
+            .remove_batch(invalidates.iter().map(|ctx| (ctx.hash, ctx.sequence)));
 
         for waiter in waiters {
             let _ = waiter.send(());

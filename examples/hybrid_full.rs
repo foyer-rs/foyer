@@ -19,7 +19,7 @@ use chrono::Datelike;
 use foyer::{
     AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
     IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
-    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
@@ -47,12 +47,7 @@ async fn main() -> Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_region_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
-                .with_tombstone_log_config(
-                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                        .with_flush(true)
-                        .build(),
-                ),
+                .with_reinsertion_picker(Arc::<RejectAllPicker>::default()),
             small: SmallEngineOptions::new()
                 .with_set_size(16 * 1024)
                 .with_set_cache_capacity(64)

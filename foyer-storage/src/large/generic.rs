@@ -34,10 +34,11 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 use futures_util::future::{join_all, try_join_all};
+use itertools::Itertools;
 use tokio::sync::Semaphore;
 
 use super::{
-    flusher::{Flusher, InvalidStats, Submission},
+    flusher::{Flusher, Submission},
     indexer::Indexer,
     reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
@@ -50,9 +51,9 @@ use crate::{
     error::{Error, Result},
     io::{buffer::IoBuffer, PAGE},
     large::{
+        flusher::{InvalidateAddr, InvalidateCtx},
         reclaimer::RegionCleaner,
         serde::{AtomicSequence, EntryHeader},
-        tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     },
     picker::{EvictionPicker, ReinsertionPicker},
     region::RegionManager,
@@ -82,7 +83,6 @@ where
     pub clean_region_threshold: usize,
     pub eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     pub reinsertion_picker: Arc<dyn ReinsertionPicker>,
-    pub tombstone_log_config: Option<TombstoneLogConfig>,
     pub runtime: Runtime,
     pub marker: PhantomData<(K, V)>,
 }
@@ -107,7 +107,6 @@ where
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_pickers", &self.reinsertion_picker)
-            .field("tombstone_log_config", &self.tombstone_log_config)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -192,22 +191,6 @@ where
         let device = config.device.clone();
         let metrics = device.metrics().clone();
 
-        let mut tombstones = vec![];
-        let tombstone_log = match &config.tombstone_log_config {
-            None => None,
-            Some(tombstone_log_config) => {
-                let log = TombstoneLog::open(
-                    tombstone_log_config,
-                    device.clone(),
-                    &mut tombstones,
-                    metrics.clone(),
-                    config.runtime.clone(),
-                )
-                .await?;
-                Some(log)
-            }
-        };
-
         let indexer = Indexer::new(config.indexer_shards);
         let mut eviction_pickers = std::mem::take(&mut config.eviction_pickers);
         for picker in eviction_pickers.iter_mut() {
@@ -229,7 +212,6 @@ where
             &sequence,
             &indexer,
             &region_manager,
-            &tombstones,
             config.runtime.clone(),
         )
         .await?;
@@ -243,7 +225,6 @@ where
             let region_manager = region_manager.clone();
             let device = device.clone();
             let submit_queue_size = submit_queue_size.clone();
-            let tombstone_log = tombstone_log.clone();
             let metrics = metrics.clone();
             #[cfg(test)]
             let flush_holder = flush_holder.clone();
@@ -255,7 +236,6 @@ where
                     region_manager,
                     device,
                     submit_queue_size,
-                    tombstone_log,
                     metrics,
                     &config.runtime,
                     #[cfg(test)]
@@ -465,21 +445,27 @@ where
         }
 
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        let stats = self
-            .inner
-            .indexer
-            .insert_tombstone(hash, sequence)
-            .map(|addr| InvalidStats {
-                region: addr.region,
-                size: bits::align_up(self.inner.device.align(), addr.len as usize),
-            });
+        let ctxs = match self.inner.indexer.insert_tombstone(hash, sequence) {
+            Some(addr) => vec![InvalidateCtx {
+                addr: Some(InvalidateAddr {
+                    region: addr.region,
+                    offset: addr.offset,
+                }),
+                len: bits::align_up(PAGE as _, addr.len),
+                hash,
+                sequence,
+            }],
+            None => vec![InvalidateCtx {
+                addr: None,
+                len: 0,
+                hash,
+                sequence,
+            }],
+        };
 
         let this = self.clone();
         self.inner.runtime.write().spawn(async move {
-            this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
-                tombstone: Tombstone { hash, sequence },
-                stats,
-            });
+            this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Invalidate { ctxs });
         });
     }
 
@@ -492,13 +478,16 @@ where
             return Err(anyhow::anyhow!("cannot delete entry after closed").into());
         }
 
-        // Write an tombstone to clear tombstone log by increase the max sequence.
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-
-        self.inner.flushers[0].submit(Submission::Tombstone {
-            tombstone: Tombstone { hash: 0, sequence },
-            stats: None,
-        });
+        let ctxs = (0..self.inner.region_manager.regions() as RegionId)
+            .map(|region| InvalidateCtx {
+                addr: Some(InvalidateAddr { region, offset: 0 }),
+                hash: 0,
+                len: self.inner.device.region_size() as _,
+                sequence,
+            })
+            .collect_vec();
+        self.inner.flushers[0].submit(Submission::Invalidate { ctxs });
         self.wait().await;
 
         // Clear indices.
@@ -601,7 +590,7 @@ mod tests {
         picker::utils::{FifoPicker, RejectAllPicker},
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        DirectFsDeviceOptions, TombstoneLogConfigBuilder,
+        DirectFsDeviceOptions,
     };
 
     const KB: usize = 1024;
@@ -653,35 +642,6 @@ mod tests {
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
-            tombstone_log_config: None,
-            buffer_pool_size: 16 * 1024 * 1024,
-            blob_index_size: 4 * 1024,
-            submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            runtime: Runtime::new(None, None, Handle::current()),
-            marker: PhantomData,
-        };
-        GenericLargeStorage::open(config).await.unwrap()
-    }
-
-    async fn store_for_test_with_tombstone_log(
-        dir: impl AsRef<Path>,
-        path: impl AsRef<Path>,
-    ) -> GenericLargeStorage<u64, Vec<u8>, TestProperties> {
-        let device = device_for_test(dir).await;
-        let regions = 0..device.regions() as RegionId;
-        let config = GenericLargeStorageConfig {
-            device,
-            regions,
-            compression: Compression::None,
-            indexer_shards: 4,
-            recover_mode: RecoverMode::Strict,
-            recover_concurrency: 2,
-            flushers: 1,
-            reclaimers: 1,
-            clean_region_threshold: 1,
-            eviction_pickers: vec![Box::<FifoPicker>::default()],
-            reinsertion_picker: Arc::<RejectAllPicker>::default(),
-            tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
@@ -799,7 +759,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
@@ -823,7 +783,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
         for i in 0..9 {
             if i != 3 {
                 assert_eq!(
@@ -845,7 +805,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
@@ -858,7 +818,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
@@ -886,7 +846,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
         for i in 0..9 {
             assert_eq!(store.load(memory.hash(&i)).await.unwrap().kv(), None);
         }
@@ -901,7 +861,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test(dir.path()).await;
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
@@ -981,6 +941,7 @@ mod tests {
             ]
         );
 
+        tracing::error!("****************************************************************************************");
         // [[(11), (3), (5)], [], [(6), (7), (8)], [(9), (10), (1)]]
         enqueue(&store, es[11].clone());
         store.wait().await;

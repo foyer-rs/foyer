@@ -36,7 +36,7 @@ use crate::{
     engine::{EngineConfig, EngineEnum, SizeSelector},
     error::{Error, Result},
     io::PAGE,
-    large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
+    large::{generic::GenericLargeStorageConfig, recover::RecoverMode},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
@@ -675,7 +675,6 @@ where
                                     clean_region_threshold: large.clean_region_threshold.unwrap_or(large.reclaimers),
                                     eviction_pickers: large.eviction_pickers,
                                     reinsertion_picker: large.reinsertion_picker,
-                                    tombstone_log_config: large.tombstone_log_config,
                                     buffer_pool_size: large.buffer_pool_size,
                                     blob_index_size: large.blob_index_size,
                                     submit_queue_size_threshold: large.submit_queue_size_threshold.unwrap_or(large.buffer_pool_size * 2),
@@ -728,7 +727,6 @@ where
                                         clean_region_threshold: large.clean_region_threshold.unwrap_or(large.reclaimers),
                                         eviction_pickers: large.eviction_pickers,
                                         reinsertion_picker: large.reinsertion_picker,
-                                        tombstone_log_config: large.tombstone_log_config,
                                         buffer_pool_size: large.buffer_pool_size,
                                         blob_index_size: large.blob_index_size,
                                         submit_queue_size_threshold: large.submit_queue_size_threshold.unwrap_or(large.buffer_pool_size * 2),
@@ -804,7 +802,6 @@ pub struct LargeEngineOptions {
     clean_region_threshold: Option<usize>,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
-    tombstone_log_config: Option<TombstoneLogConfig>,
 }
 
 impl Default for LargeEngineOptions {
@@ -827,7 +824,6 @@ impl LargeEngineOptions {
             clean_region_threshold: None,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
-            tombstone_log_config: None,
         }
     }
 
@@ -940,15 +936,6 @@ impl LargeEngineOptions {
     /// Default: [`RejectAllPicker`].
     pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker>) -> Self {
         self.reinsertion_picker = reinsertion_picker;
-        self
-    }
-
-    /// Enable the tombstone log with the given config.
-    ///
-    /// For updatable cache, either the tombstone log or [`RecoverMode::None`] must be enabled to prevent from the
-    /// phantom entries after reopen.
-    pub fn with_tombstone_log_config(mut self, tombstone_log_config: TombstoneLogConfig) -> Self {
-        self.tombstone_log_config = Some(tombstone_log_config);
         self
     }
 }

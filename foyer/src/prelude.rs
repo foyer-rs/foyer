@@ -37,6 +37,5 @@ pub use crate::{
         EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker, IopsCounter, LargeEngineOptions, Load, Pick,
         RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions,
         SmallEngineOptions, Statistics, Storage, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
-        TombstoneLogConfigBuilder,
     },
 };
