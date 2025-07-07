@@ -25,6 +25,7 @@ pub use crate::{
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
         cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties, HybridFetch},
+        error::{Error, Result},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{

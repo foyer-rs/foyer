@@ -26,9 +26,9 @@ use foyer_common::{
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
 
 use crate::{
+    error::Error,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -945,7 +945,7 @@ impl<K, V, ER, S, P> Future for Fetch<K, V, ER, S, P>
 where
     K: Key,
     V: Value,
-    ER: From<oneshot::error::RecvError>,
+    ER: From<Error>,
     S: HashBuilder,
     P: Properties,
 {
@@ -1165,7 +1165,7 @@ mod tests {
                 let entry = cache
                     .fetch(i, || async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, tokio::sync::oneshot::error::RecvError>(i)
+                        Ok::<_, Error>(i)
                     })
                     .await
                     .unwrap();
