@@ -28,20 +28,24 @@ pub enum Error {
 
 impl Error {
     /// Create customized error.
-    pub fn other<E: std::error::Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
+    pub fn other<E, IE>(e: IE) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+        IE: Into<Box<E>>,
+    {
+        Self::Other(e.into())
     }
 
     /// Downcast error to a specific type.
     ///
     /// Only `Other` variant can be downcasted.
     /// If the error is not `Other`, it will return an error indicating that downcasting is not possible.
-    pub fn downcast<T>(self) -> std::result::Result<Box<T>, Self>
+    pub fn downcast<T>(self) -> std::result::Result<T, Self>
     where
         T: std::error::Error + 'static,
     {
         match self {
-            Self::Other(e) => e.downcast::<T>().map_err(|e| {
+            Self::Other(e) => e.downcast::<T>().map(|e| *e).map_err(|e| {
                 let e: Box<dyn std::error::Error + Send + Sync + 'static> =
                     format!("cannot downcast error: {e}").into();
                 Self::Other(e)
@@ -92,9 +96,6 @@ mod tests {
             "Error or not error, that is a question.".to_string(),
         )));
         let res = e.downcast::<TestError>().unwrap();
-        assert_eq!(
-            res,
-            Box::new(TestError("Error or not error, that is a question.".to_string(),))
-        );
+        assert_eq!(res, TestError("Error or not error, that is a question.".to_string()));
     }
 }
