@@ -42,10 +42,12 @@ use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, Piece, Pi
 use foyer_storage::{IoThrottler, Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
 
-use super::writer::HybridCacheStorageWriter;
-use crate::{HybridCacheBuilder, HybridCacheWriter};
+use crate::hybrid::{
+    builder::HybridCacheBuilder,
+    error::{Error, Result},
+    writer::{HybridCacheStorageWriter, HybridCacheWriter},
+};
 
 #[cfg(feature = "tracing")]
 macro_rules! root_span {
@@ -316,7 +318,7 @@ where
         memory: Cache<K, V, S, HybridCacheProperties>,
         storage: Store<K, V, S, HybridCacheProperties>,
         flush_on_close: bool,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         if closed.fetch_or(true, Ordering::Relaxed) {
             return Ok(());
         }
@@ -333,7 +335,7 @@ where
         Ok(())
     }
 
-    async fn close(&self) -> anyhow::Result<()> {
+    async fn close(&self) -> Result<()> {
         Self::close_inner(
             self.closed.clone(),
             self.memory.clone(),
@@ -571,7 +573,7 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
         Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
     {
@@ -650,7 +652,7 @@ where
     ///
     /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
     /// key is acceptable.
-    pub async fn obtain(&self, key: K) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    pub async fn obtain(&self, key: K) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Clone,
     {
@@ -667,7 +669,7 @@ where
             || {
                 let store = self.inner.storage.clone();
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from) {
+                    match store.load(&key).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -681,7 +683,7 @@ where
                         },
                         Ok(Load::Throttled) => Err(ObtainFetchError::Throttled).into(),
                         Ok(Load::Miss) => Err(ObtainFetchError::NotExist).into(),
-                        Err(e) => Err(ObtainFetchError::Err(e)).into(),
+                        Err(e) => Err(ObtainFetchError::Other(e)).into(),
                     }
                 }
             },
@@ -720,11 +722,7 @@ where
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
-            Err(ObtainFetchError::RecvError(_)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
-                Ok(None)
-            }
-            Err(ObtainFetchError::Err(e)) => {
+            Err(ObtainFetchError::Other(e)) => {
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Err(e)
             }
@@ -766,7 +764,7 @@ where
     }
 
     /// Clear the hybrid cache.
-    pub async fn clear(&self) -> anyhow::Result<()> {
+    pub async fn clear(&self) -> Result<()> {
         self.inner.memory.clear();
         self.inner.storage.destroy().await?;
         Ok(())
@@ -781,7 +779,7 @@ where
     /// For more details, please refer to [`super::builder::HybridCacheBuilder::with_flush_on_close()`].
     ///
     /// If `close` is not called explicitly, the hybrid cache will be closed when its last copy is dropped.
-    pub async fn close(&self) -> anyhow::Result<()> {
+    pub async fn close(&self) -> Result<()> {
         self.inner.close().await
     }
 
@@ -819,13 +817,12 @@ where
 enum ObtainFetchError {
     Throttled,
     NotExist,
-    RecvError(oneshot::error::RecvError),
-    Err(anyhow::Error),
+    Other(Error),
 }
 
-impl From<oneshot::error::RecvError> for ObtainFetchError {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::RecvError(e)
+impl From<foyer_memory::Error> for ObtainFetchError {
+    fn from(e: foyer_memory::Error) -> Self {
+        Self::Other(e.into())
     }
 }
 
@@ -846,7 +843,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: Fetch<K, V, anyhow::Error, S, HybridCacheProperties>,
+    inner: Fetch<K, V, Error, S, HybridCacheProperties>,
     policy: HybridCachePolicy,
     storage: Store<K, V, S, HybridCacheProperties>,
 }
@@ -857,7 +854,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Output = anyhow::Result<CacheEntry<K, V, S, HybridCacheProperties>>;
+    type Output = Result<CacheEntry<K, V, S, HybridCacheProperties>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -885,7 +882,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Target = Fetch<K, V, anyhow::Error, S, HybridCacheProperties>;
+    type Target = Fetch<K, V, Error, S, HybridCacheProperties>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -905,7 +902,7 @@ where
     pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = Result<V>> + Send + 'static,
     {
         self.fetch_inner(key, HybridCacheProperties::default(), fetch)
     }
@@ -922,7 +919,7 @@ where
     ) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = Result<V>> + Send + 'static,
     {
         self.fetch_inner(key, properties, fetch)
     }
@@ -930,7 +927,7 @@ where
     fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<V>> + Send + 'static,
+        FU: Future<Output = Result<V>> + Send + 'static,
     {
         root_span!(self, span, "foyer::hybrid::cache::fetch");
 
@@ -950,7 +947,7 @@ where
                 let runtime = self.storage().runtime().clone();
 
                 async move {
-                    let throttled = match store.load(&key).await.map_err(anyhow::Error::from) {
+                    let throttled = match store.load(&key).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,

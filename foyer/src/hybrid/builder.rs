@@ -25,8 +25,10 @@ use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{AdmissionPicker, Compression, DeviceOptions, Engine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
-use super::cache::{HybridCacheOptions, HybridCachePipe};
-use crate::{HybridCache, HybridCachePolicy, HybridCacheProperties};
+use crate::hybrid::{
+    cache::{HybridCache, HybridCacheOptions, HybridCachePipe, HybridCachePolicy, HybridCacheProperties},
+    error::Result,
+};
 
 /// Hybrid cache builder.
 pub struct HybridCacheBuilder<K, V> {
@@ -304,7 +306,7 @@ where
     }
 
     /// Build and open the hybrid cache with the given configurations.
-    pub async fn build(self) -> anyhow::Result<HybridCache<K, V, S>> {
+    pub async fn build(self) -> Result<HybridCache<K, V, S>> {
         let builder = self.builder;
 
         let piped = !builder.is_noop() && self.options.policy == HybridCachePolicy::WriteOnEviction;

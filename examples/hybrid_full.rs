@@ -14,17 +14,16 @@
 
 use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
-use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
     AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
-    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
+    SmallEngineOptions, Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
@@ -110,7 +109,8 @@ async fn main() -> Result<()> {
 async fn mock() -> Result<String> {
     let now = chrono::Utc::now();
     if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
-        return Err(anyhow::anyhow!("Hi, time traveler!"));
+        let e: Box<dyn std::error::Error + Send + Sync + 'static> = "Hi, time traveler!".into();
+        return Err(e.into());
     }
     Ok("Hello, foyer.".to_string())
 }
