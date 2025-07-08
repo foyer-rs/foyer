@@ -17,6 +17,7 @@ pub mod flusher;
 pub mod generic;
 pub mod indexer;
 pub mod reclaimer;
+pub mod reclaimer_v2;
 pub mod recover;
 pub mod scanner;
 pub mod serde;

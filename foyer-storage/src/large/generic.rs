@@ -39,7 +39,6 @@ use tokio::sync::Semaphore;
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
     indexer::Indexer,
-    reclaimer::Reclaimer,
     recover::{RecoverMode, RecoverRunner},
 };
 #[cfg(test)]
@@ -51,6 +50,7 @@ use crate::{
     io::{buffer::IoBuffer, PAGE},
     large::{
         reclaimer::RegionCleaner,
+        reclaimer_v2::ReclaimerV2,
         serde::{AtomicSequence, EntryHeader},
         tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
     },
@@ -141,10 +141,10 @@ where
 {
     indexer: Indexer,
     device: MonitoredDevice,
-    region_manager: RegionManager,
+    region_manager: RegionManager<K, V, P>,
 
     flushers: Vec<Flusher<K, V, P>>,
-    reclaimers: Vec<Reclaimer>,
+    reclaimers: Vec<ReclaimerV2>,
 
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
@@ -213,10 +213,13 @@ where
         for picker in eviction_pickers.iter_mut() {
             picker.init(0..device.regions() as RegionId, device.region_size());
         }
-        let reclaim_semaphore = Arc::new(Semaphore::new(0));
+
         let region_manager = RegionManager::new(
             device.clone(),
             eviction_pickers,
+            config.clean_region_threshold,
+            config.blob_index_size,
+            config.reinsertion_picker,
             reclaim_semaphore.clone(),
             metrics.clone(),
         );

@@ -20,7 +20,10 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    properties::Properties,
+};
 use futures_util::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Semaphore;
@@ -63,18 +66,19 @@ pub enum RecoverMode {
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    pub async fn run<K, V>(
+    pub async fn run<K, V, P>(
         config: &GenericLargeStorageConfig<K, V>,
         regions: Range<RegionId>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
-        region_manager: &RegionManager,
+        region_manager: &RegionManager<K, V, P>,
         tombstones: &[Tombstone],
         runtime: Runtime,
     ) -> Result<()>
     where
         K: StorageKey,
         V: StorageValue,
+        P: Properties,
     {
         let now = Instant::now();
 
@@ -83,7 +87,7 @@ impl RecoverRunner {
         let mode = config.recover_mode;
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
-            let region = region_manager.region(id).clone();
+            let region = region_manager.region(&id).clone();
             let blob_index_size = config.blob_index_size;
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
@@ -152,7 +156,6 @@ impl RecoverRunner {
             .collect_vec();
         // let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
         let permits = config.clean_region_threshold.saturating_sub(clean_regions.len());
-        let countdown = clean_regions.len().saturating_sub(config.clean_region_threshold);
 
         // Log recovery.
         tracing::info!(
@@ -167,14 +170,7 @@ impl RecoverRunner {
         // Update components.
         indexer.insert_batch(indices);
         sequence.store(latest_sequence + 1, Ordering::Release);
-        for region in clean_regions {
-            region_manager.mark_clean(region).await;
-        }
-        for region in evictable_regions {
-            region_manager.mark_evictable(region);
-        }
-        region_manager.reclaim_semaphore().add_permits(permits);
-        region_manager.reclaim_semaphore_countdown().reset(countdown);
+        region_manager.init(clean_regions, evictable_regions);
 
         let elapsed = now.elapsed();
         tracing::info!("[recover] finish in {:?}", elapsed);
@@ -183,20 +179,6 @@ impl RecoverRunner {
             .metrics()
             .storage_lodc_recover_duration
             .record(elapsed.as_secs_f64());
-
-        // Note: About reclaim semaphore permits and countdown:
-        //
-        // ```
-        // permits = clean region threshold - clean region - reclaiming region
-        // ```
-        //
-        // When recovery, `reclaiming region` is always `0`.
-        //
-        // If `clean region threshold >= clean region`, permits is simply `clean region threshold - clean region`.
-        //
-        // If `clean region threshold < clean region`, for permits must be NON-NEGATIVE, we can temporarily set permits
-        // to `0`, and skip first `clean region - clean region threshold` permits increments. It is implemented by
-        // `Countdown`.
 
         Ok(())
     }

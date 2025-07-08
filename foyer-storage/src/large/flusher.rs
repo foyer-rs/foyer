@@ -153,7 +153,7 @@ where
         id: usize,
         config: &GenericLargeStorageConfig<K, V>,
         indexer: Indexer,
-        region_manager: RegionManager,
+        region_manager: RegionManager<K, V, P>,
         device: MonitoredDevice,
         submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
@@ -288,7 +288,7 @@ where
 
     current_region_handle: GetCleanRegionHandle,
 
-    region_manager: RegionManager,
+    region_manager: RegionManager<K, V, P>,
     indexer: Indexer,
     tombstone_log: Option<TombstoneLog>,
 
@@ -578,7 +578,7 @@ where
                 for TombstoneInfo { tombstone: _, stats } in tombstone_infos {
                     if let Some(stats) = stats {
                         region_manager
-                            .region(stats.region)
+                            .region(&stats.region)
                             .statistics()
                             .invalid
                             .fetch_add(stats.size, Ordering::Relaxed);

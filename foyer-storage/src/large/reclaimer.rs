@@ -39,223 +39,223 @@ use crate::{
         serde::Sequence,
     },
     picker::ReinsertionPicker,
-    region::{Region, RegionManager},
+    region::Region,
     runtime::Runtime,
 };
 
-#[derive(Debug)]
-pub struct Reclaimer {
-    wait_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
-}
+// #[derive(Debug)]
+// pub struct Reclaimer {
+//     wait_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+// }
 
-impl Reclaimer {
-    pub fn open<K, V, P>(
-        config: &GenericLargeStorageConfig<K, V>,
-        region_manager: RegionManager,
-        reclaim_semaphore: Arc<Semaphore>,
-        indexer: Indexer,
-        flushers: Vec<Flusher<K, V, P>>,
-        metrics: Arc<Metrics>,
-    ) -> Self
-    where
-        K: StorageKey,
-        V: StorageValue,
-        P: Properties,
-    {
-        let (wait_tx, wait_rx) = mpsc::unbounded_channel();
+// impl Reclaimer {
+//     pub fn open<K, V, P>(
+//         config: &GenericLargeStorageConfig<K, V>,
+//         region_manager: RegionManager,
+//         reclaim_semaphore: Arc<Semaphore>,
+//         indexer: Indexer,
+//         flushers: Vec<Flusher<K, V, P>>,
+//         metrics: Arc<Metrics>,
+//     ) -> Self
+//     where
+//         K: StorageKey,
+//         V: StorageValue,
+//         P: Properties,
+//     {
+//         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
-        let runner = ReclaimRunner {
-            device: config.device.clone(),
-            region_manager,
-            reclaim_semaphore,
-            indexer,
-            flushers,
-            reinsertion_picker: config.reinsertion_picker.clone(),
-            blob_index_size: config.blob_index_size,
-            _metrics: metrics,
-            wait_rx,
-            runtime: config.runtime.clone(),
-        };
+//         let runner = ReclaimRunner {
+//             device: config.device.clone(),
+//             region_manager,
+//             reclaim_semaphore,
+//             indexer,
+//             flushers,
+//             reinsertion_picker: config.reinsertion_picker.clone(),
+//             blob_index_size: config.blob_index_size,
+//             _metrics: metrics,
+//             wait_rx,
+//             runtime: config.runtime.clone(),
+//         };
 
-        let _handle = config.runtime.write().spawn(async move { runner.run().await });
+//         let _handle = config.runtime.write().spawn(async move { runner.run().await });
 
-        Self { wait_tx }
-    }
+//         Self { wait_tx }
+//     }
 
-    // Wait for the current reclaim job to finish.
-    pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.wait_tx.send(tx);
-        async move {
-            let _ = rx.await;
-        }
-    }
-}
+//     // Wait for the current reclaim job to finish.
+//     pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
+//         let (tx, rx) = oneshot::channel();
+//         let _ = self.wait_tx.send(tx);
+//         async move {
+//             let _ = rx.await;
+//         }
+//     }
+// }
 
-struct ReclaimRunner<K, V, P>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-    device: MonitoredDevice,
+// struct ReclaimRunner<K, V, P>
+// where
+//     K: StorageKey,
+//     V: StorageValue,
+//     P: Properties,
+// {
+//     device: MonitoredDevice,
 
-    reinsertion_picker: Arc<dyn ReinsertionPicker>,
+//     reinsertion_picker: Arc<dyn ReinsertionPicker>,
 
-    region_manager: RegionManager,
-    reclaim_semaphore: Arc<Semaphore>,
+//     region_manager: RegionManager,
+//     reclaim_semaphore: Arc<Semaphore>,
 
-    indexer: Indexer,
+//     indexer: Indexer,
 
-    flushers: Vec<Flusher<K, V, P>>,
+//     flushers: Vec<Flusher<K, V, P>>,
 
-    blob_index_size: usize,
+//     blob_index_size: usize,
 
-    _metrics: Arc<Metrics>,
+//     _metrics: Arc<Metrics>,
 
-    wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
+//     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
 
-    runtime: Runtime,
-}
+//     runtime: Runtime,
+// }
 
-impl<K, V, P> ReclaimRunner<K, V, P>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+// impl<K, V, P> ReclaimRunner<K, V, P>
+// where
+//     K: StorageKey,
+//     V: StorageValue,
+//     P: Properties,
+// {
+//     const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
-    async fn run(mut self) {
-        loop {
-            tokio::select! {
-                biased;
-                tx = self.wait_rx.recv() => {
-                    match tx {
-                        None => {
-                            tracing::info!("[reclaimer]: Reclaimer exits.");
-                            return;
-                        },
-                        Some(tx) => {
-                            let _ = tx.send(());
-                        },
-                    }
+//     async fn run(mut self) {
+//         loop {
+//             tokio::select! {
+//                 biased;
+//                 tx = self.wait_rx.recv() => {
+//                     match tx {
+//                         None => {
+//                             tracing::info!("[reclaimer]: Reclaimer exits.");
+//                             return;
+//                         },
+//                         Some(tx) => {
+//                             let _ = tx.send(());
+//                         },
+//                     }
 
-                }
-                permit = self.reclaim_semaphore.acquire() => {
-                    match permit {
-                        Err(_) => {
-                            tracing::info!("[reclaimer]: Reclaimer exits.");
-                            return;
-                        },
-                        Ok(permit) => self.handle(permit).await,
-                    }
-                }
-            }
-        }
-    }
+//                 }
+//                 permit = self.reclaim_semaphore.acquire() => {
+//                     match permit {
+//                         Err(_) => {
+//                             tracing::info!("[reclaimer]: Reclaimer exits.");
+//                             return;
+//                         },
+//                         Ok(permit) => self.handle(permit).await,
+//                     }
+//                 }
+//             }
+//         }
+//     }
 
-    async fn handle(&self, permit: SemaphorePermit<'_>) {
-        let Some(region) = self.region_manager.evict() else {
-            // There is no evictable region, which means all regions are being written or being reclaiming.
-            //
-            // Wait for a while in this case.
-            tracing::warn!(
-                "[reclaimer]: No evictable region at the moment, sleep for {interval:?}.",
-                interval = Self::RETRY_INTERVAL
-            );
-            tokio::time::sleep(Self::RETRY_INTERVAL).await;
-            return;
-        };
+//     async fn handle(&self, permit: SemaphorePermit<'_>) {
+//         let Some(region) = self.region_manager.evict() else {
+//             // There is no evictable region, which means all regions are being written or being reclaiming.
+//             //
+//             // Wait for a while in this case.
+//             tracing::warn!(
+//                 "[reclaimer]: No evictable region at the moment, sleep for {interval:?}.",
+//                 interval = Self::RETRY_INTERVAL
+//             );
+//             tokio::time::sleep(Self::RETRY_INTERVAL).await;
+//             return;
+//         };
 
-        let id = region.id();
+//         let id = region.id();
 
-        tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
+//         tracing::debug!("[reclaimer]: Start reclaiming region {id}.");
 
-        let mut scanner = RegionScanner::new(region.clone(), self.blob_index_size);
-        let mut picked_count = 0;
-        let mut unpicked = vec![];
-        // The loop will ends when:
-        //
-        // 1. no subsequent entries
-        // 2. on error
-        //
-        // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
-        // They will be removed when a query find a mismatch entry.
-        'reinsert: loop {
-            let infos = match scanner.next().await {
-                Ok(None) => break 'reinsert,
-                Err(e) => {
-                    tracing::warn!(
-                        "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                        id = region.id()
-                    );
-                    break 'reinsert;
-                }
-                Ok(Some(infos)) => infos,
-            };
-            for info in infos {
-                if self
-                    .reinsertion_picker
-                    .pick(self.device.statistics(), info.hash)
-                    .admitted()
-                {
-                    let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
-                    let (buf, res) = region.read(buf, info.addr.offset as _).await;
-                    if let Err(e) = res {
-                        tracing::warn!(
-                        "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                        id = region.id()
-                    );
-                        break 'reinsert;
-                    }
+//         let mut scanner = RegionScanner::new(region.clone(), self.blob_index_size);
+//         let mut picked_count = 0;
+//         let mut unpicked = vec![];
+//         // The loop will ends when:
+//         //
+//         // 1. no subsequent entries
+//         // 2. on error
+//         //
+//         // If the loop ends on error, the subsequent indices cannot be removed while reclaiming.
+//         // They will be removed when a query find a mismatch entry.
+//         'reinsert: loop {
+//             let infos = match scanner.next().await {
+//                 Ok(None) => break 'reinsert,
+//                 Err(e) => {
+//                     tracing::warn!(
+//                         "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+//                         id = region.id()
+//                     );
+//                     break 'reinsert;
+//                 }
+//                 Ok(Some(infos)) => infos,
+//             };
+//             for info in infos {
+//                 if self
+//                     .reinsertion_picker
+//                     .pick(self.device.statistics(), info.hash)
+//                     .admitted()
+//                 {
+//                     let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
+//                     let (buf, res) = region.read(buf, info.addr.offset as _).await;
+//                     if let Err(e) = res {
+//                         tracing::warn!(
+//                         "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
+//                         id = region.id()
+//                     );
+//                         break 'reinsert;
+//                     }
 
-                    let slice = buf.into_owned_slice().slice(..info.addr.len as usize);
-                    let flusher = self.flushers[picked_count % self.flushers.len()].clone();
-                    flusher.submit(Submission::Reinsertion {
-                        reinsertion: Reinsertion {
-                            hash: info.hash,
-                            sequence: info.addr.sequence,
-                            slice,
-                        },
-                    });
-                    picked_count += 1;
-                } else {
-                    unpicked.push((info.hash, info.addr.sequence));
-                }
-            }
-        }
+//                     let slice = buf.into_owned_slice().slice(..info.addr.len as usize);
+//                     let flusher = self.flushers[picked_count % self.flushers.len()].clone();
+//                     flusher.submit(Submission::Reinsertion {
+//                         reinsertion: Reinsertion {
+//                             hash: info.hash,
+//                             sequence: info.addr.sequence,
+//                             slice,
+//                         },
+//                     });
+//                     picked_count += 1;
+//                 } else {
+//                     unpicked.push((info.hash, info.addr.sequence));
+//                 }
+//             }
+//         }
 
-        let unpicked_count = unpicked.len();
+//         let unpicked_count = unpicked.len();
 
-        let waits = self.flushers.iter().map(|flusher| flusher.wait()).collect_vec();
-        self.runtime.write().spawn(async move {
-            join_all(waits).await;
-        });
-        self.indexer.remove_batch(unpicked);
+//         let waits = self.flushers.iter().map(|flusher| flusher.wait()).collect_vec();
+//         self.runtime.write().spawn(async move {
+//             join_all(waits).await;
+//         });
+//         self.indexer.remove_batch(unpicked);
 
-        if let Err(e) = RegionCleaner::clean(&region).await {
-            tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
-        }
+//         if let Err(e) = RegionCleaner::clean(&region).await {
+//             tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
+//         }
 
-        tracing::debug!(
-            "[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}."
-        );
+//         tracing::debug!(
+//             "[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}."
+//         );
 
-        region.statistics().reset();
+//         region.statistics().reset();
 
-        self.region_manager.mark_clean(id).await;
-        // These operations should be atomic:
-        //
-        // 1. Reclaim runner releases 1 permit on finish. (+1)
-        // 2. There is a new clean region. (-1)
-        //
-        // Because the total permits to modify is 0 and to avoid concurrent corner case, just forget the permit.
-        //
-        // The permit only increase when the a clean region is taken to write.
-        permit.forget();
-    }
-}
+//         self.region_manager.mark_clean(id).await;
+//         // These operations should be atomic:
+//         //
+//         // 1. Reclaim runner releases 1 permit on finish. (+1)
+//         // 2. There is a new clean region. (-1)
+//         //
+//         // Because the total permits to modify is 0 and to avoid concurrent corner case, just forget the permit.
+//         //
+//         // The permit only increase when the a clean region is taken to write.
+//         permit.forget();
+//     }
+// }
 
 #[derive(Debug)]
 pub struct RegionCleaner;

@@ -25,6 +25,7 @@ mod io;
 mod large;
 mod picker;
 mod region;
+mod region_v2;
 mod runtime;
 mod serde;
 mod small;

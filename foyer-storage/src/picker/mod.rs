@@ -68,6 +68,7 @@ pub struct EvictionInfo<'a> {
     pub regions: &'a [Region],
     /// Evictable regions.
     pub evictable: &'a HashSet<RegionId>,
+    // TODO(MrCroxx): use counters!!!!!
     /// Clean regions counts.
     pub clean: usize,
 }
