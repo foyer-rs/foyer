@@ -28,10 +28,9 @@ pub enum Error {
 
 impl Error {
     /// Create customized error.
-    pub fn other<E, IE>(e: IE) -> Self
+    pub fn other<E>(e: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
-        IE: Into<Box<E>>,
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     {
         Self::Other(e.into())
     }
