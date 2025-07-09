@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod buffer;
+pub mod bytes;
+pub mod engine;
 pub mod throttle;
 
 pub const PAGE: usize = 4096;
