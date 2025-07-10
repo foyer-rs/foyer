@@ -15,7 +15,7 @@
 use std::{
     any::Any,
     fmt::Debug,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, RangeBounds},
     ptr::NonNull,
     slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
@@ -140,7 +140,8 @@ impl IoB for Raw {
 impl IoBuf for Raw {}
 impl IoBufMut for Raw {}
 
-#[derive(Debug, Clone)]
+/// A 4K-aligned slice on the io buffer that can be shared.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoSlice {
     raw: Arc<Raw>,
     start: usize,
@@ -190,8 +191,39 @@ impl IoB for IoSlice {
         (ptr, len)
     }
 }
+
 impl IoBuf for IoSlice {}
 
+impl IoSlice {
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
+        let s = match range.start_bound() {
+            std::ops::Bound::Included(i) => self.start + *i,
+            std::ops::Bound::Excluded(_) => unreachable!(),
+            std::ops::Bound::Unbounded => self.start,
+        };
+
+        let e = match range.end_bound() {
+            std::ops::Bound::Included(i) => self.start + *i + 1,
+            std::ops::Bound::Excluded(i) => self.start + *i,
+            std::ops::Bound::Unbounded => self.end,
+        };
+
+        if s > e {
+            panic!("slice index starts at {s} but ends at {e}");
+        }
+
+        bits::assert_aligned(PAGE, s);
+        bits::assert_aligned(PAGE, e);
+
+        Self {
+            raw: self.raw.clone(),
+            start: s,
+            end: e,
+        }
+    }
+}
+
+/// A 4K-aligned mutable slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoSliceMut {
     raw: Raw,
@@ -240,7 +272,17 @@ impl IoB for IoSliceMut {
     }
 }
 impl IoBuf for IoSliceMut {}
+
 impl IoBufMut for IoSliceMut {}
+
+impl IoSliceMut {
+    pub fn into_io_slice(self) -> IoSlice {
+        let start = 0;
+        let end = self.raw.cap;
+        let raw = Arc::new(self.raw);
+        IoSlice { raw, start, end }
+    }
+}
 
 #[cfg(test)]
 mod tests {

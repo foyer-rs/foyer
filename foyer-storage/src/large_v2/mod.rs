@@ -12,29 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+pub mod buffer;
+// pub mod flusher;
+// pub mod generic;
+// pub mod indexer;
+// pub mod reclaimer;
+// pub mod recover;
+// pub mod scanner;
+// pub mod serde;
+// pub mod tombstone;
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
-
-mod compress;
-mod device;
-mod engine;
-mod error;
-mod io;
-mod large;
-mod large_v2;
-mod picker;
-mod region;
-mod runtime;
-mod serde;
-mod small;
-mod statistics;
-mod storage;
-mod store;
-
-mod prelude;
-pub use prelude::*;
-
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils;
+// #[cfg(test)]
+// pub mod test_utils;
