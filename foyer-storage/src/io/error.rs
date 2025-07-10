@@ -12,11 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod buffer;
-pub mod bytes;
-pub mod device;
-pub mod engine;
-pub mod error;
-pub mod throttle;
+#[derive(Debug, thiserror::Error)]
+pub enum IoError {
+    #[error("I/O operation failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+}
 
-pub const PAGE: usize = 4096;
+impl IoError {
+    pub fn from_raw_os_error(raw: i32) -> Self {
+        Self::Io(std::io::Error::from_raw_os_error(raw))
+    }
+
+    pub fn other<E>(e: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    {
+        Self::Other(e.into())
+    }
+}
+
+pub type IoResult<T> = std::result::Result<T, IoError>;
