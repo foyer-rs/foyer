@@ -13,30 +13,35 @@
 // limitations under the License.
 
 use std::{
+    any::Any,
+    fmt::Debug,
     fs::{create_dir_all, File, OpenOptions},
+    future::Future,
     mem::ManuallyDrop,
     os::{
         fd::{AsRawFd, FromRawFd, RawFd},
         unix::fs::FileExt,
     },
     path::{Path, PathBuf},
+    pin::Pin,
     sync::{mpsc, Arc},
+    task::{ready, Context, Poll},
 };
 
 use fs4::free_space;
-use io_uring::{opcode, squeue::Entry as Sqe, types::Fd, IoUring};
+use futures_core::future::BoxFuture;
+use futures_util::FutureExt;
+use io_uring::{opcode, types::Fd, IoUring};
+use pin_project::pin_project;
 use tokio::sync::oneshot;
 
-use crate::{io::PAGE, Throttle};
-
-#[derive(Debug, Clone, Copy)]
-pub struct BufferPtr {
-    pub ptr: *mut u8,
-    pub len: usize,
-}
-
-unsafe impl Send for BufferPtr {}
-unsafe impl Sync for BufferPtr {}
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut, IoSlice, IoSliceMut},
+        PAGE,
+    },
+    Throttle,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
@@ -63,30 +68,107 @@ pub type IoResult<T> = std::result::Result<T, IoError>;
 
 pub type RegionId = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IoType {
-    Read,
-    Write,
+#[pin_project]
+pub struct IoHandle {
+    #[pin]
+    inner: BoxFuture<'static, IoResult<Box<dyn IoB>>>,
 }
 
-pub struct IoRequest {
-    pub io_type: IoType,
-    pub buf: BufferPtr,
-    pub region: RegionId,
-    pub offset: u64,
+impl Debug for IoHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IoHandle").finish()
+    }
 }
 
-pub struct IoResponse {
-    pub io_type: IoType,
-    pub buf: BufferPtr,
-    pub region: RegionId,
-    pub offset: u64,
+impl From<BoxFuture<'static, IoResult<Box<dyn IoB>>>> for IoHandle {
+    fn from(inner: BoxFuture<'static, IoResult<Box<dyn IoB>>>) -> Self {
+        Self { inner }
+    }
 }
 
-// FIXME(MrCroxx): To make io task cancellation safe, we need RAII resource management.
+impl Future for IoHandle {
+    type Output = IoResult<Box<dyn IoB>>;
 
-pub type IoNotifier = oneshot::Sender<IoResult<IoResponse>>;
-pub type IoHandle = oneshot::Receiver<IoResult<IoResponse>>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.inner.poll(cx));
+        match res {
+            Ok(r) => Poll::Ready(Ok(r)),
+            Err(e) => Poll::Ready(Err(IoError::other(e))),
+        }
+    }
+}
+
+impl IoHandle {
+    pub fn into_slice_handle(self) -> SliceIoHandle {
+        SliceIoHandle { inner: self }
+    }
+
+    pub fn into_slice_mut_handle(self) -> SliceMutIoHandle {
+        SliceMutIoHandle { inner: self }
+    }
+}
+
+#[pin_project]
+pub struct SliceIoHandle {
+    #[pin]
+    inner: IoHandle,
+}
+
+impl Debug for SliceIoHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SliceIoHandle").finish()
+    }
+}
+
+impl Future for SliceIoHandle {
+    type Output = IoResult<Box<IoSlice>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.inner.poll(cx));
+        match res {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(iob) => {
+                let iob: Box<dyn Any> = iob;
+                let slice = iob
+                    .downcast::<IoSlice>()
+                    .expect("Cannot downcast to IoSlice, type mismatch.");
+                Poll::Ready(Ok(slice))
+            }
+        }
+    }
+}
+
+#[pin_project]
+pub struct SliceMutIoHandle {
+    #[pin]
+    inner: IoHandle,
+}
+
+impl Debug for SliceMutIoHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SliceIoHandle").finish()
+    }
+}
+
+impl Future for SliceMutIoHandle {
+    type Output = IoResult<Box<IoSliceMut>>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.inner.poll(cx));
+        match res {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(iob) => {
+                let iob: Box<dyn Any> = iob;
+                let slice = iob
+                    .downcast::<IoSliceMut>()
+                    .expect("Cannot downcast to IoSlice, type mismatch.");
+                Poll::Ready(Ok(slice))
+            }
+        }
+    }
+}
 
 pub trait IoEngineBuilder: Send + Sync + 'static {
     /// Build an I/O engine from the given configuration.
@@ -94,7 +176,8 @@ pub trait IoEngineBuilder: Send + Sync + 'static {
 }
 
 pub trait IoEngine: Send + Sync + 'static {
-    fn submit(&self, requests: IoRequest) -> IoHandle;
+    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle;
+    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle;
 }
 
 pub trait DeviceBuilder: Send + Sync + 'static {
@@ -241,40 +324,6 @@ impl Device for FileDevice {
     }
 }
 
-// pub trait DeviceExt: Device {
-//     #[must_use]
-//     fn write_bytes(
-//         &self,
-//         buf: IoBytes,
-//         region: RegionId,
-//         offset: u64,
-//     ) -> Box<dyn Future<Output = IoResult<IoBytes>> + Send + 'static> {
-//         todo!()
-//     }
-
-//     #[must_use]
-//     fn write_bytes_mut(
-//         &self,
-//         buf: IoBytesMut,
-//         region: RegionId,
-//         offset: u64,
-//     ) -> Box<dyn Future<Output = IoResult<IoBytesMut>> + Send + 'static> {
-//         todo!()
-//     }
-
-//     #[must_use]
-//     fn read_bytes_mut(
-//         &self,
-//         buf: IoBytesMut,
-//         region: RegionId,
-//         offset: u64,
-//     ) -> Box<dyn Future<Output = IoResult<IoBytesMut>> + Send + 'static> {
-//         todo!()
-//     }
-// }
-
-// impl<T> DeviceExt for T where T: Device + ?Sized {}
-
 pub struct PsyncIoEngineBuilder {
     device: Arc<dyn Device>,
 }
@@ -298,47 +347,71 @@ pub struct PsyncIoEngine {
 }
 
 impl IoEngine for PsyncIoEngine {
-    fn submit(&self, request: IoRequest) -> IoHandle {
-        let (tx, rx) = oneshot::channel();
+    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
         let device = self.device.clone();
-        tokio::task::spawn_blocking(move || {
-            let (fd, offset) = device.translate(request.region, request.offset);
-            let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-            let res = match request.io_type {
-                IoType::Read => {
-                    let buf = unsafe { std::slice::from_raw_parts_mut(request.buf.ptr, request.buf.len) };
-                    file.read_exact_at(buf, offset)
-                }
-                IoType::Write => {
-                    let buf = unsafe { std::slice::from_raw_parts(request.buf.ptr, request.buf.len) };
-                    file.write_all_at(buf, offset)
-                }
-            };
-            let res = res
-                .map(|_| IoResponse {
-                    io_type: request.io_type,
-                    buf: request.buf,
-                    region: request.region,
-                    offset: request.offset,
-                })
-                .map_err(IoError::from);
-            let _ = tx.send(res);
-        });
+        async move {
+            let res = tokio::task::spawn_blocking(move || {
+                let (fd, offset) = device.translate(region, offset);
+                let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                let (ptr, len) = buf.as_raw_parts();
+                let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+                file.read_exact_at(slice, offset).map_err(IoError::from)?;
+                let buf: Box<dyn IoB> = buf;
+                Ok(buf)
+            })
+            .await
+            .map_err(IoError::other)?;
+            res
+        }
+        .boxed()
+        .into()
+    }
 
-        rx
+    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
+        let device = self.device.clone();
+        async move {
+            let res = tokio::task::spawn_blocking(move || {
+                let (fd, offset) = device.translate(region, offset);
+                let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                let (ptr, len) = buf.as_raw_parts();
+                let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+                file.write_all_at(slice, offset).map_err(IoError::from)?;
+                let buf: Box<dyn IoB> = buf;
+                Ok(buf)
+            })
+            .await
+            .map_err(IoError::other)?;
+            res
+        }
+        .boxed()
+        .into()
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UringIoType {
+    Read,
+    Write,
+}
+
+struct UringIoRequest {
+    tx: oneshot::Sender<IoResult<Box<dyn IoB>>>,
+    io_type: UringIoType,
+    buf: Box<dyn IoB>,
+    region: RegionId,
+    offset: u64,
+}
+
 struct UringIoCtx {
-    notifier: IoNotifier,
-    io_type: IoType,
-    buf: BufferPtr,
+    tx: oneshot::Sender<IoResult<Box<dyn IoB>>>,
+    io_type: UringIoType,
+    buf: Box<dyn IoB>,
     region: RegionId,
     offset: u64,
 }
 
 struct UringIoEngineShard {
-    rx: mpsc::Receiver<(IoRequest, IoNotifier)>,
+    rx: mpsc::Receiver<UringIoRequest>,
     device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
@@ -346,37 +419,34 @@ struct UringIoEngineShard {
 }
 
 impl UringIoEngineShard {
-    fn prepare(&mut self, request: IoRequest) -> Sqe {
-        let (fd, offset) = self.device.translate(request.region, request.offset);
-        let fd = Fd(fd);
-        let ptr = request.buf.ptr;
-        let len = request.buf.len as _;
-        match request.io_type {
-            IoType::Read => opcode::Read::new(fd, ptr, len).offset(offset).build(),
-            IoType::Write => opcode::Write::new(fd, ptr, len).offset(offset).build(),
-        }
-    }
-
-    fn notify(&mut self) {}
-
     fn run(mut self) {
         loop {
             'recv: while self.inflight < self.io_depth {
-                let (request, notifier) = match self.rx.try_recv() {
-                    Ok((request, notifier)) => (request, notifier),
+                let request = match self.rx.try_recv() {
+                    Ok(request) => request,
                     Err(mpsc::TryRecvError::Empty) => break 'recv,
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 };
+
                 self.inflight += 1;
+
+                let (ptr, len) = request.buf.as_raw_parts();
                 let ctx = Box::new(UringIoCtx {
-                    notifier,
+                    tx: request.tx,
                     io_type: request.io_type,
                     buf: request.buf,
                     region: request.region,
                     offset: request.offset,
                 });
                 let data = Box::into_raw(ctx) as u64;
-                let sqe = self.prepare(request).user_data(data);
+
+                let (fd, offset) = self.device.translate(request.region, request.offset);
+                let fd = Fd(fd);
+                let sqe = match request.io_type {
+                    UringIoType::Read => opcode::Read::new(fd, ptr, len as _).offset(offset).build(),
+                    UringIoType::Write => opcode::Write::new(fd, ptr, len as _).offset(offset).build(),
+                }
+                .user_data(data);
                 unsafe { self.uring.submission().push(&sqe).unwrap() }
             }
 
@@ -387,18 +457,13 @@ impl UringIoEngineShard {
             for cqe in self.uring.completion() {
                 let data = cqe.user_data();
                 let ctx = unsafe { Box::from_raw(data as *mut UringIoCtx) };
-                let response = IoResponse {
-                    io_type: ctx.io_type,
-                    buf: ctx.buf,
-                    region: ctx.region,
-                    offset: ctx.offset,
-                };
+
                 let res = cqe.result();
                 if res < 0 {
                     let err = IoError::from_raw_os_error(res);
-                    let _ = ctx.notifier.send(Err(err));
+                    let _ = ctx.tx.send(Err(err));
                 } else {
-                    let _ = ctx.notifier.send(Ok(response));
+                    let _ = ctx.tx.send(Ok(ctx.buf));
                 }
                 self.inflight -= 1;
             }
@@ -407,15 +472,53 @@ impl UringIoEngineShard {
 }
 
 pub struct UringIoEngine {
-    txs: Vec<mpsc::SyncSender<(IoRequest, IoNotifier)>>,
+    txs: Vec<mpsc::SyncSender<UringIoRequest>>,
 }
 
-impl IoEngine for UringIoEngine {
-    fn submit(&self, request: IoRequest) -> IoHandle {
+// impl IoEngine for UringIoEngine {
+//     // fn submit(&self, request: IoRequest) -> IoHandle {
+//     //     let (tx, rx) = oneshot::channel();
+//     //     let shard = &self.txs[request.region as usize % self.txs.len()];
+//     //     let _ = shard.send((request, tx));
+//     //     rx
+//     // }
+// }
+
+impl UringIoEngine {
+    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.txs[request.region as usize % self.txs.len()];
-        let _ = shard.send((request, tx));
-        rx
+        let shard = &self.txs[region as usize % self.txs.len()];
+        let _ = shard.send(UringIoRequest {
+            tx,
+            io_type: UringIoType::Read,
+            buf,
+            region,
+            offset,
+        });
+        async move {
+            let recv = rx.await.map_err(IoError::other)?;
+            recv
+        }
+        .boxed()
+        .into()
+    }
+
+    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
+        let (tx, rx) = oneshot::channel();
+        let shard = &self.txs[region as usize % self.txs.len()];
+        let _ = shard.send(UringIoRequest {
+            tx,
+            io_type: UringIoType::Write,
+            buf,
+            region,
+            offset,
+        });
+        async move {
+            let recv = rx.await.map_err(IoError::other)?;
+            recv
+        }
+        .boxed()
+        .into()
     }
 }
 
@@ -453,10 +556,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }
 
-        let (txs, rxs): (
-            Vec<mpsc::SyncSender<(IoRequest, IoNotifier)>>,
-            Vec<mpsc::Receiver<(IoRequest, IoNotifier)>>,
-        ) = (0..self.threads)
+        let (txs, rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
             .map(|_| {
                 let (tx, rx) = mpsc::sync_channel(1024);
                 (tx, rx)
@@ -484,13 +584,22 @@ impl IoEngineBuilder for UringIoEngineBuilder {
     }
 }
 
+impl IoEngine for UringIoEngine {
+    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
+        self.read(buf, region, offset)
+    }
+
+    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
+        self.write(buf, region, offset)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rand::{rng, Fill};
     use tempfile::tempdir;
 
     use super::*;
-    use crate::io::bytes::Raw;
 
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
@@ -514,35 +623,13 @@ mod tests {
     }
 
     async fn test_read_write(engine: Arc<dyn IoEngine>) {
-        let mut b1 = Raw::new(16 * KIB);
+        let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
         Fill::fill(&mut b1[..], &mut rng());
-        let (p1, l1) = b1.into_raw_parts();
 
-        let recv = engine
-            .submit(IoRequest {
-                io_type: IoType::Write,
-                buf: BufferPtr { ptr: p1, len: l1 },
-                region: 0,
-                offset: 0,
-            })
-            .await
-            .unwrap();
-        let _ = recv.unwrap();
-        let b1 = unsafe { Raw::from_raw_parts(p1, l1) };
-        let b2 = Raw::new(16 * KIB);
-        let (p2, l2) = b2.into_raw_parts();
+        let b1 = engine.write(b1, 0, 0).into_slice_mut_handle().await.unwrap();
 
-        let recv = engine
-            .submit(IoRequest {
-                io_type: IoType::Read,
-                buf: BufferPtr { ptr: p2, len: l2 },
-                region: 0,
-                offset: 0,
-            })
-            .await
-            .unwrap();
-        let _ = recv.unwrap();
-        let b2 = unsafe { Raw::from_raw_parts(p2, l2) };
+        let b2 = Box::new(IoSliceMut::new(16 * KIB));
+        let b2 = engine.read(b2, 0, 0).into_slice_mut_handle().await.unwrap();
         assert_eq!(b1, b2);
     }
 

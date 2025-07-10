@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// 4K-aligned immutable buf for direct I/O.
-pub trait IoBuf: Deref<Target = [u8]> + Send + Sync + 'static {}
-
-/// 4K-aligned mutable buf for direct I/O.
-pub trait IoBufMut: DerefMut<Target = [u8]> + Send + Sync + 'static {}
-
 use std::{
+    any::Any,
+    fmt::Debug,
     ops::{Deref, DerefMut},
     ptr::NonNull,
     slice::{from_raw_parts, from_raw_parts_mut},
@@ -29,6 +25,16 @@ use allocator_api2::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use foyer_common::bits;
 
 use super::PAGE;
+
+pub trait IoB: Send + Sync + 'static + Debug + Any {
+    fn as_raw_parts(&self) -> (*mut u8, usize);
+}
+
+/// 4K-aligned immutable buf for direct I/O.
+pub trait IoBuf: Deref<Target = [u8]> + IoB {}
+
+/// 4K-aligned mutable buf for direct I/O.
+pub trait IoBufMut: DerefMut<Target = [u8]> + IoB {}
 
 /// 4K-aligned raw bytes.
 #[derive(Debug)]
@@ -126,16 +132,22 @@ impl PartialEq for Raw {
 
 impl Eq for Raw {}
 
+impl IoB for Raw {
+    fn as_raw_parts(&self) -> (*mut u8, usize) {
+        (self.ptr, self.cap)
+    }
+}
 impl IoBuf for Raw {}
 impl IoBufMut for Raw {}
 
-pub struct IoBytes {
+#[derive(Debug, Clone)]
+pub struct IoSlice {
     raw: Arc<Raw>,
     start: usize,
     end: usize,
 }
 
-impl From<Raw> for IoBytes {
+impl From<Raw> for IoSlice {
     fn from(value: Raw) -> Self {
         let len = value.len();
         Self {
@@ -146,8 +158,8 @@ impl From<Raw> for IoBytes {
     }
 }
 
-impl From<IoBytesMut> for IoBytes {
-    fn from(value: IoBytesMut) -> Self {
+impl From<IoSliceMut> for IoSlice {
+    fn from(value: IoSliceMut) -> Self {
         let len = value.len();
         Self {
             raw: Arc::new(value.raw),
@@ -157,7 +169,7 @@ impl From<IoBytesMut> for IoBytes {
     }
 }
 
-impl Deref for IoBytes {
+impl Deref for IoSlice {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -165,53 +177,70 @@ impl Deref for IoBytes {
     }
 }
 
-impl AsRef<[u8]> for IoBytes {
+impl AsRef<[u8]> for IoSlice {
     fn as_ref(&self) -> &[u8] {
         self
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct IoBytesMut {
+impl IoB for IoSlice {
+    fn as_raw_parts(&self) -> (*mut u8, usize) {
+        let ptr = unsafe { self.raw.ptr.add(self.start) };
+        let len = self.end - self.start;
+        (ptr, len)
+    }
+}
+impl IoBuf for IoSlice {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IoSliceMut {
     raw: Raw,
-    len: usize,
 }
 
-impl IoBytesMut {
-    pub fn capacity(&self) -> usize {
-        self.raw.cap
+impl IoSliceMut {
+    pub fn new(capacity: usize) -> Self {
+        let raw = Raw::new(capacity);
+        Self { raw }
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.raw.cap
     }
 }
 
-impl Deref for IoBytesMut {
+impl Deref for IoSliceMut {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.raw[..self.len]
+        &self.raw
     }
 }
 
-impl DerefMut for IoBytesMut {
+impl DerefMut for IoSliceMut {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.raw[..self.len]
+        &mut self.raw
     }
 }
 
-impl AsRef<[u8]> for IoBytesMut {
+impl AsRef<[u8]> for IoSliceMut {
     fn as_ref(&self) -> &[u8] {
         self
     }
 }
 
-impl AsMut<[u8]> for IoBytesMut {
+impl AsMut<[u8]> for IoSliceMut {
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.raw[..self.len]
+        &mut self.raw
     }
 }
+
+impl IoB for IoSliceMut {
+    fn as_raw_parts(&self) -> (*mut u8, usize) {
+        (self.raw.ptr, self.raw.cap)
+    }
+}
+impl IoBuf for IoSliceMut {}
+impl IoBufMut for IoSliceMut {}
 
 #[cfg(test)]
 mod tests {
