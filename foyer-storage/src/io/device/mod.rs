@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, os::fd::RawFd, sync::Arc};
+use std::{any::Any, fmt::Debug, os::fd::RawFd, sync::Arc};
 
 use crate::{io::error::IoResult, Throttle};
 
@@ -43,12 +43,16 @@ where
 pub trait Device: Send + Sync + 'static + Debug {
     /// The capacity of the device, must be 4K aligned.
     fn capacity(&self) -> usize;
+
     /// The region size of the device, must be 4K aligned.
     fn region_size(&self) -> usize;
+
     /// The throttle config for the device.
     fn throttle(&self) -> &Throttle;
+
     /// Translate a region and offset to a raw file descriptor and offset.
     fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64);
+
     /// Get the region count of the device.
     fn regions(&self) -> usize {
         self.capacity() / self.region_size()

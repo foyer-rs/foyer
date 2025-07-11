@@ -43,6 +43,7 @@ use crate::{
     },
     engine::{
         large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
+        large_v2::engine::LargeObjectEngineBuilder,
         noop::{NoopEngine, NoopEngineBuilder},
         small::generic::GenericSmallStorageConfig,
         Engine, EngineBuildContext, EngineBuilder, EngineConfig, EngineEnum, Load, SizeSelector,
@@ -55,6 +56,7 @@ use crate::{
         },
         engine::{
             noop::{NoopIoEngine, NoopIoEngineBuilder},
+            psync::{PsyncIoEngine, PsyncIoEngineBuilder},
             IoEngineBuilder,
         },
         PAGE,
@@ -432,8 +434,8 @@ where
             metrics,
 
             device_builder: Box::<NoopDeviceBuilder>::default(),
-            io_engine_builder: Box::<NoopIoEngineBuilder>::default(),
-            engine_builder: Box::<NoopEngineBuilder<K, V, P>>::default(),
+            io_engine_builder: PsyncIoEngineBuilder::new().boxed(),
+            engine_builder: LargeObjectEngineBuilder::new().boxed(),
 
             runtime_config: RuntimeOptions::Disabled,
 
@@ -496,7 +498,7 @@ where
     }
 
     /// Build the disk cache store with the given configuration.
-    pub async fn build(self) -> Result<Store<K, V, S, P>> {
+    pub async fn build(mut self) -> Result<Store<K, V, S, P>> {
         let memory = self.memory.clone();
         let metrics = self.metrics.clone();
         let mut admission_picker = self.admission_picker.clone();
@@ -547,6 +549,11 @@ where
         let device = self.device_builder.build()?;
         let throttle = device.throttle().clone();
         let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
+        if device.type_id() == TypeId::of::<Arc<NoopDevice>>() {
+            tracing::info!("[store builder]: No device is provided, run disk cache in mock mode that do nothing.");
+            self.io_engine_builder = Box::<NoopIoEngineBuilder>::default();
+            self.engine_builder = Box::<NoopEngineBuilder<K, V, P>>::default();
+        }
 
         let io_engine = self.io_engine_builder.build(device)?;
         let engine = self
