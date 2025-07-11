@@ -19,7 +19,7 @@ use foyer_common::{
     bits,
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Populated, Properties},
+    properties::Properties,
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -33,17 +33,19 @@ use crate::{
         monitor::{Monitored, MonitoredConfig},
         DeviceConfig, RegionId,
     },
-    engine::{EngineConfig, EngineEnum, SizeSelector},
+    engine::{
+        large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
+        small::generic::GenericSmallStorageConfig,
+        EngineConfig, EngineEnum, Load, SizeSelector,
+    },
     error::{Error, Result},
     io::PAGE,
-    large::{generic::GenericLargeStorageConfig, recover::RecoverMode, tombstone::TombstoneLogConfig},
     picker::{
         utils::{AdmitAllPicker, FifoPicker, InvalidRatioPicker, IoThrottlerTarget, RejectAllPicker},
         AdmissionPicker, EvictionPicker, ReinsertionPicker,
     },
     runtime::Runtime,
     serde::EntrySerializer,
-    small::generic::GenericSmallStorageConfig,
     statistics::Statistics,
     storage::{
         either::{EitherConfig, Order},
@@ -52,59 +54,6 @@ use crate::{
     ChainedAdmissionPickerBuilder, Dev, DevExt, DirectFileDeviceOptions, DirectFsDeviceOptions, IoThrottlerPicker,
     Pick, Throttle,
 };
-
-/// Load result.
-#[derive(Debug)]
-pub enum Load<K, V> {
-    /// Load entry success.
-    Entry {
-        /// The key of the entry.
-        key: K,
-        /// The value of the entry.
-        value: V,
-        /// The populated source context of the entry.
-        populated: Populated,
-    },
-    /// The entry may be in the disk cache, the read io is throttled.
-    Throttled,
-    /// Disk cache miss.
-    Miss,
-}
-
-impl<K, V> Load<K, V> {
-    /// Return `Some` with the entry if load success, otherwise return `None`.
-    pub fn entry(self) -> Option<(K, V, Populated)> {
-        match self {
-            Load::Entry { key, value, populated } => Some((key, value, populated)),
-            _ => None,
-        }
-    }
-
-    /// Return `Some` with the entry if load success, otherwise return `None`.
-    ///
-    /// Only key and value will be returned.
-    pub fn kv(self) -> Option<(K, V)> {
-        match self {
-            Load::Entry { key, value, .. } => Some((key, value)),
-            _ => None,
-        }
-    }
-
-    /// Check if the load result is a cache entry.
-    pub fn is_entry(&self) -> bool {
-        matches!(self, Load::Entry { .. })
-    }
-
-    /// Check if the load result is a cache miss.
-    pub fn is_miss(&self) -> bool {
-        matches!(self, Load::Miss)
-    }
-
-    /// Check if the load result is miss caused by io throttled.
-    pub fn is_throttled(&self) -> bool {
-        matches!(self, Load::Throttled)
-    }
-}
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
 pub struct Store<K, V, S, P>

@@ -177,16 +177,15 @@ impl UringIoEngine {
     }
 }
 
+#[derive(Debug)]
 pub struct UringIoEngineBuilder {
-    device: Arc<dyn Device>,
     threads: usize,
     io_depth: usize,
 }
 
 impl UringIoEngineBuilder {
-    pub fn new(device: Arc<dyn Device>) -> Self {
+    pub fn new() -> Self {
         Self {
-            device,
             threads: 1,
             io_depth: 64,
         }
@@ -206,7 +205,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self) -> IoResult<Arc<dyn IoEngine>> {
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
         if self.threads == 0 {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }
@@ -222,7 +221,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             let uring = IoUring::new(self.io_depth as _)?;
             let shard = UringIoEngineShard {
                 rx,
-                device: self.device.clone(),
+                device: device.clone(),
                 uring,
                 io_depth: self.io_depth,
                 inflight: 0,
@@ -233,10 +232,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             });
         }
 
-        let engine = UringIoEngine {
-            device: self.device,
-            txs,
-        };
+        let engine = UringIoEngine { device, txs };
         let engine = Arc::new(engine);
         Ok(engine)
     }

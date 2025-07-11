@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{error::Result, io::bytes::IoSliceMut, large_v2::buffer::BlobIndexReader, region_v2::Region};
+use crate::{engine::large_v2::buffer::BlobIndexReader, error::Result, io::bytes::IoSliceMut, region_v2::Region};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {
@@ -104,14 +104,14 @@ mod tests {
             monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice, RegionId,
         },
+        engine::large_v2::{
+            buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
+            serde::Sequence,
+        },
         io::{
             device::{fs::FsDeviceBuilder, Device, DeviceBuilder},
             engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
             PAGE,
-        },
-        large_v2::{
-            buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
-            serde::Sequence,
         },
         Compression, DirectFsDeviceOptions, Runtime,
     };
@@ -122,12 +122,13 @@ mod tests {
         FsDeviceBuilder::new(dir)
             .with_capacity(file_size * files)
             .with_file_size(file_size)
+            .boxed()
             .build()
             .unwrap()
     }
 
     async fn engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
-        PsyncIoEngineBuilder::new(device).build().unwrap()
+        PsyncIoEngineBuilder::new().boxed().build(device).unwrap()
     }
 
     #[test_log::test(tokio::test)]

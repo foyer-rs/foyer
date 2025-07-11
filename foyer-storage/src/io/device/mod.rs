@@ -20,7 +20,24 @@ pub type RegionId = u32;
 
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     /// Build a device from the given configuration.
-    fn build(self) -> IoResult<Arc<dyn Device>>;
+    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>>;
+
+    /// Box the builder.
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+}
+
+impl<T> From<T> for Box<dyn DeviceBuilder>
+where
+    T: DeviceBuilder,
+{
+    fn from(builder: T) -> Self {
+        builder.boxed()
+    }
 }
 
 pub trait Device: Send + Sync + 'static + Debug {

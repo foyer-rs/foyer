@@ -23,11 +23,13 @@ use foyer_common::{
 
 use crate::{
     compress::Compression,
+    engine::large_v2::serde::{EntryHeader, Sequence},
     error::Error,
-    io::{buffer::IoBuffer, PAGE},
-    large::serde::{EntryHeader, Sequence},
+    io::{
+        bytes::{IoSlice, IoSliceMut},
+        PAGE,
+    },
     serde::{Checksummer, EntrySerializer},
-    SharedIoSlice,
 };
 
 /// [`EntryIndex`] index entry in a blob, which can be used to speed up recovery.
@@ -80,7 +82,7 @@ impl BlobEntryIndex {
 /// ```
 #[derive(Debug)]
 pub struct BlobIndex {
-    io_buffer: IoBuffer,
+    bytes: IoSliceMut,
     count: usize,
 }
 
@@ -92,12 +94,12 @@ impl BlobIndex {
 
     pub const INDEX_OFFSET: usize = 12;
 
-    pub fn new(io_buffer: IoBuffer) -> Self {
-        Self { io_buffer, count: 0 }
+    pub fn new(bytes: IoSliceMut) -> Self {
+        Self { bytes, count: 0 }
     }
 
     pub fn capacity(&self) -> usize {
-        (self.io_buffer.len() - BlobIndex::INDEX_OFFSET) / BlobEntryIndex::serialized_len()
+        (self.bytes.len() - BlobIndex::INDEX_OFFSET) / BlobEntryIndex::serialized_len()
     }
 
     pub fn is_full(&self) -> bool {
@@ -111,16 +113,16 @@ impl BlobIndex {
         assert!(!self.is_full());
         let start = BlobIndex::INDEX_OFFSET + self.count * BlobEntryIndex::serialized_len();
         let end = start + BlobEntryIndex::serialized_len();
-        index.write(&mut self.io_buffer[start..end]);
+        index.write(&mut self.bytes[start..end]);
         self.count += 1;
     }
 
-    pub fn seal(&mut self) -> IoBuffer {
-        (&mut self.io_buffer[BlobIndex::COUNT_OFFSET..BlobIndex::COUNT_OFFSET + BlobIndex::COUNT_BYTES])
+    pub fn seal(&mut self) -> IoSliceMut {
+        (&mut self.bytes[BlobIndex::COUNT_OFFSET..BlobIndex::COUNT_OFFSET + BlobIndex::COUNT_BYTES])
             .put_u32(self.count as _);
-        let checksum = Checksummer::checksum64(&self.io_buffer[BlobIndex::CHECKSUM_BYTES..]);
-        (&mut self.io_buffer[0..BlobIndex::CHECKSUM_BYTES]).put_u64(checksum);
-        self.io_buffer.clone()
+        let checksum = Checksummer::checksum64(&self.bytes[BlobIndex::CHECKSUM_BYTES..]);
+        (&mut self.bytes[0..BlobIndex::CHECKSUM_BYTES]).put_u64(checksum);
+        self.bytes.clone()
     }
 
     pub fn reset(&mut self) {
@@ -165,7 +167,7 @@ impl BufferEntryInfo {
 
 #[derive(Debug)]
 pub struct Buffer {
-    io_buffer: IoBuffer,
+    bytes: IoSliceMut,
     written: usize,
     entry_infos: Vec<BufferEntryInfo>,
 
@@ -175,9 +177,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new(io_buffer: IoBuffer, max_entry_size: usize, metrics: Arc<Metrics>) -> Self {
+    pub fn new(bytes: IoSliceMut, max_entry_size: usize, metrics: Arc<Metrics>) -> Self {
         Self {
-            io_buffer,
+            bytes,
             written: 0,
             entry_infos: vec![],
             max_entry_size,
@@ -197,7 +199,7 @@ impl Buffer {
         tracing::trace!(hash, "[blob writer]: push");
 
         let offset = self.written;
-        let buf = &mut self.io_buffer[offset..];
+        let buf = &mut self.bytes[offset..];
 
         // If there is no space even for entry header, skip
         if buf.len() < EntryHeader::serialized_len() {
@@ -259,7 +261,7 @@ impl Buffer {
         tracing::trace!(hash, "[blob writer]: push slice");
 
         let offset = self.written;
-        let buf = &mut self.io_buffer[offset..];
+        let buf = &mut self.bytes[offset..];
 
         let len = slice.len();
         let aligned = bits::align_up(PAGE, slice.len());
@@ -284,9 +286,9 @@ impl Buffer {
         true
     }
 
-    pub fn finish(self) -> (IoBuffer, Vec<BufferEntryInfo>) {
+    pub fn finish(self) -> (IoSliceMut, Vec<BufferEntryInfo>) {
         tracing::trace!(infos=?self.entry_infos, "[buffer]: finish");
-        (self.io_buffer, self.entry_infos)
+        (self.bytes, self.entry_infos)
     }
 }
 
@@ -305,7 +307,7 @@ impl SplitCtx {
     pub fn new(region_size: usize, blob_index_size: usize) -> Self {
         Self {
             current_part_blob_offset: blob_index_size,
-            current_blob_index: BlobIndex::new(IoBuffer::new(blob_index_size)),
+            current_blob_index: BlobIndex::new(IoSliceMut::new(blob_index_size)),
             current_blob_region_offset: 0,
             region_size,
             blob_index_size,
@@ -317,10 +319,10 @@ impl SplitCtx {
 pub struct Splitter;
 
 impl Splitter {
-    pub fn split(ctx: &mut SplitCtx, mut shared_io_slice: SharedIoSlice, entry_infos: Vec<BufferEntryInfo>) -> Batch {
+    pub fn split(ctx: &mut SplitCtx, mut bytes: IoSlice, entry_infos: Vec<BufferEntryInfo>) -> Batch {
         let mut batch = Batch {
             regions: vec![Region { blob_parts: vec![] }],
-            io_slice: shared_io_slice.clone(),
+            bytes: bytes.clone(),
         };
 
         assert!(
@@ -337,7 +339,7 @@ impl Splitter {
             'handle: loop {
                 // Split blob if blob index is full.
                 if ctx.current_blob_index.is_full() {
-                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
                         batch.regions.last_mut().unwrap().blob_parts.push(part);
                     }
                     continue 'handle;
@@ -347,7 +349,7 @@ impl Splitter {
                 if ctx.current_blob_region_offset + ctx.current_part_blob_offset + part_size + info.aligned()
                     > ctx.region_size
                 {
-                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+                    if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
                         batch.regions.last_mut().unwrap().blob_parts.push(part);
                     }
                     Self::split_region(ctx, &mut batch);
@@ -371,7 +373,7 @@ impl Splitter {
             }
         }
 
-        if let Some(part) = Self::seal_blob(ctx, &mut indices, &mut part_size, &mut shared_io_slice) {
+        if let Some(part) = Self::seal_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
             batch.regions.last_mut().unwrap().blob_parts.push(part);
         }
 
@@ -382,7 +384,7 @@ impl Splitter {
         ctx: &mut SplitCtx,
         indices: &mut Vec<BlobEntryIndex>,
         part_size: &mut usize,
-        shared_io_slice: &mut SharedIoSlice,
+        bytes: &mut IoSlice,
     ) -> Option<BlobPart> {
         tracing::trace!("[splitter]: split blob");
         if indices.is_empty() {
@@ -404,13 +406,13 @@ impl Splitter {
                 blob_region_offset: ctx.current_blob_region_offset,
                 index,
                 part_blob_offset: ctx.current_part_blob_offset,
-                data: shared_io_slice.slice(..*part_size),
+                data: bytes.slice(..*part_size),
                 indices,
             };
 
             ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + *part_size;
             ctx.current_part_blob_offset = ctx.blob_index_size;
-            *shared_io_slice = shared_io_slice.slice(*part_size..);
+            *bytes = bytes.slice(*part_size..);
             *part_size = 0;
 
             Some(part)
@@ -427,7 +429,7 @@ impl Splitter {
         ctx: &mut SplitCtx,
         indices: &mut Vec<BlobEntryIndex>,
         part_size: &mut usize,
-        shared_io_slice: &mut SharedIoSlice,
+        shared_io_slice: &mut IoSlice,
     ) -> Option<BlobPart> {
         tracing::trace!("[splitter]: seal blob");
 
@@ -465,10 +467,10 @@ impl Splitter {
 pub struct BlobPart {
     /// Blob offset to the region.
     pub blob_region_offset: usize,
-    pub index: IoBuffer,
+    pub index: IoSliceMut,
     /// Blob part offset to the blob.
     pub part_blob_offset: usize,
-    pub data: SharedIoSlice,
+    pub data: IoSlice,
 
     pub indices: Vec<BlobEntryIndex>,
 }
@@ -481,7 +483,7 @@ pub struct Region {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Batch {
     pub regions: Vec<Region>,
-    pub io_slice: SharedIoSlice,
+    pub bytes: IoSlice,
 }
 
 #[cfg(test)]
@@ -494,7 +496,7 @@ mod tests {
 
     #[test_log::test]
     fn test_blob_index_serde() {
-        let mut bi = BlobIndex::new(IoBuffer::new(PAGE * 2));
+        let mut bi = BlobIndex::new(IoSliceMut::new(PAGE * 2));
         let indices = (0..bi.capacity() / 2)
             .map(|i| BlobEntryIndex {
                 hash: i as u64,
@@ -526,7 +528,7 @@ mod tests {
 
         // 1. Test write single blob part.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K
         assert!(buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, 1));
@@ -538,13 +540,13 @@ mod tests {
         assert!(buffer.push(&3u64, &vec![3u8; 3 * KB], 3, Compression::None, 3));
 
         let (buf, infos) = buffer.finish();
-        let buf = buf.into_shared_io_slice();
+        let buf = buf.into_io_slice();
         let batch = Splitter::split(&mut ctx, buf.clone(), infos.clone());
 
         assert_eq!(
             batch,
             Batch {
-                io_slice: buf.clone(),
+                bytes: buf.clone(),
                 regions: vec![Region {
                     blob_parts: vec![BlobPart {
                         blob_region_offset: 0,
@@ -572,7 +574,7 @@ mod tests {
 
         // 2. Test continue to write blob part and region split.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K, region split
         assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4));
@@ -584,13 +586,13 @@ mod tests {
         assert!(buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, 6));
 
         let (buf, infos) = buffer.finish();
-        let buf = buf.into_shared_io_slice();
+        let buf = buf.into_io_slice();
         let batch = Splitter::split(&mut ctx, buf.clone(), infos.clone());
 
         assert_eq!(
             batch,
             Batch {
-                io_slice: buf.clone(),
+                bytes: buf.clone(),
                 regions: vec![
                     Region {
                         blob_parts: vec![BlobPart {
@@ -640,19 +642,19 @@ mod tests {
 
         // 3. Test leave first region empty.
 
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 8K, region split
         assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7));
 
         let (buf, infos) = buffer.finish();
-        let buf = buf.into_shared_io_slice();
+        let buf = buf.into_io_slice();
         let batch = Splitter::split(&mut ctx, buf.clone(), infos.clone());
 
         assert_eq!(
             batch,
             Batch {
-                io_slice: buf.clone(),
+                bytes: buf.clone(),
                 regions: vec![
                     Region { blob_parts: vec![] },
                     Region {
@@ -688,7 +690,7 @@ mod tests {
         ctx.current_part_blob_offset = 16 * KB;
         ctx.current_blob_index.count = ctx.current_blob_index.capacity() - 1;
 
-        let shared_io_slice = IoBuffer::new(BATCH_SIZE).into_shared_io_slice();
+        let shared_io_slice = IoSliceMut::new(BATCH_SIZE).into_io_slice();
         let batch = Splitter::split(
             &mut ctx,
             shared_io_slice.clone(),
@@ -742,7 +744,7 @@ mod tests {
                         }]
                     }
                 ],
-                io_slice: shared_io_slice,
+                bytes: shared_io_slice,
             }
         );
     }

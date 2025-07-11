@@ -34,11 +34,11 @@ use itertools::Itertools;
 
 use crate::{
     device::{MonitoredDevice, RegionId},
-    error::Result,
-    small::{
+    engine::small::{
         flusher::{Flusher, Submission},
         set_manager::SetManager,
     },
+    error::Result,
     storage::Storage,
     Dev, Load, Runtime, Statistics, Throttle,
 };

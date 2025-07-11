@@ -31,13 +31,13 @@ use super::{
 };
 use crate::{
     device::RegionId,
-    error::{Error, Result},
-    large::{
+    engine::large::{
         indexer::HashedEntryAddress,
         scanner::{EntryInfo, RegionScanner},
         serde::{AtomicSequence, Sequence},
         tombstone::Tombstone,
     },
+    error::{Error, Result},
     region::{Region, RegionManager},
     runtime::Runtime,
 };

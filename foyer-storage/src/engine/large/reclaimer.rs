@@ -26,17 +26,17 @@ use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
     device::MonitoredDevice,
-    error::Result,
-    io::{
-        buffer::{IoBuffer, OwnedSlice},
-        PAGE,
-    },
-    large::{
+    engine::large::{
         flusher::{Flusher, Submission},
         generic::GenericLargeStorageConfig,
         indexer::Indexer,
         scanner::RegionScanner,
         serde::Sequence,
+    },
+    error::Result,
+    io::{
+        buffer::{IoBuffer, OwnedSlice},
+        PAGE,
     },
     picker::ReinsertionPicker,
     region::{Region, RegionManager},

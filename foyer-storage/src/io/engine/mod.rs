@@ -56,9 +56,26 @@ impl Future for IoHandle {
     }
 }
 
-pub trait IoEngineBuilder: Send + Sync + 'static {
+pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self) -> IoResult<Arc<dyn IoEngine>>;
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>>;
+
+    /// Box the builder.
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+}
+
+impl<T> From<T> for Box<dyn IoEngineBuilder>
+where
+    T: IoEngineBuilder,
+{
+    fn from(builder: T) -> Self {
+        builder.boxed()
+    }
 }
 
 pub trait IoEngine: Send + Sync + 'static + Debug {
@@ -93,18 +110,20 @@ mod tests {
         FileDeviceBuilder::new(&path)
             .with_capacity(16 * MIB)
             .with_region_size(1 * MIB)
+            .boxed()
             .build()
     }
 
     fn build_psync_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        PsyncIoEngineBuilder::new(device).build()
+        PsyncIoEngineBuilder::new().boxed().build(device)
     }
 
     fn build_uring_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        UringIoEngineBuilder::new(device.clone())
+        UringIoEngineBuilder::new()
             .with_threads(4)
             .with_io_depth(64)
-            .build()
+            .boxed()
+            .build(device)
     }
 
     async fn test_read_write(engine: Arc<dyn IoEngine>) {

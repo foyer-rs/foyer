@@ -28,13 +28,13 @@ use tokio::sync::Semaphore;
 use super::indexer::{EntryAddress, Indexer};
 use crate::{
     device::RegionId,
-    error::{Error, Result},
-    large_v2::{
+    engine::large_v2::{
         indexer::HashedEntryAddress,
         scanner::{EntryInfo, RegionScanner},
         serde::{AtomicSequence, Sequence},
         tombstone::Tombstone,
     },
+    error::{Error, Result},
     region_v2::{Region, RegionManager},
     runtime::Runtime,
 };

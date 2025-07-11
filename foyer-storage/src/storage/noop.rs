@@ -25,7 +25,7 @@ use foyer_common::{
 };
 use foyer_memory::Piece;
 
-use crate::{error::Result, storage::Storage, Load, Statistics, Throttle};
+use crate::{engine::Load, error::Result, storage::Storage, Statistics, Throttle};
 
 pub struct Noop<K, V, P>
 where

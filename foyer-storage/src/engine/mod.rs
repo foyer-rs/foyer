@@ -17,21 +17,85 @@ use std::{any::Any, fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 use auto_enums::auto_enum;
 use foyer_common::{
     code::{StorageKey, StorageValue},
-    properties::Properties,
+    metrics::Metrics,
+    properties::{Populated, Properties},
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
 use crate::{
+    engine::{
+        large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
+        small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
+    },
     error::Result,
-    large::generic::{GenericLargeStorage, GenericLargeStorageConfig},
-    small::generic::{GenericSmallStorage, GenericSmallStorageConfig},
+    io::engine::IoEngine,
     storage::{
         either::{Either, EitherConfig, Selection, Selector},
         noop::Noop,
     },
-    Load, Statistics, Storage, Throttle,
+    Runtime, Statistics, Storage, Throttle,
 };
+
+/// Load result.
+#[derive(Debug)]
+pub enum Load<K, V> {
+    /// Load entry success.
+    Entry {
+        /// The key of the entry.
+        key: K,
+        /// The value of the entry.
+        value: V,
+        /// The populated source context of the entry.
+        populated: Populated,
+    },
+    /// The entry may be in the disk cache, the read io is throttled.
+    Throttled,
+    /// Disk cache miss.
+    Miss,
+}
+
+impl<K, V> Load<K, V> {
+    /// Return `Some` with the entry if load success, otherwise return `None`.
+    pub fn entry(self) -> Option<(K, V, Populated)> {
+        match self {
+            Load::Entry { key, value, populated } => Some((key, value, populated)),
+            _ => None,
+        }
+    }
+
+    /// Return `Some` with the entry if load success, otherwise return `None`.
+    ///
+    /// Only key and value will be returned.
+    pub fn kv(self) -> Option<(K, V)> {
+        match self {
+            Load::Entry { key, value, .. } => Some((key, value)),
+            _ => None,
+        }
+    }
+
+    /// Check if the load result is a cache entry.
+    pub fn is_entry(&self) -> bool {
+        matches!(self, Load::Entry { .. })
+    }
+
+    /// Check if the load result is a cache miss.
+    pub fn is_miss(&self) -> bool {
+        matches!(self, Load::Miss)
+    }
+
+    /// Check if the load result is miss caused by io throttled.
+    pub fn is_throttled(&self) -> bool {
+        matches!(self, Load::Throttled)
+    }
+}
+
+pub struct EngineBuildContext {
+    pub io_engine: Arc<dyn IoEngine>,
+    pub metrics: Arc<Metrics>,
+    pub statistics: Arc<Statistics>,
+    pub runtime: Runtime,
+}
 
 pub trait EngineBuilder<K, V, P>: Send + Sync + 'static + Debug
 where
@@ -40,7 +104,15 @@ where
     P: Properties,
 {
     /// Build the engine with the given configurations.
-    fn build(self) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
+    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
+
+    /// Box the builder.
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
 }
 
 pub trait Engine<K, V, P>: Send + Sync + 'static + Debug + Any
@@ -49,30 +121,33 @@ where
     V: StorageValue,
     P: Properties,
 {
+    /// Push a in-memory cache piece to the disk cache write queue.
     fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize);
+
+    /// Load a cache entry from the disk cache.
+    ///
+    /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
+    /// check if the returned key matches the given key.
     fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V>>>;
+
+    /// Delete the cache entry with the given key from the disk cache.
     fn delete(&self, hash: u64);
+
+    /// Check if the disk cache contains a cached entry with the given key.
+    ///
+    /// `contains` may return a false-positive result if there is a hash collision with the given key.
     fn may_contains(&self, hash: u64) -> bool;
+
+    /// Delete all cached entries of the disk cache.
     fn destroy(&self) -> BoxFuture<'static, Result<()>>;
+
+    /// Wait for the ongoing flush and reclaim tasks to finish.
     fn wait(&self) -> BoxFuture<'static, ()>;
-}
 
-/// FIXME(MrCroxx): REMOVE THIS!!!
-fn assert_engine_builder_object_safe<K, V, P>(_: Option<Arc<dyn EngineBuilder<K, V, P>>>)
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-}
-
-/// FIXME(MrCroxx): REMOVE THIS!!!
-fn assert_engine_object_safe<K, V, P>(_: Option<Arc<dyn Engine<K, V, P>>>)
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
+    /// Close the disk cache gracefully.
+    ///
+    /// `close` will wait for all ongoing flush and reclaim tasks to finish.
+    fn close(&self) -> BoxFuture<'static, Result<()>>;
 }
 
 pub struct SizeSelector<K, V, P>
@@ -312,3 +387,8 @@ where
         }
     }
 }
+
+pub mod large;
+pub mod large_v2;
+pub mod noop;
+pub mod small;

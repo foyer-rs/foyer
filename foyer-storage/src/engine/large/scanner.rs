@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{error::Result, io::buffer::IoBuffer, large::buffer::BlobIndexReader, region::Region};
+use crate::{engine::large::buffer::BlobIndexReader, error::Result, io::buffer::IoBuffer, region::Region};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {
@@ -104,11 +104,11 @@ mod tests {
             monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice, RegionId,
         },
-        io::PAGE,
-        large::{
+        engine::large::{
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
             serde::Sequence,
         },
+        io::PAGE,
         Compression, DirectFsDeviceOptions, Runtime,
     };
 

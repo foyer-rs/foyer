@@ -33,9 +33,9 @@ use tokio::sync::oneshot;
 use zstd::zstd_safe::WriteBuf;
 
 use crate::{
+    engine::small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
     io::PAGE,
     serde::EntrySerializer,
-    small::{serde::EntryHeader, set::SetId, set_manager::SetPicker},
     Compression,
 };
 

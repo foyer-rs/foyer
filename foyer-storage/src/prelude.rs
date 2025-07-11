@@ -19,14 +19,17 @@ pub use crate::{
         direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
         Dev, DevConfig, DevExt, IopsCounter, Throttle,
     },
+    engine::{
+        large::{
+            recover::RecoverMode,
+            tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
+        },
+        Load,
+    },
     error::{Error, Result},
     io::{
         buffer::{IoBufMutOld, IoBufOld, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
         throttle::IoThrottler,
-    },
-    large::{
-        recover::RecoverMode,
-        tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
     },
     picker::{
         utils::{
@@ -40,7 +43,7 @@ pub use crate::{
     statistics::Statistics,
     storage::{either::Order, Storage},
     store::{
-        DeviceOptions, Engine, LargeEngineOptions, Load, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
+        DeviceOptions, Engine, LargeEngineOptions, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
         TokioRuntimeOptions,
     },
 };

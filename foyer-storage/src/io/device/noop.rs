@@ -12,12 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::os::fd::RawFd;
+use std::{os::fd::RawFd, sync::Arc};
 
 use crate::{
-    io::device::{Device, RegionId},
+    io::{
+        device::{Device, DeviceBuilder, RegionId},
+        error::IoResult,
+    },
     Throttle,
 };
+
+#[derive(Debug, Default)]
+pub struct NoopDeviceBuilder;
+
+impl DeviceBuilder for NoopDeviceBuilder {
+    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+        Ok(Arc::new(NoopDevice::default()))
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct NoopDevice(Throttle);

@@ -19,8 +19,18 @@ use futures_util::FutureExt;
 use crate::io::{
     bytes::{IoB, IoBuf, IoBufMut},
     device::{noop::NoopDevice, Device, RegionId},
-    engine::{IoEngine, IoHandle},
+    engine::{IoEngine, IoEngineBuilder, IoHandle},
+    error::IoResult,
 };
+
+#[derive(Debug, Default)]
+pub struct NoopIoEngineBuilder;
+
+impl IoEngineBuilder for NoopIoEngineBuilder {
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
+        Ok(Arc::new(NoopIoEngine(device)))
+    }
+}
 
 #[derive(Debug)]
 pub struct NoopIoEngine(Arc<dyn Device>);

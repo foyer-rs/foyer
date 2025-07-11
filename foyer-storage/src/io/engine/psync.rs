@@ -23,19 +23,18 @@ use crate::io::{
     error::{IoError, IoResult},
 };
 
-pub struct PsyncIoEngineBuilder {
-    device: Arc<dyn Device>,
-}
+#[derive(Debug)]
+pub struct PsyncIoEngineBuilder;
 
 impl PsyncIoEngineBuilder {
-    pub fn new(device: Arc<dyn Device>) -> Self {
-        Self { device }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self) -> IoResult<Arc<dyn IoEngine>> {
-        let engine = PsyncIoEngine { device: self.device };
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
+        let engine = PsyncIoEngine { device: device };
         let engine = Arc::new(engine);
         Ok(engine)
     }

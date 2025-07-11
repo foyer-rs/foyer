@@ -321,6 +321,7 @@ mod tests {
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
         let device = FsDeviceBuilder::new(dir.path())
             .with_capacity(4 * 1024 * 1024)
+            .boxed()
             .build()
             .unwrap();
 
