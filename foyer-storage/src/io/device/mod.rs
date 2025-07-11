@@ -58,3 +58,6 @@ pub trait Device: Send + Sync + 'static + Debug {
 pub mod file;
 pub mod fs;
 pub mod noop;
+
+pub mod combined;
+pub mod partial;
