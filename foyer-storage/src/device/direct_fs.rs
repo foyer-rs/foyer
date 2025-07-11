@@ -27,7 +27,7 @@ use super::{Dev, DevExt, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
     io::{
-        buffer::{IoBuf, IoBufMut},
+        buffer::{IoBufMutOld, IoBufOld},
         PAGE,
     },
     Runtime,
@@ -184,7 +184,7 @@ impl Dev for DirectFsDevice {
     )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(region, offset, len) {
@@ -226,7 +226,7 @@ impl Dev for DirectFsDevice {
     )]
     async fn read<B>(&self, mut buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(region, offset, len) {

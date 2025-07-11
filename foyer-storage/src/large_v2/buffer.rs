@@ -28,7 +28,7 @@ use crate::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
     },
-    large::serde::{EntryHeader, Sequence},
+    large_v2::serde::{EntryHeader, Sequence},
     serde::{Checksummer, EntrySerializer},
 };
 
@@ -167,7 +167,7 @@ impl BufferEntryInfo {
 
 #[derive(Debug)]
 pub struct Buffer {
-    io_buffer: IoSliceMut,
+    bytes: IoSliceMut,
     written: usize,
     entry_infos: Vec<BufferEntryInfo>,
 
@@ -177,9 +177,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new(io_buffer: IoSliceMut, max_entry_size: usize, metrics: Arc<Metrics>) -> Self {
+    pub fn new(bytes: IoSliceMut, max_entry_size: usize, metrics: Arc<Metrics>) -> Self {
         Self {
-            io_buffer,
+            bytes,
             written: 0,
             entry_infos: vec![],
             max_entry_size,
@@ -199,7 +199,7 @@ impl Buffer {
         tracing::trace!(hash, "[blob writer]: push");
 
         let offset = self.written;
-        let buf = &mut self.io_buffer[offset..];
+        let buf = &mut self.bytes[offset..];
 
         // If there is no space even for entry header, skip
         if buf.len() < EntryHeader::serialized_len() {
@@ -261,7 +261,7 @@ impl Buffer {
         tracing::trace!(hash, "[blob writer]: push slice");
 
         let offset = self.written;
-        let buf = &mut self.io_buffer[offset..];
+        let buf = &mut self.bytes[offset..];
 
         let len = slice.len();
         let aligned = bits::align_up(PAGE, slice.len());
@@ -288,7 +288,7 @@ impl Buffer {
 
     pub fn finish(self) -> (IoSliceMut, Vec<BufferEntryInfo>) {
         tracing::trace!(infos=?self.entry_infos, "[buffer]: finish");
-        (self.io_buffer, self.entry_infos)
+        (self.bytes, self.entry_infos)
     }
 }
 

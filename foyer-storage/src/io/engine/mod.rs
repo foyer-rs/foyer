@@ -13,27 +13,26 @@
 // limitations under the License.
 
 use std::{
-    any::Any,
     fmt::Debug,
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
 use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut, IoSlice, IoSliceMut},
-    device::RegionId,
-    error::{IoError, IoResult},
+    bytes::{IoB, IoBuf, IoBufMut},
+    device::{Device, RegionId},
+    error::IoResult,
 };
 
 #[pin_project]
 pub struct IoHandle {
     #[pin]
-    inner: BoxFuture<'static, IoResult<Box<dyn IoB>>>,
+    inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>,
 }
 
 impl Debug for IoHandle {
@@ -42,93 +41,18 @@ impl Debug for IoHandle {
     }
 }
 
-impl From<BoxFuture<'static, IoResult<Box<dyn IoB>>>> for IoHandle {
-    fn from(inner: BoxFuture<'static, IoResult<Box<dyn IoB>>>) -> Self {
+impl From<BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>> for IoHandle {
+    fn from(inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>) -> Self {
         Self { inner }
     }
 }
 
 impl Future for IoHandle {
-    type Output = IoResult<Box<dyn IoB>>;
+    type Output = (Box<dyn IoB>, IoResult<()>);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let res = ready!(this.inner.poll(cx));
-        match res {
-            Ok(r) => Poll::Ready(Ok(r)),
-            Err(e) => Poll::Ready(Err(IoError::other(e))),
-        }
-    }
-}
-
-impl IoHandle {
-    pub fn into_slice_handle(self) -> SliceIoHandle {
-        SliceIoHandle { inner: self }
-    }
-
-    pub fn into_slice_mut_handle(self) -> SliceMutIoHandle {
-        SliceMutIoHandle { inner: self }
-    }
-}
-
-#[pin_project]
-pub struct SliceIoHandle {
-    #[pin]
-    inner: IoHandle,
-}
-
-impl Debug for SliceIoHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SliceIoHandle").finish()
-    }
-}
-
-impl Future for SliceIoHandle {
-    type Output = IoResult<Box<IoSlice>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let res = ready!(this.inner.poll(cx));
-        match res {
-            Err(e) => Poll::Ready(Err(e)),
-            Ok(iob) => {
-                let iob: Box<dyn Any> = iob;
-                let slice = iob
-                    .downcast::<IoSlice>()
-                    .expect("Cannot downcast to IoSlice, type mismatch.");
-                Poll::Ready(Ok(slice))
-            }
-        }
-    }
-}
-
-#[pin_project]
-pub struct SliceMutIoHandle {
-    #[pin]
-    inner: IoHandle,
-}
-
-impl Debug for SliceMutIoHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SliceIoHandle").finish()
-    }
-}
-
-impl Future for SliceMutIoHandle {
-    type Output = IoResult<Box<IoSliceMut>>;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let res = ready!(this.inner.poll(cx));
-        match res {
-            Err(e) => Poll::Ready(Err(e)),
-            Ok(iob) => {
-                let iob: Box<dyn Any> = iob;
-                let slice = iob
-                    .downcast::<IoSliceMut>()
-                    .expect("Cannot downcast to IoSlice, type mismatch.");
-                Poll::Ready(Ok(slice))
-            }
-        }
+        this.inner.poll(cx)
     }
 }
 
@@ -137,11 +61,14 @@ pub trait IoEngineBuilder: Send + Sync + 'static {
     fn build(self) -> IoResult<Arc<dyn IoEngine>>;
 }
 
-pub trait IoEngine: Send + Sync + 'static {
+pub trait IoEngine: Send + Sync + 'static + Debug {
+    fn device(&self) -> &Arc<dyn Device>;
     fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle;
     fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle;
 }
 
+pub mod monitor;
+pub mod noop;
 pub mod psync;
 pub mod uring;
 
@@ -154,6 +81,7 @@ mod tests {
 
     use super::*;
     use crate::io::{
+        bytes::IoSliceMut,
         device::{file::FileDeviceBuilder, Device, DeviceBuilder},
         engine::{psync::PsyncIoEngineBuilder, uring::UringIoEngineBuilder},
     };
@@ -183,10 +111,14 @@ mod tests {
         let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
         Fill::fill(&mut b1[..], &mut rng());
 
-        let b1 = engine.write(b1, 0, 0).into_slice_mut_handle().await.unwrap();
+        let (b1, res) = engine.write(b1, 0, 0).await;
+        res.unwrap();
+        let b1 = b1.try_into_io_slice_mut().unwrap();
 
         let b2 = Box::new(IoSliceMut::new(16 * KIB));
-        let b2 = engine.read(b2, 0, 0).into_slice_mut_handle().await.unwrap();
+        let (b2, res) = engine.read(b2, 0, 0).await;
+        res.unwrap();
+        let b2 = b2.try_into_io_slice_mut().unwrap();
         assert_eq!(b1, b2);
     }
 

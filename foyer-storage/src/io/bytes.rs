@@ -26,7 +26,7 @@ use foyer_common::bits;
 
 use super::PAGE;
 
-pub trait IoB: Send + Sync + 'static + Debug + Any {
+pub trait IoB: Deref<Target = [u8]> + Send + Sync + 'static + Debug + Any {
     fn as_raw_parts(&self) -> (*mut u8, usize);
 }
 
@@ -221,6 +221,12 @@ impl IoSlice {
             end: e,
         }
     }
+
+    /// Convert into [`IoSliceMut`], if the [`IoSlice`] has exactly one reference.
+    pub fn try_into_io_slice_mut(self) -> Option<IoSliceMut> {
+        let raw = Arc::into_inner(self.raw)?;
+        Some(IoSliceMut { raw })
+    }
 }
 
 /// A 4K-aligned mutable slice.
@@ -281,6 +287,20 @@ impl IoSliceMut {
         let end = self.raw.cap;
         let raw = Arc::new(self.raw);
         IoSlice { raw, start, end }
+    }
+}
+
+impl dyn IoB {
+    /// Convert into concrete type [`Box<IoSlice>`] if the underlying type fits.
+    pub fn try_into_io_slice(self: Box<Self>) -> Option<Box<IoSlice>> {
+        let any: Box<dyn Any> = self;
+        any.downcast::<IoSlice>().ok()
+    }
+
+    /// Convert into concrete type [`Box<IoSliceMut>`] if the underlying type fits.
+    pub fn try_into_io_slice_mut(self: Box<Self>) -> Option<Box<IoSliceMut>> {
+        let any: Box<dyn Any> = self;
+        any.downcast::<IoSliceMut>().ok()
     }
 }
 

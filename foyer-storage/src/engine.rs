@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
+use std::{any::Any, fmt::Debug, future::Future, marker::PhantomData, sync::Arc};
 
 use auto_enums::auto_enum;
 use foyer_common::{
@@ -20,6 +20,7 @@ use foyer_common::{
     properties::Properties,
 };
 use foyer_memory::Piece;
+use futures_core::future::BoxFuture;
 
 use crate::{
     error::Result,
@@ -31,6 +32,48 @@ use crate::{
     },
     Load, Statistics, Storage, Throttle,
 };
+
+pub trait EngineBuilder<K, V, P>: Send + Sync + 'static + Debug
+where
+    K: StorageKey,
+    V: StorageValue,
+    P: Properties,
+{
+    /// Build the engine with the given configurations.
+    fn build(self) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
+}
+
+pub trait Engine<K, V, P>: Send + Sync + 'static + Debug + Any
+where
+    K: StorageKey,
+    V: StorageValue,
+    P: Properties,
+{
+    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize);
+    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V>>>;
+    fn delete(&self, hash: u64);
+    fn may_contains(&self, hash: u64) -> bool;
+    fn destroy(&self) -> BoxFuture<'static, Result<()>>;
+    fn wait(&self) -> BoxFuture<'static, ()>;
+}
+
+/// FIXME(MrCroxx): REMOVE THIS!!!
+fn assert_engine_builder_object_safe<K, V, P>(_: Option<Arc<dyn EngineBuilder<K, V, P>>>)
+where
+    K: StorageKey,
+    V: StorageValue,
+    P: Properties,
+{
+}
+
+/// FIXME(MrCroxx): REMOVE THIS!!!
+fn assert_engine_object_safe<K, V, P>(_: Option<Arc<dyn Engine<K, V, P>>>)
+where
+    K: StorageKey,
+    V: StorageValue,
+    P: Properties,
+{
+}
 
 pub struct SizeSelector<K, V, P>
 where

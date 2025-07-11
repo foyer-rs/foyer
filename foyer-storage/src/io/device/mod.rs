@@ -16,7 +16,7 @@ use std::{fmt::Debug, os::fd::RawFd, sync::Arc};
 
 use crate::{io::error::IoResult, Throttle};
 
-pub type RegionId = u64;
+pub type RegionId = u32;
 
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     /// Build a device from the given configuration.
@@ -32,7 +32,12 @@ pub trait Device: Send + Sync + 'static + Debug {
     fn throttle(&self) -> &Throttle;
     /// Translate a region and offset to a raw file descriptor and offset.
     fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64);
+    /// Get the region count of the device.
+    fn regions(&self) -> usize {
+        self.capacity() / self.region_size()
+    }
 }
 
 pub mod file;
 pub mod fs;
+pub mod noop;

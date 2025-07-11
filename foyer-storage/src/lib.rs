@@ -25,7 +25,9 @@ mod io;
 mod large;
 mod large_v2;
 mod picker;
+mod picker_v2;
 mod region;
+mod region_v2;
 mod runtime;
 mod serde;
 mod small;
@@ -38,3 +40,6 @@ pub use prelude::*;
 
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;
+
+#[cfg(any(test, feature = "test_utils"))]
+pub mod test_utils_v2;

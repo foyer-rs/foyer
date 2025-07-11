@@ -25,22 +25,22 @@ use itertools::Itertools;
 use tokio::sync::{mpsc, oneshot, Semaphore, SemaphorePermit};
 
 use crate::{
-    device::MonitoredDevice,
     error::Result,
     io::{
-        buffer::{IoBuffer, OwnedSlice},
+        bytes::{IoSlice, IoSliceMut},
+        engine::IoEngine,
         PAGE,
     },
-    large::{
+    large_v2::{
         flusher::{Flusher, Submission},
-        generic::GenericLargeStorageConfig,
         indexer::Indexer,
         scanner::RegionScanner,
         serde::Sequence,
     },
-    picker::ReinsertionPicker,
-    region::{Region, RegionManager},
+    picker_v2::ReinsertionPicker,
+    region_v2::{Region, RegionManager},
     runtime::Runtime,
+    Statistics,
 };
 
 #[derive(Debug)]
@@ -50,12 +50,16 @@ pub struct Reclaimer {
 
 impl Reclaimer {
     pub fn open<K, V, P>(
-        config: &GenericLargeStorageConfig<K, V>,
+        io_engine: Arc<dyn IoEngine>,
         region_manager: RegionManager,
         reclaim_semaphore: Arc<Semaphore>,
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, P>>,
+        reinsertion_picker: Arc<dyn ReinsertionPicker>,
+        blob_index_size: usize,
+        statistics: Arc<Statistics>,
         metrics: Arc<Metrics>,
+        runtime: Runtime,
     ) -> Self
     where
         K: StorageKey,
@@ -64,20 +68,22 @@ impl Reclaimer {
     {
         let (wait_tx, wait_rx) = mpsc::unbounded_channel();
 
+        let r = runtime.clone();
         let runner = ReclaimRunner {
-            device: config.device.clone(),
+            io_engine,
             region_manager,
             reclaim_semaphore,
             indexer,
             flushers,
-            reinsertion_picker: config.reinsertion_picker.clone(),
-            blob_index_size: config.blob_index_size,
+            reinsertion_picker,
+            blob_index_size,
+            statistics,
             _metrics: metrics,
             wait_rx,
-            runtime: config.runtime.clone(),
+            runtime,
         };
 
-        let _handle = config.runtime.write().spawn(async move { runner.run().await });
+        let _handle = r.write().spawn(async move { runner.run().await });
 
         Self { wait_tx }
     }
@@ -98,7 +104,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    device: MonitoredDevice,
+    io_engine: Arc<dyn IoEngine>,
 
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
 
@@ -111,6 +117,7 @@ where
 
     blob_index_size: usize,
 
+    statistics: Arc<Statistics>,
     _metrics: Arc<Metrics>,
 
     wait_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
@@ -195,13 +202,9 @@ where
                 Ok(Some(infos)) => infos,
             };
             for info in infos {
-                if self
-                    .reinsertion_picker
-                    .pick(self.device.statistics(), info.hash)
-                    .admitted()
-                {
-                    let buf = IoBuffer::new(bits::align_up(PAGE, info.addr.len as _));
-                    let (buf, res) = region.read(buf, info.addr.offset as _).await;
+                if self.reinsertion_picker.pick(&self.statistics, info.hash).admitted() {
+                    let buf = IoSliceMut::new(bits::align_up(PAGE, info.addr.len as _));
+                    let (buf, res) = region.read(Box::new(buf), info.addr.offset as _).await;
                     if let Err(e) = res {
                         tracing::warn!(
                         "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
@@ -209,12 +212,13 @@ where
                     );
                         break 'reinsert;
                     }
-
-                    let slice = buf.into_owned_slice().slice(..info.addr.len as usize);
+                    let buf = buf.try_into_io_slice_mut().unwrap().into_io_slice();
+                    let slice = buf.slice(..bits::align_up(PAGE, info.addr.len as usize));
                     let flusher = self.flushers[picked_count % self.flushers.len()].clone();
                     flusher.submit(Submission::Reinsertion {
                         reinsertion: Reinsertion {
                             hash: info.hash,
+                            len: info.addr.len as usize,
                             sequence: info.addr.sequence,
                             slice,
                         },
@@ -262,9 +266,9 @@ pub struct RegionCleaner;
 
 impl RegionCleaner {
     pub async fn clean(region: &Region) -> Result<()> {
-        let mut page = IoBuffer::new(PAGE);
+        let mut page = IoSliceMut::new(PAGE);
         page.fill(0);
-        let (_, res) = region.write(page, 0).await;
+        let (_, res) = region.write(Box::new(page), 0).await;
         res?;
         Ok(())
     }
@@ -273,6 +277,7 @@ impl RegionCleaner {
 #[derive(Debug)]
 pub struct Reinsertion {
     pub hash: u64,
+    pub len: usize,
     pub sequence: Sequence,
-    pub slice: OwnedSlice,
+    pub slice: IoSlice,
 }

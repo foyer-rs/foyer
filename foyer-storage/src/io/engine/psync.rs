@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs::File, mem::ManuallyDrop, os::fd::FromRawFd, sync::Arc};
+use std::{fmt::Debug, fs::File, mem::ManuallyDrop, os::fd::FromRawFd, sync::Arc};
 
 use futures_util::FutureExt;
 
@@ -41,19 +41,37 @@ impl IoEngineBuilder for PsyncIoEngineBuilder {
     }
 }
 
+struct RawBuf {
+    ptr: *mut u8,
+    len: usize,
+}
+
+unsafe impl Send for RawBuf {}
+unsafe impl Sync for RawBuf {}
+
 pub struct PsyncIoEngine {
     device: Arc<dyn Device>,
 }
 
+impl Debug for PsyncIoEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PsyncIoEngine").finish()
+    }
+}
+
 impl IoEngine for PsyncIoEngine {
+    fn device(&self) -> &Arc<dyn Device> {
+        &self.device
+    }
+
     fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
         let device = self.device.clone();
+        let (ptr, len) = buf.as_raw_parts();
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         async move {
-            let res = tokio::task::spawn_blocking(move || {
+            let res = match tokio::task::spawn_blocking(move || {
                 let (fd, offset) = device.translate(region, offset);
                 let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-                let (ptr, len) = buf.as_raw_parts();
-                let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
                 #[cfg(target_family = "windows")]
                 {
                     use std::os::windows::fs::FileExt;
@@ -64,12 +82,15 @@ impl IoEngine for PsyncIoEngine {
                     use std::os::unix::fs::FileExt;
                     file.read_exact_at(slice, offset).map_err(IoError::from)?;
                 };
-                let buf: Box<dyn IoB> = buf;
-                Ok(buf)
+                Ok(())
             })
             .await
-            .map_err(IoError::other)?;
-            res
+            {
+                Ok(res) => res,
+                Err(e) => Err(IoError::other(e)),
+            };
+            let buf: Box<dyn IoB> = buf;
+            (buf, res)
         }
         .boxed()
         .into()
@@ -77,12 +98,12 @@ impl IoEngine for PsyncIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
         let device = self.device.clone();
+        let (ptr, len) = buf.as_raw_parts();
+        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         async move {
-            let res = tokio::task::spawn_blocking(move || {
+            let res = match tokio::task::spawn_blocking(move || {
                 let (fd, offset) = device.translate(region, offset);
                 let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-                let (ptr, len) = buf.as_raw_parts();
-                let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
                 #[cfg(target_family = "windows")]
                 {
                     use std::os::windows::fs::FileExt;
@@ -93,12 +114,15 @@ impl IoEngine for PsyncIoEngine {
                     use std::os::unix::fs::FileExt;
                     file.write_all_at(slice, offset).map_err(IoError::from)?;
                 };
-                let buf: Box<dyn IoB> = buf;
-                Ok(buf)
+                Ok(())
             })
             .await
-            .map_err(IoError::other)?;
-            res
+            {
+                Ok(res) => res,
+                Err(e) => Err(IoError::other(e)),
+            };
+            let buf: Box<dyn IoB> = buf;
+            (buf, res)
         }
         .boxed()
         .into()

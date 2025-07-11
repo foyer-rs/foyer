@@ -35,11 +35,13 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
-    device::{Dev, DevExt, MonitoredDevice, RegionId},
+    device::RegionId,
     error::Result,
-    io::buffer::{IoBufMutOld, IoBufOld},
-    picker::EvictionPicker,
-    EvictionInfo,
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        engine::IoEngine,
+    },
+    picker_v2::{EvictionInfo, EvictionPicker},
 };
 
 /// Region statistics.
@@ -64,21 +66,21 @@ impl RegionStatistics {
 
 #[derive(Debug)]
 struct RegionInner {
-    device: MonitoredDevice,
+    id: RegionId,
+    io_engine: Arc<dyn IoEngine>,
     statistics: Arc<RegionStatistics>,
 }
 
 /// A region is a logical partition of a device. It is used to manage the device's storage space.
 #[derive(Debug, Clone)]
 pub struct Region {
-    id: RegionId,
     inner: Arc<RegionInner>,
 }
 
 impl Region {
     /// Get region id.
     pub fn id(&self) -> RegionId {
-        self.id
+        self.inner.id
     }
 
     /// Get Region Statistics.
@@ -88,39 +90,30 @@ impl Region {
 
     /// Get region size.
     pub fn size(&self) -> usize {
-        self.inner.device.region_size()
+        self.inner.io_engine.device().region_size()
     }
 
-    pub(crate) async fn write<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
-    where
-        B: IoBufOld,
-    {
-        self.inner.device.write(buf, self.id, offset).await
+    pub(crate) async fn write(&self, buf: Box<dyn IoBuf>, offset: u64) -> (Box<dyn IoB>, Result<()>) {
+        let (buf, res) = self.inner.io_engine.write(buf, self.inner.id, offset).await;
+        (buf, res.map_err(|e| e.into()))
     }
 
-    pub(crate) async fn read<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
-    where
-        B: IoBufMutOld,
-    {
-        self.inner.statistics.access.fetch_add(1, Ordering::Relaxed);
-        self.inner.device.read(buf, self.id, offset).await
-    }
-
-    #[expect(unused)]
-    pub(crate) async fn sync(&self) -> Result<()> {
-        self.inner.device.sync(Some(self.id)).await
+    pub(crate) async fn read(&self, buf: Box<dyn IoBufMut>, offset: u64) -> (Box<dyn IoB>, Result<()>) {
+        let (buf, res) = self.inner.io_engine.read(buf, self.inner.id, offset).await;
+        (buf, res.map_err(|e| e.into()))
     }
 }
 
 #[cfg(test)]
 impl Region {
-    pub(crate) fn new_for_test(id: RegionId, device: MonitoredDevice) -> Self {
+    pub(crate) fn new_for_test(id: RegionId, io_engine: Arc<dyn IoEngine>) -> Self {
         let inner = RegionInner {
-            device,
+            id,
+            io_engine,
             statistics: Arc::<RegionStatistics>::default(),
         };
         let inner = Arc::new(inner);
-        Self { id, inner }
+        Self { inner }
     }
 }
 
@@ -156,16 +149,17 @@ impl Debug for RegionManager {
 
 impl RegionManager {
     pub fn new(
-        device: MonitoredDevice,
+        io_engine: Arc<dyn IoEngine>,
         eviction_pickers: Vec<Box<dyn EvictionPicker>>,
         reclaim_semaphore: Arc<Semaphore>,
         metrics: Arc<Metrics>,
     ) -> Self {
+        let device = io_engine.device().clone();
         let regions = (0..device.regions() as RegionId)
             .map(|id| Region {
-                id,
                 inner: Arc::new(RegionInner {
-                    device: device.clone(),
+                    id,
+                    io_engine: io_engine.clone(),
                     statistics: Arc::<RegionStatistics>::default(),
                 }),
             })

@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{error::Result, io::buffer::IoBuffer, large::buffer::BlobIndexReader, region::Region};
+use crate::{error::Result, io::bytes::IoSliceMut, large_v2::buffer::BlobIndexReader, region_v2::Region};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {
@@ -45,10 +45,10 @@ impl RegionScanner {
             return Ok(None);
         }
 
-        let io_buffer = IoBuffer::new(self.blob_index_size);
-        let (io_buffer, res) = self.region.read(io_buffer, self.offset).await;
+        let bytes = Box::new(IoSliceMut::new(self.blob_index_size));
+        let (bytes, res) = self.region.read(bytes, self.offset).await;
         res?;
-        let indices = match BlobIndexReader::read(&io_buffer) {
+        let indices = match BlobIndexReader::read(&bytes) {
             Some(indices) => indices,
             None => {
                 tracing::trace!(
@@ -104,8 +104,12 @@ mod tests {
             monitor::{Monitored, MonitoredConfig},
             Dev, MonitoredDevice, RegionId,
         },
-        io::PAGE,
-        large::{
+        io::{
+            device::{fs::FsDeviceBuilder, Device, DeviceBuilder},
+            engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
+            PAGE,
+        },
+        large_v2::{
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
             serde::Sequence,
         },
@@ -114,20 +118,16 @@ mod tests {
 
     const KB: usize = 1024;
 
-    async fn device_for_test(dir: impl AsRef<Path>, file_size: usize, files: usize) -> MonitoredDevice {
-        let runtime = Runtime::current();
-        Monitored::open(
-            MonitoredConfig {
-                config: DirectFsDeviceOptions::new(dir)
-                    .with_capacity(file_size * files)
-                    .with_file_size(file_size)
-                    .into(),
-                metrics: Arc::new(Metrics::noop()),
-            },
-            runtime,
-        )
-        .await
-        .unwrap()
+    async fn device_for_test(dir: impl AsRef<Path>, file_size: usize, files: usize) -> Arc<dyn Device> {
+        FsDeviceBuilder::new(dir)
+            .with_capacity(file_size * files)
+            .with_file_size(file_size)
+            .build()
+            .unwrap()
+    }
+
+    async fn engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
+        PsyncIoEngineBuilder::new(device).build().unwrap()
     }
 
     #[test_log::test(tokio::test)]
@@ -140,10 +140,11 @@ mod tests {
         const MAX_ENTRY_SIZE: usize = REGION_SIZE - BLOB_INDEX_SIZE;
 
         let tempdir = tempdir().unwrap();
-        let dev = device_for_test(tempdir.path(), REGION_SIZE, 4).await;
+        let device = device_for_test(tempdir.path(), REGION_SIZE, 4).await;
+        let engine = engine_for_test(device).await;
 
         let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
-        let mut buffer = Buffer::new(IoBuffer::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         for i in 0..BLOB_INDEX_CAPACITY * 5 {
             buffer.push(
@@ -154,35 +155,35 @@ mod tests {
                 i as Sequence,
             );
         }
-        let (io_buffer, infos) = buffer.finish();
-        let shared_io_slice = io_buffer.into_shared_io_slice();
-        let batch = Splitter::split(&mut ctx, shared_io_slice, infos.clone());
+        let (bytes, infos) = buffer.finish();
+        let bytes = bytes.into_io_slice();
+        let batch = Splitter::split(&mut ctx, bytes, infos.clone());
 
         assert_eq!(batch.regions.len(), 3);
         assert_eq!(batch.regions[0].blob_parts.len(), 2);
         assert_eq!(batch.regions[1].blob_parts.len(), 2);
         assert_eq!(batch.regions[2].blob_parts.len(), 1);
 
-        async fn flush<'a>(dev: &'a MonitoredDevice, region: &'a RegionId, part: &'a BlobPart) {
-            let (_, res) = dev
+        async fn flush<'a>(engine: &'a Arc<dyn IoEngine>, region: &'a RegionId, part: &'a BlobPart) {
+            let (_, res) = engine
                 .write(
-                    part.data.clone(),
+                    Box::new(part.data.clone()),
                     *region,
                     part.blob_region_offset as u64 + part.part_blob_offset as u64,
                 )
                 .await;
             res.unwrap();
-            let (_, res) = dev
-                .write(part.index.clone(), *region, part.blob_region_offset as u64)
+            let (_, res) = engine
+                .write(Box::new(part.index.clone()), *region, part.blob_region_offset as u64)
                 .await;
             res.unwrap();
         }
 
-        flush(&dev, &0, &batch.regions[0].blob_parts[0]).await;
-        flush(&dev, &0, &batch.regions[0].blob_parts[1]).await;
-        flush(&dev, &1, &batch.regions[1].blob_parts[0]).await;
-        flush(&dev, &1, &batch.regions[1].blob_parts[1]).await;
-        flush(&dev, &2, &batch.regions[2].blob_parts[0]).await;
+        flush(&engine, &0, &batch.regions[0].blob_parts[0]).await;
+        flush(&engine, &0, &batch.regions[0].blob_parts[1]).await;
+        flush(&engine, &1, &batch.regions[1].blob_parts[0]).await;
+        flush(&engine, &1, &batch.regions[1].blob_parts[1]).await;
+        flush(&engine, &2, &batch.regions[2].blob_parts[0]).await;
 
         fn cal(region: RegionId, part: &BlobPart) -> Vec<EntryInfo> {
             part.indices
@@ -205,18 +206,35 @@ mod tests {
         r1.append(&mut cal(1, &batch.regions[1].blob_parts[1]));
         let r2 = cal(2, &batch.regions[2].blob_parts[0]);
 
-        async fn extract(dev: &MonitoredDevice, region: RegionId) -> Vec<EntryInfo> {
+        async fn extract(engine: Arc<dyn IoEngine>, region: RegionId) -> Vec<EntryInfo> {
             let mut infos = vec![];
-            let mut scanner = RegionScanner::new(Region::new_for_test(region, dev.clone()), BLOB_INDEX_SIZE);
+            let mut scanner = RegionScanner::new(Region::new_for_test(region, engine), BLOB_INDEX_SIZE);
             while let Some(mut es) = scanner.next().await.unwrap() {
                 infos.append(&mut es);
             }
             infos
         }
 
-        let rr0 = extract(&dev, 0).await;
-        let rr1 = extract(&dev, 1).await;
-        let rr2 = extract(&dev, 2).await;
+        // FIXME(MrCroxx):  REMOVE THIS
+        async fn device_for_test_old(dir: impl AsRef<Path>, file_size: usize, files: usize) -> MonitoredDevice {
+            let runtime = Runtime::current();
+            Monitored::open(
+                MonitoredConfig {
+                    config: DirectFsDeviceOptions::new(dir)
+                        .with_capacity(file_size * files)
+                        .with_file_size(file_size)
+                        .into(),
+                    metrics: Arc::new(Metrics::noop()),
+                },
+                runtime,
+            )
+            .await
+            .unwrap()
+        }
+
+        let rr0 = extract(engine.clone(), 0).await;
+        let rr1 = extract(engine.clone(), 1).await;
+        let rr2 = extract(engine.clone(), 2).await;
 
         assert_eq!(r0, rr0);
         assert_eq!(r1, rr1);

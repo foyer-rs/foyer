@@ -174,7 +174,7 @@ impl Device for FileDevice {
 
     fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64) {
         let fd = self.inner.file.as_raw_fd();
-        let offset = region * self.inner.region_size as u64 + offset;
+        let offset = region as u64 * self.inner.region_size as u64 + offset;
         (fd, offset)
     }
 }

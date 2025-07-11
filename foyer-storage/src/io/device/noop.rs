@@ -12,15 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod buffer;
-pub mod engine;
-pub mod flusher;
-pub mod indexer;
-pub mod reclaimer;
-pub mod recover;
-pub mod scanner;
-pub mod serde;
-pub mod tombstone;
+use std::os::fd::RawFd;
 
-#[cfg(test)]
-pub mod test_utils;
+use crate::{
+    io::device::{Device, RegionId},
+    Throttle,
+};
+
+#[derive(Debug, Default)]
+pub struct NoopDevice(Throttle);
+
+impl Device for NoopDevice {
+    fn capacity(&self) -> usize {
+        0
+    }
+
+    fn region_size(&self) -> usize {
+        0
+    }
+
+    fn throttle(&self) -> &Throttle {
+        &self.0
+    }
+
+    fn translate(&self, _: RegionId, _: u64) -> (RawFd, u64) {
+        (0, 0)
+    }
+}

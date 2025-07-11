@@ -25,10 +25,10 @@ use foyer_common::bits;
 use super::PAGE;
 
 /// 4K-aligned immutable buf for direct I/O.
-pub trait IoBuf: Deref<Target = [u8]> + Send + Sync + 'static {}
+pub trait IoBufOld: Deref<Target = [u8]> + Send + Sync + 'static {}
 
 /// 4K-aligned mutable buf for direct I/O.
-pub trait IoBufMut: DerefMut<Target = [u8]> + Send + Sync + 'static {}
+pub trait IoBufMutOld: DerefMut<Target = [u8]> + Send + Sync + 'static {}
 
 /// 4K-aligned capacity-fixed buffer.
 #[derive(Debug)]
@@ -166,8 +166,8 @@ impl PartialEq for IoBuffer {
 
 impl Eq for IoBuffer {}
 
-impl IoBuf for IoBuffer {}
-impl IoBufMut for IoBuffer {}
+impl IoBufOld for IoBuffer {}
+impl IoBufMutOld for IoBuffer {}
 
 /// A 4K-aligned slice on the io buffer with ownership.
 ///
@@ -295,8 +295,8 @@ impl AsMut<[u8]> for OwnedIoSlice {
     }
 }
 
-impl IoBuf for OwnedIoSlice {}
-impl IoBufMut for OwnedIoSlice {}
+impl IoBufOld for OwnedIoSlice {}
+impl IoBufMutOld for OwnedIoSlice {}
 
 /// A 4K-aligned slice on the io buffer that can be shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -396,7 +396,7 @@ impl AsRef<[u8]> for SharedIoSlice {
     }
 }
 
-impl IoBuf for SharedIoSlice {}
+impl IoBufOld for SharedIoSlice {}
 
 /// A slice on the io buffer with ownership.
 ///

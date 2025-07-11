@@ -29,7 +29,7 @@ use crate::{
         Dev, DevExt, RegionId,
     },
     error::{Error, Result},
-    io::{buffer::IoBuffer, PAGE},
+    io::{buffer::IoBuffer, device::Device, PAGE},
     DirectFileDeviceOptions, IopsCounter, Runtime,
 };
 
@@ -126,29 +126,24 @@ impl TombstoneLog {
     /// Open the tombstone log with given a dedicated device.
     ///
     /// The tombstone log will
-    pub async fn open<D>(
+    pub async fn open(
         config: &TombstoneLogConfig,
-        cache_device: D,
+        cache_device: Arc<dyn Device>,
         tombstones: &mut Vec<Tombstone>,
         metrics: Arc<Metrics>,
         runtime: Runtime,
-    ) -> Result<Self>
-    where
-        D: Dev,
-    {
-        let align = cache_device.align();
-
+    ) -> Result<Self> {
         // For large entry disk cache, the minimum entry size is the alignment.
         //
         // So, the tombstone log needs at most `cache device capacity / align` slots.
         //
         // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
-        let capacity = bits::align_up(align, (cache_device.capacity() / align) * Tombstone::serialized_len());
+        let capacity = bits::align_up(PAGE, (cache_device.capacity() / PAGE) * Tombstone::serialized_len());
 
         let device = Monitored::open(
             MonitoredConfig {
                 config: DirectFileDeviceOptions::new(&config.path)
-                    .with_region_size(align)
+                    .with_region_size(PAGE)
                     .with_capacity(capacity)
                     .into(),
                 metrics: metrics.clone(),
@@ -201,7 +196,7 @@ impl TombstoneLog {
         res.into_iter().for_each(|mut r| tombstones.append(&mut r.0));
         let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
-        let region = bits::align_down(align as RegionId, offset as RegionId) / align as RegionId;
+        let region = bits::align_down(PAGE as RegionId, offset as RegionId) / PAGE as RegionId;
         let buffer = PageBuffer::open(device, region, 0, config.flush).await?;
 
         Ok(Self {
@@ -315,7 +310,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::device::direct_fs::{DirectFsDevice, DirectFsDeviceOptions};
+    use crate::io::device::{fs::FsDeviceBuilder, DeviceBuilder};
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {
@@ -324,14 +319,10 @@ mod tests {
         let dir = tempdir().unwrap();
 
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones
-        let device = DirectFsDevice::open(
-            DirectFsDeviceOptions::new(dir.path())
-                .with_capacity(4 * 1024 * 1024)
-                .into(),
-            runtime.clone(),
-        )
-        .await
-        .unwrap();
+        let device = FsDeviceBuilder::new(dir.path())
+            .with_capacity(4 * 1024 * 1024)
+            .build()
+            .unwrap();
 
         let log = TombstoneLog::open(
             &TombstoneLogConfig {

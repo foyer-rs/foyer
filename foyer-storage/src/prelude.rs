@@ -21,7 +21,7 @@ pub use crate::{
     },
     error::{Error, Result},
     io::{
-        buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
+        buffer::{IoBufMutOld, IoBufOld, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
         throttle::IoThrottler,
     },
     large::{

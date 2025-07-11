@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{mpsc, Arc};
+use std::{
+    fmt::Debug,
+    sync::{mpsc, Arc},
+};
 
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
@@ -31,18 +34,26 @@ enum UringIoType {
     Write,
 }
 
+struct RawBuf {
+    ptr: *mut u8,
+    len: usize,
+}
+
+unsafe impl Send for RawBuf {}
+unsafe impl Sync for RawBuf {}
+
 struct UringIoRequest {
-    tx: oneshot::Sender<IoResult<Box<dyn IoB>>>,
+    tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
-    buf: Box<dyn IoB>,
+    buf: RawBuf,
     region: RegionId,
     offset: u64,
 }
 
 struct UringIoCtx {
-    tx: oneshot::Sender<IoResult<Box<dyn IoB>>>,
+    tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
-    buf: Box<dyn IoB>,
+    buf: RawBuf,
     region: RegionId,
     offset: u64,
 }
@@ -66,8 +77,7 @@ impl UringIoEngineShard {
                 };
 
                 self.inflight += 1;
-
-                let (ptr, len) = request.buf.as_raw_parts();
+                let (ptr, len) = (request.buf.ptr, request.buf.len);
                 let ctx = Box::new(UringIoCtx {
                     tx: request.tx,
                     io_type: request.io_type,
@@ -100,7 +110,7 @@ impl UringIoEngineShard {
                     let err = IoError::from_raw_os_error(res);
                     let _ = ctx.tx.send(Err(err));
                 } else {
-                    let _ = ctx.tx.send(Ok(ctx.buf));
+                    let _ = ctx.tx.send(Ok(()));
                 }
                 self.inflight -= 1;
             }
@@ -109,23 +119,35 @@ impl UringIoEngineShard {
 }
 
 pub struct UringIoEngine {
+    device: Arc<dyn Device>,
     txs: Vec<mpsc::SyncSender<UringIoRequest>>,
+}
+
+impl Debug for UringIoEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UringIoEngine").finish()
+    }
 }
 
 impl UringIoEngine {
     fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.txs[region as usize % self.txs.len()];
+        let (ptr, len) = buf.as_raw_parts();
         let _ = shard.send(UringIoRequest {
             tx,
             io_type: UringIoType::Read,
-            buf,
+            buf: RawBuf { ptr, len },
             region,
             offset,
         });
         async move {
-            let recv = rx.await.map_err(IoError::other)?;
-            recv
+            let res = match rx.await {
+                Ok(res) => res,
+                Err(e) => Err(IoError::other(e)),
+            };
+            let buf: Box<dyn IoB> = buf;
+            (buf, res)
         }
         .boxed()
         .into()
@@ -134,16 +156,21 @@ impl UringIoEngine {
     fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.txs[region as usize % self.txs.len()];
+        let (ptr, len) = buf.as_raw_parts();
         let _ = shard.send(UringIoRequest {
             tx,
             io_type: UringIoType::Write,
-            buf,
+            buf: RawBuf { ptr, len },
             region,
             offset,
         });
         async move {
-            let recv = rx.await.map_err(IoError::other)?;
-            recv
+            let res = match rx.await {
+                Ok(res) => res,
+                Err(e) => Err(IoError::other(e)),
+            };
+            let buf: Box<dyn IoB> = buf;
+            (buf, res)
         }
         .boxed()
         .into()
@@ -206,13 +233,20 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             });
         }
 
-        let engine = UringIoEngine { txs };
+        let engine = UringIoEngine {
+            device: self.device,
+            txs,
+        };
         let engine = Arc::new(engine);
         Ok(engine)
     }
 }
 
 impl IoEngine for UringIoEngine {
+    fn device(&self) -> &Arc<dyn Device> {
+        &self.device
+    }
+
     fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
         self.read(buf, region, offset)
     }
