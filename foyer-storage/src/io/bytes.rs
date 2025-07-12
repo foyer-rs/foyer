@@ -28,13 +28,29 @@ use super::PAGE;
 
 pub trait IoB: Deref<Target = [u8]> + Send + Sync + 'static + Debug + Any {
     fn as_raw_parts(&self) -> (*mut u8, usize);
+
+    // TODO(MrCroxx): Remove this after bump MSRV to 1.86.0+
+    // https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/
+    fn as_any(&self) -> &dyn Any;
+
+    // TODO(MrCroxx): Remove this after bump MSRV to 1.86.0+
+    // https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
 /// 4K-aligned immutable buf for direct I/O.
-pub trait IoBuf: Deref<Target = [u8]> + IoB {}
+pub trait IoBuf: Deref<Target = [u8]> + IoB {
+    // TODO(MrCroxx): Remove this after bump MSRV to 1.86.0+
+    // https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB>;
+}
 
 /// 4K-aligned mutable buf for direct I/O.
-pub trait IoBufMut: DerefMut<Target = [u8]> + IoB {}
+pub trait IoBufMut: DerefMut<Target = [u8]> + IoB {
+    // TODO(MrCroxx): Remove this after bump MSRV to 1.86.0+
+    // https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB>;
+}
 
 /// 4K-aligned raw bytes.
 #[derive(Debug)]
@@ -136,9 +152,27 @@ impl IoB for Raw {
     fn as_raw_parts(&self) -> (*mut u8, usize) {
         (self.ptr, self.cap)
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
 }
-impl IoBuf for Raw {}
-impl IoBufMut for Raw {}
+
+impl IoBuf for Raw {
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB> {
+        self
+    }
+}
+
+impl IoBufMut for Raw {
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB> {
+        self
+    }
+}
 
 /// A 4K-aligned slice on the io buffer that can be shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,9 +224,21 @@ impl IoB for IoSlice {
         let len = self.end - self.start;
         (ptr, len)
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
 }
 
-impl IoBuf for IoSlice {}
+impl IoBuf for IoSlice {
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB> {
+        self
+    }
+}
 
 impl IoSlice {
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
@@ -276,10 +322,26 @@ impl IoB for IoSliceMut {
     fn as_raw_parts(&self) -> (*mut u8, usize) {
         (self.raw.ptr, self.raw.cap)
     }
-}
-impl IoBuf for IoSliceMut {}
 
-impl IoBufMut for IoSliceMut {}
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+impl IoBuf for IoSliceMut {
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB> {
+        self
+    }
+}
+
+impl IoBufMut for IoSliceMut {
+    fn into_iob(self: Box<Self>) -> Box<dyn IoB> {
+        self
+    }
+}
 
 impl IoSliceMut {
     pub fn into_io_slice(self) -> IoSlice {
@@ -293,13 +355,13 @@ impl IoSliceMut {
 impl dyn IoB {
     /// Convert into concrete type [`Box<IoSlice>`] if the underlying type fits.
     pub fn try_into_io_slice(self: Box<Self>) -> Option<Box<IoSlice>> {
-        let any: Box<dyn Any> = self;
+        let any: Box<dyn Any> = self.into_any();
         any.downcast::<IoSlice>().ok()
     }
 
     /// Convert into concrete type [`Box<IoSliceMut>`] if the underlying type fits.
     pub fn try_into_io_slice_mut(self: Box<Self>) -> Option<Box<IoSliceMut>> {
-        let any: Box<dyn Any> = self;
+        let any: Box<dyn Any> = self.into_any();
         any.downcast::<IoSliceMut>().ok()
     }
 }

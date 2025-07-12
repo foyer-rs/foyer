@@ -52,7 +52,7 @@ impl IoEngine for NoopIoEngine {
 
     fn read(&self, buf: Box<dyn IoBufMut>, _: RegionId, _: u64) -> IoHandle {
         async move {
-            let buf: Box<dyn IoB> = buf;
+            let buf: Box<dyn IoB> = buf.into_iob();
             (buf, Ok(()))
         }
         .boxed()
@@ -61,7 +61,7 @@ impl IoEngine for NoopIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, _: RegionId, _: u64) -> super::IoHandle {
         async move {
-            let buf: Box<dyn IoB> = buf;
+            let buf: Box<dyn IoB> = buf.into_iob();
             (buf, Ok(()))
         }
         .boxed()

@@ -141,7 +141,7 @@ impl UringIoEngine {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),
             };
-            let buf: Box<dyn IoB> = buf;
+            let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
         }
         .boxed()
@@ -164,7 +164,7 @@ impl UringIoEngine {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),
             };
-            let buf: Box<dyn IoB> = buf;
+            let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
         }
         .boxed()
