@@ -536,9 +536,7 @@ jobs:
         run: |-
           cargo +$RUST_TOOLCHAIN_NIGHTLY build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-
