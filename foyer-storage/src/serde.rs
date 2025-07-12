@@ -30,6 +30,7 @@ impl Checksummer {
         XxHash64::oneshot(0, buf)
     }
 
+    #[expect(unused)]
     pub fn checksum32(buf: &[u8]) -> u32 {
         XxHash32::oneshot(0, buf)
     }

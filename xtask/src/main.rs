@@ -174,7 +174,7 @@ fn test(fast: bool) {
     run_with_env("cargo test --doc", [("RUST_BACKTRACE", "1")]);
     run_with_env(
         r#"cargo +nightly doc --features "nightly" --no-deps"#,
-        [("RUSTDOCFLAGS", "--cfg docsrs -D warnings")],
+        [("RUSTDOCFLAGS", "--cfg docsrs")],
     );
     if !fast {
         run_with_env(

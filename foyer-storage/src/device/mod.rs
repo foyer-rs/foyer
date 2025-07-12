@@ -30,7 +30,7 @@ use monitor::Monitored;
 use crate::{
     error::Result,
     io::{
-        buffer::{IoBuf, IoBufMut},
+        buffer::{IoBufMutOld, IoBufOld},
         PAGE,
     },
     DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Runtime,
@@ -199,13 +199,13 @@ pub trait Dev: Send + Sync + 'static + Sized + Clone + Debug {
     #[must_use]
     fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
     where
-        B: IoBuf;
+        B: IoBufOld;
 
     /// Read API for the device.
     #[must_use]
     fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> impl Future<Output = (B, Result<()>)> + Send
     where
-        B: IoBufMut;
+        B: IoBufMutOld;
 
     /// Flush the device, make sure all modifications are persisted safely on the device.
     #[must_use]
@@ -303,7 +303,7 @@ impl Dev for Device {
 
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         match self {
             Device::DirectFile(dev) => dev.write(buf, region, offset).await,
@@ -315,7 +315,7 @@ impl Dev for Device {
 
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         match self {
             Device::DirectFile(dev) => dev.read(buf, region, offset).await,

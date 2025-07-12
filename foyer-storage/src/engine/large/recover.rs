@@ -20,71 +20,54 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::metrics::Metrics;
 use futures_util::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Semaphore;
 
-use super::{
-    generic::GenericLargeStorageConfig,
-    indexer::{EntryAddress, Indexer},
-};
+use super::indexer::{EntryAddress, Indexer};
 use crate::{
-    device::RegionId,
-    error::{Error, Result},
-    large::{
-        indexer::HashedEntryAddress,
-        scanner::{EntryInfo, RegionScanner},
-        serde::{AtomicSequence, Sequence},
-        tombstone::Tombstone,
+    engine::{
+        large::{
+            indexer::HashedEntryAddress,
+            scanner::{EntryInfo, RegionScanner},
+            serde::{AtomicSequence, Sequence},
+            tombstone::Tombstone,
+        },
+        RecoverMode,
     },
+    error::{Error, Result},
+    io::device::RegionId,
     region::{Region, RegionManager},
     runtime::Runtime,
 };
-
-/// The recover mode of the disk cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-pub enum RecoverMode {
-    /// Do not recover disk cache.
-    ///
-    /// For updatable cache, either [`RecoverMode::None`] or the tombstone log must be used to prevent from phantom
-    /// entry when reopen.
-    None,
-    /// Recover disk cache and skip errors.
-    #[default]
-    Quiet,
-    /// Recover disk cache and panic on errors.
-    Strict,
-}
 
 #[derive(Debug)]
 pub struct RecoverRunner;
 
 impl RecoverRunner {
-    pub async fn run<K, V>(
-        config: &GenericLargeStorageConfig<K, V>,
+    #[expect(clippy::too_many_arguments)]
+    pub async fn run(
+        recover_concurrency: usize,
+        recover_mode: RecoverMode,
+        blob_index_size: usize,
+        clean_region_threshold: usize,
         regions: Range<RegionId>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
         runtime: Runtime,
-    ) -> Result<()>
-    where
-        K: StorageKey,
-        V: StorageValue,
-    {
+        metrics: Arc<Metrics>,
+    ) -> Result<()> {
         let now = Instant::now();
 
         // Recover regions concurrently.
-        let semaphore = Arc::new(Semaphore::new(config.recover_concurrency));
-        let mode = config.recover_mode;
+        let semaphore = Arc::new(Semaphore::new(recover_concurrency));
+        let mode = recover_mode;
         let handles = regions.map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(id).clone();
-            let blob_index_size = config.blob_index_size;
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
                 let res = RegionRecoverRunner::run(mode, region, blob_index_size).await;
@@ -151,8 +134,8 @@ impl RecoverRunner {
             })
             .collect_vec();
         // let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
-        let permits = config.clean_region_threshold.saturating_sub(clean_regions.len());
-        let countdown = clean_regions.len().saturating_sub(config.clean_region_threshold);
+        let permits = clean_region_threshold.saturating_sub(clean_regions.len());
+        let countdown = clean_regions.len().saturating_sub(clean_region_threshold);
 
         // Log recovery.
         tracing::info!(
@@ -178,11 +161,8 @@ impl RecoverRunner {
 
         let elapsed = now.elapsed();
         tracing::info!("[recover] finish in {:?}", elapsed);
-        config
-            .device
-            .metrics()
-            .storage_lodc_recover_duration
-            .record(elapsed.as_secs_f64());
+
+        metrics.storage_lodc_recover_duration.record(elapsed.as_secs_f64());
 
         // Note: About reclaim semaphore permits and countdown:
         //

@@ -25,7 +25,7 @@ use super::{Dev, RegionId, Throttle};
 use crate::{
     error::{Error, Result},
     io::{
-        buffer::{IoBuf, IoBufMut},
+        buffer::{IoBufMutOld, IoBufOld},
         PAGE,
     },
     Runtime,
@@ -128,7 +128,7 @@ impl DirectFileDevice {
     )]
     pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(None, offset, len) {
@@ -175,7 +175,7 @@ impl DirectFileDevice {
     )]
     pub async fn pread<B>(&self, mut buf: B, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(None, offset, len) {
@@ -282,7 +282,7 @@ impl Dev for DirectFileDevice {
     )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(Some(region), offset, len) {
@@ -299,7 +299,7 @@ impl Dev for DirectFileDevice {
     )]
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         let len = buf.len();
         if let Err(e) = self.check_io_range(Some(region), offset, len) {

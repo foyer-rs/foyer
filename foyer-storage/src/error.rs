@@ -19,6 +19,8 @@ use std::{
 
 use foyer_common::code::CodeError;
 
+use crate::io::error::IoError;
+
 /// Disk cache error type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -27,7 +29,10 @@ pub enum Error {
     Code(#[from] CodeError),
     /// I/O error.
     #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
+    StdIo(#[from] std::io::Error),
+    /// I/O related error.
+    #[error("io error: {0}")]
+    Io(#[from] IoError),
     #[error(transparent)]
     /// Multiple error list.
     Multiple(MultipleError),

@@ -18,18 +18,14 @@
 #![cfg_attr(feature = "nightly", feature(write_all_vectored))]
 
 mod compress;
-mod device;
 mod engine;
 mod error;
 mod io;
-mod large;
 mod picker;
 mod region;
 mod runtime;
 mod serde;
-mod small;
 mod statistics;
-mod storage;
 mod store;
 
 mod prelude;

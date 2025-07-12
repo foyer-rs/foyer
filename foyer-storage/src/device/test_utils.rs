@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{monitor::Monitored, Dev, Device, MonitoredDevice, RegionId, Throttle};
-use crate::{error::Result, runtime::Runtime, IoBuf, IoBufMut};
+use crate::{error::Result, runtime::Runtime, IoBufMutOld, IoBufOld};
 
 #[derive(Debug, Clone, Default)]
 pub struct NoopDevice(Throttle);
@@ -45,14 +45,14 @@ impl Dev for NoopDevice {
 
     async fn write<B>(&self, buf: B, _: RegionId, _: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         (buf, Ok(()))
     }
 
     async fn read<B>(&self, buf: B, _: RegionId, _: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         (buf, Ok(()))
     }

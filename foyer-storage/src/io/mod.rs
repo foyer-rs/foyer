@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod buffer;
+pub mod bytes;
+pub mod device;
+pub mod engine;
+pub mod error;
 pub mod throttle;
 
 pub const PAGE: usize = 4096;

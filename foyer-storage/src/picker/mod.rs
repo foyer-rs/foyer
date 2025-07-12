@@ -14,7 +14,7 @@
 
 use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc, time::Duration};
 
-use crate::{device::RegionId, region::Region, statistics::Statistics};
+use crate::{io::device::RegionId, region::Region, statistics::Statistics};
 
 /// Pick result for admission pickers and reinsertion pickers.
 #[derive(Debug, Clone, Copy)]
