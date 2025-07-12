@@ -135,7 +135,17 @@ impl DeviceBuilder for FileDeviceBuilder {
         }
 
         let file = opts.open(&self.path)?;
-        file.set_len(capacity as _)?;
+
+        if file.metadata().unwrap().is_file() {
+            tracing::warn!(
+                "{} {} {}",
+                "It seems a `DirectFileDevice` is used within a normal file system, which is inefficient.",
+                "Please use `DirectFileDevice` directly on a raw block device.",
+                "Or use `DirectFsDevice` within a normal file system.",
+            );
+            file.set_len(capacity as _)?;
+        }
+
         let throttle = self.throttle;
 
         let inner = Inner {

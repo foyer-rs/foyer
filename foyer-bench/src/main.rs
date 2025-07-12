@@ -293,6 +293,9 @@ struct Args {
 
     #[arg(long, value_parser = PossibleValuesParser::new(["psync", "io_uring"]), default_value = "psync")]
     io_engine: String,
+
+    #[arg(long, default_value_t = false)]
+    direct: bool,
 }
 
 #[derive(Debug)]
@@ -529,12 +532,14 @@ async fn benchmark(args: Args) {
             .with_capacity(args.disk.as_u64() as _)
             .with_region_size(args.region_size.as_u64() as _)
             .with_throttle(throttle)
+            .with_direct(args.direct)
             .boxed(),
 
         (None, Some(dir)) => FsDeviceBuilder::new(dir)
             .with_capacity(args.disk.as_u64() as _)
             .with_file_size(args.region_size.as_u64() as _)
             .with_throttle(throttle)
+            .with_direct(args.direct)
             .boxed(),
 
         (None, None) => NoopDeviceBuilder.boxed(),
