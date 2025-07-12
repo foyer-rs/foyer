@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// I/O related error from foyer disk cache io module.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
+    /// Std I/O error.
     #[error("I/O operation failed: {0}")]
     Io(#[from] std::io::Error),
+    /// Customized I/O error.
     #[error("Other error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl IoError {
+    /// Convert raw OS error to io error.
     pub fn from_raw_os_error(raw: i32) -> Self {
         Self::Io(std::io::Error::from_raw_os_error(raw))
     }
 
+    /// Convert customized error to io error.
     pub fn other<E>(e: E) -> Self
     where
         E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
@@ -33,4 +38,5 @@ impl IoError {
     }
 }
 
+/// I/O related result type.
 pub type IoResult<T> = std::result::Result<T, IoError>;

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 pub mod buffer;
+pub mod engine;
 pub mod flusher;
-pub mod generic;
 pub mod indexer;
 pub mod reclaimer;
 pub mod recover;

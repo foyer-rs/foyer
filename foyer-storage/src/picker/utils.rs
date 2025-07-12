@@ -28,7 +28,10 @@ use foyer_common::strict_assert;
 use itertools::Itertools;
 
 use super::{AdmissionPicker, EvictionInfo, EvictionPicker, Pick, ReinsertionPicker};
-use crate::{device::RegionId, io::throttle::IoThrottler, statistics::Statistics};
+use crate::{
+    io::{device::RegionId, throttle::IoThrottler},
+    statistics::Statistics,
+};
 
 /// Only admit on all chained admission pickers pick.
 #[derive(Debug, Default, Clone)]
@@ -331,14 +334,14 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::{device::test_utils::NoopDevice, Region};
+    use crate::{io::engine::noop::NoopIoEngine, region::Region};
 
     #[test_log::test]
     fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
 
         let regions = (0..10)
-            .map(|rid| Region::new_for_test(rid, NoopDevice::monitored()))
+            .map(|rid| Region::new_for_test(rid, Arc::<NoopIoEngine>::default()))
             .collect_vec();
         let mut evictable = HashSet::new();
 
@@ -416,7 +419,7 @@ mod tests {
         picker.init(0..10, 10);
 
         let regions = (0..10)
-            .map(|rid| Region::new_for_test(rid, NoopDevice::monitored()))
+            .map(|rid| Region::new_for_test(rid, Arc::<NoopIoEngine>::default()))
             .collect_vec();
         let mut evictable = HashSet::new();
 

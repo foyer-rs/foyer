@@ -20,7 +20,7 @@ use std::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 
-use crate::{device::RegionId, engine::large::serde::Sequence};
+use crate::{engine::large::serde::Sequence, io::device::RegionId};
 
 #[derive(Debug, Clone)]
 pub enum Index {
@@ -70,7 +70,7 @@ impl Indexer {
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::large::indexer::insert_tombstone")
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::insert_tombstone")
     )]
     pub fn insert_tombstone(&self, hash: u64, sequence: Sequence) -> Option<EntryAddress> {
         let shard = self.shard(hash);
@@ -80,7 +80,7 @@ impl Indexer {
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::large::indexer::insert_batch")
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::insert_batch")
     )]
     pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
         let shards: HashMap<usize, Vec<HashedEntryAddress>> =
@@ -101,7 +101,10 @@ impl Indexer {
         olds
     }
 
-    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::large::indexer::get"))]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::get")
+    )]
     pub fn get(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
         match self.shards[shard].read().get(&hash) {
@@ -115,7 +118,7 @@ impl Indexer {
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::large::indexer::remove")
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::remove")
     )]
     pub fn remove(&self, hash: u64) -> Option<EntryAddress> {
         let shard = self.shard(hash);
@@ -130,7 +133,7 @@ impl Indexer {
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::large::indexer::remove_batch")
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::remove_batch")
     )]
     pub fn remove_batch<I>(&self, batch: I) -> Vec<EntryAddress>
     where
@@ -157,7 +160,10 @@ impl Indexer {
         olds
     }
 
-    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::large::indexer::clear"))]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::large_v2::indexer::clear")
+    )]
     pub fn clear(&self) {
         self.shards.iter().for_each(|shard| shard.write().clear());
     }

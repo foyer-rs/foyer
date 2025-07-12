@@ -21,15 +21,14 @@ use std::{
 
 use fs4::free_space;
 
-use crate::{
-    io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::{IoError, IoResult},
-        PAGE,
-    },
-    Throttle,
+use crate::io::{
+    device::{Device, DeviceBuilder, RegionId},
+    error::{IoError, IoResult},
+    throttle::Throttle,
+    PAGE,
 };
 
+/// Builder for a filesystem-based device that manages files in a directory.
 #[derive(Debug)]
 pub struct FsDeviceBuilder {
     dir: PathBuf,
@@ -128,8 +127,8 @@ impl DeviceBuilder for FsDeviceBuilder {
             create_dir_all(&self.dir)?;
         }
 
-        const PREFIX: &'static str = "foyer-storage-direct-fs-";
-        let filename = |region: RegionId| format!("{}{:08}", PREFIX, region);
+        const PREFIX: &str = "foyer-storage-direct-fs-";
+        let filename = |region: RegionId| format!("{PREFIX}{region:08}");
 
         let mut files = Vec::with_capacity(regions);
 

@@ -38,9 +38,10 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 use foyer::{
-    Code, CodeError, Compression, DirectFileDeviceOptions, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
-    HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
-    RecoverMode, RuntimeOptions, S3FifoConfig, SmallEngineOptions, Throttle, TokioRuntimeOptions, TracingOptions,
+    Code, CodeError, Compression, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
+    FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
+    IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
+    RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions, UringIoEngineBuilder,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -218,11 +219,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
 
-    // TODO(MrCroxx): use mixed engine by default.
-    /// Disk cache engine.
-    #[arg(long, default_value = "large")]
-    engine: String,
-
+    // // TODO(MrCroxx): use mixed engine by default.
+    // /// Disk cache engine.
+    // #[arg(long, default_value = "large")]
+    // engine: String,
     /// Time-series operation distribution.
     ///
     /// Available values: "none", "uniform", "zipf".
@@ -288,6 +288,9 @@ struct Args {
 
     #[arg(long, default_value_t = 0.1)]
     lodc_fifo_probation_ratio: f64,
+
+    #[arg(long, value_parser = PossibleValuesParser::new(["psync", "io_uring"]), default_value = "psync")]
+    io_engine: String,
 }
 
 #[derive(Debug)]
@@ -496,42 +499,22 @@ async fn benchmark(args: Args) {
         create_dir_all(dir).unwrap();
     }
 
-    let mut large = LargeEngineOptions::new()
-        .with_indexer_shards(args.shards)
-        .with_recover_concurrency(args.recover_concurrency)
-        .with_flushers(args.flushers)
-        .with_reclaimers(args.reclaimers)
-        .with_eviction_pickers(vec![
-            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-            Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
-        ])
-        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
-        .with_blob_index_size(args.blob_index_size.as_u64() as _);
+    // let small = SmallEngineOptions::new()
+    //     .with_flushers(args.flushers)
+    //     .with_set_size(args.set_size.as_u64() as _)
+    //     .with_set_cache_capacity(args.set_cache_capacity);
 
-    let small = SmallEngineOptions::new()
-        .with_flushers(args.flushers)
-        .with_set_size(args.set_size.as_u64() as _)
-        .with_set_cache_capacity(args.set_cache_capacity);
-
-    if args.clean_region_threshold > 0 {
-        large = large.with_clean_region_threshold(args.clean_region_threshold);
-    }
-
-    let hint = r#"incorrect engine format, supported: "large", "small", "mixed=<ratio>"."#;
-    let engine = match args.engine.as_str() {
-        "large" => Engine::Large(large),
-        "small" => Engine::Small(small),
-        s if s.starts_with("mixed=") => Engine::Mixed {
-            ratio: s[6..].parse::<f64>().expect(hint),
-            large,
-            small,
-        },
-        _ => panic!("{hint}"),
-    };
-
-    let mut builder = builder
-        .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
-        .storage(engine);
+    // let hint = r#"incorrect engine format, supported: "large", "small", "mixed=<ratio>"."#;
+    // let engine = match args.engine.as_str() {
+    //     "large" => Engine::Large(large),
+    //     "small" => Engine::Small(small),
+    //     s if s.starts_with("mixed=") => Engine::Mixed {
+    //         ratio: s[6..].parse::<f64>().expect(hint),
+    //         large,
+    //         small,
+    //     },
+    //     _ => panic!("{hint}"),
+    // };
 
     let throttle = Throttle::default()
         .with_read_iops(args.disk_read_iops)
@@ -539,22 +522,54 @@ async fn benchmark(args: Args) {
         .with_read_throughput(args.disk_read_throughput.as_u64() as _)
         .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
-    builder = match (args.file.as_ref(), args.dir.as_ref()) {
-        (Some(file), None) => builder.with_device_options(
-            DirectFileDeviceOptions::new(file)
-                .with_capacity(args.disk.as_u64() as _)
-                .with_region_size(args.region_size.as_u64() as _)
-                .with_throttle(throttle),
-        ),
-        (None, Some(dir)) => builder.with_device_options(
-            DirectFsDeviceOptions::new(dir)
-                .with_capacity(args.disk.as_u64() as _)
-                .with_file_size(args.region_size.as_u64() as _)
-                .with_throttle(throttle),
-        ),
-        (None, None) => builder,
+    let device_builder: Box<dyn DeviceBuilder> = match (args.file.as_ref(), args.dir.as_ref()) {
+        (Some(file), None) => FileDeviceBuilder::new(file)
+            .with_capacity(args.disk.as_u64() as _)
+            .with_region_size(args.region_size.as_u64() as _)
+            .with_throttle(throttle)
+            .boxed(),
+
+        (None, Some(dir)) => FsDeviceBuilder::new(dir)
+            .with_capacity(args.disk.as_u64() as _)
+            .with_file_size(args.region_size.as_u64() as _)
+            .with_throttle(throttle)
+            .boxed(),
+
+        (None, None) => NoopDeviceBuilder.boxed(),
         _ => unreachable!(),
     };
+
+    let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
+        "psync" => PsyncIoEngineBuilder::new().boxed(),
+        "io_uring" => UringIoEngineBuilder::new().boxed(),
+        _ => unreachable!(),
+    };
+
+    let engine_builder: Box<dyn EngineBuilder<u64, Value, HybridCacheProperties>> = {
+        let mut builder = LargeObjectEngineBuilder::new()
+            .with_indexer_shards(args.shards)
+            .with_recover_concurrency(args.recover_concurrency)
+            .with_flushers(args.flushers)
+            .with_reclaimers(args.reclaimers)
+            .with_eviction_pickers(vec![
+                Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+                Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
+            ])
+            .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
+            .with_blob_index_size(args.blob_index_size.as_u64() as _);
+        if args.clean_region_threshold > 0 {
+            builder = builder.with_clean_region_threshold(args.clean_region_threshold);
+        }
+        builder
+    }
+    .boxed();
+
+    let mut builder = builder
+        .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
+        .storage()
+        .with_device_builder(device_builder)
+        .with_io_engine_builder(io_engine_builder)
+        .with_engine_builder(engine_builder);
 
     builder = builder
         .with_recover_mode(args.recover_mode)

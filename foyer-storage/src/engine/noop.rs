@@ -62,7 +62,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    pub fn build(self: Box<Self>) -> Arc<NoopEngine<K, V, P>> {
+    pub fn build(self) -> Arc<NoopEngine<K, V, P>> {
         Arc::new(NoopEngine { marker: PhantomData })
     }
 }
@@ -74,7 +74,7 @@ where
     P: Properties,
 {
     fn build(self: Box<Self>, _: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>> {
-        async move { Ok(self.build() as Arc<dyn Engine<K, V, P>>) }.boxed()
+        async move { Ok((*self).build() as Arc<dyn Engine<K, V, P>>) }.boxed()
     }
 }
 

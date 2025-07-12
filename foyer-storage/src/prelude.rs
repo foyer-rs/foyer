@@ -14,22 +14,25 @@
 
 pub use crate::{
     compress::Compression,
-    device::{
-        direct_file::{DirectFileDevice, DirectFileDeviceOptions},
-        direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-        Dev, DevConfig, DevExt, IopsCounter, Throttle,
-    },
     engine::{
         large::{
-            recover::RecoverMode,
+            engine::LargeObjectEngineBuilder,
             tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
         },
-        Load,
+        Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
     },
     error::{Error, Result},
     io::{
-        buffer::{IoBufMutOld, IoBufOld, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
-        throttle::IoThrottler,
+        device::{
+            combined::CombinedDeviceBuilder, file::FileDeviceBuilder, fs::FsDeviceBuilder, noop::NoopDeviceBuilder,
+            partial::PartialDeviceBuilder, Device, DeviceBuilder,
+        },
+        engine::{
+            noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, uring::UringIoEngineBuilder, IoEngine,
+            IoEngineBuilder, IoHandle,
+        },
+        error::{IoError, IoResult},
+        throttle::{IoThrottler, IopsCounter, Throttle},
     },
     picker::{
         utils::{
@@ -41,9 +44,5 @@ pub use crate::{
     region::{Region, RegionStatistics},
     runtime::Runtime,
     statistics::Statistics,
-    storage::{either::Order, Storage},
-    store::{
-        DeviceOptions, Engine, LargeEngineOptions, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
-        TokioRuntimeOptions,
-    },
+    store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
 };

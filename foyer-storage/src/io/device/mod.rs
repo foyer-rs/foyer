@@ -14,10 +14,11 @@
 
 use std::{any::Any, fmt::Debug, os::fd::RawFd, sync::Arc};
 
-use crate::{io::error::IoResult, Throttle};
+use crate::io::{error::IoResult, throttle::Throttle};
 
 pub type RegionId = u32;
 
+/// Device builder trait.
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     /// Build a device from the given configuration.
     fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>>;
@@ -40,7 +41,8 @@ where
     }
 }
 
-pub trait Device: Send + Sync + 'static + Debug {
+/// Device trait.
+pub trait Device: Send + Sync + 'static + Debug + Any {
     /// The capacity of the device, must be 4K aligned.
     fn capacity(&self) -> usize;
 

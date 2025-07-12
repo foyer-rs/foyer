@@ -23,12 +23,16 @@ use std::{
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::{Device, RegionId},
-    error::IoResult,
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::{Device, RegionId},
+        error::IoResult,
+    },
+    Runtime,
 };
 
+/// A detached I/O handle that can be polled for completion.
 #[pin_project]
 pub struct IoHandle {
     #[pin]
@@ -56,9 +60,10 @@ impl Future for IoHandle {
     }
 }
 
+/// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>>;
+    fn build(self: Box<Self>, device: Arc<dyn Device>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>>;
 
     /// Box the builder.
     fn boxed(self) -> Box<Self>
@@ -78,9 +83,13 @@ where
     }
 }
 
+/// I/O engine builder trait.
 pub trait IoEngine: Send + Sync + 'static + Debug {
+    /// Get the device associated with this I/O engine.
     fn device(&self) -> &Arc<dyn Device>;
+    /// Read data into the buffer from the specified region and offset.
     fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle;
+    /// Write data from the buffer to the specified region and offset.
     fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle;
 }
 
@@ -109,13 +118,13 @@ mod tests {
     fn build_test_file_device(path: impl AsRef<Path>) -> IoResult<Arc<dyn Device>> {
         FileDeviceBuilder::new(&path)
             .with_capacity(16 * MIB)
-            .with_region_size(1 * MIB)
+            .with_region_size(MIB)
             .boxed()
             .build()
     }
 
     fn build_psync_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        PsyncIoEngineBuilder::new().boxed().build(device)
+        PsyncIoEngineBuilder::new().boxed().build(device, Runtime::current())
     }
 
     fn build_uring_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
@@ -123,7 +132,7 @@ mod tests {
             .with_threads(4)
             .with_io_depth(64)
             .boxed()
-            .build(device)
+            .build(device, Runtime::current())
     }
 
     async fn test_read_write(engine: Arc<dyn IoEngine>) {

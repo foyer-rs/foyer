@@ -14,14 +14,13 @@
 
 use std::{os::fd::RawFd, sync::Arc};
 
-use crate::{
-    io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::IoResult,
-    },
-    Throttle,
+use crate::io::{
+    device::{Device, DeviceBuilder, RegionId},
+    error::IoResult,
+    throttle::Throttle,
 };
 
+/// Builder for a no-operation mock device.
 #[derive(Debug, Default)]
 pub struct NoopDeviceBuilder;
 

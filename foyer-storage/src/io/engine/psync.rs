@@ -16,40 +16,44 @@ use std::{fmt::Debug, fs::File, mem::ManuallyDrop, os::fd::FromRawFd, sync::Arc}
 
 use futures_util::FutureExt;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::{Device, RegionId},
-    engine::{IoEngine, IoEngineBuilder, IoHandle},
-    error::{IoError, IoResult},
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::{Device, RegionId},
+        engine::{IoEngine, IoEngineBuilder, IoHandle},
+        error::{IoError, IoResult},
+    },
+    Runtime,
 };
 
+/// Builder for synchronous I/O engine with pread(2)/pwrite(2).
 #[derive(Debug)]
 pub struct PsyncIoEngineBuilder;
 
+impl Default for PsyncIoEngineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PsyncIoEngineBuilder {
+    /// Create a new synchronous I/O engine builder with default configurations.
     pub fn new() -> Self {
         Self
     }
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        let engine = PsyncIoEngine { device: device };
+    fn build(self: Box<Self>, device: Arc<dyn Device>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+        let engine = PsyncIoEngine { device, runtime };
         let engine = Arc::new(engine);
         Ok(engine)
     }
 }
 
-struct RawBuf {
-    ptr: *mut u8,
-    len: usize,
-}
-
-unsafe impl Send for RawBuf {}
-unsafe impl Sync for RawBuf {}
-
 pub struct PsyncIoEngine {
     device: Arc<dyn Device>,
+    runtime: Runtime,
 }
 
 impl Debug for PsyncIoEngine {
@@ -67,23 +71,26 @@ impl IoEngine for PsyncIoEngine {
         let device = self.device.clone();
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        let runtime = self.runtime.clone();
         async move {
-            let res = match tokio::task::spawn_blocking(move || {
-                let (fd, offset) = device.translate(region, offset);
-                let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-                #[cfg(target_family = "windows")]
-                {
-                    use std::os::windows::fs::FileExt;
-                    file.seek_read(slice, offset).map_err(IoError::from)?;
-                };
-                #[cfg(target_family = "unix")]
-                {
-                    use std::os::unix::fs::FileExt;
-                    file.read_exact_at(slice, offset).map_err(IoError::from)?;
-                };
-                Ok(())
-            })
-            .await
+            let res = match runtime
+                .read()
+                .spawn_blocking(move || {
+                    let (fd, offset) = device.translate(region, offset);
+                    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                    #[cfg(target_family = "windows")]
+                    {
+                        use std::os::windows::fs::FileExt;
+                        file.seek_read(slice, offset).map_err(IoError::from)?;
+                    };
+                    #[cfg(target_family = "unix")]
+                    {
+                        use std::os::unix::fs::FileExt;
+                        file.read_exact_at(slice, offset).map_err(IoError::from)?;
+                    };
+                    Ok(())
+                })
+                .await
             {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),
@@ -99,23 +106,26 @@ impl IoEngine for PsyncIoEngine {
         let device = self.device.clone();
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+        let runtime = self.runtime.clone();
         async move {
-            let res = match tokio::task::spawn_blocking(move || {
-                let (fd, offset) = device.translate(region, offset);
-                let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-                #[cfg(target_family = "windows")]
-                {
-                    use std::os::windows::fs::FileExt;
-                    file.seek_write(slice, offset).map_err(IoError::from)?;
-                };
-                #[cfg(target_family = "unix")]
-                {
-                    use std::os::unix::fs::FileExt;
-                    file.write_all_at(slice, offset).map_err(IoError::from)?;
-                };
-                Ok(())
-            })
-            .await
+            let res = match runtime
+                .write()
+                .spawn_blocking(move || {
+                    let (fd, offset) = device.translate(region, offset);
+                    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                    #[cfg(target_family = "windows")]
+                    {
+                        use std::os::windows::fs::FileExt;
+                        file.seek_write(slice, offset).map_err(IoError::from)?;
+                    };
+                    #[cfg(target_family = "unix")]
+                    {
+                        use std::os::unix::fs::FileExt;
+                        file.write_all_at(slice, offset).map_err(IoError::from)?;
+                    };
+                    Ok(())
+                })
+                .await
             {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),

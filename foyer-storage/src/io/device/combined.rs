@@ -14,21 +14,27 @@
 
 use std::{os::fd::RawFd, sync::Arc};
 
-use crate::{
-    io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::{IoError, IoResult},
-    },
-    Throttle,
+use crate::io::{
+    device::{Device, DeviceBuilder, RegionId},
+    error::{IoError, IoResult},
+    throttle::Throttle,
 };
 
+/// Builder for a combined device that wraps multiple devices and allows access to their regions.
 #[derive(Debug)]
 pub struct CombinedDeviceBuilder {
     devices: Vec<Arc<dyn Device>>,
     throttle: Option<Throttle>,
 }
 
+impl Default for CombinedDeviceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CombinedDeviceBuilder {
+    /// Create a new combined device builder with empty devices..
     pub fn new() -> Self {
         Self {
             devices: vec![],
@@ -36,11 +42,13 @@ impl CombinedDeviceBuilder {
         }
     }
 
+    /// Add a device to the combined device builder.
     pub fn with_device(mut self, device: Arc<dyn Device>) -> Self {
         self.devices.push(device);
         self
     }
 
+    /// Set the throttle for the combined device to override the inner devices' throttles.
     pub fn with_throttle(mut self, throttle: Throttle) -> Self {
         self.throttle = Some(throttle);
         self

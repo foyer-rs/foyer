@@ -16,9 +16,9 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
-    SmallEngineOptions, Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    AdmitAllPicker, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, IopsCounter,
+    LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
+    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
 };
 use tempfile::tempdir;
 
@@ -36,9 +36,23 @@ async fn main() -> anyhow::Result<()> {
         })
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage(Engine::Mixed {
-            ratio: 0.1,
-            large: LargeEngineOptions::new()
+        .storage()
+        .with_device_builder(
+            FsDeviceBuilder::new(dir.path())
+                .with_capacity(64 * 1024 * 1024)
+                .with_file_size(4 * 1024 * 1024)
+                .with_throttle(
+                    Throttle::new()
+                        .with_read_iops(4000)
+                        .with_write_iops(2000)
+                        .with_write_throughput(100 * 1024 * 1024)
+                        .with_read_throughput(800 * 1024 * 1024)
+                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+                ),
+        )
+        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_engine_builder(
+            LargeObjectEngineBuilder::new()
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)
                 .with_flushers(2)
@@ -51,23 +65,6 @@ async fn main() -> anyhow::Result<()> {
                     TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
                         .with_flush(true)
                         .build(),
-                ),
-            small: SmallEngineOptions::new()
-                .with_set_size(16 * 1024)
-                .with_set_cache_capacity(64)
-                .with_flushers(2),
-        })
-        .with_device_options(
-            DirectFsDeviceOptions::new(dir.path())
-                .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
-                .with_throttle(
-                    Throttle::new()
-                        .with_read_iops(4000)
-                        .with_write_iops(2000)
-                        .with_write_throughput(100 * 1024 * 1024)
-                        .with_read_throughput(800 * 1024 * 1024)
-                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
                 ),
         )
         .with_recover_mode(RecoverMode::Quiet)

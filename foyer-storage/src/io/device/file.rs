@@ -21,15 +21,14 @@ use std::{
 
 use fs4::free_space;
 
-use crate::{
-    io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::{IoError, IoResult},
-        PAGE,
-    },
-    Throttle,
+use crate::io::{
+    device::{Device, DeviceBuilder, RegionId},
+    error::{IoError, IoResult},
+    throttle::Throttle,
+    PAGE,
 };
 
+/// Builder for a file-based device that manages a single file or a raw block device.
 #[derive(Debug)]
 pub struct FileDeviceBuilder {
     path: PathBuf,
@@ -90,7 +89,7 @@ impl DeviceBuilder for FileDeviceBuilder {
     fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
         // Normalize configurations.
 
-        let align_v = |value: usize, align: usize| value - value % align;
+        let align_v = |value: usize, align: usize| value - (value % align);
 
         let capacity = self.capacity.unwrap_or({
             // Create an empty directory before to get free space.
@@ -100,7 +99,11 @@ impl DeviceBuilder for FileDeviceBuilder {
         });
         let capacity = align_v(capacity, PAGE);
 
-        let region_size = self.region_size.unwrap_or(Self::DEFAULT_REGION_SIZE).min(capacity / 16);
+        let region_size = self
+            .region_size
+            .unwrap_or(Self::DEFAULT_REGION_SIZE)
+            .min(capacity / 16)
+            .max(PAGE);
         let region_size = align_v(region_size, PAGE);
 
         let capacity = align_v(capacity, region_size);
@@ -130,6 +133,7 @@ impl DeviceBuilder for FileDeviceBuilder {
         }
 
         let file = opts.open(&self.path)?;
+        file.set_len(capacity as _)?;
         let throttle = self.throttle;
 
         let inner = Inner {

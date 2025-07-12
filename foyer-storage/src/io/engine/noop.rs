@@ -16,18 +16,22 @@ use std::sync::Arc;
 
 use futures_util::FutureExt;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::{noop::NoopDevice, Device, RegionId},
-    engine::{IoEngine, IoEngineBuilder, IoHandle},
-    error::IoResult,
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::{noop::NoopDevice, Device, RegionId},
+        engine::{IoEngine, IoEngineBuilder, IoHandle},
+        error::IoResult,
+    },
+    Runtime,
 };
 
+/// Builder for a no-operation mock I/O engine.
 #[derive(Debug, Default)]
 pub struct NoopIoEngineBuilder;
 
 impl IoEngineBuilder for NoopIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
+    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
         Ok(Arc::new(NoopIoEngine(device)))
     }
 }

@@ -18,26 +18,18 @@
 #![cfg_attr(feature = "nightly", feature(write_all_vectored))]
 
 mod compress;
-mod device;
 mod engine;
 mod error;
 mod io;
 mod picker;
-mod picker_v2;
 mod region;
-mod region_v2;
 mod runtime;
 mod serde;
 mod statistics;
-mod storage;
 mod store;
-mod store_v2;
 
 mod prelude;
 pub use prelude::*;
 
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;
-
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils_v2;

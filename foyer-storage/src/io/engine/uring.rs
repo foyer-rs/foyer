@@ -21,11 +21,14 @@ use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
 use tokio::sync::oneshot;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::{Device, RegionId},
-    engine::{IoEngine, IoEngineBuilder, IoHandle},
-    error::{IoError, IoResult},
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::{Device, RegionId},
+        engine::{IoEngine, IoEngineBuilder, IoHandle},
+        error::{IoError, IoResult},
+    },
+    Runtime,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,14 +45,6 @@ struct RawBuf {
 unsafe impl Send for RawBuf {}
 unsafe impl Sync for RawBuf {}
 
-struct UringIoRequest {
-    tx: oneshot::Sender<IoResult<()>>,
-    io_type: UringIoType,
-    buf: RawBuf,
-    region: RegionId,
-    offset: u64,
-}
-
 struct UringIoCtx {
     tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
@@ -59,7 +54,7 @@ struct UringIoCtx {
 }
 
 struct UringIoEngineShard {
-    rx: mpsc::Receiver<UringIoRequest>,
+    rx: mpsc::Receiver<UringIoCtx>,
     device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
@@ -120,7 +115,7 @@ impl UringIoEngineShard {
 
 pub struct UringIoEngine {
     device: Arc<dyn Device>,
-    txs: Vec<mpsc::SyncSender<UringIoRequest>>,
+    txs: Vec<mpsc::SyncSender<UringIoCtx>>,
 }
 
 impl Debug for UringIoEngine {
@@ -134,7 +129,7 @@ impl UringIoEngine {
         let (tx, rx) = oneshot::channel();
         let shard = &self.txs[region as usize % self.txs.len()];
         let (ptr, len) = buf.as_raw_parts();
-        let _ = shard.send(UringIoRequest {
+        let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Read,
             buf: RawBuf { ptr, len },
@@ -157,7 +152,7 @@ impl UringIoEngine {
         let (tx, rx) = oneshot::channel();
         let shard = &self.txs[region as usize % self.txs.len()];
         let (ptr, len) = buf.as_raw_parts();
-        let _ = shard.send(UringIoRequest {
+        let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Write,
             buf: RawBuf { ptr, len },
@@ -177,13 +172,21 @@ impl UringIoEngine {
     }
 }
 
+/// Builder for io_uring based I/O engine.
 #[derive(Debug)]
 pub struct UringIoEngineBuilder {
     threads: usize,
     io_depth: usize,
 }
 
+impl Default for UringIoEngineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UringIoEngineBuilder {
+    /// Create a new io_uring based I/O engine builder with default configurations.
     pub fn new() -> Self {
         Self {
             threads: 1,
@@ -205,7 +208,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
+    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
         if self.threads == 0 {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }

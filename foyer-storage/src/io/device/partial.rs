@@ -14,14 +14,13 @@
 
 use std::{os::fd::RawFd, sync::Arc};
 
-use crate::{
-    io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::IoResult,
-    },
-    Throttle,
+use crate::io::{
+    device::{Device, DeviceBuilder, RegionId},
+    error::IoResult,
+    throttle::Throttle,
 };
 
+/// Builder for a partial device that wraps another device and allows access to only a subset of its regions.
 #[derive(Debug)]
 pub struct PartialDeviceBuilder {
     device: Arc<dyn Device>,
@@ -30,6 +29,9 @@ pub struct PartialDeviceBuilder {
 }
 
 impl PartialDeviceBuilder {
+    /// Create a new partial device builder with the specified device.
+    ///
+    /// It uses none of the regions by default.
     pub fn new(device: Arc<dyn Device>) -> Self {
         Self {
             device,
@@ -38,11 +40,13 @@ impl PartialDeviceBuilder {
         }
     }
 
+    /// Set the region mapping for the partial device.
     pub fn with_region_mapping(mut self, region_mapping: Vec<RegionId>) -> Self {
         self.region_mapping = region_mapping;
         self
     }
 
+    /// Set the throttle for the partial device to override the inner device's throttle.
     pub fn with_throttle(mut self, throttle: Throttle) -> Self {
         self.throttle = Some(throttle);
         self

@@ -30,6 +30,7 @@ pub enum Error {
     /// I/O error.
     #[error("io error: {0}")]
     StdIo(#[from] std::io::Error),
+    /// I/O related error.
     #[error("io error: {0}")]
     Io(#[from] IoError),
     #[error(transparent)]

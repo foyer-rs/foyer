@@ -42,20 +42,23 @@ use tokio::sync::oneshot;
 #[cfg(test)]
 use crate::engine::large::test_utils::*;
 use crate::{
-    device::{MonitoredDevice, RegionId},
     engine::large::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
-        generic::GenericLargeStorageConfig,
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
         reclaimer::Reinsertion,
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
     error::{Error, Result},
-    io::{buffer::IoBuffer, PAGE},
+    io::{
+        bytes::{IoSlice, IoSliceMut},
+        device::RegionId,
+        engine::IoEngine,
+        PAGE,
+    },
     region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
-    Compression, Dev, SharedIoSlice,
+    Compression,
 };
 
 pub enum Submission<K, V, P>
@@ -151,10 +154,12 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn open(
         id: usize,
-        config: &GenericLargeStorageConfig<K, V>,
+        io_buffer_size: usize,
+        blob_index_size: usize,
+        compression: Compression,
         indexer: Indexer,
         region_manager: RegionManager,
-        device: MonitoredDevice,
+        io_engine: Arc<dyn IoEngine>,
         submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
@@ -163,24 +168,25 @@ where
     ) -> Result<Self> {
         let (tx, rx) = flume::unbounded();
 
-        let io_buffer_size = config.buffer_pool_size / config.flushers;
         let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
         assert!(io_buffer_size > 0);
 
         bits::assert_aligned(PAGE, io_buffer_size);
-        bits::assert_aligned(PAGE, config.blob_index_size);
+        bits::assert_aligned(PAGE, blob_index_size);
 
-        let max_entry_size = device.region_size() - config.blob_index_size;
+        let device = io_engine.device().clone();
 
-        let io_buffer = IoBuffer::new(io_buffer_size);
-        let rotate_buffer = Some(IoBuffer::new(io_buffer_size));
+        let max_entry_size = device.region_size() - blob_index_size;
 
-        let buffer = Buffer::new(io_buffer, max_entry_size, metrics.clone());
+        let bytes = IoSliceMut::new(io_buffer_size);
+        let rotate_buffer = Some(IoSliceMut::new(io_buffer_size));
+
+        let buffer = Buffer::new(bytes, max_entry_size, metrics.clone());
         let buffer = Some(buffer);
 
         let current_region_handle = region_manager.get_clean_region();
 
-        let ctx = SplitCtx::new(device.region_size(), config.blob_index_size);
+        let ctx = SplitCtx::new(device.region_size(), blob_index_size);
 
         let runner = Runner {
             id,
@@ -193,10 +199,9 @@ where
             queue_init: None,
             submit_queue_size: submit_queue_size.clone(),
             region_manager,
-            _device: device,
             indexer,
             tombstone_log,
-            compression: config.compression,
+            compression,
             runtime: runtime.clone(),
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
@@ -258,7 +263,7 @@ struct IoTaskCtx {
     handle: Option<GetCleanRegionHandle>,
     waiters: Vec<oneshot::Sender<()>>,
     init: Instant,
-    io_slice: SharedIoSlice,
+    io_slice: IoSlice,
     tombstone_infos: Vec<TombstoneInfo>,
 }
 
@@ -282,7 +287,7 @@ where
     /// IoBuffer rotates between writer and inflight io task.
     ///
     /// Use this field to avoid allocation.
-    rotate_buffer: Option<IoBuffer>,
+    rotate_buffer: Option<IoSliceMut>,
 
     submit_queue_size: Arc<AtomicUsize>,
 
@@ -293,8 +298,6 @@ where
     tombstone_log: Option<TombstoneLog>,
 
     compression: Compression,
-
-    _device: MonitoredDevice,
 
     runtime: Runtime,
 
@@ -346,7 +349,7 @@ where
                     infos.last().map(|info| info.offset + info.len).unwrap_or_default() as f64 / io_buffer.len() as f64;
                 self.metrics.storage_lodc_buffer_efficiency.record(efficiency);
 
-                let shared_io_slice = io_buffer.into_shared_io_slice();
+                let shared_io_slice = io_buffer.into_io_slice();
                 let batch = Splitter::split(&mut self.ctx, shared_io_slice, infos);
 
                 let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
@@ -364,13 +367,13 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice,tombstone_infos } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_region_handle = handle;
                     }
                     self.handle_io_complete(waiters,  tombstone_infos,init);
                     // `try_into_io_buffer` must return `Some(..)` here.
-                    self.rotate_buffer = io_slice.try_into_io_buffer();
+                    self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
                 Ok(submission) = rx.recv_async() => {
                     self.recv(submission);
@@ -416,7 +419,7 @@ where
                 // Skip reinsertion if the entry is not in the indexer.
                 if self.indexer.get(reinsertion.hash).is_some() {
                     report(self.buffer.as_mut().unwrap().push_slice(
-                        &reinsertion.slice,
+                        &reinsertion.slice[..reinsertion.len],
                         reinsertion.hash,
                         reinsertion.sequence,
                     ));
@@ -451,7 +454,7 @@ where
                 .collect_vec()
         };
 
-        let io_slice = batch.io_slice;
+        let bytes = batch.bytes;
         let regions = batch.regions.len();
         // Write regions concurrently.
         let futures = batch
@@ -493,7 +496,7 @@ where
                                         "[flusher]: write blob data"
                                     );
 
-                                    let (_, res) = region.write(data, offset as _).await;
+                                    let (_, res) = region.write(Box::new(data), offset as _).await;
                                     if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
@@ -509,7 +512,7 @@ where
 
                                     tracing::trace!(id, offset = blob_region_offset, "[flusher]: write blob index");
 
-                                    let (_, res) = region.write(index, blob_region_offset as _).await;
+                                    let (_, res) = region.write(Box::new(index), blob_region_offset as _).await;
                                     if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
@@ -598,7 +601,7 @@ where
                     handle: states.pop(),
                     waiters,
                     init,
-                    io_slice,
+                    io_slice: bytes,
                     tombstone_infos,
                 },
                 Ok(Err(e)) => {
@@ -607,7 +610,7 @@ where
                         handle: None,
                         waiters,
                         init,
-                        io_slice,
+                        io_slice: bytes,
                         tombstone_infos,
                     }
                 }
@@ -617,7 +620,7 @@ where
                         handle: None,
                         waiters,
                         init,
-                        io_slice,
+                        io_slice: bytes,
                         tombstone_infos,
                     }
                 }

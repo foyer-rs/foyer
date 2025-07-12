@@ -1030,12 +1030,8 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
             .build()
             .await
             .unwrap()
@@ -1050,12 +1046,8 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
             .build()
             .await
@@ -1072,12 +1064,8 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
             .build()
             .await
             .unwrap()
@@ -1094,12 +1082,8 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
             .with_admission_picker(recorder.clone())
             .build()
             .await
@@ -1117,12 +1101,8 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
             .build()
             .await
             .unwrap()
@@ -1469,9 +1449,9 @@ mod tests {
                 .with_name("test")
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
-                .storage(Engine::large())
-                .with_device_options(
-                    DirectFsDeviceOptions::new(dir)
+                .storage()
+                .with_device_builder(
+                    FsDeviceBuilder::new(dir)
                         .with_capacity(256 * KB)
                         .with_file_size(64 * KB),
                 )

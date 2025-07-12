@@ -22,20 +22,30 @@ use crate::{
         device::RegionId,
         engine::{IoEngine, IoHandle},
     },
-    IopsCounter, Statistics,
+    Statistics,
 };
 
 #[derive(Debug)]
 struct Inner {
     io_engine: Arc<dyn IoEngine>,
-    iops_counter: IopsCounter,
-    stats: Arc<Statistics>,
+    statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
 #[derive(Clone)]
 pub struct MonitoredIoEngine {
     inner: Arc<Inner>,
+}
+
+impl MonitoredIoEngine {
+    pub fn new(io_engine: Arc<dyn IoEngine>, statistics: Arc<Statistics>, metrics: Arc<Metrics>) -> Arc<Self> {
+        let inner = Inner {
+            io_engine,
+            statistics,
+            metrics,
+        };
+        Arc::new(Self { inner: Arc::new(inner) })
+    }
 }
 
 impl Debug for MonitoredIoEngine {
@@ -57,7 +67,7 @@ impl IoEngine for MonitoredIoEngine {
 
         let handle = self.inner.io_engine.read(buf, region, offset);
 
-        self.inner.stats.record_disk_read(bytes);
+        self.inner.statistics.record_disk_read(bytes);
         self.inner.metrics.storage_disk_read.increase(1);
         self.inner.metrics.storage_disk_read_bytes.increase(bytes as u64);
         self.inner
@@ -74,7 +84,7 @@ impl IoEngine for MonitoredIoEngine {
 
         let handle = self.inner.io_engine.write(buf, region, offset);
 
-        self.inner.stats.record_disk_write(bytes);
+        self.inner.statistics.record_disk_write(bytes);
         self.inner.metrics.storage_disk_write.increase(1);
         self.inner.metrics.storage_disk_write_bytes.increase(bytes as u64);
         self.inner
