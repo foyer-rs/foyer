@@ -12,6 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod monitor;
+pub mod noop;
+pub mod psync;
+
+#[cfg(target_os = "linux")]
+pub mod uring;
+
 use std::{
     fmt::Debug,
     future::Future,
@@ -93,11 +100,6 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
     fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle;
 }
 
-pub mod monitor;
-pub mod noop;
-pub mod psync;
-pub mod uring;
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -127,6 +129,7 @@ mod tests {
         PsyncIoEngineBuilder::new().boxed().build(device, Runtime::current())
     }
 
+    #[cfg(target_os = "linux")]
     fn build_uring_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
         UringIoEngineBuilder::new()
             .with_threads(4)
@@ -154,10 +157,13 @@ mod tests {
     async fn test_io_engine() {
         let dir = tempdir().unwrap();
 
-        let path = dir.path().join("test_file_1");
-        let device = build_test_file_device(&path).unwrap();
-        let engine = build_uring_io_engine(device.clone()).unwrap();
-        test_read_write(engine).await;
+        #[cfg(target_os = "linux")]
+        {
+            let path = dir.path().join("test_file_1");
+            let device = build_test_file_device(&path).unwrap();
+            let engine = build_uring_io_engine(device.clone()).unwrap();
+            test_read_write(engine).await;
+        }
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
