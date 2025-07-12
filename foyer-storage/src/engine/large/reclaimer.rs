@@ -42,7 +42,7 @@ use crate::{
     Statistics,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Reclaimer {
     wait_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
 }
@@ -133,6 +133,15 @@ where
         loop {
             tokio::select! {
                 biased;
+                permit = self.reclaim_semaphore.acquire() => {
+                    match permit {
+                        Err(_) => {
+                            tracing::info!("[reclaimer]: Reclaimer exits.");
+                            return;
+                        },
+                        Ok(permit) => self.handle(permit).await,
+                    }
+                }
                 tx = self.wait_rx.recv() => {
                     match tx {
                         None => {
@@ -144,15 +153,6 @@ where
                         },
                     }
 
-                }
-                permit = self.reclaim_semaphore.acquire() => {
-                    match permit {
-                        Err(_) => {
-                            tracing::info!("[reclaimer]: Reclaimer exits.");
-                            return;
-                        },
-                        Ok(permit) => self.handle(permit).await,
-                    }
                 }
             }
         }

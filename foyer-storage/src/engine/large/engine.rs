@@ -494,11 +494,11 @@ where
     P: Properties,
 {
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let wait_flushers = join_all(self.inner.flushers.iter().map(|flusher| flusher.wait()));
-        let wait_reclaimers = join_all(self.inner.reclaimers.iter().map(|reclaimer| reclaimer.wait()));
+        let flushers = self.inner.flushers.clone();
+        let reclaimers = self.inner.reclaimers.clone();
         async move {
-            wait_flushers.await;
-            wait_reclaimers.await;
+            join_all(flushers.iter().map(|flusher| flusher.wait())).await;
+            join_all(reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
         }
     }
 
