@@ -37,11 +37,13 @@ use analyze::{analyze, monitor, Metrics};
 use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
+#[cfg(target_os = "linux")]
+use foyer::UringIoEngineBuilder;
 use foyer::{
     Code, CodeError, Compression, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
     FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
     IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
-    RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions, UringIoEngineBuilder,
+    RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -541,6 +543,7 @@ async fn benchmark(args: Args) {
 
     let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
         "psync" => PsyncIoEngineBuilder::new().boxed(),
+        #[cfg(target_os = "linux")]
         "io_uring" => UringIoEngineBuilder::new().boxed(),
         _ => unreachable!(),
     };

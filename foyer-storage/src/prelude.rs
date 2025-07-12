@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_os = "linux")]
+pub use crate::io::engine::uring::UringIoEngineBuilder;
 pub use crate::{
     compress::Compression,
     engine::{
@@ -27,10 +29,7 @@ pub use crate::{
             combined::CombinedDeviceBuilder, file::FileDeviceBuilder, fs::FsDeviceBuilder, noop::NoopDeviceBuilder,
             partial::PartialDeviceBuilder, Device, DeviceBuilder,
         },
-        engine::{
-            noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, uring::UringIoEngineBuilder, IoEngine,
-            IoEngineBuilder, IoHandle,
-        },
+        engine::{noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
         throttle::{IoThrottler, IopsCounter, Throttle},
     },

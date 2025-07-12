@@ -108,10 +108,12 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    #[cfg(target_os = "linux")]
+    use crate::io::engine::uring::UringIoEngineBuilder;
     use crate::io::{
         bytes::IoSliceMut,
         device::{file::FileDeviceBuilder, Device, DeviceBuilder},
-        engine::{psync::PsyncIoEngineBuilder, uring::UringIoEngineBuilder},
+        engine::psync::PsyncIoEngineBuilder,
     };
 
     const KIB: usize = 1024;

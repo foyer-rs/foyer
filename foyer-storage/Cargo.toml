@@ -37,7 +37,6 @@ foyer-memory = { workspace = true }
 fs4 = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
-io-uring = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }
@@ -71,6 +70,9 @@ tokio = { workspace = true, features = [
   "signal",
   "fs",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { workspace = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }
