@@ -14,18 +14,20 @@
 
 use std::{
     fs::{create_dir_all, File, OpenOptions},
-    os::fd::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use fs4::free_space;
 
-use crate::io::{
-    device::{Device, DeviceBuilder, RegionId},
-    error::{IoError, IoResult},
-    throttle::Throttle,
-    PAGE,
+use crate::{
+    io::{
+        device::{Device, DeviceBuilder, RegionId},
+        error::{IoError, IoResult},
+        throttle::Throttle,
+        PAGE,
+    },
+    RawFile,
 };
 
 /// Builder for a file-based device that manages a single file or a raw block device.
@@ -176,9 +178,20 @@ impl Device for FileDevice {
         &self.inner.throttle
     }
 
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64) {
-        let fd = self.inner.file.as_raw_fd();
+    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64) {
+        #[cfg(any(target_family = "unix", target_family = "wasm"))]
+        let raw = {
+            use std::os::fd::AsRawFd;
+            self.inner.file.as_raw_fd()
+        };
+
+        #[cfg(target_family = "windows")]
+        let raw = {
+            use std::os::windows::io::AsRawHandle;
+            self.inner.file.as_raw_handle()
+        };
+
         let offset = region as u64 * self.inner.region_size as u64 + offset;
-        (fd, offset)
+        (raw, offset)
     }
 }

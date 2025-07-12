@@ -39,8 +39,8 @@ pub use crate::{
         Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineBuilder, EvictionInfo, EvictionPicker,
         FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
         IoHandle, IoResult, IoThrottler, IoThrottlerPicker, IoThrottlerTarget, IopsCounter, LargeObjectEngineBuilder,
-        Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RecoverMode,
-        Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics, Store,
-        StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfig, TombstoneLogConfigBuilder,
+        Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RawFile,
+        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics,
+        Store, StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfig, TombstoneLogConfigBuilder,
     },
 };

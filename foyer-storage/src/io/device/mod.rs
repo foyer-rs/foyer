@@ -12,11 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{any::Any, fmt::Debug, os::fd::RawFd, sync::Arc};
+use std::{any::Any, fmt::Debug, sync::Arc};
 
 use crate::io::{error::IoResult, throttle::Throttle};
 
 pub type RegionId = u32;
+
+/// Raw os file resource.
+///
+/// Use `fd` with unix and wasm, use `handle` with windows.
+#[cfg(any(target_family = "unix", target_family = "wasm"))]
+pub type RawFile = std::os::fd::RawFd;
+
+/// Raw os file resource.
+///
+/// Use `fd` with unix and wasm, use `handle` with windows.
+#[cfg(target_family = "windows")]
+pub type RawFile = std::os::windows::io::RawHandle;
 
 /// Device builder trait.
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
@@ -53,7 +65,7 @@ pub trait Device: Send + Sync + 'static + Debug + Any {
     fn throttle(&self) -> &Throttle;
 
     /// Translate a region and offset to a raw file descriptor and offset.
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64);
+    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64);
 
     /// Get the region count of the device.
     fn regions(&self) -> usize {

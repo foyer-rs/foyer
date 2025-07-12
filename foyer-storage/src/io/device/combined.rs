@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{os::fd::RawFd, sync::Arc};
+use std::sync::Arc;
 
-use crate::io::{
-    device::{Device, DeviceBuilder, RegionId},
-    error::{IoError, IoResult},
-    throttle::Throttle,
+use crate::{
+    io::{
+        device::{Device, DeviceBuilder, RegionId},
+        error::{IoError, IoResult},
+        throttle::Throttle,
+    },
+    RawFile,
 };
 
 /// Builder for a combined device that wraps multiple devices and allows access to their regions.
@@ -104,7 +107,7 @@ impl Device for CombinedDevice {
         self.throttle.as_ref().unwrap_or_else(|| self.throttle())
     }
 
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64) {
+    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64) {
         // let region = self.region_mapping[region as usize];
         // self.inner.translate(region, offset)
 

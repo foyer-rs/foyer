@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{os::fd::RawFd, sync::Arc};
+use std::sync::Arc;
 
-use crate::io::{
-    device::{Device, DeviceBuilder, RegionId},
-    error::IoResult,
-    throttle::Throttle,
+use crate::{
+    io::{
+        device::{Device, DeviceBuilder, RegionId},
+        error::IoResult,
+        throttle::Throttle,
+    },
+    RawFile,
 };
 
 /// Builder for a no-operation mock device.
@@ -46,7 +49,7 @@ impl Device for NoopDevice {
         &self.0
     }
 
-    fn translate(&self, _: RegionId, _: u64) -> (RawFd, u64) {
-        (0, 0)
+    fn translate(&self, _: RegionId, _: u64) -> (RawFile, u64) {
+        (0 as _, 0)
     }
 }

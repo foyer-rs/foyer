@@ -27,7 +27,7 @@ pub use crate::{
     io::{
         device::{
             combined::CombinedDeviceBuilder, file::FileDeviceBuilder, fs::FsDeviceBuilder, noop::NoopDeviceBuilder,
-            partial::PartialDeviceBuilder, Device, DeviceBuilder,
+            partial::PartialDeviceBuilder, Device, DeviceBuilder, RawFile,
         },
         engine::{noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},

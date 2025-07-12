@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, fs::File, mem::ManuallyDrop, os::fd::FromRawFd, sync::Arc};
+use std::{fmt::Debug, fs::File, mem::ManuallyDrop, sync::Arc};
 
 use futures_util::FutureExt;
 
@@ -76,16 +76,17 @@ impl IoEngine for PsyncIoEngine {
             let res = match runtime
                 .read()
                 .spawn_blocking(move || {
-                    let (fd, offset) = device.translate(region, offset);
-                    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                    let (raw, offset) = device.translate(region, offset);
                     #[cfg(target_family = "windows")]
                     {
-                        use std::os::windows::fs::FileExt;
+                        use std::os::windows::{fs::FileExt, io::FromRawHandle};
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw) });
                         file.seek_read(slice, offset).map_err(IoError::from)?;
                     };
                     #[cfg(target_family = "unix")]
                     {
-                        use std::os::unix::fs::FileExt;
+                        use std::os::{fd::FromRawFd, unix::fs::FileExt};
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_fd(raw) });
                         file.read_exact_at(slice, offset).map_err(IoError::from)?;
                     };
                     Ok(())
@@ -111,16 +112,17 @@ impl IoEngine for PsyncIoEngine {
             let res = match runtime
                 .write()
                 .spawn_blocking(move || {
-                    let (fd, offset) = device.translate(region, offset);
-                    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+                    let (raw, offset) = device.translate(region, offset);
                     #[cfg(target_family = "windows")]
                     {
-                        use std::os::windows::fs::FileExt;
+                        use std::os::windows::{fs::FileExt, io::FromRawHandle};
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw) });
                         file.seek_write(slice, offset).map_err(IoError::from)?;
                     };
                     #[cfg(target_family = "unix")]
                     {
-                        use std::os::unix::fs::FileExt;
+                        use std::os::{fd::FromRawFd, unix::fs::FileExt};
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_fd(raw) });
                         file.write_all_at(slice, offset).map_err(IoError::from)?;
                     };
                     Ok(())

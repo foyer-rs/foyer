@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{os::fd::RawFd, sync::Arc};
+use std::sync::Arc;
 
-use crate::io::{
-    device::{Device, DeviceBuilder, RegionId},
-    error::IoResult,
-    throttle::Throttle,
+use crate::{
+    io::{
+        device::{Device, DeviceBuilder, RegionId},
+        error::IoResult,
+        throttle::Throttle,
+    },
+    RawFile,
 };
 
 /// Builder for a partial device that wraps another device and allows access to only a subset of its regions.
@@ -85,7 +88,7 @@ impl Device for PartialDevice {
         self.throttle.as_ref().unwrap_or_else(|| self.inner.throttle())
     }
 
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFd, u64) {
+    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64) {
         let region = self.region_mapping[region as usize];
         self.inner.translate(region, offset)
     }
