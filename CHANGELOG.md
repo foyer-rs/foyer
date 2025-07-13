@@ -9,6 +9,28 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-07-13
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.18.0 |
+| foyer-common | 0.18.0 |
+| foyer-memory | 0.18.0 |
+| foyer-storage | 0.18.0 |
+| foyer-bench | 0.18.0 |
+
+### Changes
+
+- Introduce SIEVE algorithm for in-memory cache eviction policy.
+- Wrap key and value with `Arc` inside foyer implementation to be compatible with more features. `fetch()` doesn't requires keys to be `Clone` anymore.
+- Expose internal foyer error types.
+- Fix `delete()` implementation for large object disk cache to prevent from phantom entries.
+- Remove unnecessary and confusing `with_flush()` API.
+- Use "cargo xtask"-style for developing, yank `make` system.
+- Bump MSRV to v1.82.0
+
 ## 2025-06-27
 
 ### Releases
