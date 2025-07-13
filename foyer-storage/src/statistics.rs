@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::IopsCounter;
+use crate::io::throttle::IopsCounter;
 
 /// The statistics of the disk cache, which is used by the pickers.
 #[derive(Debug)]

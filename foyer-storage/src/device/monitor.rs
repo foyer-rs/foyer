@@ -19,7 +19,7 @@ use foyer_common::metrics::Metrics;
 use super::{RegionId, Throttle};
 use crate::{
     error::Result,
-    io::buffer::{IoBuf, IoBufMut},
+    io::buffer::{IoBufMutOld, IoBufOld},
     Dev, DirectFileDevice, Runtime, Statistics,
 };
 
@@ -74,7 +74,7 @@ where
     )]
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         let now = Instant::now();
 
@@ -96,7 +96,7 @@ where
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::device::monitor::read"))]
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         let now = Instant::now();
 
@@ -159,14 +159,14 @@ where
 
     async fn write<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         self.write(buf, region, offset).await
     }
 
     async fn read<B>(&self, buf: B, region: RegionId, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         self.read(buf, region, offset).await
     }
@@ -184,7 +184,7 @@ impl Monitored<DirectFileDevice> {
     #[cfg_attr(not(feature = "tracing"), expect(dead_code))]
     pub async fn pwrite<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
-        B: IoBuf,
+        B: IoBufOld,
     {
         let now = Instant::now();
 
@@ -209,7 +209,7 @@ impl Monitored<DirectFileDevice> {
     )]
     pub async fn pread<B>(&self, buf: B, offset: u64) -> (B, Result<()>)
     where
-        B: IoBufMut,
+        B: IoBufMutOld,
     {
         let now = Instant::now();
 

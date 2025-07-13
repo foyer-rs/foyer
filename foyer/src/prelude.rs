@@ -14,6 +14,8 @@
 
 #[cfg(feature = "tracing")]
 pub use crate::common::tracing::TracingOptions;
+#[cfg(target_os = "linux")]
+pub use crate::storage::UringIoEngineBuilder;
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
@@ -33,11 +35,12 @@ pub use crate::{
         S3FifoConfig, Weighter,
     },
     storage::{
-        AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, Compression, Dev,
-        DevConfig, DevExt, DirectFileDevice, DirectFileDeviceOptions, DirectFsDevice, DirectFsDeviceOptions, Engine,
-        EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker, IopsCounter, LargeEngineOptions, Load, Pick,
-        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions,
-        SmallEngineOptions, Statistics, Storage, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
-        TombstoneLogConfigBuilder,
+        AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, CombinedDeviceBuilder,
+        Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineBuilder, EvictionInfo, EvictionPicker,
+        FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
+        IoHandle, IoResult, IoThrottler, IoThrottlerPicker, IoThrottlerTarget, IopsCounter, LargeObjectEngineBuilder,
+        Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RawFile,
+        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics,
+        Store, StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfig, TombstoneLogConfigBuilder,
     },
 };

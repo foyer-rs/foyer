@@ -22,7 +22,10 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
-use foyer_storage::{AdmissionPicker, Compression, DeviceOptions, Engine, RecoverMode, RuntimeOptions, StoreBuilder};
+use foyer_storage::{
+    AdmissionPicker, Compression, DeviceBuilder, EngineBuilder, IoEngineBuilder, RecoverMode, RuntimeOptions,
+    StoreBuilder,
+};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::{
@@ -203,14 +206,14 @@ where
     }
 
     /// Continue to modify the disk cache configurations.
-    pub fn storage(self, engine: Engine) -> HybridCacheBuilderPhaseStorage<K, V, S> {
+    pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
         let memory = self.builder.build();
         HybridCacheBuilderPhaseStorage {
             name: self.name.clone(),
             options: self.options,
             metrics: self.metrics.clone(),
             memory: memory.clone(),
-            builder: StoreBuilder::new(self.name, memory, self.metrics, engine),
+            builder: StoreBuilder::new(self.name, memory, self.metrics),
         }
     }
 }
@@ -235,9 +238,33 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set device options for the disk cache store.
-    pub fn with_device_options(self, device_options: impl Into<DeviceOptions>) -> Self {
-        let builder = self.builder.with_device_options(device_options);
+    /// Set device builder for the disk cache store.
+    pub fn with_device_builder(self, builder: impl Into<Box<dyn DeviceBuilder>>) -> Self {
+        let builder = self.builder.with_device_builder(builder);
+        Self {
+            name: self.name,
+            options: self.options,
+            metrics: self.metrics,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set io engine builder for the disk cache store.
+    pub fn with_io_engine_builder(self, builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
+        let builder = self.builder.with_io_engine_builder(builder);
+        Self {
+            name: self.name,
+            options: self.options,
+            metrics: self.metrics,
+            memory: self.memory,
+            builder,
+        }
+    }
+
+    /// Set engine builder for the disk cache store.
+    pub fn with_engine_builder(self, builder: impl Into<Box<dyn EngineBuilder<K, V, HybridCacheProperties>>>) -> Self {
+        let builder = self.builder.with_engine_builder(builder);
         Self {
             name: self.name,
             options: self.options,

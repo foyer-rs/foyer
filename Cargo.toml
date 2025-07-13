@@ -59,6 +59,7 @@ humantime = "2"
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
+io-uring = "0.7"
 itertools = "0.14"
 libc = "0.2"
 lz4 = "1"

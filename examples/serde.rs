@@ -14,9 +14,7 @@
 
 use std::fmt::Debug;
 
-use foyer::{
-    Code, CodeResult, DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder, HybridCachePolicy, StorageValue,
-};
+use foyer::{Code, CodeResult, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, StorageValue};
 
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -64,8 +62,8 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
     let hybrid: HybridCache<u64, V> = HybridCacheBuilder::new()
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(64 * 1024 * 1024)
-        .storage(Engine::large()) // use large object disk cache engine only
-        .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
+        .storage() // use large object disk cache engine only
+        .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(256 * 1024 * 1024))
         .build()
         .await?;
 
