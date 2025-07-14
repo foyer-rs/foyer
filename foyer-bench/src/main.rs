@@ -528,21 +528,25 @@ async fn benchmark(args: Args) {
         .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
     let device_builder: Box<dyn DeviceBuilder> = match (args.file.as_ref(), args.dir.as_ref()) {
-        (Some(file), None) => FileDeviceBuilder::new(file)
-            .with_capacity(args.disk.as_u64() as _)
-            .with_region_size(args.region_size.as_u64() as _)
-            .with_throttle(throttle)
-            .with_direct(args.direct)
-            .boxed(),
-
-        (None, Some(dir)) => FsDeviceBuilder::new(dir)
-            .with_capacity(args.disk.as_u64() as _)
-            .with_file_size(args.region_size.as_u64() as _)
-            .with_throttle(throttle)
-            .with_direct(args.direct)
-            .boxed(),
-
-        (None, None) => NoopDeviceBuilder.boxed(),
+        (Some(file), None) => {
+            let mut builder = FileDeviceBuilder::new(file);
+            builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
+            #[cfg(target_os = "linux")]
+            {
+                builder = builder.with_direct(args.direct);
+            }
+            builder.boxed()
+        }
+        (None, Some(dir)) => {
+            let mut builder = FsDeviceBuilder::new(dir);
+            builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
+            #[cfg(target_os = "linux")]
+            {
+                builder = builder.with_direct(args.direct);
+            }
+            builder.boxed()
+        }
+        (None, None) => NoopDeviceBuilder::default().boxed(),
         _ => unreachable!(),
     };
 
@@ -555,6 +559,7 @@ async fn benchmark(args: Args) {
 
     let engine_builder: Box<dyn EngineBuilder<u64, Value, HybridCacheProperties>> = {
         let mut builder = LargeObjectEngineBuilder::new()
+            .with_region_size(args.region_size.as_u64() as _)
             .with_indexer_shards(args.shards)
             .with_recover_concurrency(args.recover_concurrency)
             .with_flushers(args.flushers)

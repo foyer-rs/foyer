@@ -33,7 +33,7 @@ use pin_project::pin_project;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, RegionId},
+        device::{Device, Partition},
         error::IoResult,
     },
     Runtime,
@@ -94,10 +94,10 @@ where
 pub trait IoEngine: Send + Sync + 'static + Debug {
     /// Get the device associated with this I/O engine.
     fn device(&self) -> &Arc<dyn Device>;
-    /// Read data into the buffer from the specified region and offset.
-    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle;
+    /// Read data into the buffer from the specified partition and offset.
+    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
     /// Write data from the buffer to the specified region and offset.
-    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle;
+    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle;
 }
 
 #[cfg(test)]
@@ -120,11 +120,11 @@ mod tests {
     const MIB: usize = 1024 * 1024;
 
     fn build_test_file_device(path: impl AsRef<Path>) -> IoResult<Arc<dyn Device>> {
-        FileDeviceBuilder::new(&path)
-            .with_capacity(16 * MIB)
-            .with_region_size(MIB)
-            .boxed()
-            .build()
+        let device = FileDeviceBuilder::new(&path).with_capacity(16 * MIB).boxed().build()?;
+        for _ in 0..16 {
+            device.create_partition(MIB)?;
+        }
+        Ok(device)
     }
 
     fn build_psync_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
@@ -144,12 +144,12 @@ mod tests {
         let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
         Fill::fill(&mut b1[..], &mut rng());
 
-        let (b1, res) = engine.write(b1, 0, 0).await;
+        let (b1, res) = engine.write(b1, engine.device().partition(0).as_ref(), 0).await;
         res.unwrap();
         let b1 = b1.try_into_io_slice_mut().unwrap();
 
         let b2 = Box::new(IoSliceMut::new(16 * KIB));
-        let (b2, res) = engine.read(b2, 0, 0).await;
+        let (b2, res) = engine.read(b2, engine.device().partition(0).as_ref(), 0).await;
         res.unwrap();
         let b2 = b2.try_into_io_slice_mut().unwrap();
         assert_eq!(b1, b2);

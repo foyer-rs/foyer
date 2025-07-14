@@ -39,10 +39,13 @@ use crate::{
     error::Result,
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::RegionId,
+        device::Partition,
         engine::IoEngine,
     },
+    IoError,
 };
+
+pub type RegionId = u32;
 
 /// Region statistics.
 #[derive(Debug, Default)]
@@ -67,6 +70,7 @@ impl RegionStatistics {
 #[derive(Debug)]
 struct RegionInner {
     id: RegionId,
+    partition: Arc<dyn Partition>,
     io_engine: Arc<dyn IoEngine>,
     statistics: Arc<RegionStatistics>,
 }
@@ -90,25 +94,34 @@ impl Region {
 
     /// Get region size.
     pub fn size(&self) -> usize {
-        self.inner.io_engine.device().region_size()
+        self.inner.partition.size()
     }
 
     pub(crate) async fn write(&self, buf: Box<dyn IoBuf>, offset: u64) -> (Box<dyn IoB>, Result<()>) {
-        let (buf, res) = self.inner.io_engine.write(buf, self.inner.id, offset).await;
+        let (buf, res) = self
+            .inner
+            .io_engine
+            .write(buf, self.inner.partition.as_ref(), offset)
+            .await;
         (buf, res.map_err(|e| e.into()))
     }
 
     pub(crate) async fn read(&self, buf: Box<dyn IoBufMut>, offset: u64) -> (Box<dyn IoB>, Result<()>) {
-        let (buf, res) = self.inner.io_engine.read(buf, self.inner.id, offset).await;
+        let (buf, res) = self
+            .inner
+            .io_engine
+            .read(buf, self.inner.partition.as_ref(), offset)
+            .await;
         (buf, res.map_err(|e| e.into()))
     }
 }
 
 #[cfg(test)]
 impl Region {
-    pub(crate) fn new_for_test(id: RegionId, io_engine: Arc<dyn IoEngine>) -> Self {
+    pub(crate) fn new_for_test(id: RegionId, partition: Arc<dyn Partition>, io_engine: Arc<dyn IoEngine>) -> Self {
         let inner = RegionInner {
             id,
+            partition,
             io_engine,
             statistics: Arc::<RegionStatistics>::default(),
         };
@@ -148,28 +161,45 @@ impl Debug for RegionManager {
 }
 
 impl RegionManager {
-    pub fn new(
+    pub fn open(
         io_engine: Arc<dyn IoEngine>,
-        eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+        region_size: usize,
+        mut eviction_pickers: Vec<Box<dyn EvictionPicker>>,
         reclaim_semaphore: Arc<Semaphore>,
         metrics: Arc<Metrics>,
-    ) -> Self {
+    ) -> Result<Self> {
         let device = io_engine.device().clone();
-        let regions = (0..device.regions() as RegionId)
-            .map(|id| Region {
+
+        let mut regions = vec![];
+        while device.free() >= region_size {
+            let partition = match device.create_partition(region_size) {
+                Ok(partition) => partition,
+                Err(IoError::NoSpace { .. }) => break,
+                Err(e) => return Err(e.into()),
+            };
+            let id = regions.len() as RegionId;
+            let region = Region {
                 inner: Arc::new(RegionInner {
                     id,
+                    partition,
                     io_engine: io_engine.clone(),
                     statistics: Arc::<RegionStatistics>::default(),
                 }),
-            })
-            .collect_vec();
+            };
+            regions.push(region);
+        }
+
         let (clean_region_tx, clean_region_rx) = flume::unbounded();
 
-        metrics.storage_region_total.absolute(device.regions() as _);
-        metrics.storage_region_size_bytes.absolute(device.region_size() as _);
+        let rs = regions.iter().map(|r| r.id()).collect_vec();
+        for pickers in eviction_pickers.iter_mut() {
+            pickers.init(&rs, region_size);
+        }
 
-        Self {
+        metrics.storage_region_total.absolute(regions.len() as _);
+        metrics.storage_region_size_bytes.absolute(region_size as _);
+
+        let this = Self {
             inner: Arc::new(RegionManagerInner {
                 regions,
                 eviction: Mutex::new(Eviction {
@@ -182,7 +212,8 @@ impl RegionManager {
                 reclaim_semaphore_countdown: Arc::new(Countdown::new(0)),
                 metrics,
             }),
-        }
+        };
+        Ok(this)
     }
 
     pub fn mark_evictable(&self, rid: RegionId) {

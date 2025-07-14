@@ -15,7 +15,6 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    ops::Range,
     sync::{atomic::Ordering, Arc},
     time::Instant,
 };
@@ -30,7 +29,7 @@ use crate::{
     engine::{
         large::{
             indexer::HashedEntryAddress,
-            region::{Region, RegionManager},
+            region::{Region, RegionId, RegionManager},
             scanner::{EntryInfo, RegionScanner},
             serde::{AtomicSequence, Sequence},
             tombstone::Tombstone,
@@ -38,7 +37,6 @@ use crate::{
         RecoverMode,
     },
     error::{Error, Result},
-    io::device::RegionId,
     runtime::Runtime,
 };
 
@@ -52,7 +50,7 @@ impl RecoverRunner {
         recover_mode: RecoverMode,
         blob_index_size: usize,
         clean_region_threshold: usize,
-        regions: Range<RegionId>,
+        regions: &[RegionId],
         sequence: &AtomicSequence,
         indexer: &Indexer,
         region_manager: &RegionManager,
@@ -65,9 +63,9 @@ impl RecoverRunner {
         // Recover regions concurrently.
         let semaphore = Arc::new(Semaphore::new(recover_concurrency));
         let mode = recover_mode;
-        let handles = regions.map(|id| {
+        let handles = regions.iter().map(|id| {
             let semaphore = semaphore.clone();
-            let region = region_manager.region(id).clone();
+            let region = region_manager.region(*id).clone();
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
                 let res = RegionRecoverRunner::run(mode, region, blob_index_size).await;

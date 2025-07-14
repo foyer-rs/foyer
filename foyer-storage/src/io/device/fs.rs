@@ -15,19 +15,19 @@
 use std::{
     fs::{create_dir_all, File, OpenOptions},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use fs4::free_space;
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, RegionId},
-        error::{IoError, IoResult},
+        device::{Device, DeviceBuilder, Partition, PartitionId},
+        error::IoResult,
         throttle::Throttle,
         PAGE,
     },
-    RawFile,
+    IoError, RawFile,
 };
 
 /// Builder for a filesystem-based device that manages files in a directory.
@@ -35,21 +35,19 @@ use crate::{
 pub struct FsDeviceBuilder {
     dir: PathBuf,
     capacity: Option<usize>,
-    file_size: Option<usize>,
     throttle: Throttle,
+    #[cfg(target_os = "linux")]
     direct: bool,
 }
 
 impl FsDeviceBuilder {
-    const DEFAULT_FILE_SIZE: usize = 64 * 1024 * 1024;
-
     /// Use the given file path as the file device path.
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
             dir: dir.as_ref().into(),
             capacity: None,
-            file_size: None,
             throttle: Throttle::default(),
+            #[cfg(target_os = "linux")]
             direct: false,
         }
     }
@@ -64,16 +62,6 @@ impl FsDeviceBuilder {
         self
     }
 
-    /// Set the file size of each file of the fs device.
-    ///
-    /// The given file size may be modified on build for alignment.
-    ///
-    /// The serialized entry size (with extra metadata) must be equal to or smaller than the file size.
-    pub fn with_file_size(mut self, file_size: usize) -> Self {
-        self.file_size = Some(file_size);
-        self
-    }
-
     /// Set the throttle of the file device.
     pub fn with_throttle(mut self, throttle: Throttle) -> Self {
         self.throttle = throttle;
@@ -81,6 +69,7 @@ impl FsDeviceBuilder {
     }
 
     /// Set whether the file device should use direct I/O.
+    #[cfg(target_os = "linux")]
     pub fn with_direct(mut self, direct: bool) -> Self {
         self.direct = direct;
         self
@@ -100,108 +89,123 @@ impl DeviceBuilder for FsDeviceBuilder {
         });
         let capacity = align_v(capacity, PAGE);
 
-        let file_size = self.file_size.unwrap_or(Self::DEFAULT_FILE_SIZE).min(capacity);
-        let file_size = align_v(file_size, PAGE);
-
-        let capacity = align_v(capacity, file_size);
-
         let throttle = self.throttle;
 
-        // Verify configurations.
-
-        if file_size == 0 || file_size % PAGE != 0 {
-            return Err(IoError::other(anyhow::anyhow!(
-                "file size ({file_size}) must be a multiplier of PAGE ({PAGE})",
-            )));
-        }
-
-        if capacity == 0 || capacity % file_size != 0 {
-            return Err(IoError::other(anyhow::anyhow!(
-                "capacity ({capacity}) must be a multiplier of file size ({file_size})",
-            )));
-        }
-
         // Build device.
-
-        let regions = capacity / file_size;
 
         if !self.dir.exists() {
             create_dir_all(&self.dir)?;
         }
 
-        const PREFIX: &str = "foyer-storage-direct-fs-";
-        let filename = |region: RegionId| format!("{PREFIX}{region:08}");
-
-        let mut files = Vec::with_capacity(regions);
-
-        for region in 0..regions as RegionId {
-            let path = self.dir.join(filename(region as RegionId));
-            let mut opts = OpenOptions::new();
-            opts.create(true).write(true).read(true);
-            #[cfg(target_os = "linux")]
-            if self.direct {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
-            }
-            let file = opts.open(path)?;
-            file.set_len(file_size as _)?;
-            let file = Arc::new(file);
-            files.push(file);
-        }
-
-        let inner = Inner {
-            files,
+        let device = FsDevice {
             capacity,
-            file_size,
             throttle,
+            dir: self.dir,
+            #[cfg(target_os = "linux")]
+            direct: self.direct,
+            partitions: RwLock::new(vec![]),
         };
-        let inner = Arc::new(inner);
-        let device = FsDevice { inner };
         let device: Arc<dyn Device> = Arc::new(device);
         Ok(device)
     }
 }
 
+/// A device upon a directory in a filesystem.
 #[derive(Debug)]
-struct Inner {
-    files: Vec<Arc<File>>,
+pub struct FsDevice {
     capacity: usize,
-    file_size: usize,
     throttle: Throttle,
+    dir: PathBuf,
+    #[cfg(target_os = "linux")]
+    direct: bool,
+    partitions: RwLock<Vec<Arc<FsPartition>>>,
 }
 
-/// A device upon a directory in a filesystem.
-#[derive(Debug, Clone)]
-pub struct FsDevice {
-    inner: Arc<Inner>,
+impl FsDevice {
+    const PREFIX: &str = "foyer-storage-direct-fs-";
+    fn filename(partition: PartitionId) -> String {
+        format!("{prefix}{partition:08}", prefix = Self::PREFIX,)
+    }
 }
 
 impl Device for FsDevice {
     fn capacity(&self) -> usize {
-        self.inner.capacity
+        self.capacity
     }
 
-    fn region_size(&self) -> usize {
-        self.inner.file_size
+    fn allocated(&self) -> usize {
+        self.partitions.read().unwrap().iter().map(|p| p.size).sum()
+    }
+
+    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+        let mut partitions = self.partitions.write().unwrap();
+        let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
+        if allocated + size > self.capacity {
+            return Err(IoError::NoSpace {
+                capacity: self.capacity,
+                allocated,
+                required: allocated + size,
+            });
+        }
+        let id = partitions.len() as PartitionId;
+        let path = self.dir.join(Self::filename(id));
+        let mut opts = OpenOptions::new();
+        opts.create(true).write(true).read(true);
+        #[cfg(target_os = "linux")]
+        if self.direct {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
+        }
+        let file = opts.open(path)?;
+        file.set_len(size as _)?;
+
+        let partition = Arc::new(FsPartition { id, size, file });
+        partitions.push(partition.clone());
+        Ok(partition)
+    }
+
+    fn partitions(&self) -> usize {
+        self.partitions.read().unwrap().len()
+    }
+
+    fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
+        self.partitions.read().unwrap()[id as usize].clone()
     }
 
     fn throttle(&self) -> &Throttle {
-        &self.inner.throttle
+        &self.throttle
+    }
+}
+
+#[derive(Debug)]
+pub struct FsPartition {
+    id: PartitionId,
+    size: usize,
+    file: File,
+}
+
+impl Partition for FsPartition {
+    fn id(&self) -> PartitionId {
+        self.id
     }
 
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64) {
+    fn size(&self) -> usize {
+        self.size
+    }
+
+    fn translate(&self, address: u64) -> (RawFile, u64) {
         #[cfg(any(target_family = "unix", target_family = "wasm"))]
         let raw = {
             use std::os::fd::AsRawFd;
-            self.inner.files[region as usize].as_raw_fd()
+            RawFile(self.file.as_raw_fd())
         };
 
         #[cfg(target_family = "windows")]
         let raw = {
             use std::os::windows::io::AsRawHandle;
-            self.inner.files[region as usize].as_raw_handle()
+            RawFile(self.file.as_raw_handle())
         };
 
-        (raw, offset)
+        (raw, address)
     }
 }

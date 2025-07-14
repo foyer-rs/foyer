@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, RegionId},
+        device::{Device, DeviceBuilder, Partition, PartitionId},
         error::{IoError, IoResult},
         throttle::Throttle,
     },
@@ -27,7 +27,7 @@ use crate::{
 #[derive(Debug)]
 pub struct CombinedDeviceBuilder {
     devices: Vec<Arc<dyn Device>>,
-    throttle: Option<Throttle>,
+    throttle: Throttle,
 }
 
 impl Default for CombinedDeviceBuilder {
@@ -41,7 +41,7 @@ impl CombinedDeviceBuilder {
     pub fn new() -> Self {
         Self {
             devices: vec![],
-            throttle: None,
+            throttle: Throttle::default(),
         }
     }
 
@@ -52,75 +52,119 @@ impl CombinedDeviceBuilder {
     }
 
     /// Set the throttle for the combined device to override the inner devices' throttles.
+    ///
+    /// The throttles of the combined devices are disabled by default.
     pub fn with_throttle(mut self, throttle: Throttle) -> Self {
-        self.throttle = Some(throttle);
+        self.throttle = throttle;
         self
     }
 }
 
 impl DeviceBuilder for CombinedDeviceBuilder {
     fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
-        if self.devices.is_empty() {
-            return Err(IoError::other("No devices provided for CombinedDevice"));
-        }
-
-        let region_size = self.devices.iter().map(|d| d.region_size()).min().unwrap();
-        let mut mapping = vec![];
-        let mut regions = 0;
-        for device in self.devices.iter() {
-            regions += device.regions();
-            mapping.push(regions);
-        }
-        let capacity = regions * region_size;
-        Ok(Arc::new(CombinedDevice {
+        let device = CombinedDevice {
             devices: self.devices,
             throttle: self.throttle,
-            mapping: vec![],
-            capacity,
-            region_size,
-            regions,
-        }))
+            inner: RwLock::new(Inner {
+                partitions: vec![],
+                next: 0,
+            }),
+        };
+        let device = Arc::new(device);
+        Ok(device)
     }
+}
+
+#[derive(Debug)]
+struct Inner {
+    partitions: Vec<Arc<CombinedPartition>>,
+    next: usize,
 }
 
 /// [`CombinedDevice`] is a wrapper for other device to use only a part of it.
 #[derive(Debug)]
 pub struct CombinedDevice {
     devices: Vec<Arc<dyn Device>>,
-    throttle: Option<Throttle>,
-    mapping: Vec<usize>,
-    capacity: usize,
-    region_size: usize,
-    regions: usize,
+    throttle: Throttle,
+    inner: RwLock<Inner>,
 }
 
 impl Device for CombinedDevice {
     fn capacity(&self) -> usize {
-        self.capacity
+        self.devices.iter().map(|d| d.capacity()).sum()
     }
 
-    fn region_size(&self) -> usize {
-        self.region_size
+    fn allocated(&self) -> usize {
+        let inner = self.inner.read().unwrap();
+        let allocated = inner.partitions.iter().take(inner.next).map(|p| p.size()).sum();
+        if inner.next < inner.partitions.len() {
+            allocated + self.devices[inner.next].allocated()
+        } else {
+            allocated
+        }
+    }
+
+    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+        let mut inner = self.inner.write().unwrap();
+        loop {
+            if inner.next >= self.devices.len() {
+                let capacity = self.devices.iter().map(|d| d.capacity()).sum();
+                return Err(IoError::NoSpace {
+                    capacity,
+                    allocated: capacity,
+                    required: size,
+                });
+            }
+            let device = &self.devices[inner.next];
+            match device.create_partition(size) {
+                Err(IoError::NoSpace { .. }) => {
+                    inner.next += 1;
+                }
+                Ok(p) => {
+                    let partition = CombinedPartition {
+                        inner: p,
+                        id: inner.partitions.len() as PartitionId,
+                    };
+                    let partition = Arc::new(partition);
+                    inner.partitions.push(partition.clone());
+                    return Ok(partition);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    fn partitions(&self) -> usize {
+        self.inner.read().unwrap().partitions.len()
+    }
+
+    fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
+        self.inner.read().unwrap().partitions[id as usize].clone()
     }
 
     fn throttle(&self) -> &Throttle {
-        self.throttle.as_ref().unwrap_or_else(|| self.throttle())
+        &self.throttle
+    }
+}
+
+#[derive(Debug)]
+pub struct CombinedPartition {
+    inner: Arc<dyn Partition>,
+    id: PartitionId,
+}
+
+impl Partition for CombinedPartition {
+    fn id(&self) -> PartitionId {
+        self.id
     }
 
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64) {
-        // let region = self.region_mapping[region as usize];
-        // self.inner.translate(region, offset)
-
-        let i = self.mapping.partition_point(|x| *x <= region as _);
-        let region = if i == 0 {
-            region
-        } else {
-            region - self.mapping[i - 1] as RegionId
-        };
-        self.devices[i].translate(region, offset)
+    fn size(&self) -> usize {
+        self.inner.size()
     }
 
-    fn regions(&self) -> usize {
-        self.regions
+    fn translate(&self, address: u64) -> (RawFile, u64) {
+        self.inner.translate(address)
     }
 }
