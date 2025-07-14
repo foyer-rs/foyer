@@ -50,6 +50,11 @@ struct RawFileAddress {
     offset: u64,
 }
 
+#[cfg(target_family = "windows")]
+unsafe impl Send for RawFileAddress {}
+#[cfg(target_family = "windows")]
+unsafe impl Sync for RawFileAddress {}
+
 struct UringIoCtx {
     tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,

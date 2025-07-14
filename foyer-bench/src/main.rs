@@ -528,18 +528,24 @@ async fn benchmark(args: Args) {
         .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
     let device_builder: Box<dyn DeviceBuilder> = match (args.file.as_ref(), args.dir.as_ref()) {
-        (Some(file), None) => FileDeviceBuilder::new(file)
-            .with_capacity(args.disk.as_u64() as _)
-            .with_throttle(throttle)
-            .with_direct(args.direct)
-            .boxed(),
-
-        (None, Some(dir)) => FsDeviceBuilder::new(dir)
-            .with_capacity(args.disk.as_u64() as _)
-            .with_throttle(throttle)
-            .with_direct(args.direct)
-            .boxed(),
-
+        (Some(file), None) => {
+            let mut builder = FileDeviceBuilder::new(file);
+            builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
+            #[cfg(target_os = "linux")]
+            {
+                builder = builder.with_direct(args.direct);
+            }
+            builder.boxed()
+        }
+        (None, Some(dir)) => {
+            let mut builder = FsDeviceBuilder::new(dir);
+            builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
+            #[cfg(target_os = "linux")]
+            {
+                builder = builder.with_direct(args.direct);
+            }
+            builder.boxed()
+        }
         (None, None) => NoopDeviceBuilder::default().boxed(),
         _ => unreachable!(),
     };
