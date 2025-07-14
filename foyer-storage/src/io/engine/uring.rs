@@ -58,42 +58,75 @@ struct UringIoCtx {
 }
 
 struct UringIoEngineShard {
-    rx: mpsc::Receiver<UringIoCtx>,
+    read_rx: mpsc::Receiver<UringIoCtx>,
+    write_rx: mpsc::Receiver<UringIoCtx>,
+    weight: f64,
     _device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
     io_poll: bool,
-    inflight: usize,
+    read_inflight: usize,
+    write_inflight: usize,
 }
 
 impl UringIoEngineShard {
     fn run(mut self) {
         loop {
-            'recv: while self.inflight < self.io_depth {
-                let ctx = match self.rx.try_recv() {
-                    Ok(ctx) => ctx,
-                    Err(mpsc::TryRecvError::Empty) => break 'recv,
-                    Err(mpsc::TryRecvError::Disconnected) => return,
+            'prepare: loop {
+                if self.read_inflight + self.write_inflight >= self.io_depth {
+                    break 'prepare;
+                }
+
+                let ctx = if (self.read_inflight as f64) < self.write_inflight as f64 * self.weight {
+                    match self.read_rx.try_recv() {
+                        Err(mpsc::TryRecvError::Disconnected) => return,
+                        Ok(ctx) => Some(ctx),
+                        Err(mpsc::TryRecvError::Empty) => match self.write_rx.try_recv() {
+                            Err(mpsc::TryRecvError::Disconnected) => return,
+                            Ok(ctx) => Some(ctx),
+                            Err(mpsc::TryRecvError::Empty) => None,
+                        },
+                    }
+                } else {
+                    match self.write_rx.try_recv() {
+                        Err(mpsc::TryRecvError::Disconnected) => return,
+                        Ok(ctx) => Some(ctx),
+                        Err(mpsc::TryRecvError::Empty) => match self.read_rx.try_recv() {
+                            Err(mpsc::TryRecvError::Disconnected) => return,
+                            Ok(ctx) => Some(ctx),
+                            Err(mpsc::TryRecvError::Empty) => None,
+                        },
+                    }
                 };
 
-                self.inflight += 1;
+                let ctx = match ctx {
+                    Some(ctx) => ctx,
+                    None => break 'prepare,
+                };
+
                 let ctx = Box::new(ctx);
 
                 let fd = Fd(ctx.addr.file.0);
                 let sqe = match ctx.io_type {
-                    UringIoType::Read => opcode::Read::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
-                        .offset(ctx.addr.offset)
-                        .build(),
-                    UringIoType::Write => opcode::Write::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
-                        .offset(ctx.addr.offset)
-                        .build(),
+                    UringIoType::Read => {
+                        self.read_inflight += 1;
+                        opcode::Read::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
+                            .offset(ctx.addr.offset)
+                            .build()
+                    }
+                    UringIoType::Write => {
+                        self.write_inflight += 1;
+                        opcode::Write::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
+                            .offset(ctx.addr.offset)
+                            .build()
+                    }
                 };
                 let data = Box::into_raw(ctx) as u64;
                 let sqe = sqe.user_data(data);
                 unsafe { self.uring.submission().push(&sqe).unwrap() }
             }
 
-            if self.inflight > 0 {
+            if self.read_inflight + self.write_inflight > 0 {
                 if self.io_poll {
                     self.uring.submit().unwrap();
                 } else {
@@ -105,6 +138,11 @@ impl UringIoEngineShard {
                 let data = cqe.user_data();
                 let ctx = unsafe { Box::from_raw(data as *mut UringIoCtx) };
 
+                match ctx.io_type {
+                    UringIoType::Read => self.read_inflight -= 1,
+                    UringIoType::Write => self.write_inflight -= 1,
+                }
+
                 let res = cqe.result();
                 if res < 0 {
                     let err = IoError::from_raw_os_error(res);
@@ -112,7 +150,6 @@ impl UringIoEngineShard {
                 } else {
                     let _ = ctx.tx.send(Ok(()));
                 }
-                self.inflight -= 1;
             }
         }
     }
@@ -120,7 +157,8 @@ impl UringIoEngineShard {
 
 pub struct UringIoEngine {
     device: Arc<dyn Device>,
-    txs: Vec<mpsc::SyncSender<UringIoCtx>>,
+    read_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
+    write_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
 }
 
 impl Debug for UringIoEngine {
@@ -132,7 +170,7 @@ impl Debug for UringIoEngine {
 impl UringIoEngine {
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.txs[partition.id() as usize % self.txs.len()];
+        let shard = &self.read_txs[partition.id() as usize % self.read_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
@@ -157,7 +195,7 @@ impl UringIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.txs[partition.id() as usize % self.txs.len()];
+        let shard = &self.write_txs[partition.id() as usize % self.write_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
@@ -187,6 +225,7 @@ pub struct UringIoEngineBuilder {
     threads: usize,
     io_depth: usize,
     io_poll: bool,
+    weight: f64,
 }
 
 impl Default for UringIoEngineBuilder {
@@ -202,6 +241,7 @@ impl UringIoEngineBuilder {
             threads: 1,
             io_depth: 64,
             io_poll: false,
+            weight: 1.0,
         }
     }
 
@@ -219,7 +259,7 @@ impl UringIoEngineBuilder {
 
     /// Enable or disable I/O polling.
     ///
-    /// FYI: https://man7.org/linux/man-pages/man2/io_uring_setup.2.html
+    /// FYI: [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
     ///
     /// Related syscall flag: `IORING_SETUP_IOPOLL`.
     ///
@@ -230,6 +270,14 @@ impl UringIoEngineBuilder {
         self.io_poll = iopoll;
         self
     }
+
+    /// Set the weight of read/write priorities.
+    ///
+    /// The engine will try to keep the read/write iodepth ratio as close to the specified weight as possible.
+    pub fn with_weight(mut self, weight: f64) -> Self {
+        self.weight = weight;
+        self
+    }
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
@@ -238,26 +286,36 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }
 
-        let (txs, rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+        let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
             .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(1024);
+                let (tx, rx) = mpsc::sync_channel(4096);
                 (tx, rx)
             })
             .unzip();
 
-        for rx in rxs {
+        let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+            .map(|_| {
+                let (tx, rx) = mpsc::sync_channel(4096);
+                (tx, rx)
+            })
+            .unzip();
+
+        for (read_rx, write_rx) in read_rxs.into_iter().zip(write_rxs.into_iter()) {
             let mut builder = IoUring::builder();
             if self.io_poll {
                 builder.setup_iopoll();
             }
             let uring = builder.build(self.io_depth as _)?;
             let shard = UringIoEngineShard {
-                rx,
+                read_rx,
+                write_rx,
                 _device: device.clone(),
                 uring,
                 io_depth: self.io_depth,
                 io_poll: self.io_poll,
-                inflight: 0,
+                weight: self.weight,
+                read_inflight: 0,
+                write_inflight: 0,
             };
 
             std::thread::spawn(move || {
@@ -265,7 +323,11 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             });
         }
 
-        let engine = UringIoEngine { device, txs };
+        let engine = UringIoEngine {
+            device,
+            read_txs,
+            write_txs,
+        };
         let engine = Arc::new(engine);
         Ok(engine)
     }
