@@ -607,11 +607,12 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
-            .with_device_builder(FsDeviceBuilder::new(dir.path()))
+            .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(64 * 1024))
             .with_io_engine_builder(PsyncIoEngineBuilder::new())
             .with_engine_builder(
                 LargeObjectEngineBuilder::new()
                     .with_flushers(3)
+                    .with_region_size(16 * 1024)
                     .with_buffer_pool_size(128 * 1024 * 1024),
             )
             .build()
@@ -632,13 +633,9 @@ mod tests {
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
         let store = StoreBuilder::new("test", memory, metrics)
-            .with_device_builder(
-                FsDeviceBuilder::new(dir.path())
-                    .with_capacity(4 * 1024 * 1024)
-                    .with_file_size(1024 * 1024),
-            )
+            .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(4 * 1024 * 1024))
             .with_io_engine_builder(PsyncIoEngineBuilder::new())
-            .with_engine_builder(LargeObjectEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(16 * 1024))
             .build()
             .await
             .unwrap();

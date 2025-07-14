@@ -16,7 +16,7 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use crate::io::{error::IoResult, throttle::Throttle};
 
-pub type RegionId = u32;
+pub type PartitionId = u32;
 
 /// Raw os file resource.
 ///
@@ -53,24 +53,51 @@ where
     }
 }
 
+/// Partition is a logical segment of a device.
+pub trait Partition: Send + Sync + 'static + Debug + Any {
+    /// Get the id of the partition.
+    fn id(&self) -> PartitionId;
+
+    /// Get the capacity of the partition.
+    ///
+    /// NOTE: `size` must be 4K aligned.
+    fn size(&self) -> usize;
+
+    /// Translate an address to a raw file descriptor and address.
+    fn translate(&self, address: u64) -> (RawFile, u64);
+}
+
 /// Device trait.
 pub trait Device: Send + Sync + 'static + Debug + Any {
-    /// The capacity of the device, must be 4K aligned.
+    /// Get the capacity of the device.
+    ///
+    /// NOTE: `capacity` must be 4K aligned.
     fn capacity(&self) -> usize;
 
-    /// The region size of the device, must be 4K aligned.
-    fn region_size(&self) -> usize;
+    /// Get the allocated space in the device.
+    fn allocated(&self) -> usize;
+
+    /// Get the free space in the device.
+    fn free(&self) -> usize {
+        self.capacity() - self.allocated()
+    }
+
+    /// Create a new partition with the given size.
+    ///
+    /// NOTE:
+    ///
+    /// - Allocating partition may consume more space than requested.
+    /// - `size` must be 4K aligned.
+    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>>;
+
+    /// Get the number of partitions in the device.
+    fn partitions(&self) -> usize;
+
+    /// Get the partition with given id in the device.
+    fn partition(&self, id: PartitionId) -> Arc<dyn Partition>;
 
     /// The throttle config for the device.
     fn throttle(&self) -> &Throttle;
-
-    /// Translate a region and offset to a raw file descriptor and offset.
-    fn translate(&self, region: RegionId, offset: u64) -> (RawFile, u64);
-
-    /// Get the region count of the device.
-    fn regions(&self) -> usize {
-        self.capacity() / self.region_size()
-    }
 }
 
 pub mod file;

@@ -41,6 +41,6 @@ pub use crate::{
         IoHandle, IoResult, IoThrottler, IoThrottlerPicker, IoThrottlerTarget, IopsCounter, LargeObjectEngineBuilder,
         Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RawFile,
         RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics,
-        Store, StoreBuilder, Throttle, TokioRuntimeOptions, TombstoneLogConfig, TombstoneLogConfigBuilder,
+        Store, StoreBuilder, Throttle, TokioRuntimeOptions,
     },
 };

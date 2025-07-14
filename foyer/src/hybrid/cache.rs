@@ -330,6 +330,7 @@ where
             memory.flush().await;
         }
         storage.close().await?;
+
         let elapsed = now.elapsed();
         tracing::info!("[hybrid]: close consumes {elapsed:?}");
         Ok(())
@@ -1031,7 +1032,9 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1047,7 +1050,9 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
             .build()
             .await
@@ -1065,7 +1070,9 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1083,7 +1090,9 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .with_admission_picker(recorder.clone())
             .build()
             .await
@@ -1102,7 +1111,9 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB).with_file_size(MB))
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1450,11 +1461,9 @@ mod tests {
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
                 .storage()
-                .with_device_builder(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(256 * KB)
-                        .with_file_size(64 * KB),
-                )
+                .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(256 * KB))
+                .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(64 * KB))
                 .build()
                 .await
                 .unwrap()

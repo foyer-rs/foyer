@@ -20,7 +20,7 @@ use std::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 
-use crate::{engine::large::serde::Sequence, io::device::RegionId};
+use crate::engine::large::{region::RegionId, serde::Sequence};
 
 #[derive(Debug, Clone)]
 pub enum Index {

@@ -15,14 +15,13 @@
 use std::{
     collections::{HashSet, VecDeque},
     fmt::Debug,
-    ops::Range,
     sync::atomic::Ordering,
 };
 
 use foyer_common::strict_assert;
 use itertools::Itertools;
 
-use crate::{engine::large::region::Region, io::device::RegionId};
+use crate::engine::large::region::{Region, RegionId};
 
 /// Eviction related information for eviction picker to make decisions.
 #[derive(Debug)]
@@ -39,7 +38,7 @@ pub struct EvictionInfo<'a> {
 pub trait EvictionPicker: Send + Sync + 'static + Debug {
     /// Init the eviction picker with information.
     #[expect(unused_variables)]
-    fn init(&mut self, regions: Range<RegionId>, region_size: usize) {}
+    fn init(&mut self, regions: &[RegionId], region_size: usize) {}
 
     /// Pick a region to evict.
     ///
@@ -107,7 +106,7 @@ impl FifoPicker {
 }
 
 impl EvictionPicker for FifoPicker {
-    fn init(&mut self, regions: Range<RegionId>, _: usize) {
+    fn init(&mut self, regions: &[RegionId], _: usize) {
         self.regions = regions.len();
         let probations = (self.regions as f64 * self.probation_ratio).floor() as usize;
         self.probations = probations.clamp(0, self.regions);
@@ -154,7 +153,7 @@ impl InvalidRatioPicker {
 }
 
 impl EvictionPicker for InvalidRatioPicker {
-    fn init(&mut self, _: Range<RegionId>, region_size: usize) {
+    fn init(&mut self, _: &[RegionId], region_size: usize) {
         self.region_size = region_size;
     }
 
@@ -197,14 +196,22 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::{engine::large::region::Region, io::engine::noop::NoopIoEngine};
+    use crate::{
+        engine::large::region::Region, io::device::noop::NoopPartition, DeviceBuilder, IoEngineBuilder,
+        NoopDeviceBuilder, NoopIoEngineBuilder, Runtime,
+    };
 
-    #[test_log::test]
-    fn test_fifo_picker() {
+    #[test_log::test(tokio::test)]
+    async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
+        let mock_device = NoopDeviceBuilder::new(0).boxed().build().unwrap();
+        let mock_io_engine = NoopIoEngineBuilder
+            .boxed()
+            .build(mock_device, Runtime::current())
+            .unwrap();
 
         let regions = (0..10)
-            .map(|rid| Region::new_for_test(rid, Arc::<NoopIoEngine>::default()))
+            .map(|rid| Region::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))
             .collect_vec();
         let mut evictable = HashSet::new();
 
@@ -233,7 +240,7 @@ mod tests {
             }
         }
 
-        picker.init(0..10, 0);
+        picker.init(&(0..10).collect_vec(), 0);
 
         // mark 0..10 evictable in order
         (0..10).for_each(|i| {
@@ -276,13 +283,19 @@ mod tests {
         evictable.remove(&8);
     }
 
-    #[test]
-    fn test_invalid_ratio_picker() {
+    #[test_log::test(tokio::test)]
+    async fn test_invalid_ratio_picker() {
         let mut picker = InvalidRatioPicker::new(0.5);
-        picker.init(0..10, 10);
+        picker.init(&(0..10).collect_vec(), 10);
+
+        let mock_device = NoopDeviceBuilder::new(0).boxed().build().unwrap();
+        let mock_io_engine = NoopIoEngineBuilder
+            .boxed()
+            .build(mock_device, Runtime::current())
+            .unwrap();
 
         let regions = (0..10)
-            .map(|rid| Region::new_for_test(rid, Arc::<NoopIoEngine>::default()))
+            .map(|rid| Region::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))
             .collect_vec();
         let mut evictable = HashSet::new();
 

@@ -24,11 +24,11 @@ use tokio::sync::oneshot;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, RegionId},
+        device::{Device, Partition},
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
-    Runtime,
+    RawFile, Runtime,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,17 +45,21 @@ struct RawBuf {
 unsafe impl Send for RawBuf {}
 unsafe impl Sync for RawBuf {}
 
+struct RawFileAddress {
+    file: RawFile,
+    offset: u64,
+}
+
 struct UringIoCtx {
     tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
-    buf: RawBuf,
-    region: RegionId,
-    offset: u64,
+    rbuf: RawBuf,
+    addr: RawFileAddress,
 }
 
 struct UringIoEngineShard {
     rx: mpsc::Receiver<UringIoCtx>,
-    device: Arc<dyn Device>,
+    _device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
     inflight: usize,
@@ -65,30 +69,26 @@ impl UringIoEngineShard {
     fn run(mut self) {
         loop {
             'recv: while self.inflight < self.io_depth {
-                let request = match self.rx.try_recv() {
-                    Ok(request) => request,
+                let ctx = match self.rx.try_recv() {
+                    Ok(ctx) => ctx,
                     Err(mpsc::TryRecvError::Empty) => break 'recv,
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 };
 
                 self.inflight += 1;
-                let (ptr, len) = (request.buf.ptr, request.buf.len);
-                let ctx = Box::new(UringIoCtx {
-                    tx: request.tx,
-                    io_type: request.io_type,
-                    buf: request.buf,
-                    region: request.region,
-                    offset: request.offset,
-                });
-                let data = Box::into_raw(ctx) as u64;
+                let ctx = Box::new(ctx);
 
-                let (fd, offset) = self.device.translate(request.region, request.offset);
-                let fd = Fd(fd);
-                let sqe = match request.io_type {
-                    UringIoType::Read => opcode::Read::new(fd, ptr, len as _).offset(offset).build(),
-                    UringIoType::Write => opcode::Write::new(fd, ptr, len as _).offset(offset).build(),
-                }
-                .user_data(data);
+                let fd = Fd(ctx.addr.file);
+                let sqe = match ctx.io_type {
+                    UringIoType::Read => opcode::Read::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
+                        .offset(ctx.addr.offset)
+                        .build(),
+                    UringIoType::Write => opcode::Write::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
+                        .offset(ctx.addr.offset)
+                        .build(),
+                };
+                let data = Box::into_raw(ctx) as u64;
+                let sqe = sqe.user_data(data);
                 unsafe { self.uring.submission().push(&sqe).unwrap() }
             }
 
@@ -125,16 +125,18 @@ impl Debug for UringIoEngine {
 }
 
 impl UringIoEngine {
-    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
+    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.txs[region as usize % self.txs.len()];
+        let shard = &self.txs[partition.id() as usize % self.txs.len()];
         let (ptr, len) = buf.as_raw_parts();
+        let rbuf = RawBuf { ptr, len };
+        let (file, offset) = partition.translate(offset);
+        let addr = RawFileAddress { file, offset };
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Read,
-            buf: RawBuf { ptr, len },
-            region,
-            offset,
+            rbuf,
+            addr,
         });
         async move {
             let res = match rx.await {
@@ -148,16 +150,18 @@ impl UringIoEngine {
         .into()
     }
 
-    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
+    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.txs[region as usize % self.txs.len()];
+        let shard = &self.txs[partition.id() as usize % self.txs.len()];
         let (ptr, len) = buf.as_raw_parts();
+        let rbuf = RawBuf { ptr, len };
+        let (file, offset) = partition.translate(offset);
+        let addr = RawFileAddress { file, offset };
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Write,
-            buf: RawBuf { ptr, len },
-            region,
-            offset,
+            rbuf,
+            addr,
         });
         async move {
             let res = match rx.await {
@@ -224,7 +228,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             let uring = IoUring::new(self.io_depth as _)?;
             let shard = UringIoEngineShard {
                 rx,
-                device: device.clone(),
+                _device: device.clone(),
                 uring,
                 io_depth: self.io_depth,
                 inflight: 0,
@@ -246,11 +250,11 @@ impl IoEngine for UringIoEngine {
         &self.device
     }
 
-    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
-        self.read(buf, region, offset)
+    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        self.read(buf, partition, offset)
     }
 
-    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
-        self.write(buf, region, offset)
+    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        self.write(buf, partition, offset)
     }
 }

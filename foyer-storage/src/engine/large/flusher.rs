@@ -46,15 +46,13 @@ use crate::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
         reclaimer::Reinsertion,
-        region::{GetCleanRegionHandle, RegionManager},
+        region::{GetCleanRegionHandle, RegionId, RegionManager},
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
     error::{Error, Result},
     io::{
         bytes::{IoSlice, IoSliceMut},
-        device::RegionId,
-        engine::IoEngine,
         PAGE,
     },
     runtime::Runtime,
@@ -154,12 +152,12 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn open(
         id: usize,
+        region_size: usize,
         io_buffer_size: usize,
         blob_index_size: usize,
         compression: Compression,
         indexer: Indexer,
         region_manager: RegionManager,
-        io_engine: Arc<dyn IoEngine>,
         submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
@@ -174,9 +172,7 @@ where
         bits::assert_aligned(PAGE, io_buffer_size);
         bits::assert_aligned(PAGE, blob_index_size);
 
-        let device = io_engine.device().clone();
-
-        let max_entry_size = device.region_size() - blob_index_size;
+        let max_entry_size = region_size - blob_index_size;
 
         let bytes = IoSliceMut::new(io_buffer_size);
         let rotate_buffer = Some(IoSliceMut::new(io_buffer_size));
@@ -186,7 +182,7 @@ where
 
         let current_region_handle = region_manager.get_clean_region();
 
-        let ctx = SplitCtx::new(device.region_size(), blob_index_size);
+        let ctx = SplitCtx::new(region_size, blob_index_size);
 
         let runner = Runner {
             id,

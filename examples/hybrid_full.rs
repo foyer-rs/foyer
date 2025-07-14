@@ -18,7 +18,7 @@ use chrono::Datelike;
 use foyer::{
     AdmitAllPicker, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, IopsCounter,
     LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
-    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
@@ -40,7 +40,6 @@ async fn main() -> anyhow::Result<()> {
         .with_device_builder(
             FsDeviceBuilder::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
                 .with_throttle(
                     Throttle::new()
                         .with_read_iops(4000)
@@ -53,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .with_io_engine_builder(PsyncIoEngineBuilder::new())
         .with_engine_builder(
             LargeObjectEngineBuilder::new()
+                .with_region_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)
                 .with_flushers(2)
@@ -61,11 +61,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_clean_region_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
                 .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
-                .with_tombstone_log_config(
-                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                        .with_flush(true)
-                        .build(),
-                ),
+                .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::<AdmitAllPicker>::default())

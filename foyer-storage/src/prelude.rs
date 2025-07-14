@@ -21,7 +21,6 @@ pub use crate::{
             engine::LargeObjectEngineBuilder,
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             region::{Region, RegionStatistics},
-            tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
         },
         Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
     },

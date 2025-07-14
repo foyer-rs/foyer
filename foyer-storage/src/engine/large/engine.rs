@@ -37,6 +37,7 @@ use futures_util::{
     future::{join_all, try_join_all},
     FutureExt,
 };
+use itertools::Itertools;
 use tokio::sync::Semaphore;
 
 use super::{
@@ -53,14 +54,14 @@ use crate::{
         large::{
             eviction::{EvictionPicker, FifoPicker, InvalidRatioPicker},
             reclaimer::RegionCleaner,
-            region::RegionManager,
+            region::{RegionId, RegionManager},
             serde::{AtomicSequence, EntryHeader},
-            tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
+            tombstone::{Tombstone, TombstoneLog},
         },
         Engine, EngineBuildContext, EngineBuilder,
     },
     error::{Error, Result},
-    io::{bytes::IoSliceMut, device::RegionId, PAGE},
+    io::{bytes::IoSliceMut, PAGE},
     picker::{utils::RejectAllPicker, ReinsertionPicker},
     runtime::Runtime,
     serde::EntryDeserializer,
@@ -74,6 +75,7 @@ where
     V: StorageValue,
     P: Properties,
 {
+    region_size: usize,
     compression: Compression,
     indexer_shards: usize,
     recover_concurrency: usize,
@@ -85,7 +87,7 @@ where
     clean_region_threshold: usize,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
-    tombstone_log_config: Option<TombstoneLogConfig>,
+    enable_tombstone_log: bool,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -97,6 +99,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LargeObjectEngineBuilder")
+            .field("region_size", &self.region_size)
             .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
             .field("recover_concurrency", &self.recover_concurrency)
@@ -108,7 +111,7 @@ where
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("reinsertion_picker", &self.reinsertion_picker)
-            .field("tombstone_log_config", &self.tombstone_log_config)
+            .field("enable_tombstone_log", &self.enable_tombstone_log)
             .finish()
     }
 }
@@ -133,6 +136,7 @@ where
     /// Create a new large object disk cache engine builder with default configurations.
     pub fn new() -> Self {
         Self {
+            region_size: 16 * 1024 * 1024, // 16 MiB
             compression: Compression::default(),
             indexer_shards: 64,
             recover_concurrency: 8,
@@ -144,9 +148,22 @@ where
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
-            tombstone_log_config: None,
+            enable_tombstone_log: false,
             marker: PhantomData,
         }
+    }
+
+    /// Set the region size for the large object disk cache.
+    ///
+    /// Region is the minimal cache eviction unit for the large object disk cache,
+    /// its size also limits the max cacheable entry size.
+    ///
+    /// The region size must be 4K-aligned. the given value is not 4K-aligned, it will be automatically aligned up.
+    ///
+    /// Default: `16 MiB`.
+    pub fn with_region_size(mut self, region_size: usize) -> Self {
+        self.region_size = bits::align_up(PAGE, region_size);
+        self
     }
 
     /// Set the shard num of the indexer. Each shard has its own lock.
@@ -261,12 +278,12 @@ where
         self
     }
 
-    /// Enable the tombstone log with the given config.
+    /// Enable the tombstone log.
     ///
     /// For updatable cache, either the tombstone log or [`crate::engine::RecoverMode::None`] must be enabled to prevent
     /// from the phantom entries after reopen.
-    pub fn with_tombstone_log_config(mut self, tombstone_log_config: TombstoneLogConfig) -> Self {
-        self.tombstone_log_config = Some(tombstone_log_config);
+    pub fn with_tombstone_log(mut self, enable: bool) -> Self {
+        self.enable_tombstone_log = enable;
         self
     }
 
@@ -282,36 +299,44 @@ where
         }: EngineBuildContext,
     ) -> Result<Arc<LargeObjectEngine<K, V, P>>> {
         let device = io_engine.device().clone();
-        if self.flushers + self.clean_region_threshold > device.regions() / 2 {
+        let region_size = self.region_size;
+
+        let mut tombstones = vec![];
+
+        let tombstone_log = if self.enable_tombstone_log {
+            let max_entries = device.capacity() / PAGE;
+            let pages = max_entries / TombstoneLog::SLOTS_PER_PAGE
+                + if max_entries % TombstoneLog::SLOTS_PER_PAGE > 0 {
+                    1
+                } else {
+                    0
+                };
+            let partition = device.create_partition(pages * PAGE)?;
+            let tombstone_log = TombstoneLog::open(partition, io_engine.clone(), &mut tombstones).await?;
+            Some(tombstone_log)
+        } else {
+            None
+        };
+
+        let reclaim_semaphore = Arc::new(Semaphore::new(0));
+        let region_manager = RegionManager::open(
+            io_engine.clone(),
+            region_size,
+            self.eviction_pickers,
+            reclaim_semaphore.clone(),
+            metrics.clone(),
+        )?;
+        let regions = region_manager.regions();
+
+        if self.flushers + self.clean_region_threshold > regions / 2 {
             tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
                     flushers = self.flushers,
                     clean_region_threshold = self.clean_region_threshold,
-                    regions = device.regions()
                 );
         }
 
-        let mut tombstones = vec![];
-        let tombstone_log = match &self.tombstone_log_config {
-            None => None,
-            Some(tombstone_log_config) => {
-                let log =
-                    TombstoneLog::open(tombstone_log_config, runtime.clone(), device.clone(), &mut tombstones).await?;
-                Some(log)
-            }
-        };
-
         let indexer = Indexer::new(self.indexer_shards);
-        let mut eviction_pickers = self.eviction_pickers;
-        for picker in eviction_pickers.iter_mut() {
-            picker.init(0..device.regions() as RegionId, device.region_size());
-        }
-        let reclaim_semaphore = Arc::new(Semaphore::new(0));
-        let region_manager = RegionManager::new(
-            io_engine.clone(),
-            eviction_pickers,
-            reclaim_semaphore.clone(),
-            metrics.clone(),
-        );
+
         let sequence = AtomicSequence::default();
         let submit_queue_size = Arc::<AtomicUsize>::default();
 
@@ -320,7 +345,7 @@ where
             recover_mode,
             self.blob_index_size,
             self.clean_region_threshold,
-            0..device.regions() as RegionId,
+            &(0..regions as RegionId).collect_vec(),
             &sequence,
             &indexer,
             &region_manager,
@@ -342,19 +367,18 @@ where
             let io_buffer_size = self.buffer_pool_size / self.flushers;
             let blob_index_size = self.blob_index_size;
             let compression = self.compression;
-            let io_engine = io_engine.clone();
             let runtime = runtime.clone();
             #[cfg(test)]
             let flush_holder = flush_holder.clone();
             async move {
                 Flusher::<K, V, P>::open(
                     id,
+                    region_size,
                     io_buffer_size,
                     blob_index_size,
                     compression,
                     indexer,
                     region_manager,
-                    io_engine,
                     submit_queue_size,
                     tombstone_log,
                     metrics,
@@ -785,7 +809,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        engine::{large::tombstone::TombstoneLogConfigBuilder, RecoverMode},
+        engine::RecoverMode,
         io::{
             self,
             device::{fs::FsDeviceBuilder, Device, DeviceBuilder},
@@ -808,15 +832,6 @@ mod tests {
             .build()
     }
 
-    fn device_for_test(dir: impl AsRef<Path>) -> Arc<dyn Device> {
-        FsDeviceBuilder::new(dir)
-            .with_capacity(ByteSize::kib(64).as_u64() as _)
-            .with_file_size(ByteSize::kib(16).as_u64() as _)
-            .boxed()
-            .build()
-            .unwrap()
-    }
-
     fn io_engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
         // io::engine::uring::UringIoEngineBuilder::new().build(device).unwrap()
@@ -835,12 +850,17 @@ mod tests {
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker>,
     ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
-        let device = device_for_test(dir);
+        let device = FsDeviceBuilder::new(dir)
+            .with_capacity(ByteSize::kib(64).as_u64() as _)
+            .boxed()
+            .build()
+            .unwrap();
         let io_engine = io_engine_for_test(device);
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
+            region_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
@@ -849,7 +869,7 @@ mod tests {
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
-            tombstone_log_config: None,
+            enable_tombstone_log: false,
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
@@ -871,14 +891,18 @@ mod tests {
 
     async fn store_for_test_with_tombstone_log(
         dir: impl AsRef<Path>,
-        path: impl AsRef<Path>,
     ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
-        let device = device_for_test(dir);
+        let device = FsDeviceBuilder::new(dir)
+            .with_capacity(ByteSize::kib(64).as_u64() as usize + ByteSize::kib(4).as_u64() as usize)
+            .boxed()
+            .build()
+            .unwrap();
         let io_engine = io_engine_for_test(device);
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
+            region_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
@@ -887,7 +911,7 @@ mod tests {
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
-            tombstone_log_config: Some(TombstoneLogConfigBuilder::new(path).with_flush(true).build()),
+            enable_tombstone_log: true,
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
@@ -1014,7 +1038,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
@@ -1038,7 +1062,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
         for i in 0..9 {
             if i != 3 {
                 assert_eq!(
@@ -1060,7 +1084,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),
@@ -1073,7 +1097,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         let es = (0..10).map(|i| memory.insert(i, vec![i as u8; 3 * KB])).collect_vec();
 
@@ -1101,7 +1125,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
         for i in 0..9 {
             assert_eq!(store.load(memory.hash(&i)).await.unwrap().kv(), None);
         }
@@ -1116,7 +1140,7 @@ mod tests {
         store.close().await.unwrap();
         drop(store);
 
-        let store = store_for_test_with_tombstone_log(dir.path(), dir.path().join("test-tombstone-log")).await;
+        let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         assert_eq!(
             store.load(memory.hash(&3)).await.unwrap().kv(),

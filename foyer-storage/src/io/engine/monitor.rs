@@ -19,7 +19,7 @@ use foyer_common::metrics::Metrics;
 use crate::{
     io::{
         bytes::{IoBuf, IoBufMut},
-        device::RegionId,
+        device::Partition,
         engine::{IoEngine, IoHandle},
     },
     Statistics,
@@ -61,11 +61,11 @@ impl IoEngine for MonitoredIoEngine {
         self.inner.io_engine.device()
     }
 
-    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
+    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();
 
-        let handle = self.inner.io_engine.read(buf, region, offset);
+        let handle = self.inner.io_engine.read(buf, partition, offset);
 
         self.inner.statistics.record_disk_read(bytes);
         self.inner.metrics.storage_disk_read.increase(1);
@@ -78,11 +78,11 @@ impl IoEngine for MonitoredIoEngine {
         handle
     }
 
-    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
+    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();
 
-        let handle = self.inner.io_engine.write(buf, region, offset);
+        let handle = self.inner.io_engine.write(buf, partition, offset);
 
         self.inner.statistics.record_disk_write(bytes);
         self.inner.metrics.storage_disk_write.increase(1);

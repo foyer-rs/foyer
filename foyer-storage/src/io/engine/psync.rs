@@ -19,7 +19,7 @@ use futures_util::FutureExt;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, RegionId},
+        device::{Device, Partition},
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
@@ -67,8 +67,8 @@ impl IoEngine for PsyncIoEngine {
         &self.device
     }
 
-    fn read(&self, buf: Box<dyn IoBufMut>, region: RegionId, offset: u64) -> IoHandle {
-        let device = self.device.clone();
+    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        let (raw, offset) = partition.translate(offset);
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         let runtime = self.runtime.clone();
@@ -76,7 +76,6 @@ impl IoEngine for PsyncIoEngine {
             let res = match runtime
                 .read()
                 .spawn_blocking(move || {
-                    let (raw, offset) = device.translate(region, offset);
                     #[cfg(target_family = "windows")]
                     {
                         use std::os::windows::{fs::FileExt, io::FromRawHandle};
@@ -103,8 +102,8 @@ impl IoEngine for PsyncIoEngine {
         .into()
     }
 
-    fn write(&self, buf: Box<dyn IoBuf>, region: RegionId, offset: u64) -> IoHandle {
-        let device = self.device.clone();
+    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        let (raw, offset) = partition.translate(offset);
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         let runtime = self.runtime.clone();
@@ -112,7 +111,6 @@ impl IoEngine for PsyncIoEngine {
             let res = match runtime
                 .write()
                 .spawn_blocking(move || {
-                    let (raw, offset) = device.translate(region, offset);
                     #[cfg(target_family = "windows")]
                     {
                         use std::os::windows::{fs::FileExt, io::FromRawHandle};

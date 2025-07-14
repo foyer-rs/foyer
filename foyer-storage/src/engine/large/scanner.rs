@@ -106,10 +106,11 @@ mod tests {
     use crate::{
         engine::large::{
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
+            region::RegionId,
             serde::Sequence,
         },
         io::{
-            device::{fs::FsDeviceBuilder, Device, DeviceBuilder, RegionId},
+            device::{fs::FsDeviceBuilder, Device, DeviceBuilder, Partition},
             engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
             PAGE,
         },
@@ -121,13 +122,12 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>, file_size: usize, files: usize) -> Arc<dyn Device> {
         FsDeviceBuilder::new(dir)
             .with_capacity(file_size * files)
-            .with_file_size(file_size)
             .boxed()
             .build()
             .unwrap()
     }
 
-    async fn engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
+    async fn io_engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
         PsyncIoEngineBuilder::new()
             .boxed()
             .build(device, Runtime::current())
@@ -145,7 +145,10 @@ mod tests {
 
         let tempdir = tempdir().unwrap();
         let device = device_for_test(tempdir.path(), REGION_SIZE, 4).await;
-        let engine = engine_for_test(device).await;
+        let partitions = (0..4)
+            .map(|_| device.create_partition(REGION_SIZE).unwrap())
+            .collect_vec();
+        let engine = io_engine_for_test(device).await;
 
         let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
@@ -168,26 +171,26 @@ mod tests {
         assert_eq!(batch.regions[1].blob_parts.len(), 2);
         assert_eq!(batch.regions[2].blob_parts.len(), 1);
 
-        async fn flush<'a>(engine: &'a Arc<dyn IoEngine>, region: &'a RegionId, part: &'a BlobPart) {
+        async fn flush<'a>(engine: &'a Arc<dyn IoEngine>, partition: &'a dyn Partition, part: &'a BlobPart) {
             let (_, res) = engine
                 .write(
                     Box::new(part.data.clone()),
-                    *region,
+                    partition,
                     part.blob_region_offset as u64 + part.part_blob_offset as u64,
                 )
                 .await;
             res.unwrap();
             let (_, res) = engine
-                .write(Box::new(part.index.clone()), *region, part.blob_region_offset as u64)
+                .write(Box::new(part.index.clone()), partition, part.blob_region_offset as u64)
                 .await;
             res.unwrap();
         }
 
-        flush(&engine, &0, &batch.regions[0].blob_parts[0]).await;
-        flush(&engine, &0, &batch.regions[0].blob_parts[1]).await;
-        flush(&engine, &1, &batch.regions[1].blob_parts[0]).await;
-        flush(&engine, &1, &batch.regions[1].blob_parts[1]).await;
-        flush(&engine, &2, &batch.regions[2].blob_parts[0]).await;
+        flush(&engine, partitions[0].as_ref(), &batch.regions[0].blob_parts[0]).await;
+        flush(&engine, partitions[0].as_ref(), &batch.regions[0].blob_parts[1]).await;
+        flush(&engine, partitions[1].as_ref(), &batch.regions[1].blob_parts[0]).await;
+        flush(&engine, partitions[1].as_ref(), &batch.regions[1].blob_parts[1]).await;
+        flush(&engine, partitions[2].as_ref(), &batch.regions[2].blob_parts[0]).await;
 
         fn cal(region: RegionId, part: &BlobPart) -> Vec<EntryInfo> {
             part.indices
@@ -210,18 +213,21 @@ mod tests {
         r1.append(&mut cal(1, &batch.regions[1].blob_parts[1]));
         let r2 = cal(2, &batch.regions[2].blob_parts[0]);
 
-        async fn extract(engine: Arc<dyn IoEngine>, region: RegionId) -> Vec<EntryInfo> {
+        async fn extract(engine: Arc<dyn IoEngine>, partition: Arc<dyn Partition>) -> Vec<EntryInfo> {
             let mut infos = vec![];
-            let mut scanner = RegionScanner::new(Region::new_for_test(region, engine), BLOB_INDEX_SIZE);
+            let mut scanner = RegionScanner::new(
+                Region::new_for_test(partition.id() as _, partition, engine),
+                BLOB_INDEX_SIZE,
+            );
             while let Some(mut es) = scanner.next().await.unwrap() {
                 infos.append(&mut es);
             }
             infos
         }
 
-        let rr0 = extract(engine.clone(), 0).await;
-        let rr1 = extract(engine.clone(), 1).await;
-        let rr2 = extract(engine.clone(), 2).await;
+        let rr0 = extract(engine.clone(), partitions[0].clone()).await;
+        let rr1 = extract(engine.clone(), partitions[1].clone()).await;
+        let rr2 = extract(engine.clone(), partitions[2].clone()).await;
 
         assert_eq!(r0, rr0);
         assert_eq!(r1, rr1);

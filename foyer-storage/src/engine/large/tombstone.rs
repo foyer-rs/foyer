@@ -12,70 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use foyer_common::bits;
 use tokio::sync::Mutex;
 
 use crate::{
     error::Result,
-    io::{bytes::IoSliceMut, device::RegionId, throttle::IopsCounter, PAGE},
-    Device, DeviceBuilder, FileDeviceBuilder, IoEngine, IoEngineBuilder, PsyncIoEngineBuilder, Runtime,
+    io::{bytes::IoSliceMut, device::Partition, PAGE},
+    IoEngine,
 };
-
-/// The configurations for the tombstone log.
-#[derive(Debug, Clone)]
-pub struct TombstoneLogConfig {
-    /// Path of the tombstone log.
-    pub path: PathBuf,
-    /// iops_counter for the tombstone log device monitor.
-    pub iops_counter: IopsCounter,
-}
-
-/// The builder for the tombstone log config.
-#[derive(Debug)]
-pub struct TombstoneLogConfigBuilder {
-    path: PathBuf,
-    flush: bool,
-    iops_counter: IopsCounter,
-}
-
-impl TombstoneLogConfigBuilder {
-    /// Create a new builder for the tombstone log config on the given path.
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        Self {
-            path: path.as_ref().into(),
-            flush: true,
-            iops_counter: IopsCounter::per_io(),
-        }
-    }
-
-    /// Set whether to enable flush.
-    ///
-    /// If enabled, `sync` will be called after writes to make sure the data is safely persisted on the device.
-    pub fn with_flush(mut self, flush: bool) -> Self {
-        self.flush = flush;
-        self
-    }
-
-    /// Set iops counter for the tombstone log device monitor.
-    pub fn with_iops_counter(mut self, iops_counter: IopsCounter) -> Self {
-        self.iops_counter = iops_counter;
-        self
-    }
-
-    /// Build the tombstone log config with the given args.
-    pub fn build(self) -> TombstoneLogConfig {
-        TombstoneLogConfig {
-            path: self.path,
-            iops_counter: self.iops_counter,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Tombstone {
@@ -103,44 +49,32 @@ impl Tombstone {
 #[derive(Debug, Clone)]
 pub struct TombstoneLog {
     inner: Arc<Mutex<TombstoneLogInner>>,
+    pages: usize,
 }
 
 #[derive(Debug)]
 struct TombstoneLogInner {
-    offset: u64,
     buffer: PageBuffer,
+    slot: usize,
 }
 
 impl TombstoneLog {
+    pub const SLOTS_PER_PAGE: usize = PAGE / Tombstone::serialized_len();
+
     /// Open the tombstone log with given a dedicated device.
     ///
     /// The tombstone log will
     pub async fn open(
-        config: &TombstoneLogConfig,
-        runtime: Runtime,
-        cache_device: Arc<dyn Device>,
+        partition: Arc<dyn Partition>,
+        io_engine: Arc<dyn IoEngine>,
         tombstones: &mut Vec<Tombstone>,
     ) -> Result<Self> {
-        // For large entry disk cache, the minimum entry size is the alignment.
-        //
-        // So, the tombstone log needs at most `cache device capacity / align` slots.
-        //
-        // For the alignment is 4K and the slot size is 16B, tombstone log requires 1/256 of the cache device size.
-        let capacity = bits::align_up(PAGE, (cache_device.capacity() / PAGE) * Tombstone::serialized_len());
-
-        let device = FileDeviceBuilder::new(&config.path)
-            .with_region_size(PAGE)
-            .with_capacity(capacity)
-            .boxed()
-            .build()?;
-        let io_engine = PsyncIoEngineBuilder::new().boxed().build(device, runtime)?;
-
         let mut recovered = vec![];
 
-        for region in 0..io_engine.device().regions() as RegionId {
-            tracing::trace!(region, "[tombstone log]: recover region");
+        for offset in (0..partition.size()).step_by(PAGE) {
+            tracing::trace!(offset, "[tombstone log]: recover at");
             let buf = IoSliceMut::new(PAGE);
-            let (buffer, res) = io_engine.read(Box::new(buf), region, 0).await;
+            let (buffer, res) = io_engine.read(Box::new(buf), partition.as_ref(), offset as u64).await;
             res?;
 
             let mut seq = 0;
@@ -152,45 +86,73 @@ impl TombstoneLog {
                     seq = tombstone.sequence;
                     addr = slot * Tombstone::serialized_len();
                 }
+                if tombstone.sequence == 0 {
+                    continue;
+                }
                 recovered.push((tombstone, addr));
             }
         }
 
-        let offset = recovered
+        tracing::trace!(?recovered, "[tombstone log]: recovered tombstones");
+
+        let latest_tombstone_offset = recovered
             .iter()
             .reduce(|a, b| if a.0.sequence > b.0.sequence { a } else { b })
             .map(|(tombstone, addr)| {
                 tracing::trace!(?tombstone, "[tombstone log]: found latest tombstone");
                 *addr
             })
-            .unwrap() as u64;
+            .unwrap_or_default();
 
         tombstones.extend(recovered.into_iter().map(|(tombstone, _)| tombstone));
-        let offset = (offset + Tombstone::serialized_len() as u64) % capacity as u64;
 
-        let region = bits::align_down(PAGE as RegionId, offset as RegionId) / PAGE as RegionId;
-        let buffer = PageBuffer::open(io_engine, region, 0).await?;
+        let latest_tombstone_page = latest_tombstone_offset / PAGE;
+        let latest_tombstone_slot = if latest_tombstone_page == 0 {
+            latest_tombstone_offset / Tombstone::serialized_len()
+        } else {
+            let pages_before_latest_tombstone = latest_tombstone_page - 1;
+            Self::SLOTS_PER_PAGE * pages_before_latest_tombstone
+                + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::serialized_len()
+        };
+
+        let pages = partition.size() / PAGE;
+        let slot = latest_tombstone_slot + 1;
+        let (page, _) = Self::calculate_slot_addr(pages, slot);
+        let buffer = PageBuffer::open(io_engine, partition, page as _).await?;
 
         Ok(Self {
-            inner: Arc::new(Mutex::new(TombstoneLogInner { offset, buffer })),
+            inner: Arc::new(Mutex::new(TombstoneLogInner { buffer, slot })),
+            pages,
         })
+    }
+
+    fn calculate_slot_addr(pages: usize, slot: usize) -> (u32, usize) {
+        let page = slot / Self::SLOTS_PER_PAGE;
+        let page = page % pages;
+        let offset = (slot % Self::SLOTS_PER_PAGE) * Tombstone::serialized_len();
+        (page as u32, offset)
+    }
+
+    fn slot_addr(&self, slot: usize) -> (u32, usize) {
+        Self::calculate_slot_addr(self.pages, slot)
     }
 
     pub async fn append(&self, tombstones: impl Iterator<Item = &Tombstone>) -> Result<()> {
         let mut inner = self.inner.lock().await;
 
         for tombstone in tombstones {
-            if bits::is_aligned(PAGE as u64, inner.offset) {
+            let slot = inner.slot;
+
+            let (page, offset) = self.slot_addr(slot);
+            if page != inner.buffer.page {
                 inner.buffer.flush().await?;
-                let region = bits::align_down(PAGE as RegionId, inner.offset as RegionId) / PAGE as RegionId;
-                inner.buffer.load(region, 0).await?;
+                inner.buffer.load(page).await?;
             }
-            let start = inner.offset as usize % PAGE;
+            let start = offset;
             let end = start + Tombstone::serialized_len();
             tombstone.write(&mut inner.buffer.as_mut()[start..end]);
 
-            inner.offset =
-                (inner.offset + Tombstone::serialized_len() as u64) % inner.buffer.io_engine.device().capacity() as u64;
+            inner.slot += 1;
         }
 
         inner.buffer.flush().await
@@ -199,12 +161,12 @@ impl TombstoneLog {
 
 #[derive(Debug)]
 pub struct PageBuffer {
-    region: RegionId,
-    idx: u32,
     // NOTE: This is always `Some(..)`.
     buffer: Option<IoSliceMut>,
 
     io_engine: Arc<dyn IoEngine>,
+    partition: Arc<dyn Partition>,
+    page: u32,
 }
 
 impl AsRef<[u8]> for PageBuffer {
@@ -220,12 +182,12 @@ impl AsMut<[u8]> for PageBuffer {
 }
 
 impl PageBuffer {
-    pub async fn open(io_engine: Arc<dyn IoEngine>, region: RegionId, idx: u32) -> Result<Self> {
+    pub async fn open(io_engine: Arc<dyn IoEngine>, partition: Arc<dyn Partition>, page: u32) -> Result<Self> {
         let mut this = Self {
-            region,
-            idx,
             buffer: Some(IoSliceMut::new(PAGE)),
             io_engine,
+            partition,
+            page,
         };
 
         this.update().await?;
@@ -237,7 +199,7 @@ impl PageBuffer {
         let buf = self.buffer.take().unwrap();
         let (buf, res) = self
             .io_engine
-            .read(Box::new(buf), self.region, Self::offset(PAGE, self.idx))
+            .read(Box::new(buf), self.partition.as_ref(), Self::offset(self.page))
             .await;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
@@ -245,17 +207,18 @@ impl PageBuffer {
         Ok(())
     }
 
-    pub async fn load(&mut self, region: RegionId, idx: u32) -> Result<()> {
-        self.region = region;
-        self.idx = idx;
+    pub async fn load(&mut self, page: u32) -> Result<()> {
+        tracing::trace!(page, "[tombstone log page buffer]: load page");
+        self.page = page;
         self.update().await
     }
 
     pub async fn flush(&mut self) -> Result<()> {
+        tracing::trace!(page = self.page, "[tombstone log page buffer]: flush page");
         let buf = self.buffer.take().unwrap();
         let (buf, res) = self
             .io_engine
-            .write(Box::new(buf), self.region, Self::offset(PAGE, self.idx))
+            .write(Box::new(buf), self.partition.as_ref(), Self::offset(self.page))
             .await;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
@@ -263,8 +226,8 @@ impl PageBuffer {
         Ok(())
     }
 
-    fn offset(align: usize, idx: u32) -> u64 {
-        align as u64 * idx as u64
+    fn offset(page: u32) -> u64 {
+        PAGE as u64 * page as u64
     }
 }
 
@@ -274,34 +237,37 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::io::device::{fs::FsDeviceBuilder, DeviceBuilder};
+    use crate::{
+        io::device::{fs::FsDeviceBuilder, DeviceBuilder},
+        IoEngineBuilder, PsyncIoEngineBuilder, Runtime,
+    };
 
     #[test_log::test(tokio::test)]
     async fn test_tombstone_log() {
         let dir = tempdir().unwrap();
 
-        // 4 MB cache device => 16 KB tombstone log => 1K tombstones
+        // 4 MB cache device => 16 KB tombstone log => 1K tombstones => 16K partition => 4 pages
         let device = FsDeviceBuilder::new(dir.path())
-            .with_capacity(4 * 1024 * 1024)
+            .with_capacity(4 * 1024 * 1024 + 16 * 1024)
             .boxed()
             .build()
             .unwrap();
+        let partition = device.create_partition(16 * 1024).unwrap();
+        let io_engine = PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(device, Runtime::current())
+            .unwrap();
 
-        let log = TombstoneLog::open(
-            &TombstoneLogConfig {
-                path: dir.path().join("test-tombstone-log"),
-                iops_counter: IopsCounter::per_io(),
-            },
-            Runtime::current(),
-            device.clone(),
-            &mut vec![],
-        )
-        .await
-        .unwrap();
+        let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
+            .await
+            .unwrap();
 
         log.append(
             (0..3 * 1024 + 42)
-                .map(|i| Tombstone { hash: i, sequence: i })
+                .map(|i| Tombstone {
+                    hash: i + 1,
+                    sequence: i + 1,
+                })
                 .collect_vec()
                 .iter(),
         )
@@ -310,32 +276,22 @@ mod tests {
 
         {
             let inner = log.inner.lock().await;
-            assert_eq!(
-                inner.offset,
-                (3 * 1024 + 42 + 1) * Tombstone::serialized_len() as u64 % (16 * 1024)
-            )
+            assert_eq!(inner.slot, (3 * 1024 + 42 + 1));
+            let (page, _) = log.slot_addr(inner.slot);
+            assert_eq!(inner.buffer.page, page);
         }
 
         drop(log);
 
-        let log = TombstoneLog::open(
-            &TombstoneLogConfig {
-                path: dir.path().join("test-tombstone-log"),
-                iops_counter: IopsCounter::per_io(),
-            },
-            Runtime::current(),
-            device.clone(),
-            &mut vec![],
-        )
-        .await
-        .unwrap();
+        let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
+            .await
+            .unwrap();
 
         {
             let inner = log.inner.lock().await;
-            assert_eq!(
-                inner.offset,
-                (3 * 1024 + 42 + 1) * Tombstone::serialized_len() as u64 % (16 * 1024)
-            )
+            assert_eq!(inner.slot, (3 * 1024 + 42 + 1) % (TombstoneLog::SLOTS_PER_PAGE * 4));
+            let (page, _) = log.slot_addr(inner.slot);
+            assert_eq!(inner.buffer.page, page);
         }
     }
 }

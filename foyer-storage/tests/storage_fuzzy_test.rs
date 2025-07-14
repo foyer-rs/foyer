@@ -106,9 +106,10 @@ fn basic(
 ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()))
-        .with_device_builder(FsDeviceBuilder::new(path).with_capacity(4 * MB).with_file_size(MB))
+        .with_device_builder(FsDeviceBuilder::new(path).with_capacity(4 * MB))
         .with_engine_builder(
             LargeObjectEngineBuilder::new()
+                .with_region_size(MB)
                 .with_recover_concurrency(2)
                 .with_indexer_shards(4)
                 .with_reinsertion_picker(recorder.clone()),

@@ -19,6 +19,16 @@ pub enum IoError {
     #[error("I/O operation failed: {0}")]
     Io(#[from] std::io::Error),
     /// Customized I/O error.
+    #[error("No space left on device: capacity={capacity}, allocated={allocated}, required={required}")]
+    NoSpace {
+        /// Device capacity in bytes.
+        capacity: usize,
+        /// Device allocated bytes.
+        allocated: usize,
+        /// Required bytes for the operation.
+        required: usize,
+    },
+    /// Other I/O error/
     #[error("Other error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
