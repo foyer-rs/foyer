@@ -36,7 +36,7 @@ pub struct FileDeviceBuilder {
     path: PathBuf,
     capacity: Option<usize>,
     throttle: Throttle,
-    #[cfg(target_family = "unix")]
+    #[cfg(target_os = "linux")]
     direct: bool,
 }
 
@@ -47,7 +47,7 @@ impl FileDeviceBuilder {
             path: path.as_ref().into(),
             capacity: None,
             throttle: Throttle::default(),
-            #[cfg(target_family = "unix")]
+            #[cfg(target_os = "linux")]
             direct: false,
         }
     }
@@ -69,7 +69,7 @@ impl FileDeviceBuilder {
     }
 
     /// Set whether the file device should use direct I/O.
-    #[cfg(target_family = "unix")]
+    #[cfg(target_os = "linux")]
     pub fn with_direct(mut self, direct: bool) -> Self {
         self.direct = direct;
         self
@@ -94,7 +94,7 @@ impl DeviceBuilder for FileDeviceBuilder {
 
         let mut opts = OpenOptions::new();
         opts.create(true).write(true).read(true);
-        #[cfg(target_family = "unix")]
+        #[cfg(target_os = "linux")]
         if self.direct {
             use std::os::unix::fs::OpenOptionsExt;
             opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
