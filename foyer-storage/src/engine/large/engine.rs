@@ -536,7 +536,7 @@ where
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::large_v2::generic::enqueue")
+        fastrace::trace(name = "foyer::storage::engine::large::generic::enqueue")
     )]
     fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
@@ -677,7 +677,9 @@ where
             })
         };
         #[cfg(feature = "tracing")]
-        let load = load.in_span(Span::enter_with_local_parent("foyer::storage::large_v2::generic::load"));
+        let load = load.in_span(Span::enter_with_local_parent(
+            "foyer::storage::engine::large::generic::load",
+        ));
         load
     }
 
