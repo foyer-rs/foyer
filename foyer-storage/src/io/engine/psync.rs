@@ -79,7 +79,7 @@ impl IoEngine for PsyncIoEngine {
                     #[cfg(target_family = "windows")]
                     {
                         use std::os::windows::{fs::FileExt, io::FromRawHandle};
-                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw) });
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw.0) });
                         file.seek_read(slice, offset).map_err(IoError::from)?;
                     };
                     #[cfg(target_family = "unix")]
@@ -114,7 +114,7 @@ impl IoEngine for PsyncIoEngine {
                     #[cfg(target_family = "windows")]
                     {
                         use std::os::windows::{fs::FileExt, io::FromRawHandle};
-                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw) });
+                        let file = ManuallyDrop::new(unsafe { File::from_raw_handle(raw.0) });
                         file.seek_write(slice, offset).map_err(IoError::from)?;
                     };
                     #[cfg(target_family = "unix")]
