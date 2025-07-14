@@ -62,6 +62,7 @@ struct UringIoEngineShard {
     _device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
+    io_poll: bool,
     inflight: usize,
 }
 
@@ -93,7 +94,11 @@ impl UringIoEngineShard {
             }
 
             if self.inflight > 0 {
-                self.uring.submit_and_wait(1).unwrap();
+                if self.io_poll {
+                    self.uring.submit().unwrap();
+                } else {
+                    self.uring.submit_and_wait(1).unwrap();
+                }
             }
 
             for cqe in self.uring.completion() {
@@ -181,6 +186,7 @@ impl UringIoEngine {
 pub struct UringIoEngineBuilder {
     threads: usize,
     io_depth: usize,
+    io_poll: bool,
 }
 
 impl Default for UringIoEngineBuilder {
@@ -195,6 +201,7 @@ impl UringIoEngineBuilder {
         Self {
             threads: 1,
             io_depth: 64,
+            io_poll: false,
         }
     }
 
@@ -207,6 +214,20 @@ impl UringIoEngineBuilder {
     /// Set the I/O depth for each thread.
     pub fn with_io_depth(mut self, io_depth: usize) -> Self {
         self.io_depth = io_depth;
+        self
+    }
+
+    /// Enable or disable I/O polling.
+    ///
+    /// FYI: https://man7.org/linux/man-pages/man2/io_uring_setup.2.html
+    ///
+    /// Related syscall flag: `IORING_SETUP_IOPOLL`.
+    ///
+    /// NOTE: If this feature is enabeld, the underlying device must be opened with the `O_DIRECT` flag.
+    ///
+    /// Default: `false`.
+    pub fn with_iopoll(mut self, iopoll: bool) -> Self {
+        self.io_poll = iopoll;
         self
     }
 }
@@ -225,12 +246,17 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             .unzip();
 
         for rx in rxs {
-            let uring = IoUring::new(self.io_depth as _)?;
+            let mut builder = IoUring::builder();
+            if self.io_poll {
+                builder.setup_iopoll();
+            }
+            let uring = builder.build(self.io_depth as _)?;
             let shard = UringIoEngineShard {
                 rx,
                 _device: device.clone(),
                 uring,
                 io_depth: self.io_depth,
+                io_poll: self.io_poll,
                 inflight: 0,
             };
 

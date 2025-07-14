@@ -296,6 +296,15 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     direct: bool,
+
+    #[arg(long, default_value_t = false)]
+    io_uring_iopoll: bool,
+
+    #[arg(long, default_value_t = 1)]
+    io_uring_threads: usize,
+
+    #[arg(long, default_value_t = 64)]
+    io_uring_iodepth: usize,
 }
 
 #[derive(Debug)]
@@ -553,7 +562,11 @@ async fn benchmark(args: Args) {
     let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
         "psync" => PsyncIoEngineBuilder::new().boxed(),
         #[cfg(target_os = "linux")]
-        "io_uring" => UringIoEngineBuilder::new().boxed(),
+        "io_uring" => UringIoEngineBuilder::new()
+            .with_threads(args.io_uring_threads)
+            .with_io_depth(args.io_uring_iodepth)
+            .with_iopoll(args.io_uring_iopoll)
+            .boxed(),
         _ => unreachable!(),
     };
 
