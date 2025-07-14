@@ -197,13 +197,13 @@ impl Partition for FsPartition {
         #[cfg(any(target_family = "unix", target_family = "wasm"))]
         let raw = {
             use std::os::fd::AsRawFd;
-            self.file.as_raw_fd()
+            RawFile(self.file.as_raw_fd())
         };
 
         #[cfg(target_family = "windows")]
         let raw = {
             use std::os::windows::io::AsRawHandle;
-            self.file.as_raw_handle()
+            RawFile(self.file.as_raw_handle())
         };
 
         (raw, address)

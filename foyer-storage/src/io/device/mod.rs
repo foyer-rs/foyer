@@ -22,13 +22,16 @@ pub type PartitionId = u32;
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(any(target_family = "unix", target_family = "wasm"))]
-pub type RawFile = std::os::fd::RawFd;
+pub struct RawFile(pub std::os::fd::RawFd);
 
 /// Raw os file resource.
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(target_family = "windows")]
-pub type RawFile = std::os::windows::io::RawHandle;
+pub struct RawFile(pub std::os::windows::io::RawHandle);
+
+unsafe impl Send for RawFile {}
+unsafe impl Sync for RawFile {}
 
 /// Device builder trait.
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {

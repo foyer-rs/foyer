@@ -107,6 +107,6 @@ impl Partition for NoopPartition {
     }
 
     fn translate(&self, _: u64) -> (RawFile, u64) {
-        (0 as _, 0)
+        (RawFile(0 as _), 0)
     }
 }

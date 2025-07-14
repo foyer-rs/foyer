@@ -50,11 +50,6 @@ struct RawFileAddress {
     offset: u64,
 }
 
-#[cfg(target_family = "windows")]
-unsafe impl Send for RawFileAddress {}
-#[cfg(target_family = "windows")]
-unsafe impl Sync for RawFileAddress {}
-
 struct UringIoCtx {
     tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
@@ -83,7 +78,7 @@ impl UringIoEngineShard {
                 self.inflight += 1;
                 let ctx = Box::new(ctx);
 
-                let fd = Fd(ctx.addr.file);
+                let fd = Fd(ctx.addr.file.0);
                 let sqe = match ctx.io_type {
                     UringIoType::Read => opcode::Read::new(fd, ctx.rbuf.ptr, ctx.rbuf.len as _)
                         .offset(ctx.addr.offset)
