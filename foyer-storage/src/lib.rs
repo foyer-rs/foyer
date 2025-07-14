@@ -22,7 +22,6 @@ mod engine;
 mod error;
 mod io;
 mod picker;
-mod region;
 mod runtime;
 mod serde;
 mod statistics;

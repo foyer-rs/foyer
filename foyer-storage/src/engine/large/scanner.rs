@@ -15,7 +15,11 @@
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
-use crate::{engine::large::buffer::BlobIndexReader, error::Result, io::bytes::IoSliceMut, region::Region};
+use crate::{
+    engine::large::{buffer::BlobIndexReader, region::Region},
+    error::Result,
+    io::bytes::IoSliceMut,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntryInfo {

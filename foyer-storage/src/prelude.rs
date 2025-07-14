@@ -19,6 +19,8 @@ pub use crate::{
     engine::{
         large::{
             engine::LargeObjectEngineBuilder,
+            eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
+            region::{Region, RegionStatistics},
             tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
         },
         Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
@@ -35,12 +37,11 @@ pub use crate::{
     },
     picker::{
         utils::{
-            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
-            IoThrottlerPicker, IoThrottlerTarget, RejectAllPicker,
+            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, IoThrottlerPicker,
+            IoThrottlerTarget, RejectAllPicker,
         },
-        AdmissionPicker, EvictionInfo, EvictionPicker, Pick, ReinsertionPicker,
+        AdmissionPicker, Pick, ReinsertionPicker,
     },
-    region::{Region, RegionStatistics},
     runtime::Runtime,
     statistics::Statistics,
     store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},

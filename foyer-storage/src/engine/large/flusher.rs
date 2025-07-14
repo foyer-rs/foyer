@@ -46,6 +46,7 @@ use crate::{
         buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
         reclaimer::Reinsertion,
+        region::{GetCleanRegionHandle, RegionManager},
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
@@ -56,7 +57,6 @@ use crate::{
         engine::IoEngine,
         PAGE,
     },
-    region::{GetCleanRegionHandle, RegionManager},
     runtime::Runtime,
     Compression,
 };
