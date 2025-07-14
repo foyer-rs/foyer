@@ -30,6 +30,7 @@ use crate::{
     engine::{
         large::{
             indexer::HashedEntryAddress,
+            region::{Region, RegionManager},
             scanner::{EntryInfo, RegionScanner},
             serde::{AtomicSequence, Sequence},
             tombstone::Tombstone,
@@ -38,7 +39,6 @@ use crate::{
     },
     error::{Error, Result},
     io::device::RegionId,
-    region::{Region, RegionManager},
     runtime::Runtime,
 };
 

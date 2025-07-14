@@ -14,10 +14,12 @@
 
 pub mod buffer;
 pub mod engine;
+pub mod eviction;
 pub mod flusher;
 pub mod indexer;
 pub mod reclaimer;
 pub mod recover;
+pub mod region;
 pub mod scanner;
 pub mod serde;
 pub mod tombstone;

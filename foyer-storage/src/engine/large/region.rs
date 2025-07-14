@@ -35,13 +35,13 @@ use rand::seq::IteratorRandom;
 use tokio::sync::Semaphore;
 
 use crate::{
+    engine::large::eviction::{EvictionInfo, EvictionPicker},
     error::Result,
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::RegionId,
         engine::IoEngine,
     },
-    picker::{EvictionInfo, EvictionPicker},
 };
 
 /// Region statistics.

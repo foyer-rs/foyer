@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashSet, fmt::Debug, ops::Range, sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use crate::{io::device::RegionId, region::Region, statistics::Statistics};
+use crate::statistics::Statistics;
 
 /// Pick result for admission pickers and reinsertion pickers.
 #[derive(Debug, Clone, Copy)]
@@ -59,37 +59,6 @@ pub trait AdmissionPicker: Send + Sync + 'static + Debug {
 pub trait ReinsertionPicker: Send + Sync + 'static + Debug {
     /// Decide whether to pick an entry by hash.
     fn pick(&self, stats: &Arc<Statistics>, hash: u64) -> Pick;
-}
-
-/// Eviction related information for eviction picker to make decisions.
-#[derive(Debug)]
-pub struct EvictionInfo<'a> {
-    /// All regions in the disk cache.
-    pub regions: &'a [Region],
-    /// Evictable regions.
-    pub evictable: &'a HashSet<RegionId>,
-    /// Clean regions counts.
-    pub clean: usize,
-}
-
-/// The eviction picker for the disk cache.
-pub trait EvictionPicker: Send + Sync + 'static + Debug {
-    /// Init the eviction picker with information.
-    #[expect(unused_variables)]
-    fn init(&mut self, regions: Range<RegionId>, region_size: usize) {}
-
-    /// Pick a region to evict.
-    ///
-    /// `pick` can return `None` if no region can be picked based on its rules, and the next picker will be used.
-    ///
-    /// If no picker picks a region, the disk cache will pick randomly pick one.
-    fn pick(&mut self, info: EvictionInfo<'_>) -> Option<RegionId>;
-
-    /// Notify the picker that a region is ready to pick.
-    fn on_region_evictable(&mut self, info: EvictionInfo<'_>, region: RegionId);
-
-    /// Notify the picker that a region is evicted.
-    fn on_region_evict(&mut self, info: EvictionInfo<'_>, region: RegionId);
 }
 
 pub mod utils;

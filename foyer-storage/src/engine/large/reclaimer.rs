@@ -28,6 +28,7 @@ use crate::{
     engine::large::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
+        region::{Region, RegionManager},
         scanner::RegionScanner,
         serde::Sequence,
     },
@@ -37,7 +38,6 @@ use crate::{
         PAGE,
     },
     picker::ReinsertionPicker,
-    region::{Region, RegionManager},
     runtime::Runtime,
     Statistics,
 };

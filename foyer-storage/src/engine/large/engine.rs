@@ -51,7 +51,9 @@ use crate::{
     compress::Compression,
     engine::{
         large::{
+            eviction::{EvictionPicker, FifoPicker, InvalidRatioPicker},
             reclaimer::RegionCleaner,
+            region::RegionManager,
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog, TombstoneLogConfig},
         },
@@ -59,11 +61,7 @@ use crate::{
     },
     error::{Error, Result},
     io::{bytes::IoSliceMut, device::RegionId, PAGE},
-    picker::{
-        utils::{FifoPicker, InvalidRatioPicker, RejectAllPicker},
-        EvictionPicker, ReinsertionPicker,
-    },
-    region::RegionManager,
+    picker::{utils::RejectAllPicker, ReinsertionPicker},
     runtime::Runtime,
     serde::EntryDeserializer,
     Load,
@@ -794,7 +792,7 @@ mod tests {
             engine::{IoEngine, IoEngineBuilder},
             throttle::IopsCounter,
         },
-        picker::utils::{FifoPicker, RejectAllPicker},
+        picker::utils::RejectAllPicker,
         serde::EntrySerializer,
         test_utils::BiasedPicker,
         Statistics,
