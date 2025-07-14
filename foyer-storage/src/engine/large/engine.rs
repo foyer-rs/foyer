@@ -819,7 +819,7 @@ mod tests {
         picker::utils::RejectAllPicker,
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        Statistics,
+        CombinedDeviceBuilder, PsyncIoEngineBuilder, Statistics,
     };
 
     const KB: usize = 1024;
@@ -1324,5 +1324,55 @@ mod tests {
         }
 
         assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_aggregated_device() {
+        let dir = tempfile::tempdir().unwrap();
+
+        const KB: usize = 1024;
+        const MB: usize = 1024 * 1024;
+
+        let runtime = Runtime::current();
+
+        let d1 = FsDeviceBuilder::new(dir.path().join("dev1"))
+            .with_capacity(MB)
+            .boxed()
+            .build()
+            .unwrap();
+        let d2 = FsDeviceBuilder::new(dir.path().join("dev2"))
+            .with_capacity(2 * MB)
+            .boxed()
+            .build()
+            .unwrap();
+        let d3 = FsDeviceBuilder::new(dir.path().join("dev3"))
+            .with_capacity(4 * MB)
+            .boxed()
+            .build()
+            .unwrap();
+        let device = CombinedDeviceBuilder::new()
+            .with_device(d1)
+            .with_device(d2)
+            .with_device(d3)
+            .boxed()
+            .build()
+            .unwrap();
+        let io_engine = PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(device, runtime.clone())
+            .unwrap();
+        let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new()
+            .with_region_size(64 * KB)
+            .boxed()
+            .build(EngineBuildContext {
+                io_engine,
+                metrics: Arc::new(Metrics::noop()),
+                statistics: Arc::new(Statistics::new(IopsCounter::per_io())),
+                runtime,
+                recover_mode: RecoverMode::None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(engine.inner.region_manager.regions(), (1 + 2 + 4) * MB / (64 * KB));
     }
 }
