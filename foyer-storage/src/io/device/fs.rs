@@ -101,6 +101,7 @@ impl DeviceBuilder for FsDeviceBuilder {
             capacity,
             throttle,
             dir: self.dir,
+            #[cfg(target_os = "linux")]
             direct: self.direct,
             partitions: RwLock::new(vec![]),
         };
@@ -115,6 +116,7 @@ pub struct FsDevice {
     capacity: usize,
     throttle: Throttle,
     dir: PathBuf,
+    #[cfg(target_os = "linux")]
     direct: bool,
     partitions: RwLock<Vec<Arc<FsPartition>>>,
 }
