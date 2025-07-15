@@ -38,12 +38,10 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::Semaphore;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
     indexer::Indexer,
-    reclaimer::Reclaimer,
     recover::RecoverRunner,
 };
 #[cfg(test)]
@@ -53,7 +51,7 @@ use crate::{
     engine::{
         large::{
             eviction::{EvictionPicker, FifoPicker, InvalidRatioPicker},
-            reclaimer::RegionCleaner,
+            reclaimer::{Reclaimer, ReclaimerTrait, RegionCleaner},
             region::{RegionId, RegionManager},
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
@@ -318,13 +316,33 @@ where
             None
         };
 
-        let reclaim_semaphore = Arc::new(Semaphore::new(0));
+        let indexer = Indexer::new(self.indexer_shards);
+        let submit_queue_size = Arc::<AtomicUsize>::default();
+
+        #[expect(clippy::type_complexity)]
+        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<flume::Receiver<Submission<K, V, P>>>) = (0..self.flushers)
+            .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
+            .unzip();
+
+        let reclaimer = Reclaimer::new(
+            indexer.clone(),
+            flushers.clone(),
+            self.reinsertion_picker,
+            self.blob_index_size,
+            statistics.clone(),
+            runtime.clone(),
+        );
+        let reclaimer: Arc<dyn ReclaimerTrait> = Arc::new(reclaimer);
+
         let region_manager = RegionManager::open(
-            io_engine.clone(),
+            io_engine,
             region_size,
             self.eviction_pickers,
-            reclaim_semaphore.clone(),
+            reclaimer,
+            self.reclaimers,
+            self.clean_region_threshold,
             metrics.clone(),
+            runtime.clone(),
         )?;
         let regions = region_manager.regions();
 
@@ -335,16 +353,12 @@ where
                 );
         }
 
-        let indexer = Indexer::new(self.indexer_shards);
-
         let sequence = AtomicSequence::default();
-        let submit_queue_size = Arc::<AtomicUsize>::default();
 
         RecoverRunner::run(
             self.recover_concurrency,
             recover_mode,
             self.blob_index_size,
-            self.clean_region_threshold,
             &(0..regions as RegionId).collect_vec(),
             &sequence,
             &indexer,
@@ -358,58 +372,28 @@ where
         #[cfg(test)]
         let flush_holder = FlushHolder::default();
 
-        let flushers = try_join_all((0..self.flushers).map(|id| {
-            let indexer = indexer.clone();
-            let region_manager = region_manager.clone();
-            let submit_queue_size = submit_queue_size.clone();
-            let tombstone_log = tombstone_log.clone();
-            let metrics = metrics.clone();
-            let io_buffer_size = self.buffer_pool_size / self.flushers;
-            let blob_index_size = self.blob_index_size;
-            let compression = self.compression;
-            let runtime = runtime.clone();
-            #[cfg(test)]
-            let flush_holder = flush_holder.clone();
-            async move {
-                Flusher::<K, V, P>::open(
-                    id,
-                    region_size,
-                    io_buffer_size,
-                    blob_index_size,
-                    compression,
-                    indexer,
-                    region_manager,
-                    submit_queue_size,
-                    tombstone_log,
-                    metrics,
-                    &runtime,
-                    #[cfg(test)]
-                    flush_holder,
-                )
-            }
-        }))
-        .await?;
-
-        let reclaimers = join_all((0..self.reclaimers).map(|_| async {
-            Reclaimer::open(
-                region_manager.clone(),
-                reclaim_semaphore.clone(),
-                indexer.clone(),
-                flushers.clone(),
-                self.reinsertion_picker.clone(),
+        let io_buffer_size = self.buffer_pool_size / self.flushers;
+        for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
+            flusher.run(
+                rx,
+                region_size,
+                io_buffer_size,
                 self.blob_index_size,
-                statistics.clone(),
+                self.compression,
+                indexer.clone(),
+                region_manager.clone(),
+                tombstone_log.clone(),
                 metrics.clone(),
-                runtime.clone(),
-            )
-        }))
-        .await;
+                &runtime,
+                #[cfg(test)]
+                flush_holder.clone(),
+            )?;
+        }
 
         let inner = LargeObjectEngineInner {
             indexer,
             region_manager,
             flushers,
-            reclaimers,
             submit_queue_size,
             submit_queue_size_threshold: self.submit_queue_size_threshold,
             sequence,
@@ -479,7 +463,6 @@ where
     region_manager: RegionManager,
 
     flushers: Vec<Flusher<K, V, P>>,
-    reclaimers: Vec<Reclaimer>,
 
     submit_queue_size: Arc<AtomicUsize>,
     submit_queue_size_threshold: usize,
@@ -517,10 +500,10 @@ where
 {
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let flushers = self.inner.flushers.clone();
-        let reclaimers = self.inner.reclaimers.clone();
+        let region_manager = self.inner.region_manager.clone();
         async move {
             join_all(flushers.iter().map(|flusher| flusher.wait())).await;
-            join_all(reclaimers.iter().map(|reclaimer| reclaimer.wait())).await;
+            region_manager.wait_reclaim().await;
         }
     }
 
@@ -1198,9 +1181,6 @@ mod tests {
         enqueue(&store, es[9].clone());
         enqueue(&store, es[10].clone());
         store.wait().await;
-        for reclaimer in store.inner.reclaimers.iter() {
-            reclaimer.wait().await;
-        }
         let mut res = vec![];
         for i in 0..11 {
             res.push(store.load(memory.hash(&i)).await.unwrap().kv());
@@ -1225,9 +1205,6 @@ mod tests {
         // [[(11), (3), (5)], [], [(6), (7), (8)], [(9), (10), (1)]]
         enqueue(&store, es[11].clone());
         store.wait().await;
-        for reclaimer in store.inner.reclaimers.iter() {
-            reclaimer.wait().await;
-        }
         let mut res = vec![];
         for i in 0..12 {
             tracing::trace!("==========> {i}");
@@ -1260,9 +1237,6 @@ mod tests {
         store.wait().await;
         enqueue(&store, es[14].clone());
         store.wait().await;
-        for reclaimer in store.inner.reclaimers.iter() {
-            reclaimer.wait().await;
-        }
         let mut res = vec![];
         for i in 0..15 {
             res.push(store.load(memory.hash(&i)).await.unwrap().kv());

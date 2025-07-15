@@ -149,23 +149,37 @@ where
     V: StorageValue,
     P: Properties,
 {
-    #[expect(clippy::too_many_arguments)]
-    pub fn open(
+    pub fn new(
         id: usize,
+        submit_queue_size: Arc<AtomicUsize>,
+        metrics: Arc<Metrics>,
+    ) -> (Self, flume::Receiver<Submission<K, V, P>>) {
+        let (tx, rx) = flume::unbounded();
+        let this = Self {
+            id,
+            tx,
+            submit_queue_size,
+            metrics,
+        };
+        (this, rx)
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub fn run(
+        &self,
+        rx: flume::Receiver<Submission<K, V, P>>,
         region_size: usize,
         io_buffer_size: usize,
         blob_index_size: usize,
         compression: Compression,
         indexer: Indexer,
         region_manager: RegionManager,
-        submit_queue_size: Arc<AtomicUsize>,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
         #[cfg(test)] flush_holder: FlushHolder,
-    ) -> Result<Self> {
-        let (tx, rx) = flume::unbounded();
-
+    ) -> Result<()> {
+        let id = self.id;
         let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
         assert!(io_buffer_size > 0);
 
@@ -193,7 +207,7 @@ where
             waiters: vec![],
             rotate_buffer,
             queue_init: None,
-            submit_queue_size: submit_queue_size.clone(),
+            submit_queue_size: self.submit_queue_size.clone(),
             region_manager,
             indexer,
             tombstone_log,
@@ -213,12 +227,7 @@ where
             }
         });
 
-        Ok(Self {
-            id,
-            tx,
-            submit_queue_size,
-            metrics,
-        })
+        Ok(())
     }
 
     pub fn submit(&self, submission: Submission<K, V, P>) {
@@ -556,10 +565,11 @@ where
                     metrics.storage_lodc_indexer_conflict.increase(olds.len() as _);
 
                     // Window expect window is full, make it evictable.
+                    let id = region.id();
                     if i != regions - 1 {
-                        region_manager.mark_evictable(region.id());
+                        region_manager.on_writing_finish(region);
                     }
-                    tracing::trace!(id, "[flusher]: write region {id} finish.", id = region.id());
+                    tracing::trace!(id, "[flusher]: write region finish.");
 
                     Ok::<_, Error>(region_handle)
                 }
