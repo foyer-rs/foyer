@@ -204,7 +204,7 @@ where
         }
 
         let future = self.inner.engine.load(hash);
-        match self.inner.runtime.read().spawn(future).await.unwrap() {
+        match future.await {
             Ok(Load::Entry {
                 key: k,
                 value: v,
