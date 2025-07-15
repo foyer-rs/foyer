@@ -36,7 +36,6 @@ use foyer_common::{
     future::{Diversion, DiversionFuture},
     metrics::Metrics,
     properties::{Location, Properties, Source},
-    runtime::SingletonHandle,
     strict_assert,
     utils::scope::Scope,
 };
@@ -1017,12 +1016,7 @@ where
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
-        self.fetch_inner(
-            key,
-            Default::default(),
-            fetch,
-            &tokio::runtime::Handle::current().into(),
-        )
+        self.fetch_inner(key, Default::default(), fetch)
     }
 
     #[cfg_attr(
@@ -1041,7 +1035,7 @@ where
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
     {
-        self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
+        self.fetch_inner(key, properties, fetch)
     }
 
     /// Advanced fetch with specified runtime.
@@ -1054,7 +1048,6 @@ where
         key: E::Key,
         mut properties: E::Properties,
         fetch: F,
-        runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
     where
         F: FnOnce() -> FU,
@@ -1083,7 +1076,7 @@ where
 
         let cache = self.clone();
         let future = fetch();
-        let join = runtime.spawn({
+        let join = tokio::spawn({
             let task = async move {
                 #[cfg(feature = "tracing")]
                 let Diversion { target, store } = future

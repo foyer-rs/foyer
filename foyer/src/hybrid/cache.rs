@@ -360,7 +360,7 @@ where
         let storage = self.storage.clone();
         let flush_on_close = self.flush_on_close;
 
-        self.storage.runtime().user().spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = Self::close_inner(closed, memory, storage, flush_on_close).await {
                 tracing::error!(?name, ?e, "[hybrid]: failed to close hybrid cache");
             }
@@ -664,10 +664,10 @@ where
         #[cfg(feature = "tracing")]
         let guard = span.set_local_parent();
 
-        let fetch = self.inner.memory.fetch_inner(
-            key.clone(),
-            HybridCacheProperties::default(),
-            || {
+        let fetch = self
+            .inner
+            .memory
+            .fetch_inner(key.clone(), HybridCacheProperties::default(), || {
                 let store = self.inner.storage.clone();
                 async move {
                     match store.load(&key).await.map_err(Error::from) {
@@ -687,9 +687,7 @@ where
                         Err(e) => Err(ObtainFetchError::Other(e)).into(),
                     }
                 }
-            },
-            &tokio::runtime::Handle::current().into(),
-        );
+            });
         #[cfg(feature = "tracing")]
         drop(guard);
 
@@ -940,55 +938,49 @@ where
         let store = self.inner.storage.clone();
 
         let future = fetch();
-        let inner = self.inner.memory.fetch_inner(
-            key.clone(),
-            properties,
-            || {
-                let metrics = self.inner.metrics.clone();
-                let runtime = self.storage().runtime().clone();
+        let inner = self.inner.memory.fetch_inner(key.clone(), properties, || {
+            let metrics = self.inner.metrics.clone();
 
-                async move {
-                    let throttled = match store.load(&key).await.map_err(Error::from) {
-                        Ok(Load::Entry {
-                            key: _,
-                            value,
-                            populated,
-                        }) => {
-                            metrics.hybrid_hit.increase(1);
-                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-                            return Diversion {
-                                target: Ok(value),
-                                store: Some(FetchContext {
-                                    throttled: false,
-                                    source: Source::Populated(populated),
-                                }),
-                            };
-                        }
-                        Ok(Load::Throttled) => true,
-                        Ok(Load::Miss) => false,
-                        Err(e) => return Err(e).into(),
-                    };
-
-                    metrics.hybrid_miss.increase(1);
-                    metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
-
-                    let fut = async move {
-                        Diversion {
-                            target: future.await,
+            async move {
+                let throttled = match store.load(&key).await.map_err(Error::from) {
+                    Ok(Load::Entry {
+                        key: _,
+                        value,
+                        populated,
+                    }) => {
+                        metrics.hybrid_hit.increase(1);
+                        metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+                        return Diversion {
+                            target: Ok(value),
                             store: Some(FetchContext {
-                                throttled,
-                                source: Source::Outer,
+                                throttled: false,
+                                source: Source::Populated(populated),
                             }),
-                        }
-                    };
-                    #[cfg(feature = "tracing")]
-                    let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+                        };
+                    }
+                    Ok(Load::Throttled) => true,
+                    Ok(Load::Miss) => false,
+                    Err(e) => return Err(e).into(),
+                };
 
-                    runtime.user().spawn(fut).await.unwrap()
-                }
-            },
-            self.storage().runtime().read(),
-        );
+                metrics.hybrid_miss.increase(1);
+                metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
+
+                let fut = async move {
+                    Diversion {
+                        target: future.await,
+                        store: Some(FetchContext {
+                            throttled,
+                            source: Source::Outer,
+                        }),
+                    }
+                };
+                #[cfg(feature = "tracing")]
+                let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+
+                tokio::spawn(fut).await.unwrap()
+            }
+        });
 
         if inner.state() == FetchState::Hit {
             self.inner.metrics.hybrid_hit.increase(1);

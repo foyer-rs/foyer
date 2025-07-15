@@ -55,7 +55,6 @@ use crate::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
     },
-    runtime::Runtime,
     Compression,
 };
 
@@ -176,7 +175,6 @@ where
         region_manager: RegionManager,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
-        runtime: &Runtime,
         #[cfg(test)] flush_holder: FlushHolder,
     ) -> Result<()> {
         let id = self.id;
@@ -212,7 +210,6 @@ where
             indexer,
             tombstone_log,
             compression,
-            runtime: runtime.clone(),
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
             current_region_handle,
@@ -221,7 +218,7 @@ where
             flush_holder,
         };
 
-        runtime.write().spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!(id, "[flusher]: flusher exit with error: {e}");
             }
@@ -303,8 +300,6 @@ where
     tombstone_log: Option<TombstoneLog>,
 
     compression: Compression,
-
-    runtime: Runtime,
 
     metrics: Arc<Metrics>,
 
@@ -598,10 +593,7 @@ where
         };
 
         let f: BoxFuture<'_, Result<(Vec<GetCleanRegionHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
-        let handle = self
-            .runtime
-            .write()
-            .spawn(f)
+        let handle = tokio::spawn(f)
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {
                     handle: states.pop(),

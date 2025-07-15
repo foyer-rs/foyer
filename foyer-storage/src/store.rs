@@ -26,10 +26,8 @@ use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
     properties::Properties,
-    runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
-use tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -40,7 +38,7 @@ use crate::{
         noop::{NoopEngine, NoopEngineBuilder},
         Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
     },
-    error::{Error, Result},
+    error::Result,
     io::{
         device::{
             noop::{NoopDevice, NoopDeviceBuilder},
@@ -49,7 +47,6 @@ use crate::{
         engine::{monitor::MonitoredIoEngine, noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngineBuilder},
         throttle::Throttle,
     },
-    runtime::Runtime,
     serde::EntrySerializer,
     statistics::Statistics,
     AdmissionPicker, AdmitAllPicker, ChainedAdmissionPickerBuilder, IoThrottlerPicker, IoThrottlerTarget, Pick,
@@ -82,8 +79,6 @@ where
 
     compression: Compression,
 
-    runtime: Runtime,
-
     throttle: Throttle,
     statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
@@ -105,7 +100,6 @@ where
             .field("admission_picker", &self.inner.admission_picker)
             .field("load_throttler", &self.inner.load_throttler)
             .field("compression", &self.inner.compression)
-            .field("runtimes", &self.inner.runtime)
             .finish()
     }
 }
@@ -203,8 +197,7 @@ where
             }
         }
 
-        let future = self.inner.engine.load(hash);
-        match self.inner.runtime.read().spawn(future).await.unwrap() {
+        match self.inner.engine.load(hash).await {
             Ok(Load::Entry {
                 key: k,
                 value: v,
@@ -287,11 +280,6 @@ where
         &self.inner.throttle
     }
 
-    /// Get the runtime.
-    pub fn runtime(&self) -> &Runtime {
-        &self.inner.runtime
-    }
-
     /// Wait for the ongoing flush and reclaim tasks to finish.
     pub async fn wait(&self) {
         self.inner.engine.wait().await
@@ -314,43 +302,6 @@ where
     }
 }
 
-/// Tokio runtime configuration.
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TokioRuntimeOptions {
-    /// Dedicated runtime worker threads.
-    ///
-    /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
-    /// Which is 1 worker per core.
-    ///
-    /// See [`tokio::runtime::Builder::worker_threads`].
-    pub worker_threads: usize,
-
-    /// Max threads to run blocking io.
-    ///
-    /// If the value is set to `0`, use the tokio default value (which is 512).
-    ///
-    /// See [`tokio::runtime::Builder::max_blocking_threads`].
-    pub max_blocking_threads: usize,
-}
-
-/// Options for the dedicated runtime.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum RuntimeOptions {
-    /// Disable dedicated runtime. The runtime which foyer is built on will be used.
-    Disabled,
-    /// Use unified dedicated runtime for both reads and writes.
-    Unified(TokioRuntimeOptions),
-    /// Use separated dedicated runtime for reads or writes.
-    Separated {
-        /// Dedicated runtime for reads.
-        read_runtime_options: TokioRuntimeOptions,
-        /// Dedicated runtime for both foreground and background writes
-        write_runtime_options: TokioRuntimeOptions,
-    },
-}
-
 /// The builder of the disk cache.
 pub struct StoreBuilder<K, V, S, P>
 where
@@ -366,8 +317,6 @@ where
     device_builder: Box<dyn DeviceBuilder>,
     io_engine_builder: Box<dyn IoEngineBuilder>,
     engine_builder: Box<dyn EngineBuilder<K, V, P>>,
-
-    runtime_config: RuntimeOptions,
 
     admission_picker: Arc<dyn AdmissionPicker>,
     compression: Compression,
@@ -389,7 +338,6 @@ where
             .field("device_builder", &self.device_builder)
             .field("io_engine_builder", &self.io_engine_builder)
             .field("engine_builder", &self.engine_builder)
-            .field("runtime_config", &self.runtime_config)
             .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
@@ -414,8 +362,6 @@ where
             device_builder: Box::<NoopDeviceBuilder>::default(),
             io_engine_builder: PsyncIoEngineBuilder::new().boxed(),
             engine_builder: LargeObjectEngineBuilder::new().boxed(),
-
-            runtime_config: RuntimeOptions::Disabled,
 
             admission_picker: Arc::<AdmitAllPicker>::default(),
             compression: Compression::default(),
@@ -469,12 +415,6 @@ where
         self
     }
 
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
-        self.runtime_config = runtime_options;
-        self
-    }
-
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
         (*self.device_builder).type_id() == TypeId::of::<Arc<NoopDeviceBuilder>>()
@@ -488,47 +428,6 @@ where
 
         let compression = self.compression;
 
-        let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
-            #[cfg(madsim)]
-            let _ = config;
-            #[cfg(not(madsim))]
-            if config.worker_threads != 0 {
-                builder.worker_threads(config.worker_threads);
-            }
-            #[cfg(not(madsim))]
-            if config.max_blocking_threads != 0 {
-                builder.max_blocking_threads(config.max_blocking_threads);
-            }
-            builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
-            let runtime = BackgroundShutdownRuntime::from(runtime);
-            Ok::<_, Error>(Arc::new(runtime))
-        };
-
-        let user_runtime_handle = Handle::current();
-        let (read_runtime, write_runtime) = match self.runtime_config {
-            RuntimeOptions::Disabled => {
-                tracing::info!(
-                    "[store]: Dedicated runtime is disabled. This may lead to spikes in latency under high load. Hint: Consider configuring a dedicated runtime."
-                );
-                (None, None)
-            }
-            RuntimeOptions::Unified(runtime_config) => {
-                let runtime = build_runtime(&runtime_config, "unified")?;
-                (Some(runtime.clone()), Some(runtime.clone()))
-            }
-            RuntimeOptions::Separated {
-                read_runtime_options: read_runtime_config,
-                write_runtime_options: write_runtime_config,
-            } => {
-                let read_runtime = build_runtime(&read_runtime_config, "read")?;
-                let write_runtime = build_runtime(&write_runtime_config, "write")?;
-                (Some(read_runtime), Some(write_runtime))
-            }
-        };
-        let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
-
         let device = self.device_builder.build()?;
         let throttle = device.throttle().clone();
         let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
@@ -538,7 +437,7 @@ where
             self.engine_builder = Box::<NoopEngineBuilder<K, V, P>>::default();
         }
 
-        let io_engine = self.io_engine_builder.build(device, runtime.clone())?;
+        let io_engine = self.io_engine_builder.build(device)?;
         let io_engine = MonitoredIoEngine::new(io_engine, statistics.clone(), metrics.clone());
         let engine = self
             .engine_builder
@@ -546,7 +445,6 @@ where
                 io_engine,
                 metrics: metrics.clone(),
                 statistics: statistics.clone(),
-                runtime: runtime.clone(),
                 recover_mode: self.recover_mode,
             })
             .await?;
@@ -575,7 +473,6 @@ where
             admission_picker,
             load_throttler,
             compression,
-            runtime,
             throttle,
             metrics,
             statistics,

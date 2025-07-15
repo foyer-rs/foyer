@@ -21,7 +21,6 @@ use foyer_common::{
     future::Diversion,
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
-    runtime::SingletonHandle,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -1050,13 +1049,7 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, ID>(
-        &self,
-        key: K,
-        properties: P,
-        fetch: F,
-        runtime: &SingletonHandle,
-    ) -> Fetch<K, V, ER, S, P>
+    pub fn fetch_inner<F, FU, ER, ID>(&self, key: K, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
     where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
@@ -1064,11 +1057,11 @@ where
         ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
     {
         match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Sieve(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
+            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch)),
+            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch)),
+            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch)),
+            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch)),
+            Cache::Sieve(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch)),
         }
     }
 }

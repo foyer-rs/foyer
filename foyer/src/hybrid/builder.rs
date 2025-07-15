@@ -23,8 +23,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
 use foyer_storage::{
-    AdmissionPicker, Compression, DeviceBuilder, EngineBuilder, IoEngineBuilder, RecoverMode, RuntimeOptions,
-    StoreBuilder,
+    AdmissionPicker, Compression, DeviceBuilder, EngineBuilder, IoEngineBuilder, RecoverMode, StoreBuilder,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
@@ -311,18 +310,6 @@ where
     /// Default: [`Compression::None`].
     pub fn with_compression(self, compression: Compression) -> Self {
         let builder = self.builder.with_compression(compression);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_options(self, runtime_options: RuntimeOptions) -> Self {
-        let builder = self.builder.with_runtime_options(runtime_options);
         Self {
             name: self.name,
             options: self.options,

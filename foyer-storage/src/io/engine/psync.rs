@@ -29,7 +29,7 @@ use crate::{
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
-    RawFile, Runtime,
+    RawFile,
 };
 
 #[derive(Debug)]
@@ -87,8 +87,8 @@ impl PsyncIoEngineBuilder {
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        let engine = PsyncIoEngine { device, runtime };
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
+        let engine = PsyncIoEngine { device };
         let engine = Arc::new(engine);
         Ok(engine)
     }
@@ -96,7 +96,6 @@ impl IoEngineBuilder for PsyncIoEngineBuilder {
 
 pub struct PsyncIoEngine {
     device: Arc<dyn Device>,
-    runtime: Runtime,
 }
 
 impl Debug for PsyncIoEngine {
@@ -115,24 +114,21 @@ impl IoEngine for PsyncIoEngine {
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         let file = FileHandle::from(raw);
-        let runtime = self.runtime.clone();
         async move {
-            let res = match runtime
-                .read()
-                .spawn_blocking(move || {
-                    #[cfg(target_family = "windows")]
-                    {
-                        use std::os::windows::fs::FileExt;
-                        file.seek_read(slice, offset).map_err(IoError::from)?;
-                    };
-                    #[cfg(target_family = "unix")]
-                    {
-                        use std::os::unix::fs::FileExt;
-                        file.read_exact_at(slice, offset).map_err(IoError::from)?;
-                    };
-                    Ok(())
-                })
-                .await
+            let res = match tokio::task::spawn_blocking(move || {
+                #[cfg(target_family = "windows")]
+                {
+                    use std::os::windows::fs::FileExt;
+                    file.seek_read(slice, offset).map_err(IoError::from)?;
+                };
+                #[cfg(target_family = "unix")]
+                {
+                    use std::os::unix::fs::FileExt;
+                    file.read_exact_at(slice, offset).map_err(IoError::from)?;
+                };
+                Ok(())
+            })
+            .await
             {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),
@@ -149,24 +145,21 @@ impl IoEngine for PsyncIoEngine {
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         let file = FileHandle::from(raw);
-        let runtime = self.runtime.clone();
         async move {
-            let res = match runtime
-                .write()
-                .spawn_blocking(move || {
-                    #[cfg(target_family = "windows")]
-                    {
-                        use std::os::windows::fs::FileExt;
-                        file.seek_write(slice, offset).map_err(IoError::from)?;
-                    };
-                    #[cfg(target_family = "unix")]
-                    {
-                        use std::os::unix::fs::FileExt;
-                        file.write_all_at(slice, offset).map_err(IoError::from)?;
-                    };
-                    Ok(())
-                })
-                .await
+            let res = match tokio::task::spawn_blocking(move || {
+                #[cfg(target_family = "windows")]
+                {
+                    use std::os::windows::fs::FileExt;
+                    file.seek_write(slice, offset).map_err(IoError::from)?;
+                };
+                #[cfg(target_family = "unix")]
+                {
+                    use std::os::unix::fs::FileExt;
+                    file.write_all_at(slice, offset).map_err(IoError::from)?;
+                };
+                Ok(())
+            })
+            .await
             {
                 Ok(res) => res,
                 Err(e) => Err(IoError::other(e)),

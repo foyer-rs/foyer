@@ -37,7 +37,6 @@ use crate::{
         PAGE,
     },
     picker::ReinsertionPicker,
-    runtime::Runtime,
     Statistics,
 };
 
@@ -56,7 +55,6 @@ where
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
     blob_index_size: usize,
     statistics: Arc<Statistics>,
-    runtime: Runtime,
 }
 
 impl<K, V, P> Debug for Reclaimer<K, V, P>
@@ -82,7 +80,6 @@ where
         reinsertion_picker: Arc<dyn ReinsertionPicker>,
         blob_index_size: usize,
         statistics: Arc<Statistics>,
-        runtime: Runtime,
     ) -> Self {
         Self {
             indexer,
@@ -90,7 +87,6 @@ where
             reinsertion_picker,
             blob_index_size,
             statistics,
-            runtime,
         }
     }
 }
@@ -106,7 +102,6 @@ where
         let statistics = self.statistics.clone();
         let blob_index_size = self.blob_index_size;
         let flushers = self.flushers.clone();
-        let runtime = self.runtime.clone();
         let indexer = self.indexer.clone();
         async move {
             let id = region.id();
@@ -167,7 +162,7 @@ where
             let unpicked_count = unpicked.len();
 
             let waits = flushers.iter().map(|flusher| flusher.wait()).collect_vec();
-            runtime.write().spawn(async move {
+            tokio::spawn(async move {
                 join_all(waits).await;
             });
             indexer.remove_batch(unpicked);
