@@ -49,7 +49,6 @@ impl RecoverRunner {
         recover_concurrency: usize,
         recover_mode: RecoverMode,
         blob_index_size: usize,
-        clean_region_threshold: usize,
         regions: &[RegionId],
         sequence: &AtomicSequence,
         indexer: &Indexer,
@@ -131,50 +130,25 @@ impl RecoverRunner {
                 }
             })
             .collect_vec();
-        // let indices = indices.into_iter().map(|(hash, (_, addr))| (hash, addr)).collect_vec();
-        let permits = clean_region_threshold.saturating_sub(clean_regions.len());
-        let countdown = clean_regions.len().saturating_sub(clean_region_threshold);
 
         // Log recovery.
         tracing::info!(
-            "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}, initial reclaim permits is {p}.",
+            "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}..",
             e = evictable_regions.len(),
             c = clean_regions.len(),
             t = indices.len(),
             s = latest_sequence,
-            p = permits,
         );
 
         // Update components.
         indexer.insert_batch(indices);
         sequence.store(latest_sequence + 1, Ordering::Release);
-        for region in clean_regions {
-            region_manager.mark_clean(region).await;
-        }
-        for region in evictable_regions {
-            region_manager.mark_evictable(region);
-        }
-        region_manager.reclaim_semaphore().add_permits(permits);
-        region_manager.reclaim_semaphore_countdown().reset(countdown);
+        region_manager.init(&clean_regions);
 
         let elapsed = now.elapsed();
         tracing::info!("[recover] finish in {:?}", elapsed);
 
         metrics.storage_lodc_recover_duration.record(elapsed.as_secs_f64());
-
-        // Note: About reclaim semaphore permits and countdown:
-        //
-        // ```
-        // permits = clean region threshold - clean region - reclaiming region
-        // ```
-        //
-        // When recovery, `reclaiming region` is always `0`.
-        //
-        // If `clean region threshold >= clean region`, permits is simply `clean region threshold - clean region`.
-        //
-        // If `clean region threshold < clean region`, for permits must be NON-NEGATIVE, we can temporarily set permits
-        // to `0`, and skip first `clean region - clean region threshold` permits increments. It is implemented by
-        // `Countdown`.
 
         Ok(())
     }
