@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use crate::{
         io::device::{fs::FsDeviceBuilder, DeviceBuilder},
-        IoEngineBuilder, PsyncIoEngineBuilder, Runtime,
+        IoEngineBuilder, PsyncIoEngineBuilder,
     };
 
     #[test_log::test(tokio::test)]
@@ -253,10 +253,7 @@ mod tests {
             .build()
             .unwrap();
         let partition = device.create_partition(16 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new()
-            .boxed()
-            .build(device, Runtime::current())
-            .unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().boxed().build(device).unwrap();
 
         let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
             .await

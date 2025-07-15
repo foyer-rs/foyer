@@ -43,7 +43,7 @@ use foyer::{
     Code, CodeError, Compression, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
     FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
     IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
-    RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
+    RecoverMode, S3FifoConfig, Throttle, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -172,50 +172,6 @@ struct Args {
     /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
     metrics: bool,
-
-    /// Benchmark user runtime worker threads.
-    #[arg(long, default_value_t = 0)]
-    user_runtime_worker_threads: usize,
-
-    /// Dedicated runtime type.
-    #[arg(long, value_parser = PossibleValuesParser::new(["disabled", "unified", "separated"]), default_value = "disabled")]
-    runtime: String,
-
-    /// Dedicated runtime worker threads.
-    ///
-    /// Only valid when using unified dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    runtime_worker_threads: usize,
-
-    /// Max threads for blocking io.
-    ///
-    /// Only valid when using unified dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    runtime_max_blocking_threads: usize,
-
-    /// Dedicated runtime for writes worker threads.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    write_runtime_worker_threads: usize,
-
-    /// Dedicated runtime for writes Max threads for blocking io.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    write_runtime_max_blocking_threads: usize,
-
-    /// Dedicated runtime for reads worker threads.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    read_runtime_worker_threads: usize,
-
-    /// Dedicated runtime for writes max threads for blocking io.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    read_runtime_max_blocking_threads: usize,
 
     /// compression algorithm
     #[arg(long, value_enum, default_value_t = Compression::None)]
@@ -435,9 +391,6 @@ fn main() {
     println!("{args:#?}");
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
-    if args.user_runtime_worker_threads != 0 {
-        builder.worker_threads(args.user_runtime_worker_threads);
-    }
     builder.thread_name("foyer-bench");
     let runtime = builder.enable_all().build().unwrap();
     runtime.block_on(benchmark(args));
@@ -603,25 +556,7 @@ async fn benchmark(args: Args) {
 
     builder = builder
         .with_recover_mode(args.recover_mode)
-        .with_compression(args.compression)
-        .with_runtime_options(match args.runtime.as_str() {
-            "disabled" => RuntimeOptions::Disabled,
-            "unified" => RuntimeOptions::Unified(TokioRuntimeOptions {
-                worker_threads: args.runtime_worker_threads,
-                max_blocking_threads: args.runtime_max_blocking_threads,
-            }),
-            "separated" => RuntimeOptions::Separated {
-                read_runtime_options: TokioRuntimeOptions {
-                    worker_threads: args.read_runtime_worker_threads,
-                    max_blocking_threads: args.read_runtime_max_blocking_threads,
-                },
-                write_runtime_options: TokioRuntimeOptions {
-                    worker_threads: args.write_runtime_worker_threads,
-                    max_blocking_threads: args.write_runtime_max_blocking_threads,
-                },
-            },
-            _ => unreachable!(),
-        });
+        .with_compression(args.compression);
 
     let hybrid = builder.build().await.unwrap();
 

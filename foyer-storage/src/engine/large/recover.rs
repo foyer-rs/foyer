@@ -37,7 +37,6 @@ use crate::{
         RecoverMode,
     },
     error::{Error, Result},
-    runtime::Runtime,
 };
 
 #[derive(Debug)]
@@ -54,7 +53,6 @@ impl RecoverRunner {
         indexer: &Indexer,
         region_manager: &RegionManager,
         tombstones: &[Tombstone],
-        runtime: Runtime,
         metrics: Arc<Metrics>,
     ) -> Result<()> {
         let now = Instant::now();
@@ -65,7 +63,7 @@ impl RecoverRunner {
         let handles = regions.iter().map(|id| {
             let semaphore = semaphore.clone();
             let region = region_manager.region(*id).clone();
-            runtime.user().spawn(async move {
+            tokio::spawn(async move {
                 let permit = semaphore.acquire().await;
                 let res = RegionRecoverRunner::run(mode, region, blob_index_size).await;
                 drop(permit);

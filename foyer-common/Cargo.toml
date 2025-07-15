@@ -25,6 +25,7 @@ bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 fastrace = { workspace = true, optional = true }
+futures-util = { workspace = true }
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
@@ -32,7 +33,6 @@ pin-project = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 twox-hash = { workspace = true }
-
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
   "rt",

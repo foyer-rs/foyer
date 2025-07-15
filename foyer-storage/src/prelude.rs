@@ -41,7 +41,6 @@ pub use crate::{
         },
         AdmissionPicker, Pick, ReinsertionPicker,
     },
-    runtime::Runtime,
     statistics::Statistics,
-    store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
+    store::{Store, StoreBuilder},
 };

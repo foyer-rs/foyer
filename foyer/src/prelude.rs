@@ -40,7 +40,7 @@ pub use crate::{
         FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
         IoHandle, IoResult, IoThrottler, IoThrottlerPicker, IoThrottlerTarget, IopsCounter, LargeObjectEngineBuilder,
         Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RawFile,
-        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics,
-        Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Statistics, Store, StoreBuilder,
+        Throttle,
     },
 };

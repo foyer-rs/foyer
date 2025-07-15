@@ -28,7 +28,7 @@ use crate::{
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
-    RawFile, Runtime,
+    RawFile,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,7 +281,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+    fn build(self: Box<Self>, device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
         if self.threads == 0 {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }

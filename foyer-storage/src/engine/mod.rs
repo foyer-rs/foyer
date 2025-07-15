@@ -22,7 +22,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, Statistics};
 
 /// Load result.
 #[derive(Debug)]
@@ -102,8 +102,6 @@ pub struct EngineBuildContext {
     pub metrics: Arc<Metrics>,
     /// Shared statistics for all components.
     pub statistics: Arc<Statistics>,
-    /// The runtime for the disk cache engine.
-    pub runtime: Runtime,
     /// The recover mode of the disk cache engine.
     pub recover_mode: RecoverMode,
 }

@@ -17,8 +17,7 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 use chrono::Datelike;
 use foyer::{
     AdmitAllPicker, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, IopsCounter,
-    LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
-    Throttle, TokioRuntimeOptions,
+    LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, Throttle,
 };
 use tempfile::tempdir;
 
@@ -66,16 +65,6 @@ async fn main() -> anyhow::Result<()> {
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
-        .with_runtime_options(RuntimeOptions::Separated {
-            read_runtime_options: TokioRuntimeOptions {
-                worker_threads: 4,
-                max_blocking_threads: 8,
-            },
-            write_runtime_options: TokioRuntimeOptions {
-                worker_threads: 4,
-                max_blocking_threads: 8,
-            },
-        })
         .build()
         .await?;
 

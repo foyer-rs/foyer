@@ -43,7 +43,7 @@ use crate::{
         device::Partition,
         engine::IoEngine,
     },
-    IoError, Runtime,
+    IoError,
 };
 
 pub type RegionId = u32;
@@ -155,7 +155,6 @@ struct Inner {
     reclaim_concurrency: usize,
     clean_region_threshold: usize,
     metrics: Arc<Metrics>,
-    runtime: Runtime,
 }
 
 #[derive(Debug, Clone)]
@@ -164,7 +163,6 @@ pub struct RegionManager {
 }
 
 impl RegionManager {
-    #[expect(clippy::too_many_arguments)]
     pub fn open(
         io_engine: Arc<dyn IoEngine>,
         region_size: usize,
@@ -173,7 +171,6 @@ impl RegionManager {
         reclaim_concurrency: usize,
         clean_region_threshold: usize,
         metrics: Arc<Metrics>,
-        runtime: Runtime,
     ) -> Result<Self> {
         let device = io_engine.device().clone();
 
@@ -219,7 +216,6 @@ impl RegionManager {
             reclaim_concurrency,
             clean_region_threshold,
             metrics,
-            runtime,
         };
         let inner = Arc::new(inner);
         let this = Self { inner };
@@ -377,7 +373,7 @@ impl RegionManager {
                     region,
                 };
                 let future = self.inner.reclaimer.reclaim(region);
-                self.inner.runtime.write().spawn(future);
+                tokio::spawn(future);
             }
         }
     }

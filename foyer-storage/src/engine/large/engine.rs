@@ -61,7 +61,6 @@ use crate::{
     error::{Error, Result},
     io::{bytes::IoSliceMut, PAGE},
     picker::{utils::RejectAllPicker, ReinsertionPicker},
-    runtime::Runtime,
     serde::EntryDeserializer,
     Load,
 };
@@ -292,7 +291,6 @@ where
             io_engine,
             metrics,
             statistics,
-            runtime,
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<LargeObjectEngine<K, V, P>>> {
@@ -330,7 +328,6 @@ where
             self.reinsertion_picker,
             self.blob_index_size,
             statistics.clone(),
-            runtime.clone(),
         );
         let reclaimer: Arc<dyn ReclaimerTrait> = Arc::new(reclaimer);
 
@@ -342,7 +339,6 @@ where
             self.reclaimers,
             self.clean_region_threshold,
             metrics.clone(),
-            runtime.clone(),
         )?;
         let regions = region_manager.regions();
 
@@ -364,7 +360,6 @@ where
             &indexer,
             &region_manager,
             &tombstones,
-            runtime.clone(),
             metrics.clone(),
         )
         .await?;
@@ -384,7 +379,6 @@ where
                 region_manager.clone(),
                 tombstone_log.clone(),
                 metrics.clone(),
-                &runtime,
                 #[cfg(test)]
                 flush_holder.clone(),
             )?;
@@ -397,7 +391,6 @@ where
             submit_queue_size,
             submit_queue_size_threshold: self.submit_queue_size_threshold,
             sequence,
-            runtime,
             active: AtomicBool::new(true),
             metrics,
             #[cfg(test)]
@@ -468,8 +461,6 @@ where
     submit_queue_size_threshold: usize,
 
     sequence: AtomicSequence,
-
-    runtime: Runtime,
 
     active: AtomicBool,
 
@@ -682,12 +673,9 @@ where
                 size: bits::align_up(PAGE, addr.len as usize),
             });
 
-        let this = self.clone();
-        self.inner.runtime.write().spawn(async move {
-            this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
-                tombstone: Tombstone { hash, sequence },
-                stats,
-            });
+        self.inner.flushers[hash as usize % self.inner.flushers.len()].submit(Submission::Tombstone {
+            tombstone: Tombstone { hash, sequence },
+            stats,
         });
     }
 
@@ -790,7 +778,6 @@ mod tests {
     use foyer_common::hasher::ModHasher;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
-    use tokio::runtime::Handle;
 
     use super::*;
     use crate::{
@@ -822,7 +809,7 @@ mod tests {
         // io::engine::uring::UringIoEngineBuilder::new().build(device).unwrap()
         io::engine::psync::PsyncIoEngineBuilder::new()
             .boxed()
-            .build(device, Runtime::current())
+            .build(device)
             .unwrap()
     }
 
@@ -843,7 +830,6 @@ mod tests {
         let io_engine = io_engine_for_test(device);
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
-        let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
             region_size: 16 * 1024,
             compression: Compression::None,
@@ -867,7 +853,6 @@ mod tests {
                 io_engine,
                 metrics,
                 statistics,
-                runtime,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -885,7 +870,6 @@ mod tests {
         let io_engine = io_engine_for_test(device);
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
-        let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
             region_size: 16 * 1024,
             compression: Compression::None,
@@ -908,7 +892,6 @@ mod tests {
                 io_engine,
                 metrics,
                 statistics,
-                runtime,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -1309,8 +1292,6 @@ mod tests {
         const KB: usize = 1024;
         const MB: usize = 1024 * 1024;
 
-        let runtime = Runtime::current();
-
         let d1 = FsDeviceBuilder::new(dir.path().join("dev1"))
             .with_capacity(MB)
             .boxed()
@@ -1333,10 +1314,7 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = PsyncIoEngineBuilder::new()
-            .boxed()
-            .build(device, runtime.clone())
-            .unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().boxed().build(device).unwrap();
         let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new()
             .with_region_size(64 * KB)
             .boxed()
@@ -1344,7 +1322,6 @@ mod tests {
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),
                 statistics: Arc::new(Statistics::new(IopsCounter::per_io())),
-                runtime,
                 recover_mode: RecoverMode::None,
             })
             .await
