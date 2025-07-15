@@ -176,12 +176,12 @@ impl Metrics {
         );
 
         let foyer_storage_lodc_region = registry.register_gauge_vec(
-            "foyer_lodc_storage_region".into(),
+            "foyer_storage_lodc_region".into(),
             "foyer large object disk cache regions".into(),
             &["name", "type"],
         );
         let foyer_storage_lodc_region_size_bytes = registry.register_gauge_vec(
-            "foyer_lodc_storage_region_size_bytes".into(),
+            "foyer_storage_lodc_region_size_bytes".into(),
             "foyer large object disk cache region sizes".into(),
             &["name"],
         );
