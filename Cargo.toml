@@ -38,6 +38,7 @@ clap = { version = "4", features = ["derive"] }
 cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.4"
+core_affinity = "0.8"
 criterion = "0.6"
 csv = "1"
 equivalent = "1"

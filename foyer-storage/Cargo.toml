@@ -29,6 +29,7 @@ allocator-api2 = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
+core_affinity = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 flume = { workspace = true }

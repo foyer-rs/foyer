@@ -17,6 +17,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 
+use core_affinity::CoreId;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
 use tokio::sync::oneshot;
@@ -30,6 +31,190 @@ use crate::{
     },
     RawFile, Runtime,
 };
+
+/// Builder for io_uring based I/O engine.
+#[derive(Debug)]
+pub struct UringIoEngineBuilder {
+    threads: usize,
+    cpus: Vec<u32>,
+    io_depth: usize,
+    sqpoll: bool,
+    sqpoll_cpus: Vec<u32>,
+    sqpoll_idle: u32,
+    iopoll: bool,
+    weight: f64,
+}
+
+impl Default for UringIoEngineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UringIoEngineBuilder {
+    /// Create a new io_uring based I/O engine builder with default configurations.
+    pub fn new() -> Self {
+        Self {
+            threads: 1,
+            cpus: vec![],
+            io_depth: 64,
+            sqpoll: false,
+            sqpoll_cpus: vec![],
+            sqpoll_idle: 10,
+            iopoll: false,
+            weight: 1.0,
+        }
+    }
+
+    /// Set the number of threads to use for the I/O engine.
+    pub fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads;
+        self
+    }
+
+    /// Bind the engine threads to specific CPUs.
+    ///
+    /// The length of `cpus` must be equal to the threads.
+    pub fn with_cpus(mut self, cpus: Vec<u32>) -> Self {
+        self.cpus = cpus;
+        self
+    }
+
+    /// Set the I/O depth for each thread.
+    pub fn with_io_depth(mut self, io_depth: usize) -> Self {
+        self.io_depth = io_depth;
+        self
+    }
+
+    /// Enable or disable I/O polling.
+    ///
+    /// FYI:
+    ///
+    /// - [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
+    /// - [crate - io-uring](https://docs.rs/io-uring/latest/io_uring/struct.Builder.html#method.setup_iopoll)
+    ///
+    /// Related syscall flag: `IORING_SETUP_IOPOLL`.
+    ///
+    /// NOTE:
+    ///
+    /// - If this feature is enabeld, the underlying device MUST be opened with the `O_DIRECT` flag.
+    /// - If this feature is enabeld, the underlying device MUST support io polling.
+    ///
+    /// Default: `false`.
+    pub fn with_iopoll(mut self, iopoll: bool) -> Self {
+        self.iopoll = iopoll;
+        self
+    }
+
+    /// Set the weight of read/write priorities.
+    ///
+    /// The engine will try to keep the read/write iodepth ratio as close to the specified weight as possible.
+    pub fn with_weight(mut self, weight: f64) -> Self {
+        self.weight = weight;
+        self
+    }
+
+    /// Enable or disable SQ polling.
+    ///
+    /// FYI:
+    ///
+    /// - [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
+    /// - [crate - io-uring](https://docs.rs/io-uring/latest/io_uring/struct.Builder.html#method.setup_sqpoll)
+    ///
+    /// Related syscall flag: `IORING_SETUP_IOPOLL`.
+    ///
+    /// NOTE: If this feature is enabeld, the underlying device must be opened with the `O_DIRECT` flag.
+    ///
+    /// Default: `false`.
+    pub fn with_sqpoll(mut self, sqpoll: bool) -> Self {
+        self.sqpoll = sqpoll;
+        self
+    }
+
+    /// Bind the kernel’s SQ poll thread to the specified cpu.
+    ///
+    /// This flag is only meaningful when [`Self::with_sqpoll`] is enabled.
+    ///
+    /// The length of `cpus` must be equal to the number of threads.
+    pub fn with_sqpoll_cpus(mut self, cpus: Vec<u32>) -> Self {
+        self.sqpoll_cpus = cpus;
+        self
+    }
+
+    /// After idle milliseconds, the kernel thread will go to sleep and you will have to wake it up again with a system
+    /// call.
+    ///
+    /// This flag is only meaningful when [`Self::with_sqpoll`] is enabled.
+    pub fn with_sqpoll_idle(mut self, idle: u32) -> Self {
+        self.sqpoll_idle = idle;
+        self
+    }
+}
+
+impl IoEngineBuilder for UringIoEngineBuilder {
+    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+        if self.threads == 0 {
+            return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
+        }
+
+        let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+            .map(|_| {
+                let (tx, rx) = mpsc::sync_channel(4096);
+                (tx, rx)
+            })
+            .unzip();
+
+        let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+            .map(|_| {
+                let (tx, rx) = mpsc::sync_channel(4096);
+                (tx, rx)
+            })
+            .unzip();
+
+        for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs.into_iter()).enumerate() {
+            let mut builder = IoUring::builder();
+            if self.iopoll {
+                builder.setup_iopoll();
+            }
+            if self.sqpoll {
+                builder.setup_sqpoll(self.sqpoll_idle);
+                if !self.sqpoll_cpus.is_empty() {
+                    let cpu = self.sqpoll_cpus[i];
+                    builder.setup_sqpoll_cpu(cpu);
+                }
+            }
+            let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
+            let uring = builder.build(self.io_depth as _)?;
+            let shard = UringIoEngineShard {
+                read_rx,
+                write_rx,
+                _device: device.clone(),
+                uring,
+                io_depth: self.io_depth,
+                weight: self.weight,
+                read_inflight: 0,
+                write_inflight: 0,
+            };
+
+            std::thread::Builder::new()
+                .name(format!("foyer-uring-{i}"))
+                .spawn(move || {
+                    if let Some(cpu) = cpu {
+                        core_affinity::set_for_current(CoreId { id: cpu as _ });
+                    }
+                    shard.run();
+                })?;
+        }
+
+        let engine = UringIoEngine {
+            device,
+            read_txs,
+            write_txs,
+        };
+        let engine = Arc::new(engine);
+        Ok(engine)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UringIoType {
@@ -64,7 +249,6 @@ struct UringIoEngineShard {
     _device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
-    io_poll: bool,
     read_inflight: usize,
     write_inflight: usize,
 }
@@ -127,11 +311,7 @@ impl UringIoEngineShard {
             }
 
             if self.read_inflight + self.write_inflight > 0 {
-                if self.io_poll {
-                    self.uring.submit().unwrap();
-                } else {
-                    self.uring.submit_and_wait(1).unwrap();
-                }
+                self.uring.submit().unwrap();
             }
 
             for cqe in self.uring.completion() {
@@ -216,120 +396,6 @@ impl UringIoEngine {
         }
         .boxed()
         .into()
-    }
-}
-
-/// Builder for io_uring based I/O engine.
-#[derive(Debug)]
-pub struct UringIoEngineBuilder {
-    threads: usize,
-    io_depth: usize,
-    io_poll: bool,
-    weight: f64,
-}
-
-impl Default for UringIoEngineBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl UringIoEngineBuilder {
-    /// Create a new io_uring based I/O engine builder with default configurations.
-    pub fn new() -> Self {
-        Self {
-            threads: 1,
-            io_depth: 64,
-            io_poll: false,
-            weight: 1.0,
-        }
-    }
-
-    /// Set the number of threads to use for the I/O engine.
-    pub fn with_threads(mut self, threads: usize) -> Self {
-        self.threads = threads;
-        self
-    }
-
-    /// Set the I/O depth for each thread.
-    pub fn with_io_depth(mut self, io_depth: usize) -> Self {
-        self.io_depth = io_depth;
-        self
-    }
-
-    /// Enable or disable I/O polling.
-    ///
-    /// FYI: [io_uring_setup(2)](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
-    ///
-    /// Related syscall flag: `IORING_SETUP_IOPOLL`.
-    ///
-    /// NOTE: If this feature is enabeld, the underlying device must be opened with the `O_DIRECT` flag.
-    ///
-    /// Default: `false`.
-    pub fn with_iopoll(mut self, iopoll: bool) -> Self {
-        self.io_poll = iopoll;
-        self
-    }
-
-    /// Set the weight of read/write priorities.
-    ///
-    /// The engine will try to keep the read/write iodepth ratio as close to the specified weight as possible.
-    pub fn with_weight(mut self, weight: f64) -> Self {
-        self.weight = weight;
-        self
-    }
-}
-
-impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        if self.threads == 0 {
-            return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
-        }
-
-        let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
-            .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
-                (tx, rx)
-            })
-            .unzip();
-
-        let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
-            .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
-                (tx, rx)
-            })
-            .unzip();
-
-        for (read_rx, write_rx) in read_rxs.into_iter().zip(write_rxs.into_iter()) {
-            let mut builder = IoUring::builder();
-            if self.io_poll {
-                builder.setup_iopoll();
-            }
-            let uring = builder.build(self.io_depth as _)?;
-            let shard = UringIoEngineShard {
-                read_rx,
-                write_rx,
-                _device: device.clone(),
-                uring,
-                io_depth: self.io_depth,
-                io_poll: self.io_poll,
-                weight: self.weight,
-                read_inflight: 0,
-                write_inflight: 0,
-            };
-
-            std::thread::spawn(move || {
-                shard.run();
-            });
-        }
-
-        let engine = UringIoEngine {
-            device,
-            read_txs,
-            write_txs,
-        };
-        let engine = Arc::new(engine);
-        Ok(engine)
     }
 }
 
