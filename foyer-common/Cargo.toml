@@ -58,7 +58,6 @@ tokio = { workspace = true, features = [
 [dev-dependencies]
 bytes = { workspace = true, features = ["serde"] }
 criterion = { workspace = true }
-futures-util = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
 paste = { workspace = true }
 rand = { workspace = true }

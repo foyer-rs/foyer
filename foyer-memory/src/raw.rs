@@ -985,7 +985,7 @@ where
 impl<E, ER, S, I> Future for RawFetchInner<E, ER, S, I>
 where
     E: Eviction,
-    ER: From<oneshot::error::RecvError>,
+    ER: From<Error>,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
@@ -994,7 +994,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
-            RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|err| err.into()).map(Diversion::from),
+            RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|e| Error::wait(e).into()).map(Diversion::from),
             RawFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }

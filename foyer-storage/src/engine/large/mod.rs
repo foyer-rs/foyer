@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod batch;
-pub mod bloom_filter;
+pub mod buffer;
+pub mod engine;
+pub mod eviction;
 pub mod flusher;
-pub mod generic;
+pub mod indexer;
+pub mod reclaimer;
+pub mod recover;
+pub mod region;
+pub mod scanner;
 pub mod serde;
-pub mod set;
-pub mod set_cache;
-pub mod set_manager;
+pub mod tombstone;
+
+#[cfg(test)]
+pub mod test_utils;

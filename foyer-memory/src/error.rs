@@ -23,12 +23,20 @@ pub enum Error {
     /// Config error.
     #[error("config error: {0}")]
     ConfigError(String),
+    /// Wait error.
+    #[error("wait for concurrent fetch result error: {0}")]
+    Wait(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl Error {
     /// Combine multiple errors into one error.
     pub fn multiple(errs: Vec<Error>) -> Self {
         Self::Multiple(MultipleError(errs))
+    }
+
+    /// Error on waiting for concurrrent fetch result.
+    pub fn wait(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Wait(Box::new(err))
     }
 }
 

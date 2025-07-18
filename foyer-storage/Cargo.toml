@@ -27,7 +27,6 @@ strict_assertions = [
 [dependencies]
 allocator-api2 = { workspace = true }
 anyhow = { workspace = true }
-auto_enums = { workspace = true, features = ["futures03"] }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
@@ -42,9 +41,7 @@ hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }
-ordered_hash_map = { workspace = true }
 parking_lot = { workspace = true }
-paste = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, optional = true }
@@ -74,6 +71,10 @@ tokio = { workspace = true, features = [
   "signal",
   "fs",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+core_affinity = { workspace = true }
+io-uring = { workspace = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }

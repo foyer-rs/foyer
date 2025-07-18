@@ -36,12 +36,14 @@ pub struct Metrics {
     pub storage_enqueue: BoxedCounter,
     pub storage_hit: BoxedCounter,
     pub storage_miss: BoxedCounter,
+    pub storage_throttled: BoxedCounter,
     pub storage_delete: BoxedCounter,
     pub storage_error: BoxedCounter,
 
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
     pub storage_miss_duration: BoxedHistogram,
+    pub storage_throttled_duration: BoxedHistogram,
     pub storage_delete_duration: BoxedHistogram,
 
     pub storage_queue_rotate: BoxedCounter,
@@ -60,11 +62,12 @@ pub struct Metrics {
     pub storage_disk_read_duration: BoxedHistogram,
     pub storage_disk_flush_duration: BoxedHistogram,
 
-    pub storage_region_total: BoxedGauge,
-    pub storage_region_clean: BoxedGauge,
-    pub storage_region_evictable: BoxedGauge,
+    pub storage_lodc_region_clean: BoxedGauge,
+    pub storage_lodc_region_writing: BoxedGauge,
+    pub storage_lodc_region_evictable: BoxedGauge,
+    pub storage_lodc_region_reclaiming: BoxedGauge,
 
-    pub storage_region_size_bytes: BoxedGauge,
+    pub storage_lodc_region_size_bytes: BoxedGauge,
 
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
@@ -172,14 +175,14 @@ impl Metrics {
             Buckets::exponential(0.000_001, 2.0, 23),
         );
 
-        let foyer_storage_region = registry.register_gauge_vec(
-            "foyer_storage_region".into(),
-            "foyer disk cache regions".into(),
+        let foyer_storage_lodc_region = registry.register_gauge_vec(
+            "foyer_storage_lodc_region".into(),
+            "foyer large object disk cache regions".into(),
             &["name", "type"],
         );
-        let foyer_storage_region_size_bytes = registry.register_gauge_vec(
-            "foyer_storage_region_size_bytes".into(),
-            "foyer disk cache region sizes".into(),
+        let foyer_storage_lodc_region_size_bytes = registry.register_gauge_vec(
+            "foyer_storage_lodc_region_size_bytes".into(),
+            "foyer large object disk cache region sizes".into(),
             &["name"],
         );
 
@@ -217,11 +220,13 @@ impl Metrics {
         let storage_hit = foyer_storage_op_total.counter(&[name.clone(), "hit".into()]);
         let storage_miss = foyer_storage_op_total.counter(&[name.clone(), "miss".into()]);
         let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]);
+        let storage_throttled = foyer_storage_op_total.counter(&[name.clone(), "throttled".into()]);
         let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
 
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
         let storage_miss_duration = foyer_storage_op_duration.histogram(&[name.clone(), "miss".into()]);
+        let storage_throttled_duration = foyer_storage_op_duration.histogram(&[name.clone(), "throttled".into()]);
         let storage_delete_duration = foyer_storage_op_duration.histogram(&[name.clone(), "delete".into()]);
 
         let storage_queue_rotate = foyer_storage_inner_op_total.counter(&[name.clone(), "queue_rotate".into()]);
@@ -244,11 +249,12 @@ impl Metrics {
         let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "read".into()]);
         let storage_disk_flush_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "flush".into()]);
 
-        let storage_region_total = foyer_storage_region.gauge(&[name.clone(), "total".into()]);
-        let storage_region_clean = foyer_storage_region.gauge(&[name.clone(), "clean".into()]);
-        let storage_region_evictable = foyer_storage_region.gauge(&[name.clone(), "evictable".into()]);
+        let storage_lodc_region_clean = foyer_storage_lodc_region.gauge(&[name.clone(), "clean".into()]);
+        let storage_lodc_region_writing = foyer_storage_lodc_region.gauge(&[name.clone(), "writing".into()]);
+        let storage_lodc_region_evictable = foyer_storage_lodc_region.gauge(&[name.clone(), "evictable".into()]);
+        let storage_lodc_region_reclaiming = foyer_storage_lodc_region.gauge(&[name.clone(), "reclaiming".into()]);
 
-        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name.clone()]);
+        let storage_lodc_region_size_bytes = foyer_storage_lodc_region_size_bytes.gauge(&[name.clone()]);
 
         let storage_entry_serialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
@@ -303,11 +309,13 @@ impl Metrics {
             storage_enqueue,
             storage_hit,
             storage_miss,
+            storage_throttled,
             storage_delete,
             storage_error,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,
+            storage_throttled_duration,
             storage_delete_duration,
             storage_queue_rotate,
             storage_queue_rotate_duration,
@@ -321,10 +329,11 @@ impl Metrics {
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,
-            storage_region_total,
-            storage_region_clean,
-            storage_region_evictable,
-            storage_region_size_bytes,
+            storage_lodc_region_clean,
+            storage_lodc_region_writing,
+            storage_lodc_region_evictable,
+            storage_lodc_region_reclaiming,
+            storage_lodc_region_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
             storage_lodc_indexer_conflict,

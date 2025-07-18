@@ -19,7 +19,10 @@ use std::{
     hash::Hash,
     ops::Deref,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
     time::Instant,
 };
@@ -40,10 +43,12 @@ use foyer_storage::{IoThrottler, Load, Statistics, Store};
 use futures::FutureExt;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
 
-use super::writer::HybridCacheStorageWriter;
-use crate::{HybridCacheBuilder, HybridCacheWriter};
+use crate::hybrid::{
+    builder::HybridCacheBuilder,
+    error::{Error, Result},
+    writer::{HybridCacheStorageWriter, HybridCacheWriter},
+};
 
 #[cfg(feature = "tracing")]
 macro_rules! root_span {
@@ -294,12 +299,74 @@ where
     policy: HybridCachePolicy,
     flush_on_close: bool,
     metrics: Arc<Metrics>,
+    closed: Arc<AtomicBool>,
     memory: Cache<K, V, S, HybridCacheProperties>,
     storage: Store<K, V, S, HybridCacheProperties>,
     #[cfg(feature = "tracing")]
     tracing: std::sync::atomic::AtomicBool,
     #[cfg(feature = "tracing")]
     tracing_config: TracingConfig,
+}
+
+impl<K, V, S> Inner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    async fn close_inner(
+        closed: Arc<AtomicBool>,
+        memory: Cache<K, V, S, HybridCacheProperties>,
+        storage: Store<K, V, S, HybridCacheProperties>,
+        flush_on_close: bool,
+    ) -> Result<()> {
+        if closed.fetch_or(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if flush_on_close {
+            let bytes = memory.usage();
+            tracing::info!(bytes, "[hybrid]: flush all in-memory cached entries to disk on close");
+            memory.flush().await;
+        }
+        storage.close().await?;
+
+        let elapsed = now.elapsed();
+        tracing::info!("[hybrid]: close consumes {elapsed:?}");
+        Ok(())
+    }
+
+    async fn close(&self) -> Result<()> {
+        Self::close_inner(
+            self.closed.clone(),
+            self.memory.clone(),
+            self.storage.clone(),
+            self.flush_on_close,
+        )
+        .await
+    }
+}
+
+impl<K, V, S> Drop for Inner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn drop(&mut self) {
+        let name = self.name.clone();
+        let closed = self.closed.clone();
+        let memory = self.memory.clone();
+        let storage = self.storage.clone();
+        let flush_on_close = self.flush_on_close;
+
+        self.storage.runtime().user().spawn(async move {
+            if let Err(e) = Self::close_inner(closed, memory, storage, flush_on_close).await {
+                tracing::error!(?name, ?e, "[hybrid]: failed to close hybrid cache");
+            }
+        });
+    }
 }
 
 /// Hybrid cache that integrates in-memory cache and disk cache.
@@ -390,10 +457,12 @@ where
         };
         #[cfg(feature = "tracing")]
         let tracing = std::sync::atomic::AtomicBool::new(false);
+        let closed = Arc::new(AtomicBool::new(false));
         let inner = Inner {
             name,
             policy,
             flush_on_close,
+            closed,
             memory,
             storage,
             metrics,
@@ -506,7 +575,7 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub async fn get<Q>(&self, key: &Q) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
         Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
     {
@@ -585,7 +654,7 @@ where
     ///
     /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
     /// key is acceptable.
-    pub async fn obtain(&self, key: K) -> anyhow::Result<Option<HybridCacheEntry<K, V, S>>>
+    pub async fn obtain(&self, key: K) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
         K: Clone,
     {
@@ -602,7 +671,7 @@ where
             || {
                 let store = self.inner.storage.clone();
                 async move {
-                    match store.load(&key).await.map_err(anyhow::Error::from) {
+                    match store.load(&key).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -616,7 +685,7 @@ where
                         },
                         Ok(Load::Throttled) => Err(ObtainFetchError::Throttled).into(),
                         Ok(Load::Miss) => Err(ObtainFetchError::NotExist).into(),
-                        Err(e) => Err(ObtainFetchError::Err(e)).into(),
+                        Err(e) => Err(ObtainFetchError::Other(e)).into(),
                     }
                 }
             },
@@ -655,11 +724,7 @@ where
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
-            Err(ObtainFetchError::RecvError(_)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
-                Ok(None)
-            }
-            Err(ObtainFetchError::Err(e)) => {
+            Err(ObtainFetchError::Other(e)) => {
                 try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Err(e)
             }
@@ -701,7 +766,7 @@ where
     }
 
     /// Clear the hybrid cache.
-    pub async fn clear(&self) -> anyhow::Result<()> {
+    pub async fn clear(&self) -> Result<()> {
         self.inner.memory.clear();
         self.inner.storage.destroy().await?;
         Ok(())
@@ -714,17 +779,10 @@ where
     /// Based on the `flush_on_close` option, `close` will flush all in-memory cached entries to the disk cache.
     ///
     /// For more details, please refer to [`super::builder::HybridCacheBuilder::with_flush_on_close()`].
-    pub async fn close(&self) -> anyhow::Result<()> {
-        let now = Instant::now();
-        if self.inner.flush_on_close {
-            let bytes = self.inner.memory.usage();
-            tracing::info!(bytes, "[hybrid]: flush all in-memory cached entries to disk on close");
-            self.inner.memory.flush().await;
-        }
-        self.inner.storage.close().await?;
-        let elapsed = now.elapsed();
-        tracing::info!("[hybrid]: close consumes {elapsed:?}",);
-        Ok(())
+    ///
+    /// If `close` is not called explicitly, the hybrid cache will be closed when its last copy is dropped.
+    pub async fn close(&self) -> Result<()> {
+        self.inner.close().await
     }
 
     /// Return the statistics information of the hybrid cache.
@@ -761,13 +819,12 @@ where
 enum ObtainFetchError {
     Throttled,
     NotExist,
-    RecvError(oneshot::error::RecvError),
-    Err(anyhow::Error),
+    Other(Error),
 }
 
-impl From<oneshot::error::RecvError> for ObtainFetchError {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::RecvError(e)
+impl From<foyer_memory::Error> for ObtainFetchError {
+    fn from(e: foyer_memory::Error) -> Self {
+        Self::Other(e.into())
     }
 }
 
@@ -788,7 +845,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: Fetch<K, V, anyhow::Error, S, HybridCacheProperties>,
+    inner: Fetch<K, V, Error, S, HybridCacheProperties>,
     policy: HybridCachePolicy,
     storage: Store<K, V, S, HybridCacheProperties>,
 }
@@ -799,7 +856,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Output = anyhow::Result<CacheEntry<K, V, S, HybridCacheProperties>>;
+    type Output = Result<CacheEntry<K, V, S, HybridCacheProperties>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -827,7 +884,7 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    type Target = Fetch<K, V, anyhow::Error, S, HybridCacheProperties>;
+    type Target = Fetch<K, V, Error, S, HybridCacheProperties>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -847,7 +904,7 @@ where
     pub fn fetch<F, FU, AK, AV>(&self, key: AK, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        FU: Future<Output = Result<AV>> + Send + 'static,
         AK: Into<Arc<K>>,
         AV: Into<Arc<V>>,
     {
@@ -866,7 +923,7 @@ where
     ) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        FU: Future<Output = Result<AV>> + Send + 'static,
         AK: Into<Arc<K>>,
         AV: Into<Arc<V>>,
     {
@@ -876,7 +933,7 @@ where
     fn fetch_inner<F, FU, AK, AV>(&self, key: AK, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
     where
         F: FnOnce() -> FU,
-        FU: Future<Output = anyhow::Result<AV>> + Send + 'static,
+        FU: Future<Output = Result<AV>> + Send + 'static,
         AK: Into<Arc<K>>,
         AV: Into<Arc<V>>,
     {
@@ -899,7 +956,7 @@ where
                 let runtime = self.storage().runtime().clone();
 
                 async move {
-                    let throttled = match store.load(key.as_ref()).await.map_err(anyhow::Error::from) {
+                    let throttled = match store.load(key.as_ref()).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -982,12 +1039,10 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1002,12 +1057,10 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .with_admission_picker(Arc::new(BiasedPicker::new(admits)))
             .build()
             .await
@@ -1024,12 +1077,10 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1046,12 +1097,10 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .with_admission_picker(recorder.clone())
             .build()
             .await
@@ -1069,12 +1118,10 @@ mod tests {
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage(Engine::large())
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(16 * MB)
-                    .with_file_size(MB),
-            )
+            .storage()
+            .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(16 * MB))
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(MB))
             .build()
             .await
             .unwrap()
@@ -1421,12 +1468,10 @@ mod tests {
                 .with_name("test")
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
-                .storage(Engine::large())
-                .with_device_options(
-                    DirectFsDeviceOptions::new(dir)
-                        .with_capacity(256 * KB)
-                        .with_file_size(64 * KB),
-                )
+                .storage()
+                .with_device_builder(FsDeviceBuilder::new(dir).with_capacity(256 * KB))
+                .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(64 * KB))
                 .build()
                 .await
                 .unwrap()

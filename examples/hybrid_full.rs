@@ -14,17 +14,16 @@
 
 use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
-use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
-    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    AdmitAllPicker, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, IopsCounter,
+    LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
+    Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
@@ -37,31 +36,10 @@ async fn main() -> Result<()> {
         })
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage(Engine::Mixed {
-            ratio: 0.1,
-            large: LargeEngineOptions::new()
-                .with_indexer_shards(64)
-                .with_recover_concurrency(8)
-                .with_flushers(2)
-                .with_reclaimers(2)
-                .with_buffer_pool_size(256 * 1024 * 1024)
-                .with_clean_region_threshold(4)
-                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
-                .with_tombstone_log_config(
-                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                        .with_flush(true)
-                        .build(),
-                ),
-            small: SmallEngineOptions::new()
-                .with_set_size(16 * 1024)
-                .with_set_cache_capacity(64)
-                .with_flushers(2),
-        })
-        .with_device_options(
-            DirectFsDeviceOptions::new(dir.path())
+        .storage()
+        .with_device_builder(
+            FsDeviceBuilder::new(dir.path())
                 .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
                 .with_throttle(
                     Throttle::new()
                         .with_read_iops(4000)
@@ -70,6 +48,20 @@ async fn main() -> Result<()> {
                         .with_read_throughput(800 * 1024 * 1024)
                         .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
                 ),
+        )
+        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_engine_builder(
+            LargeObjectEngineBuilder::new()
+                .with_region_size(16 * 1024 * 1024)
+                .with_indexer_shards(64)
+                .with_recover_concurrency(8)
+                .with_flushers(2)
+                .with_reclaimers(2)
+                .with_buffer_pool_size(256 * 1024 * 1024)
+                .with_clean_region_threshold(4)
+                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
+                .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)
         .with_admission_picker(Arc::<AdmitAllPicker>::default())
@@ -110,7 +102,8 @@ async fn main() -> Result<()> {
 async fn mock() -> Result<String> {
     let now = chrono::Utc::now();
     if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
-        return Err(anyhow::anyhow!("Hi, time traveler!"));
+        let e: Box<dyn std::error::Error + Send + Sync + 'static> = "Hi, time traveler!".into();
+        return Err(e.into());
     }
     Ok("Hello, foyer.".to_string())
 }

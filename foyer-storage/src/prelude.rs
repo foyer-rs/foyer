@@ -12,35 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_os = "linux")]
+pub use crate::io::engine::uring::UringIoEngineBuilder;
 pub use crate::{
     compress::Compression,
-    device::{
-        direct_file::{DirectFileDevice, DirectFileDeviceOptions},
-        direct_fs::{DirectFsDevice, DirectFsDeviceOptions},
-        Dev, DevConfig, DevExt, IopsCounter, Throttle,
+    engine::{
+        large::{
+            engine::LargeObjectEngineBuilder,
+            eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
+            region::{Region, RegionStatistics},
+        },
+        Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
     },
     error::{Error, Result},
     io::{
-        buffer::{IoBuf, IoBufMut, IoBuffer, OwnedIoSlice, OwnedSlice, SharedIoSlice},
-        throttle::IoThrottler,
-    },
-    large::{
-        recover::RecoverMode,
-        tombstone::{TombstoneLogConfig, TombstoneLogConfigBuilder},
+        device::{
+            combined::CombinedDeviceBuilder, file::FileDeviceBuilder, fs::FsDeviceBuilder, noop::NoopDeviceBuilder,
+            partial::PartialDeviceBuilder, Device, DeviceBuilder, RawFile,
+        },
+        engine::{noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder, IoHandle},
+        error::{IoError, IoResult},
+        throttle::{IoThrottler, IopsCounter, Throttle},
     },
     picker::{
         utils::{
-            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, FifoPicker, InvalidRatioPicker,
-            IoThrottlerPicker, IoThrottlerTarget, RejectAllPicker,
+            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, IoThrottlerPicker,
+            IoThrottlerTarget, RejectAllPicker,
         },
-        AdmissionPicker, EvictionInfo, EvictionPicker, Pick, ReinsertionPicker,
+        AdmissionPicker, Pick, ReinsertionPicker,
     },
-    region::{Region, RegionStatistics},
     runtime::Runtime,
     statistics::Statistics,
-    storage::{either::Order, Storage},
-    store::{
-        DeviceOptions, Engine, LargeEngineOptions, Load, RuntimeOptions, SmallEngineOptions, Store, StoreBuilder,
-        TokioRuntimeOptions,
-    },
+    store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
 };

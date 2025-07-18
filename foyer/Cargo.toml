@@ -34,7 +34,6 @@ strict_assertions = [
 ]
 
 [dependencies]
-anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
@@ -44,6 +43,7 @@ futures = { workspace = true }
 mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]
