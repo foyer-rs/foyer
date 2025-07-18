@@ -56,6 +56,7 @@ Feel free to open a PR and add your projects here:
 - [RisingWave](https://github.com/risingwavelabs/risingwave): SQL stream processing, analytics, and management.
 - [Chroma](https://github.com/chroma-core/chroma): Embedding database for LLM apps.
 - [SlateDB](https://github.com/slatedb/slatedb): A cloud native embedded storage engine built on object storage.
+- [ZeroFS](https://github.com/Barre/zerofs): File systems and block devices on S3 storage.
 - [Percas](https://github.com/scopedb/percas): A distributed persistent cache service optimized for high performance NVMe SSD.
 - [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services.
 - [si](https://github.com/systeminit/si): The System Initiative software.
