@@ -37,6 +37,7 @@ foyer-memory = { workspace = true }
 fs4 = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }

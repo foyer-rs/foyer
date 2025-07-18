@@ -19,10 +19,9 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Populated, Properties},
 };
-use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Runtime, Statistics};
 
 /// Load result.
 #[derive(Debug)]
@@ -30,9 +29,9 @@ pub enum Load<K, V> {
     /// Load entry success.
     Entry {
         /// The key of the entry.
-        key: K,
+        key: Arc<K>,
         /// The value of the entry.
-        value: V,
+        value: Arc<V>,
         /// The populated source context of the entry.
         populated: Populated,
     },
@@ -44,7 +43,7 @@ pub enum Load<K, V> {
 
 impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
-    pub fn entry(self) -> Option<(K, V, Populated)> {
+    pub fn entry(self) -> Option<(Arc<K>, Arc<V>, Populated)> {
         match self {
             Load::Entry { key, value, populated } => Some((key, value, populated)),
             _ => None,
@@ -54,7 +53,7 @@ impl<K, V> Load<K, V> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
     ///
     /// Only key and value will be returned.
-    pub fn kv(self) -> Option<(K, V)> {
+    pub fn kv(self) -> Option<(Arc<K>, Arc<V>)> {
         match self {
             Load::Entry { key, value, .. } => Some((key, value)),
             _ => None,
@@ -136,7 +135,7 @@ where
     P: Properties,
 {
     /// Push a in-memory cache piece to the disk cache write queue.
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize);
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///

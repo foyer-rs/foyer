@@ -25,7 +25,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::Properties,
+    properties::{Age, Populated, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -49,6 +49,7 @@ use crate::{
         engine::{monitor::MonitoredIoEngine, noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngineBuilder},
         throttle::Throttle,
     },
+    keeper::Keeper,
     runtime::Runtime,
     serde::EntrySerializer,
     statistics::Statistics,
@@ -75,6 +76,7 @@ where
 {
     hasher: Arc<S>,
 
+    keeper: Option<Keeper<K, V, P>>,
     engine: Arc<dyn Engine<K, V, P>>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
@@ -101,6 +103,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
+            .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("load_throttler", &self.inner.load_throttler)
@@ -150,7 +153,11 @@ where
 
         if force || self.pick(piece.hash()).admitted() {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
-            self.inner.engine.enqueue(piece, estimated_size);
+            let rpiece = match self.inner.keeper.as_ref() {
+                Some(keeper) => keeper.insert(piece),
+                None => piece.into(),
+            };
+            self.inner.engine.enqueue(rpiece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -168,6 +175,17 @@ where
         let now = Instant::now();
 
         let hash = self.inner.hasher.hash_one(key);
+
+        if let Some(keeper) = self.inner.keeper.as_ref() {
+            if let Some(piece) = keeper.get(hash, key) {
+                tracing::trace!(hash, "[store]: load from keeper");
+                return Ok(Load::Entry {
+                    key: piece.arc_key().clone(),
+                    value: piece.arc_value().clone(),
+                    populated: Populated { age: Age::Young },
+                });
+            }
+        }
 
         #[cfg(feature = "test_utils")]
         if self.inner.load_throttle_switch.is_throttled() {
@@ -366,6 +384,7 @@ where
     device_builder: Box<dyn DeviceBuilder>,
     io_engine_builder: Box<dyn IoEngineBuilder>,
     engine_builder: Box<dyn EngineBuilder<K, V, P>>,
+    keeper: bool,
 
     runtime_config: RuntimeOptions,
 
@@ -389,6 +408,7 @@ where
             .field("device_builder", &self.device_builder)
             .field("io_engine_builder", &self.io_engine_builder)
             .field("engine_builder", &self.engine_builder)
+            .field("keeper", &self.keeper)
             .field("runtime_config", &self.runtime_config)
             .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
@@ -415,6 +435,8 @@ where
             io_engine_builder: PsyncIoEngineBuilder::new().boxed(),
             engine_builder: LargeObjectEngineBuilder::new().boxed(),
 
+            keeper: true,
+
             runtime_config: RuntimeOptions::Disabled,
 
             admission_picker: Arc::<AdmitAllPicker>::default(),
@@ -438,6 +460,17 @@ where
     /// Set engine builder for the disk cache store.
     pub fn with_engine_builder(mut self, builder: impl Into<Box<dyn EngineBuilder<K, V, P>>>) -> Self {
         self.engine_builder = builder.into();
+        self
+    }
+
+    /// Enable/disable keeper.
+    ///
+    /// Keeper is a indexer for disk cache enqueued not yet written entries.
+    /// Enable it will make entries in the write queue queryable.
+    ///
+    /// Default: `true`.
+    pub fn with_keeper(mut self, keeper: bool) -> Self {
+        self.keeper = keeper;
         self
     }
 
@@ -568,9 +601,12 @@ where
             IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
         );
 
+        let keeper = self.keeper.then(|| Keeper::new(memory.shards()));
+
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
             hasher,
+            keeper,
             engine,
             admission_picker,
             load_throttler,
@@ -649,6 +685,6 @@ mod tests {
 
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
-        assert_eq!(l2.entry().unwrap().1, "bar");
+        assert_eq!(l2.entry().unwrap().1.as_str(), "bar");
     }
 }

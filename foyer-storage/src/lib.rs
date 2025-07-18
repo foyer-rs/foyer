@@ -21,6 +21,7 @@ mod compress;
 mod engine;
 mod error;
 mod io;
+mod keeper;
 mod picker;
 mod runtime;
 mod serde;

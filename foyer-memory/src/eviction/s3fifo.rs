@@ -386,8 +386,8 @@ mod tests {
 
     impl<K, V> Dump for S3Fifo<K, V, TestProperties>
     where
-        K: Key + Clone,
-        V: Value + Clone,
+        K: Key,
+        V: Value,
     {
         type Output = Vec<Vec<Arc<Record<Self>>>>;
 
@@ -430,8 +430,8 @@ mod tests {
         let rs = (0..100)
             .map(|i| {
                 Arc::new(Record::new(Data {
-                    key: i,
-                    value: i,
+                    key: Arc::new(i),
+                    value: Arc::new(i),
                     properties: TestProperties::default(),
                     hash: i,
                     weight: 1,
