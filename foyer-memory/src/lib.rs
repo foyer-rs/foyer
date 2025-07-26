@@ -42,6 +42,7 @@ mod indexer;
 mod pipe;
 mod raw;
 mod record;
+mod sharder;
 
 mod prelude;
 pub use prelude::*;

@@ -22,12 +22,15 @@ pub trait Indexer: Send + Sync + 'static + Default {
     type Eviction: Eviction;
 
     fn insert(&mut self, record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>>;
+
     fn get<Q>(&self, hash: u64, key: &Q) -> Option<&Arc<Record<Self::Eviction>>>
     where
         Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
+
     fn remove<Q>(&mut self, hash: u64, key: &Q) -> Option<Arc<Record<Self::Eviction>>>
     where
         Q: Hash + Equivalent<<Self::Eviction as Eviction>::Key> + ?Sized;
+
     fn drain(&mut self) -> impl Iterator<Item = Arc<Record<Self::Eviction>>>;
 }
 
