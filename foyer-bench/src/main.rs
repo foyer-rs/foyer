@@ -320,6 +320,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     io_uring_iopoll: bool,
+
+    #[arg(long, default_value = "1s")]
+    io_uring_tail: humantime::Duration,
 }
 
 #[derive(Debug)]
@@ -586,6 +589,7 @@ async fn benchmark(args: Args) {
             .with_sqpoll_cpus(args.io_uring_sqpoll_cpus.clone())
             .with_iopoll(args.io_uring_iopoll)
             .with_weight(args.io_uring_weight)
+            .with_tail_tracing(args.io_uring_tail.into())
             .boxed(),
         _ => unreachable!(),
     };

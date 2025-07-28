@@ -15,6 +15,7 @@
 use std::{
     fmt::Debug,
     sync::{mpsc, Arc},
+    time::Duration,
 };
 
 use core_affinity::CoreId;
@@ -32,6 +33,8 @@ use crate::{
     RawFile, Runtime,
 };
 
+use fastant::Instant;
+
 /// Builder for io_uring based I/O engine.
 #[derive(Debug)]
 pub struct UringIoEngineBuilder {
@@ -43,6 +46,7 @@ pub struct UringIoEngineBuilder {
     sqpoll_idle: u32,
     iopoll: bool,
     weight: f64,
+    tail: Duration,
 }
 
 impl Default for UringIoEngineBuilder {
@@ -63,6 +67,7 @@ impl UringIoEngineBuilder {
             sqpoll_idle: 10,
             iopoll: false,
             weight: 1.0,
+            tail: Duration::from_secs(1),
         }
     }
 
@@ -149,6 +154,14 @@ impl UringIoEngineBuilder {
         self.sqpoll_idle = idle;
         self
     }
+
+    /// Set the tail tracing duration.
+    ///
+    /// Only available with `DEBUG` log level.
+    pub fn with_tail_tracing(mut self, tail: Duration) -> Self {
+        self.tail = tail;
+        self
+    }
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
@@ -194,6 +207,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                 weight: self.weight,
                 read_inflight: 0,
                 write_inflight: 0,
+                tail: self.tail,
             };
 
             std::thread::Builder::new()
@@ -235,11 +249,61 @@ struct RawFileAddress {
     offset: u64,
 }
 
+// TODO(MrCroxx): Add a feature to opt-in io tracing.
+///
+#[derive(Debug)]
+pub struct Trace {
+    pub base: Instant,
+    pub prepare: Instant,
+    pub queue: Instant,
+    pub submit: Instant,
+    pub io: Instant,
+    pub notify: Instant,
+}
+
+impl Trace {
+    pub fn now() -> Self {
+        Self {
+            base: Instant::now(),
+            prepare: Instant::now(),
+            queue: Instant::now(),
+            submit: Instant::now(),
+            io: Instant::now(),
+            notify: Instant::now(),
+        }
+    }
+
+    pub fn prepare(&self) -> Duration {
+        self.prepare.duration_since(self.base)
+    }
+
+    pub fn queue(&self) -> Duration {
+        self.queue.duration_since(self.prepare)
+    }
+
+    pub fn submit(&self) -> Duration {
+        self.submit.duration_since(self.queue)
+    }
+
+    pub fn io(&self) -> Duration {
+        self.io.duration_since(self.submit)
+    }
+
+    pub fn notify(&self) -> Duration {
+        self.notify.duration_since(self.io)
+    }
+
+    pub fn total(&self) -> Duration {
+        self.notify.duration_since(self.base)
+    }
+}
+
 struct UringIoCtx {
     tx: oneshot::Sender<IoResult<()>>,
     io_type: UringIoType,
     rbuf: RawBuf,
     addr: RawFileAddress,
+    trace: Trace,
 }
 
 struct UringIoEngineShard {
@@ -251,11 +315,14 @@ struct UringIoEngineShard {
     io_depth: usize,
     read_inflight: usize,
     write_inflight: usize,
+    tail: Duration,
 }
 
 impl UringIoEngineShard {
     fn run(mut self) {
         loop {
+            let mut pctxs = vec![];
+
             'prepare: loop {
                 if self.read_inflight + self.write_inflight >= self.io_depth {
                     break 'prepare;
@@ -283,10 +350,12 @@ impl UringIoEngineShard {
                     }
                 };
 
-                let ctx = match ctx {
+                let mut ctx = match ctx {
                     Some(ctx) => ctx,
                     None => break 'prepare,
                 };
+
+                ctx.trace.queue = Instant::now();
 
                 let ctx = Box::new(ctx);
 
@@ -305,7 +374,9 @@ impl UringIoEngineShard {
                             .build()
                     }
                 };
-                let data = Box::into_raw(ctx) as u64;
+                let pctx = Box::into_raw(ctx);
+                pctxs.push(pctx);
+                let data = pctx as u64;
                 let sqe = sqe.user_data(data);
                 unsafe { self.uring.submission().push(&sqe).unwrap() }
             }
@@ -314,9 +385,19 @@ impl UringIoEngineShard {
                 self.uring.submit().unwrap();
             }
 
+            for pctx in pctxs {
+                let ctx = unsafe { &mut *pctx };
+                ctx.trace.submit = Instant::now();
+            }
+
+            let rio = self.read_inflight;
+            let wio = self.write_inflight;
+
             for cqe in self.uring.completion() {
                 let data = cqe.user_data();
-                let ctx = unsafe { Box::from_raw(data as *mut UringIoCtx) };
+                let mut ctx = unsafe { Box::from_raw(data as *mut UringIoCtx) };
+
+                ctx.trace.io = Instant::now();
 
                 match ctx.io_type {
                     UringIoType::Read => self.read_inflight -= 1,
@@ -329,6 +410,22 @@ impl UringIoEngineShard {
                     let _ = ctx.tx.send(Err(err));
                 } else {
                     let _ = ctx.tx.send(Ok(()));
+                }
+
+                ctx.trace.notify = Instant::now();
+
+                if ctx.io_type == UringIoType::Read && ctx.trace.total() >= self.tail {
+                    tracing::debug!(
+                        total = ?ctx.trace.total(),
+                        prepare = ?ctx.trace.prepare(),
+                        queue = ?ctx.trace.queue(),
+                        submit = ?ctx.trace.submit(),
+                        io = ?ctx.trace.io(),
+                        notify = ?ctx.trace.notify(),
+                        rio,
+                        wio,
+                        "[io_uring io engine]: tail tracing"
+                    );
                 }
             }
         }
@@ -349,17 +446,20 @@ impl Debug for UringIoEngine {
 
 impl UringIoEngine {
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        let mut trace = Trace::now();
         let (tx, rx) = oneshot::channel();
         let shard = &self.read_txs[partition.id() as usize % self.read_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        trace.prepare = Instant::now();
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Read,
             rbuf,
             addr,
+            trace,
         });
         async move {
             let res = match rx.await {
@@ -374,17 +474,21 @@ impl UringIoEngine {
     }
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
+        let mut trace = Trace::now();
+
         let (tx, rx) = oneshot::channel();
         let shard = &self.write_txs[partition.id() as usize % self.write_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        trace.prepare = Instant::now();
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Write,
             rbuf,
             addr,
+            trace,
         });
         async move {
             let res = match rx.await {
