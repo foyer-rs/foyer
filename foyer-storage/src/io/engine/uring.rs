@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    sync::{mpsc, Arc},
-    time::Duration,
-};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use core_affinity::CoreId;
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
 use tokio::sync::oneshot;
@@ -170,16 +167,16 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }
 
-        let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+        let (read_txs, read_rxs): (Vec<Sender<_>>, Vec<Receiver<_>>) = (0..self.threads)
             .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
+                let (tx, rx) = crossbeam::channel::unbounded();
                 (tx, rx)
             })
             .unzip();
 
-        let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+        let (write_txs, write_rxs): (Vec<Sender<_>>, Vec<Receiver<_>>) = (0..self.threads)
             .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
+                let (tx, rx) = crossbeam::channel::unbounded();
                 (tx, rx)
             })
             .unzip();
@@ -307,8 +304,8 @@ struct UringIoCtx {
 }
 
 struct UringIoEngineShard {
-    read_rx: mpsc::Receiver<UringIoCtx>,
-    write_rx: mpsc::Receiver<UringIoCtx>,
+    read_rx: Receiver<UringIoCtx>,
+    write_rx: Receiver<UringIoCtx>,
     weight: f64,
     _device: Arc<dyn Device>,
     uring: IoUring,
@@ -330,22 +327,22 @@ impl UringIoEngineShard {
 
                 let ctx = if (self.read_inflight as f64) < self.write_inflight as f64 * self.weight {
                     match self.read_rx.try_recv() {
-                        Err(mpsc::TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Disconnected) => return,
                         Ok(ctx) => Some(ctx),
-                        Err(mpsc::TryRecvError::Empty) => match self.write_rx.try_recv() {
-                            Err(mpsc::TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Empty) => match self.write_rx.try_recv() {
+                            Err(TryRecvError::Disconnected) => return,
                             Ok(ctx) => Some(ctx),
-                            Err(mpsc::TryRecvError::Empty) => None,
+                            Err(TryRecvError::Empty) => None,
                         },
                     }
                 } else {
                     match self.write_rx.try_recv() {
-                        Err(mpsc::TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Disconnected) => return,
                         Ok(ctx) => Some(ctx),
-                        Err(mpsc::TryRecvError::Empty) => match self.read_rx.try_recv() {
-                            Err(mpsc::TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Empty) => match self.read_rx.try_recv() {
+                            Err(TryRecvError::Disconnected) => return,
                             Ok(ctx) => Some(ctx),
-                            Err(mpsc::TryRecvError::Empty) => None,
+                            Err(TryRecvError::Empty) => None,
                         },
                     }
                 };
@@ -414,7 +411,9 @@ impl UringIoEngineShard {
 
                 ctx.trace.notify = Instant::now();
 
-                if ctx.io_type == UringIoType::Read && ctx.trace.total() >= self.tail {
+                if ctx.io_type == UringIoType::Read
+                    && (ctx.trace.total() >= self.tail || ctx.trace.queue() >= Duration::from_micros(100))
+                {
                     tracing::debug!(
                         total = ?ctx.trace.total(),
                         prepare = ?ctx.trace.prepare(),
@@ -424,6 +423,8 @@ impl UringIoEngineShard {
                         notify = ?ctx.trace.notify(),
                         rio,
                         wio,
+                        rq = self.read_rx.len(),
+                        wq = self.write_rx.len(),
                         "[io_uring io engine]: tail tracing"
                     );
                 }
@@ -434,8 +435,8 @@ impl UringIoEngineShard {
 
 pub struct UringIoEngine {
     device: Arc<dyn Device>,
-    read_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
-    write_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
+    read_txs: Vec<Sender<UringIoCtx>>,
+    write_txs: Vec<Sender<UringIoCtx>>,
 }
 
 impl Debug for UringIoEngine {
