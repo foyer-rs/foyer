@@ -558,7 +558,7 @@ where
         });
     }
 
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
         tracing::trace!(hash, "[lodc]: load");
 
         let indexer = self.inner.indexer.clone();
@@ -754,7 +754,7 @@ where
         self.enqueue(piece, estimated_size);
     }
 
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V>>> {
+    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
         // TODO(MrCroxx): refactor this.
         self.load(hash).boxed()
     }

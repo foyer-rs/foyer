@@ -38,7 +38,7 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
 };
-use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, Piece, Pipe};
+use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, FetchTarget, Piece, Pipe};
 use foyer_storage::{IoThrottler, Load, Statistics, Store};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
@@ -632,6 +632,10 @@ where
                     HybridCacheProperties::default().with_source(Source::Populated(populated)),
                 ))
             }
+            Load::Piece { piece, .. } => {
+                record_hit();
+                Some(self.inner.memory.insert_piece(piece))
+            }
             Load::Throttled => {
                 record_throttled();
                 None
@@ -676,7 +680,14 @@ where
                             value,
                             populated,
                         }) => Diversion {
-                            target: Ok(value),
+                            target: Ok(FetchTarget::Value(value)),
+                            store: Some(FetchContext {
+                                throttled: false,
+                                source: Source::Populated(populated),
+                            }),
+                        },
+                        Ok(Load::Piece { piece, populated }) => Diversion {
+                            target: Ok(FetchTarget::Piece(piece)),
                             store: Some(FetchContext {
                                 throttled: false,
                                 source: Source::Populated(populated),
@@ -957,7 +968,18 @@ where
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                             return Diversion {
-                                target: Ok(value),
+                                target: Ok(FetchTarget::Value(value)),
+                                store: Some(FetchContext {
+                                    throttled: false,
+                                    source: Source::Populated(populated),
+                                }),
+                            };
+                        }
+                        Ok(Load::Piece { piece, populated }) => {
+                            metrics.hybrid_hit.increase(1);
+                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+                            return Diversion {
+                                target: Ok(FetchTarget::Piece(piece)),
                                 store: Some(FetchContext {
                                     throttled: false,
                                     source: Source::Populated(populated),
@@ -974,7 +996,7 @@ where
 
                     let fut = async move {
                         Diversion {
-                            target: future.await,
+                            target: future.await.map(|v| FetchTarget::Value(v)),
                             store: Some(FetchContext {
                                 throttled,
                                 source: Source::Outer,

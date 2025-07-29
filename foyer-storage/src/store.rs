@@ -161,7 +161,7 @@ where
     }
 
     /// Load a cache entry from the disk cache.
-    pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V>>
+    pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V, P>>
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
@@ -221,7 +221,15 @@ where
                     populated: p,
                 })
             }
-            Ok(Load::Entry { .. }) | Ok(Load::Miss) => {
+            Ok(Load::Piece { piece, populated }) if key.equivalent(piece.key()) => {
+                self.inner.metrics.storage_hit.increase(1);
+                self.inner
+                    .metrics
+                    .storage_hit_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Piece { piece, populated })
+            }
+            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) | Ok(Load::Miss) => {
                 self.inner.metrics.storage_miss.increase(1);
                 self.inner
                     .metrics

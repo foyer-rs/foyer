@@ -117,7 +117,7 @@ where
 {
     fn enqueue(&self, _: Piece<K, V, P>, _: usize) {}
 
-    fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V>>> {
+    fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
         async move { Ok(Load::Miss) }.boxed()
     }
 

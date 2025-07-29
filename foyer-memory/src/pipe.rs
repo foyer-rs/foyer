@@ -107,6 +107,15 @@ impl<K, V, P> Piece<K, V, P> {
     pub fn properties(&self) -> &P {
         unsafe { &*self.properties }
     }
+
+    pub(crate) fn into_record<E>(mut self) -> Arc<Record<E>>
+    where
+        E: Eviction<Key = K, Value = V, Properties = P>,
+    {
+        self.drop_fn = |_| {};
+        let record = self.record as *const Record<E>;
+        unsafe { Arc::from_raw(record) }
+    }
 }
 
 /// Pipe is used to notify disk cache to cache entries from the in-memory cache.
