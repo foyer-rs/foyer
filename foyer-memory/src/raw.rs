@@ -164,9 +164,7 @@ where
         self.usage += weight;
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
-        let refs = waiters.len() + 1;
-        let inc = record.inc_refs(refs);
-        assert_eq!(refs, inc);
+        record.inc_refs(waiters.len() + 1);
 
         match self.usage.cmp(&old_usage) {
             std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),

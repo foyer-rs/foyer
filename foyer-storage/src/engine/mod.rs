@@ -22,7 +22,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Runtime, Statistics};
 
 /// Load result.
 #[derive(Debug)]
@@ -138,7 +138,7 @@ where
     P: Properties,
 {
     /// Push a in-memory cache piece to the disk cache write queue.
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize);
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///
