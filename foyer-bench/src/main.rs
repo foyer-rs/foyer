@@ -320,6 +320,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     io_uring_iopoll: bool,
+
+    #[arg(long, default_value = "0ms")]
+    latency: humantime::Duration,
 }
 
 #[derive(Debug)]
@@ -367,6 +370,7 @@ struct Context {
     warm_up: Duration,
     distribution: TimeSeriesDistribution,
     metrics: Metrics,
+    latency: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -727,6 +731,7 @@ async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, st
         warm_up: Duration::from_secs(args.warm_up),
         distribution,
         metrics: metrics.clone(),
+        latency: args.latency.into(),
     });
 
     let w_handles = (0..args.writers)
@@ -886,7 +891,12 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let fetch = hybrid.fetch(idx, || {
             let context = context.clone();
             let entry_size = osrng.random_range(context.entry_size_range.clone());
+            let latency = context.latency;
             async move {
+                if latency != Duration::ZERO {
+                    tokio::time::sleep(latency).await;
+                }
+                tokio::task::yield_now().await;
                 let _ = miss_tx.send(time.elapsed());
                 Ok(Value {
                     inner: Arc::new(text(idx as usize, entry_size)),
