@@ -30,7 +30,6 @@ use foyer_common::{
     metrics::Metrics,
     properties::Properties,
 };
-use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
     future::{try_join, try_join_all},
@@ -55,6 +54,7 @@ use crate::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
     },
+    keeper::PieceRef,
     runtime::Runtime,
     Compression,
 };
@@ -66,7 +66,7 @@ where
     P: Properties,
 {
     CacheEntry {
-        piece: Piece<K, V, P>,
+        piece: PieceRef<K, V, P>,
         estimated_size: usize,
         sequence: Sequence,
     },
@@ -205,6 +205,7 @@ where
             ctx,
             tombstone_infos: vec![],
             waiters: vec![],
+            piece_refs: vec![],
             rotate_buffer,
             queue_init: None,
             submit_queue_size: self.submit_queue_size.clone(),
@@ -264,9 +265,15 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
-struct IoTaskCtx {
+struct IoTaskCtx<K, V, P>
+where
+    K: StorageKey,
+    V: StorageValue,
+    P: Properties,
+{
     handle: Option<GetCleanRegionHandle>,
     waiters: Vec<oneshot::Sender<()>>,
+    piece_refs: Vec<PieceRef<K, V, P>>,
     init: Instant,
     io_slice: IoSlice,
     tombstone_infos: Vec<TombstoneInfo>,
@@ -286,6 +293,7 @@ where
     buffer: Option<Buffer>,
     ctx: SplitCtx,
     tombstone_infos: Vec<TombstoneInfo>,
+    piece_refs: Vec<PieceRef<K, V, P>>,
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
@@ -308,7 +316,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
+    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx<K, V, P>>>,
 
     max_entry_size: usize,
 
@@ -322,7 +330,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + '_ {
+    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx<K, V, P>> + '_ {
         poll_fn(|cx| {
             if let Some(io_task) = self.io_tasks.front_mut() {
                 let res = ready!(io_task.poll_unpin(cx));
@@ -359,10 +367,11 @@ where
 
                 let tombstone_infos = std::mem::take(&mut self.tombstone_infos);
                 let waiters = std::mem::take(&mut self.waiters);
+                let piece_refs = std::mem::take(&mut self.piece_refs);
 
                 let init = self.queue_init.take().unwrap();
 
-                let io_task = self.submit_io_task(batch, tombstone_infos, waiters, init);
+                let io_task = self.submit_io_task(batch, piece_refs, tombstone_infos, waiters, init);
                 self.io_tasks.push_back(io_task);
 
                 let io_buffer = self.rotate_buffer.take().unwrap();
@@ -372,11 +381,11 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_region_handle = handle;
                     }
-                    self.handle_io_complete(waiters,  tombstone_infos,init);
+                    self.handle_io_complete(piece_refs, waiters, tombstone_infos, init);
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
@@ -409,13 +418,17 @@ where
                 estimated_size,
                 sequence,
             } => {
-                report(self.buffer.as_mut().unwrap().push(
+                let enqueued = self.buffer.as_mut().unwrap().push(
                     piece.key(),
                     piece.value(),
                     piece.hash(),
                     self.compression,
                     sequence,
-                ));
+                );
+                if enqueued {
+                    self.piece_refs.push(piece);
+                }
+                report(enqueued);
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
@@ -437,10 +450,11 @@ where
     fn submit_io_task(
         &self,
         batch: Batch,
+        piece_refs: Vec<PieceRef<K, V, P>>,
         tombstone_infos: Vec<TombstoneInfo>,
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
-    ) -> BoxFuture<'static, IoTaskCtx> {
+    ) -> BoxFuture<'static, IoTaskCtx<K, V, P>> {
         let id = self.id;
 
         tracing::trace!(
@@ -605,6 +619,7 @@ where
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {
                     handle: states.pop(),
+                    piece_refs,
                     waiters,
                     init,
                     io_slice: bytes,
@@ -614,6 +629,7 @@ where
                     tracing::error!(id, ?e, "[lodc flusher]: io task error");
                     IoTaskCtx {
                         handle: None,
+                        piece_refs,
                         waiters,
                         init,
                         io_slice: bytes,
@@ -624,6 +640,7 @@ where
                     tracing::error!(id, ?e, "[lodc flusher]: join io task error");
                     IoTaskCtx {
                         handle: None,
+                        piece_refs,
                         waiters,
                         init,
                         io_slice: bytes,
@@ -638,10 +655,13 @@ where
 
     fn handle_io_complete(
         &self,
+        piece_refs: Vec<PieceRef<K, V, P>>,
         waiters: Vec<oneshot::Sender<()>>,
         tombstone_infos: Vec<TombstoneInfo>,
         init: Instant,
     ) {
+        drop(piece_refs);
+
         self.indexer.remove_batch(
             tombstone_infos
                 .iter()

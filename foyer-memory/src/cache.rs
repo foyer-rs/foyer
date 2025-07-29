@@ -36,7 +36,7 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoConfig},
         sieve::{Sieve, SieveConfig},
     },
-    raw::{FetchContext, FetchState, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
+    raw::{FetchContext, FetchState, FetchTarget, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     Piece, Pipe, Result,
 };
 
@@ -692,6 +692,18 @@ where
         }
     }
 
+    #[doc(hidden)]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::insert_inner"))]
+    pub fn insert_piece(&self, piece: Piece<K, V, P>) -> CacheEntry<K, V, S, P> {
+        match self {
+            Cache::Fifo(cache) => cache.insert_piece(piece).into(),
+            Cache::S3Fifo(cache) => cache.insert_piece(piece).into(),
+            Cache::Lru(cache) => cache.insert_piece(piece).into(),
+            Cache::Lfu(cache) => cache.insert_piece(piece).into(),
+            Cache::Sieve(cache) => cache.insert_piece(piece).into(),
+        }
+    }
+
     /// Remove a cached entry with the given key from the in-memory cache.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::remove"))]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>
@@ -1050,7 +1062,7 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, ID>(
+    pub fn fetch_inner<F, FU, ER, ID, IT>(
         &self,
         key: K,
         properties: P,
@@ -1061,7 +1073,8 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<V, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
+        IT: Into<FetchTarget<K, V, P>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),

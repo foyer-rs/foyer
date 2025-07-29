@@ -31,7 +31,6 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Age, Populated, Properties, Source},
 };
-use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::{
     future::{join_all, try_join_all},
@@ -60,6 +59,7 @@ use crate::{
     },
     error::{Error, Result},
     io::{bytes::IoSliceMut, PAGE},
+    keeper::PieceRef,
     picker::{utils::RejectAllPicker, ReinsertionPicker},
     runtime::Runtime,
     serde::EntryDeserializer,
@@ -521,7 +521,7 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::engine::large::generic::enqueue")
     )]
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
             return;
@@ -558,7 +558,7 @@ where
         });
     }
 
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V>>> + Send + 'static {
+    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
         tracing::trace!(hash, "[lodc]: load");
 
         let indexer = self.inner.indexer.clone();
@@ -750,11 +750,11 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize) {
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         self.enqueue(piece, estimated_size);
     }
 
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V>>> {
+    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
         // TODO(MrCroxx): refactor this.
         self.load(hash).boxed()
     }
@@ -920,7 +920,7 @@ mod tests {
         entry: CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
-        store.enqueue(entry.piece(), estimated_size);
+        store.enqueue(entry.piece().into(), estimated_size);
     }
 
     #[test_log::test(tokio::test)]

@@ -123,16 +123,14 @@ where
 
     fn emplace(
         &mut self,
-        data: Data<E>,
+        record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
     ) -> Arc<Record<E>> {
-        *waiters = self.waiters.lock().remove(&data.key).unwrap_or_default();
+        *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
 
-        let weight = data.weight;
+        let weight = record.weight();
         let old_usage = self.usage;
-
-        let record = Arc::new(Record::new(data));
 
         // Evict overflow records.
         self.evict(self.capacity.saturating_sub(weight), garbages);
@@ -166,9 +164,7 @@ where
         self.usage += weight;
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
-        let refs = waiters.len() + 1;
-        let inc = record.inc_refs(refs);
-        assert_eq!(refs, inc);
+        record.inc_refs(waiters.len() + 1);
 
         match self.usage.cmp(&old_usage) {
             std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
@@ -567,23 +563,30 @@ where
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
+        let record = Arc::new(Record::new(Data {
+            key,
+            value,
+            properties,
+            hash,
+            weight,
+        }));
+        self.insert_inner(record)
+    }
 
+    #[doc(hidden)]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_piece"))]
+    pub fn insert_piece(&self, piece: Piece<E::Key, E::Value, E::Properties>) -> RawCacheEntry<E, S, I> {
+        self.insert_inner(piece.into_record())
+    }
+
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
+    fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
         let mut garbages = vec![];
         let mut waiters = vec![];
 
-        let record = self.inner.shards[self.shard(hash)].write().with(|mut shard| {
-            shard.emplace(
-                Data {
-                    key,
-                    value,
-                    properties,
-                    hash,
-                    weight,
-                },
-                &mut garbages,
-                &mut waiters,
-            )
-        });
+        let record = self.inner.shards[self.shard(record.hash())]
+            .write()
+            .with(|mut shard| shard.emplace(record, &mut garbages, &mut waiters));
 
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
@@ -958,6 +961,32 @@ type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
 type RawFetchWait<E, S, I> = oneshot::Receiver<RawCacheEntry<E, S, I>>;
 type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
 
+/// The target of a fetch operation.
+pub enum FetchTarget<K, V, P> {
+    /// Fetched value.
+    Value(V),
+    /// Fetched piece from disk cache write queue.
+    Piece(Piece<K, V, P>),
+}
+
+impl<K, V, P> Debug for FetchTarget<K, V, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FetchTarget").finish()
+    }
+}
+
+impl<K, V, P> From<V> for FetchTarget<K, V, P> {
+    fn from(value: V) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl<K, V, P> From<Piece<K, V, P>> for FetchTarget<K, V, P> {
+    fn from(piece: Piece<K, V, P>) -> Self {
+        Self::Piece(piece)
+    }
+}
+
 #[pin_project(project = RawFetchInnerProj)]
 pub enum RawFetchInner<E, ER, S, I>
 where
@@ -1049,7 +1078,7 @@ where
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<F, FU, ER, ID>(
+    pub fn fetch_inner<F, FU, ER, ID, IT>(
         &self,
         key: E::Key,
         mut properties: E::Properties,
@@ -1060,7 +1089,8 @@ where
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
+        IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
     {
         let hash = self.inner.hash_builder.hash_one(&key);
 
@@ -1093,7 +1123,7 @@ where
                 #[cfg(not(feature = "tracing"))]
                 let Diversion { target, store } = future.await.into();
 
-                let value = match target {
+                let target = match target {
                     Ok(value) => value,
                     Err(e) => {
                         cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
@@ -1109,7 +1139,10 @@ where
                 };
                 let location = properties.location().unwrap_or_default();
                 properties = properties.with_ephemeral(matches! {location, Location::OnDisk});
-                let entry = cache.insert_with_properties(key, value, properties);
+                let entry = match target.into() {
+                    FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
+                    FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
+                };
                 Diversion {
                     target: Ok(entry),
                     store,

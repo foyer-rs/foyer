@@ -25,7 +25,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::Properties,
+    properties::{Age, Populated, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -49,6 +49,7 @@ use crate::{
         engine::{monitor::MonitoredIoEngine, noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngineBuilder},
         throttle::Throttle,
     },
+    keeper::Keeper,
     runtime::Runtime,
     serde::EntrySerializer,
     statistics::Statistics,
@@ -75,6 +76,7 @@ where
 {
     hasher: Arc<S>,
 
+    keeper: Keeper<K, V, P>,
     engine: Arc<dyn Engine<K, V, P>>,
 
     admission_picker: Arc<dyn AdmissionPicker>,
@@ -101,6 +103,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
+            .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("admission_picker", &self.inner.admission_picker)
             .field("load_throttler", &self.inner.load_throttler)
@@ -150,7 +153,8 @@ where
 
         if force || self.pick(piece.hash()).admitted() {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
-            self.inner.engine.enqueue(piece, estimated_size);
+            let rpiece = self.inner.keeper.insert(piece);
+            self.inner.engine.enqueue(rpiece, estimated_size);
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -161,13 +165,21 @@ where
     }
 
     /// Load a cache entry from the disk cache.
-    pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V>>
+    pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V, P>>
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
     {
         let now = Instant::now();
 
         let hash = self.inner.hasher.hash_one(key);
+
+        if let Some(piece) = self.inner.keeper.get(hash, key) {
+            tracing::trace!(hash, "[store]: load from keeper");
+            return Ok(Load::Piece {
+                piece,
+                populated: Populated { age: Age::Young },
+            });
+        }
 
         #[cfg(feature = "test_utils")]
         if self.inner.load_throttle_switch.is_throttled() {
@@ -221,7 +233,15 @@ where
                     populated: p,
                 })
             }
-            Ok(Load::Entry { .. }) | Ok(Load::Miss) => {
+            Ok(Load::Piece { piece, populated }) if key.equivalent(piece.key()) => {
+                self.inner.metrics.storage_hit.increase(1);
+                self.inner
+                    .metrics
+                    .storage_hit_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Piece { piece, populated })
+            }
+            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) | Ok(Load::Miss) => {
                 self.inner.metrics.storage_miss.increase(1);
                 self.inner
                     .metrics
@@ -568,9 +588,11 @@ where
             IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
         );
 
+        let keeper = Keeper::new(memory.shards());
         let hasher = memory.hash_builder().clone();
         let inner = StoreInner {
             hasher,
+            keeper,
             engine,
             admission_picker,
             load_throttler,

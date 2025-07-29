@@ -63,6 +63,20 @@ impl<K, V, P> Drop for Piece<K, V, P> {
     }
 }
 
+impl<K, V, P> Clone for Piece<K, V, P> {
+    fn clone(&self) -> Self {
+        unsafe { Arc::increment_strong_count(self.record) };
+        Self {
+            record: self.record,
+            key: self.key,
+            value: self.value,
+            hash: self.hash,
+            properties: self.properties,
+            drop_fn: self.drop_fn,
+        }
+    }
+}
+
 impl<K, V, P> Piece<K, V, P> {
     /// Create a record piece from an record wrapped by [`Arc`].
     pub fn new<E>(record: Arc<Record<E>>) -> Self
@@ -106,6 +120,15 @@ impl<K, V, P> Piece<K, V, P> {
     /// Get the properties of the record.
     pub fn properties(&self) -> &P {
         unsafe { &*self.properties }
+    }
+
+    pub(crate) fn into_record<E>(mut self) -> Arc<Record<E>>
+    where
+        E: Eviction<Key = K, Value = V, Properties = P>,
+    {
+        self.drop_fn = |_| {};
+        let record = self.record as *const Record<E>;
+        unsafe { Arc::from_raw(record) }
     }
 }
 

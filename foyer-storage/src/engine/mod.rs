@@ -22,11 +22,11 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Runtime, Statistics};
 
 /// Load result.
 #[derive(Debug)]
-pub enum Load<K, V> {
+pub enum Load<K, V, P> {
     /// Load entry success.
     Entry {
         /// The key of the entry.
@@ -36,13 +36,20 @@ pub enum Load<K, V> {
         /// The populated source context of the entry.
         populated: Populated,
     },
+    /// Load entry success from disk cache write queue.
+    Piece {
+        /// The piece of the entry.
+        piece: Piece<K, V, P>,
+        /// The populated source context of the entry.
+        populated: Populated,
+    },
     /// The entry may be in the disk cache, the read io is throttled.
     Throttled,
     /// Disk cache miss.
     Miss,
 }
 
-impl<K, V> Load<K, V> {
+impl<K, V, P> Load<K, V, P> {
     /// Return `Some` with the entry if load success, otherwise return `None`.
     pub fn entry(self) -> Option<(K, V, Populated)> {
         match self {
@@ -59,11 +66,6 @@ impl<K, V> Load<K, V> {
             Load::Entry { key, value, .. } => Some((key, value)),
             _ => None,
         }
-    }
-
-    /// Check if the load result is a cache entry.
-    pub fn is_entry(&self) -> bool {
-        matches!(self, Load::Entry { .. })
     }
 
     /// Check if the load result is a cache miss.
@@ -136,13 +138,13 @@ where
     P: Properties,
 {
     /// Push a in-memory cache piece to the disk cache write queue.
-    fn enqueue(&self, piece: Piece<K, V, P>, estimated_size: usize);
+    fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
     ///
     /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
     /// check if the returned key matches the given key.
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V>>>;
+    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>>;
 
     /// Delete the cache entry with the given key from the disk cache.
     fn delete(&self, hash: u64);

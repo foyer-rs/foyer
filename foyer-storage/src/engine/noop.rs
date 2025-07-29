@@ -18,13 +18,13 @@ use foyer_common::{
     code::{StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
     engine::{Engine, EngineBuildContext, EngineBuilder},
     error::Result,
+    keeper::PieceRef,
     Load,
 };
 
@@ -115,9 +115,9 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn enqueue(&self, _: Piece<K, V, P>, _: usize) {}
+    fn enqueue(&self, _: PieceRef<K, V, P>, _: usize) {}
 
-    fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V>>> {
+    fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
         async move { Ok(Load::Miss) }.boxed()
     }
 
