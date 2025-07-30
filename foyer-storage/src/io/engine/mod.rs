@@ -33,7 +33,7 @@ use pin_project::pin_project;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, Partition},
+        device::Partition,
         error::IoResult,
     },
     Runtime,
@@ -70,7 +70,7 @@ impl Future for IoHandle {
 /// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self: Box<Self>, device: Arc<dyn Device>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>>;
+    fn build(self: Box<Self>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>>;
 
     /// Box the builder.
     fn boxed(self) -> Box<Self>
@@ -92,8 +92,6 @@ where
 
 /// I/O engine builder trait.
 pub trait IoEngine: Send + Sync + 'static + Debug {
-    /// Get the device associated with this I/O engine.
-    fn device(&self) -> &Arc<dyn Device>;
     /// Read data into the buffer from the specified partition and offset.
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
     /// Write data from the buffer to the specified region and offset.
@@ -127,29 +125,16 @@ mod tests {
         Ok(device)
     }
 
-    fn build_psync_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        PsyncIoEngineBuilder::new().boxed().build(device, Runtime::current())
-    }
-
-    #[cfg(target_os = "linux")]
-    fn build_uring_io_engine(device: Arc<dyn Device>) -> IoResult<Arc<dyn IoEngine>> {
-        UringIoEngineBuilder::new()
-            .with_threads(4)
-            .with_io_depth(64)
-            .boxed()
-            .build(device, Runtime::current())
-    }
-
-    async fn test_read_write(engine: Arc<dyn IoEngine>) {
+    async fn test_read_write(engine: Arc<dyn IoEngine>, device: &dyn Device) {
         let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
         Fill::fill(&mut b1[..], &mut rng());
 
-        let (b1, res) = engine.write(b1, engine.device().partition(0).as_ref(), 0).await;
+        let (b1, res) = engine.write(b1, device.partition(0).as_ref(), 0).await;
         res.unwrap();
         let b1 = b1.try_into_io_slice_mut().unwrap();
 
         let b2 = Box::new(IoSliceMut::new(16 * KIB));
-        let (b2, res) = engine.read(b2, engine.device().partition(0).as_ref(), 0).await;
+        let (b2, res) = engine.read(b2, device.partition(0).as_ref(), 0).await;
         res.unwrap();
         let b2 = b2.try_into_io_slice_mut().unwrap();
         assert_eq!(b1, b2);
@@ -163,13 +148,18 @@ mod tests {
         {
             let path = dir.path().join("test_file_1");
             let device = build_test_file_device(&path).unwrap();
-            let engine = build_uring_io_engine(device.clone()).unwrap();
-            test_read_write(engine).await;
+            let engine = UringIoEngineBuilder::new()
+                .with_threads(4)
+                .with_io_depth(64)
+                .boxed()
+                .build(Runtime::current())
+                .unwrap();
+            test_read_write(engine, device.as_ref()).await;
         }
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
-        let engine = build_psync_io_engine(device.clone()).unwrap();
-        test_read_write(engine).await;
+        let engine = PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap();
+        test_read_write(engine, device.as_ref()).await;
     }
 }

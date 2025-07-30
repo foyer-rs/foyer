@@ -127,11 +127,8 @@ mod tests {
             .unwrap()
     }
 
-    async fn io_engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
-        PsyncIoEngineBuilder::new()
-            .boxed()
-            .build(device, Runtime::current())
-            .unwrap()
+    async fn io_engine_for_test() -> Arc<dyn IoEngine> {
+        PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap()
     }
 
     #[test_log::test(tokio::test)]
@@ -148,7 +145,7 @@ mod tests {
         let partitions = (0..4)
             .map(|_| device.create_partition(REGION_SIZE).unwrap())
             .collect_vec();
-        let engine = io_engine_for_test(device).await;
+        let engine = io_engine_for_test().await;
 
         let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));

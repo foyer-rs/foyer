@@ -57,10 +57,6 @@ impl Debug for MonitoredIoEngine {
 }
 
 impl IoEngine for MonitoredIoEngine {
-    fn device(&self) -> &Arc<dyn crate::io::device::Device> {
-        self.inner.io_engine.device()
-    }
-
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();

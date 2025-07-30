@@ -22,7 +22,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Device, Runtime, Statistics};
 
 /// Load result.
 #[derive(Debug)]
@@ -98,6 +98,8 @@ pub enum RecoverMode {
 
 /// Context for building the disk cache engine.
 pub struct EngineBuildContext {
+    /// IO device for the disk cache engine.
+    pub device: Arc<dyn Device>,
     /// IO engine for the disk cache engine.
     pub io_engine: Arc<dyn IoEngine>,
     /// Shared metrics for all components.

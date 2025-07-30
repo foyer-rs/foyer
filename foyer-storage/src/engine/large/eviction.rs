@@ -197,18 +197,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        engine::large::region::Region, io::device::noop::NoopPartition, DeviceBuilder, IoEngineBuilder,
-        NoopDeviceBuilder, NoopIoEngineBuilder, Runtime,
+        engine::large::region::Region, io::device::noop::NoopPartition, IoEngineBuilder, NoopIoEngineBuilder, Runtime,
     };
 
     #[test_log::test(tokio::test)]
     async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
-        let mock_device = NoopDeviceBuilder::new(0).boxed().build().unwrap();
-        let mock_io_engine = NoopIoEngineBuilder
-            .boxed()
-            .build(mock_device, Runtime::current())
-            .unwrap();
+        let mock_io_engine = NoopIoEngineBuilder.boxed().build(Runtime::current()).unwrap();
 
         let regions = (0..10)
             .map(|rid| Region::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))
@@ -288,11 +283,7 @@ mod tests {
         let mut picker = InvalidRatioPicker::new(0.5);
         picker.init(&(0..10).collect_vec(), 10);
 
-        let mock_device = NoopDeviceBuilder::new(0).boxed().build().unwrap();
-        let mock_io_engine = NoopIoEngineBuilder
-            .boxed()
-            .build(mock_device, Runtime::current())
-            .unwrap();
+        let mock_io_engine = NoopIoEngineBuilder.boxed().build(Runtime::current()).unwrap();
 
         let regions = (0..10)
             .map(|rid| Region::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))

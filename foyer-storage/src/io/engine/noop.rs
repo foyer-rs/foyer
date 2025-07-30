@@ -19,7 +19,7 @@ use futures_util::FutureExt;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, Partition},
+        device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::IoResult,
     },
@@ -31,19 +31,15 @@ use crate::{
 pub struct NoopIoEngineBuilder;
 
 impl IoEngineBuilder for NoopIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        Ok(Arc::new(NoopIoEngine(device)))
+    fn build(self: Box<Self>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+        Ok(Arc::new(NoopIoEngine))
     }
 }
 
 #[derive(Debug)]
-pub struct NoopIoEngine(Arc<dyn Device>);
+pub struct NoopIoEngine;
 
 impl IoEngine for NoopIoEngine {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.0
-    }
-
     fn read(&self, buf: Box<dyn IoBufMut>, _: &dyn Partition, _: u64) -> IoHandle {
         async move {
             let buf: Box<dyn IoB> = buf.into_iob();

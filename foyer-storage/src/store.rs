@@ -558,11 +558,12 @@ where
             self.engine_builder = Box::<NoopEngineBuilder<K, V, P>>::default();
         }
 
-        let io_engine = self.io_engine_builder.build(device, runtime.clone())?;
+        let io_engine = self.io_engine_builder.build(runtime.clone())?;
         let io_engine = MonitoredIoEngine::new(io_engine, statistics.clone(), metrics.clone());
         let engine = self
             .engine_builder
             .build(EngineBuildContext {
+                device,
                 io_engine,
                 metrics: metrics.clone(),
                 statistics: statistics.clone(),
