@@ -25,7 +25,7 @@ use futures_util::FutureExt;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, Partition},
+        device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
@@ -87,15 +87,14 @@ impl PsyncIoEngineBuilder {
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        let engine = PsyncIoEngine { device, runtime };
+    fn build(self: Box<Self>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+        let engine = PsyncIoEngine { runtime };
         let engine = Arc::new(engine);
         Ok(engine)
     }
 }
 
 pub struct PsyncIoEngine {
-    device: Arc<dyn Device>,
     runtime: Runtime,
 }
 
@@ -106,10 +105,6 @@ impl Debug for PsyncIoEngine {
 }
 
 impl IoEngine for PsyncIoEngine {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.device
-    }
-
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
         let (ptr, len) = buf.as_raw_parts();

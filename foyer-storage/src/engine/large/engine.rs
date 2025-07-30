@@ -289,6 +289,7 @@ where
     pub async fn build(
         self: Box<Self>,
         EngineBuildContext {
+            device,
             io_engine,
             metrics,
             statistics,
@@ -296,7 +297,6 @@ where
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<LargeObjectEngine<K, V, P>>> {
-        let device = io_engine.device().clone();
         let region_size = self.region_size;
 
         let mut tombstones = vec![];
@@ -335,6 +335,7 @@ where
         let reclaimer: Arc<dyn ReclaimerTrait> = Arc::new(reclaimer);
 
         let region_manager = RegionManager::open(
+            device.clone(),
             io_engine,
             region_size,
             self.eviction_pickers,
@@ -797,7 +798,7 @@ mod tests {
         engine::RecoverMode,
         io::{
             self,
-            device::{fs::FsDeviceBuilder, Device, DeviceBuilder},
+            device::{fs::FsDeviceBuilder, DeviceBuilder},
             engine::{IoEngine, IoEngineBuilder},
             throttle::IopsCounter,
         },
@@ -817,12 +818,12 @@ mod tests {
             .build()
     }
 
-    fn io_engine_for_test(device: Arc<dyn Device>) -> Arc<dyn IoEngine> {
+    fn io_engine_for_test() -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
         // io::engine::uring::UringIoEngineBuilder::new().build(device).unwrap()
         io::engine::psync::PsyncIoEngineBuilder::new()
             .boxed()
-            .build(device, Runtime::current())
+            .build(Runtime::current())
             .unwrap()
     }
 
@@ -840,7 +841,7 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test(device);
+        let io_engine = io_engine_for_test();
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
@@ -864,6 +865,7 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
+                device,
                 io_engine,
                 metrics,
                 statistics,
@@ -882,7 +884,7 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test(device);
+        let io_engine = io_engine_for_test();
         let metrics = Arc::new(Metrics::noop());
         let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
@@ -905,6 +907,7 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
+                device,
                 io_engine,
                 metrics,
                 statistics,
@@ -1333,14 +1336,12 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = PsyncIoEngineBuilder::new()
-            .boxed()
-            .build(device, runtime.clone())
-            .unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().boxed().build(runtime.clone()).unwrap();
         let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new()
             .with_region_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {
+                device,
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),
                 statistics: Arc::new(Statistics::new(IopsCounter::per_io())),

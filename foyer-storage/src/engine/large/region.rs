@@ -43,7 +43,7 @@ use crate::{
         device::Partition,
         engine::IoEngine,
     },
-    IoError, Runtime,
+    Device, IoError, Runtime,
 };
 
 pub type RegionId = u32;
@@ -166,6 +166,7 @@ pub struct RegionManager {
 impl RegionManager {
     #[expect(clippy::too_many_arguments)]
     pub fn open(
+        device: Arc<dyn Device>,
         io_engine: Arc<dyn IoEngine>,
         region_size: usize,
         mut eviction_pickers: Vec<Box<dyn EvictionPicker>>,
@@ -175,8 +176,6 @@ impl RegionManager {
         metrics: Arc<Metrics>,
         runtime: Runtime,
     ) -> Result<Self> {
-        let device = io_engine.device().clone();
-
         let mut regions = vec![];
         while device.free() >= region_size {
             let partition = match device.create_partition(region_size) {

@@ -253,10 +253,7 @@ mod tests {
             .build()
             .unwrap();
         let partition = device.create_partition(16 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new()
-            .boxed()
-            .build(device, Runtime::current())
-            .unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap();
 
         let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
             .await

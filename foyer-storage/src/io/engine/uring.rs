@@ -25,7 +25,7 @@ use tokio::sync::oneshot;
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
-        device::{Device, Partition},
+        device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
@@ -152,7 +152,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>, device: Arc<dyn Device>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
+    fn build(self: Box<Self>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
         if self.threads == 0 {
             return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
         }
@@ -188,7 +188,6 @@ impl IoEngineBuilder for UringIoEngineBuilder {
             let shard = UringIoEngineShard {
                 read_rx,
                 write_rx,
-                _device: device.clone(),
                 uring,
                 io_depth: self.io_depth,
                 weight: self.weight,
@@ -206,11 +205,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                 })?;
         }
 
-        let engine = UringIoEngine {
-            device,
-            read_txs,
-            write_txs,
-        };
+        let engine = UringIoEngine { read_txs, write_txs };
         let engine = Arc::new(engine);
         Ok(engine)
     }
@@ -246,7 +241,6 @@ struct UringIoEngineShard {
     read_rx: mpsc::Receiver<UringIoCtx>,
     write_rx: mpsc::Receiver<UringIoCtx>,
     weight: f64,
-    _device: Arc<dyn Device>,
     uring: IoUring,
     io_depth: usize,
     read_inflight: usize,
@@ -336,7 +330,6 @@ impl UringIoEngineShard {
 }
 
 pub struct UringIoEngine {
-    device: Arc<dyn Device>,
     read_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
     write_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
 }
@@ -400,10 +393,6 @@ impl UringIoEngine {
 }
 
 impl IoEngine for UringIoEngine {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.device
-    }
-
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         self.read(buf, partition, offset)
     }
