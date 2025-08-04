@@ -18,6 +18,7 @@ use std::{
 };
 
 use core_affinity::CoreId;
+use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
 use tokio::sync::oneshot;
@@ -29,7 +30,7 @@ use crate::{
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
-    RawFile, Runtime,
+    RawFile,
 };
 
 /// Builder for io_uring based I/O engine.
@@ -152,62 +153,65 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>, _: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        if self.threads == 0 {
-            return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
-        }
-
-        let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
-            .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
-                (tx, rx)
-            })
-            .unzip();
-
-        let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
-            .map(|_| {
-                let (tx, rx) = mpsc::sync_channel(4096);
-                (tx, rx)
-            })
-            .unzip();
-
-        for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs.into_iter()).enumerate() {
-            let mut builder = IoUring::builder();
-            if self.iopoll {
-                builder.setup_iopoll();
+    fn build(self: Box<Self>) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+        async move {
+            if self.threads == 0 {
+                return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
             }
-            if self.sqpoll {
-                builder.setup_sqpoll(self.sqpoll_idle);
-                if !self.sqpoll_cpus.is_empty() {
-                    let cpu = self.sqpoll_cpus[i];
-                    builder.setup_sqpoll_cpu(cpu);
+
+            let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+                .map(|_| {
+                    let (tx, rx) = mpsc::sync_channel(4096);
+                    (tx, rx)
+                })
+                .unzip();
+
+            let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+                .map(|_| {
+                    let (tx, rx) = mpsc::sync_channel(4096);
+                    (tx, rx)
+                })
+                .unzip();
+
+            for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs.into_iter()).enumerate() {
+                let mut builder = IoUring::builder();
+                if self.iopoll {
+                    builder.setup_iopoll();
                 }
-            }
-            let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
-            let uring = builder.build(self.io_depth as _)?;
-            let shard = UringIoEngineShard {
-                read_rx,
-                write_rx,
-                uring,
-                io_depth: self.io_depth,
-                weight: self.weight,
-                read_inflight: 0,
-                write_inflight: 0,
-            };
-
-            std::thread::Builder::new()
-                .name(format!("foyer-uring-{i}"))
-                .spawn(move || {
-                    if let Some(cpu) = cpu {
-                        core_affinity::set_for_current(CoreId { id: cpu as _ });
+                if self.sqpoll {
+                    builder.setup_sqpoll(self.sqpoll_idle);
+                    if !self.sqpoll_cpus.is_empty() {
+                        let cpu = self.sqpoll_cpus[i];
+                        builder.setup_sqpoll_cpu(cpu);
                     }
-                    shard.run();
-                })?;
-        }
+                }
+                let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
+                let uring = builder.build(self.io_depth as _)?;
+                let shard = UringIoEngineShard {
+                    read_rx,
+                    write_rx,
+                    uring,
+                    io_depth: self.io_depth,
+                    weight: self.weight,
+                    read_inflight: 0,
+                    write_inflight: 0,
+                };
 
-        let engine = UringIoEngine { read_txs, write_txs };
-        let engine = Arc::new(engine);
-        Ok(engine)
+                std::thread::Builder::new()
+                    .name(format!("foyer-uring-{i}"))
+                    .spawn(move || {
+                        if let Some(cpu) = cpu {
+                            core_affinity::set_for_current(CoreId { id: cpu as _ });
+                        }
+                        shard.run();
+                    })?;
+            }
+
+            let engine = UringIoEngine { read_txs, write_txs };
+            let engine = Arc::new(engine);
+            Ok(engine as Arc<dyn IoEngine>)
+        }
+        .boxed()
     }
 }
 
@@ -329,6 +333,7 @@ impl UringIoEngineShard {
     }
 }
 
+/// The io_uring based I/O engine.
 pub struct UringIoEngine {
     read_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
     write_txs: Vec<mpsc::SyncSender<UringIoCtx>>,

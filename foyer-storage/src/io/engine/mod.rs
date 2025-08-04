@@ -30,13 +30,10 @@ use std::{
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
-use crate::{
-    io::{
-        bytes::{IoB, IoBuf, IoBufMut},
-        device::Partition,
-        error::IoResult,
-    },
-    Runtime,
+use crate::io::{
+    bytes::{IoB, IoBuf, IoBufMut},
+    device::Partition,
+    error::IoResult,
 };
 
 /// A detached I/O handle that can be polled for completion.
@@ -70,7 +67,7 @@ impl Future for IoHandle {
 /// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self: Box<Self>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>>;
+    fn build(self: Box<Self>) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>>;
 
     /// Box the builder.
     fn boxed(self) -> Box<Self>
@@ -152,14 +149,15 @@ mod tests {
                 .with_threads(4)
                 .with_io_depth(64)
                 .boxed()
-                .build(Runtime::current())
+                .build()
+                .await
                 .unwrap();
             test_read_write(engine, device.as_ref()).await;
         }
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
-        let engine = PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap();
+        let engine = PsyncIoEngineBuilder::new().boxed().build().await.unwrap();
         test_read_write(engine, device.as_ref()).await;
     }
 }

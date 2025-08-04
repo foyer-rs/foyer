@@ -16,15 +16,30 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, IopsCounter,
-    LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker, Result, RuntimeOptions,
-    Throttle, TokioRuntimeOptions,
+    AdmitAllPicker, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IoEngineBuilder, IopsCounter, LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode,
+    RejectAllPicker, Result, RuntimeOptions, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
+
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(64 * 1024 * 1024)
+        .with_throttle(
+            Throttle::new()
+                .with_read_iops(4000)
+                .with_write_iops(2000)
+                .with_write_throughput(100 * 1024 * 1024)
+                .with_read_throughput(800 * 1024 * 1024)
+                .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+        )
+        .boxed()
+        .build()?;
+
+    let io_engine = PsyncIoEngineBuilder::new().boxed().build().await?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .with_name("my-hybrid-cache")
@@ -37,21 +52,9 @@ async fn main() -> anyhow::Result<()> {
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
         .storage()
-        .with_device_builder(
-            FsDeviceBuilder::new(dir.path())
-                .with_capacity(64 * 1024 * 1024)
-                .with_throttle(
-                    Throttle::new()
-                        .with_read_iops(4000)
-                        .with_write_iops(2000)
-                        .with_write_throughput(100 * 1024 * 1024)
-                        .with_read_throughput(800 * 1024 * 1024)
-                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
-                ),
-        )
-        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_io_engine(io_engine)
         .with_engine_builder(
-            LargeObjectEngineBuilder::new()
+            LargeObjectEngineBuilder::new(device)
                 .with_region_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)
@@ -60,11 +63,11 @@ async fn main() -> anyhow::Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_region_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_admission_picker(Arc::<AdmitAllPicker>::default())
                 .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
                 .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)
-        .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
         .with_runtime_options(RuntimeOptions::Separated {
             read_runtime_options: TokioRuntimeOptions {

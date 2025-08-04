@@ -26,8 +26,8 @@ use std::{
 use parking_lot::Mutex;
 
 use crate::{
+    io::device::statistics::Statistics,
     picker::{AdmissionPicker, Pick, ReinsertionPicker},
-    statistics::Statistics,
 };
 
 /// A picker that only admits hash from the given list.

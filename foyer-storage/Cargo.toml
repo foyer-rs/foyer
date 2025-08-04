@@ -30,6 +30,7 @@ anyhow = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
+fastant = { workspace = true, features = ["atomic"] }
 fastrace = { workspace = true, optional = true }
 flume = { workspace = true }
 foyer-common = { workspace = true }

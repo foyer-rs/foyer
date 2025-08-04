@@ -16,9 +16,8 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
+        device::{statistics::Statistics, Device, DeviceBuilder, Partition, PartitionId},
         error::IoResult,
-        throttle::Throttle,
     },
     IoError,
 };
@@ -28,18 +27,13 @@ use crate::{
 pub struct PartialDeviceBuilder {
     device: Arc<dyn Device>,
     capacity: usize,
-    throttle: Option<Throttle>,
 }
 
 impl PartialDeviceBuilder {
     /// Create a new partial device builder with the specified device.
     pub fn new(device: Arc<dyn Device>) -> Self {
         let capacity = device.capacity();
-        Self {
-            device,
-            capacity,
-            throttle: None,
-        }
+        Self { device, capacity }
     }
 
     /// Set the capacity of the partial device.
@@ -53,12 +47,6 @@ impl PartialDeviceBuilder {
         self.capacity = capacity;
         self
     }
-
-    /// Set the throttle for the partial device to override the inner device's throttle.
-    pub fn with_throttle(mut self, throttle: Throttle) -> Self {
-        self.throttle = Some(throttle);
-        self
-    }
 }
 
 impl DeviceBuilder for PartialDeviceBuilder {
@@ -66,7 +54,6 @@ impl DeviceBuilder for PartialDeviceBuilder {
         Ok(Arc::new(PartialDevice {
             inner: self.device,
             capacity: self.capacity,
-            throttle: self.throttle,
             partitions: RwLock::new(vec![]),
         }))
     }
@@ -77,7 +64,6 @@ impl DeviceBuilder for PartialDeviceBuilder {
 pub struct PartialDevice {
     inner: Arc<dyn Device>,
     capacity: usize,
-    throttle: Option<Throttle>,
     partitions: RwLock<Vec<Arc<PartialPartition>>>,
 }
 
@@ -119,8 +105,8 @@ impl Device for PartialDevice {
         self.partitions.read().unwrap()[id as usize].clone()
     }
 
-    fn throttle(&self) -> &Throttle {
-        self.throttle.as_ref().unwrap_or_else(|| self.inner.throttle())
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.statistics()
     }
 }
 
@@ -141,5 +127,9 @@ impl Partition for PartialPartition {
 
     fn translate(&self, address: u64) -> (super::RawFile, u64) {
         self.inner.translate(address)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.statistics()
     }
 }

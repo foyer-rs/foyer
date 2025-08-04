@@ -14,7 +14,7 @@
 
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use crate::statistics::Statistics;
+use crate::io::device::statistics::Statistics;
 
 /// Pick result for admission pickers and reinsertion pickers.
 #[derive(Debug, Clone, Copy)]

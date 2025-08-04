@@ -22,9 +22,8 @@ use fs4::free_space;
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
+        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
         error::IoResult,
-        throttle::Throttle,
         PAGE,
     },
     IoError, RawFile,
@@ -89,7 +88,7 @@ impl DeviceBuilder for FsDeviceBuilder {
         });
         let capacity = align_v(capacity, PAGE);
 
-        let throttle = self.throttle;
+        let statistics = Arc::new(Statistics::new(self.throttle));
 
         // Build device.
 
@@ -99,7 +98,7 @@ impl DeviceBuilder for FsDeviceBuilder {
 
         let device = FsDevice {
             capacity,
-            throttle,
+            statistics,
             dir: self.dir,
             #[cfg(target_os = "linux")]
             direct: self.direct,
@@ -114,7 +113,7 @@ impl DeviceBuilder for FsDeviceBuilder {
 #[derive(Debug)]
 pub struct FsDevice {
     capacity: usize,
-    throttle: Throttle,
+    statistics: Arc<Statistics>,
     dir: PathBuf,
     #[cfg(target_os = "linux")]
     direct: bool,
@@ -159,7 +158,12 @@ impl Device for FsDevice {
         let file = opts.open(path)?;
         file.set_len(size as _)?;
 
-        let partition = Arc::new(FsPartition { id, size, file });
+        let partition = Arc::new(FsPartition {
+            id,
+            size,
+            file,
+            staticistics: self.statistics.clone(),
+        });
         partitions.push(partition.clone());
         Ok(partition)
     }
@@ -172,8 +176,8 @@ impl Device for FsDevice {
         self.partitions.read().unwrap()[id as usize].clone()
     }
 
-    fn throttle(&self) -> &Throttle {
-        &self.throttle
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }
 
@@ -181,6 +185,7 @@ impl Device for FsDevice {
 pub struct FsPartition {
     id: PartitionId,
     size: usize,
+    staticistics: Arc<Statistics>,
     file: File,
 }
 
@@ -207,5 +212,9 @@ impl Partition for FsPartition {
         };
 
         (raw, address)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.staticistics
     }
 }

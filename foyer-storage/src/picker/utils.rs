@@ -12,18 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fmt::Debug,
-    num::NonZeroUsize,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use super::{AdmissionPicker, Pick, ReinsertionPicker};
-use crate::{io::throttle::IoThrottler, statistics::Statistics};
+use crate::io::device::statistics::Statistics;
 
 /// Only admit on all chained admission pickers pick.
 #[derive(Debug, Default, Clone)]
@@ -102,86 +94,16 @@ impl ReinsertionPicker for RejectAllPicker {
     }
 }
 
-#[derive(Debug)]
-struct IoThrottlerPickerInner {
-    throttler: IoThrottler,
-    bytes_last: AtomicUsize,
-    ios_last: AtomicUsize,
-    target: IoThrottlerTarget,
-}
+#[derive(Debug, Default)]
+pub struct IoThrottlerPicker;
 
-/// Target of the io throttler.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum IoThrottlerTarget {
-    /// Count read io for io throttling.
-    Read,
-    /// Count write io for io throttling.
-    Write,
-    /// Count read and write io for io throttling.
-    ReadWrite,
-}
-
-/// A picker that picks based on the disk statistics and the given throttle args.
-///
-/// NOTE: This picker is automatically applied if the device throttle is set.
-///
-/// Please use set the `throttle` in the device options instead use this picker directly.
-/// Unless you know what you are doing. :D
-#[derive(Debug, Clone)]
-pub struct IoThrottlerPicker {
-    inner: Arc<IoThrottlerPickerInner>,
-}
-
-impl IoThrottlerPicker {
-    /// Create a rate limit picker with the given rate limit.
-    ///
-    /// Note: `None` stands for unlimited.
-    pub fn new(target: IoThrottlerTarget, throughput: Option<NonZeroUsize>, iops: Option<NonZeroUsize>) -> Self {
-        let inner = IoThrottlerPickerInner {
-            throttler: IoThrottler::new(throughput, iops),
-            bytes_last: AtomicUsize::default(),
-            ios_last: AtomicUsize::default(),
-            target,
-        };
-        Self { inner: Arc::new(inner) }
-    }
-
-    fn pick_inner(&self, stats: &Arc<Statistics>) -> Pick {
-        let duration = self.inner.throttler.probe();
-
-        let bytes_current = match self.inner.target {
-            IoThrottlerTarget::Read => stats.disk_read_bytes(),
-            IoThrottlerTarget::Write => stats.disk_write_bytes(),
-            IoThrottlerTarget::ReadWrite => stats.disk_read_bytes() + stats.disk_write_bytes(),
-        };
-        let ios_current = match self.inner.target {
-            IoThrottlerTarget::Read => stats.disk_read_ios(),
-            IoThrottlerTarget::Write => stats.disk_write_ios(),
-            IoThrottlerTarget::ReadWrite => stats.disk_read_ios() + stats.disk_write_ios(),
-        };
-
-        let bytes_last = self.inner.bytes_last.load(Ordering::Relaxed);
-        let ios_last = self.inner.ios_last.load(Ordering::Relaxed);
-
-        let bytes_delta = bytes_current.saturating_sub(bytes_last);
-        let ios_delta = ios_current.saturating_sub(ios_last);
-
-        self.inner.bytes_last.store(bytes_current, Ordering::Relaxed);
-        self.inner.ios_last.store(ios_current, Ordering::Relaxed);
-
-        self.inner.throttler.reduce(bytes_delta as f64, ios_delta as f64);
-
+impl AdmissionPicker for IoThrottlerPicker {
+    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> Pick {
+        let duration = stats.write_throttle();
         if duration.is_zero() {
             Pick::Admit
         } else {
             Pick::Throttled(duration)
         }
-    }
-}
-
-impl AdmissionPicker for IoThrottlerPicker {
-    fn pick(&self, stats: &Arc<Statistics>, _: u64) -> Pick {
-        self.pick_inner(stats)
     }
 }

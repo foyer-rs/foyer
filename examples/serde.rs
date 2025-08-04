@@ -14,7 +14,10 @@
 
 use std::fmt::Debug;
 
-use foyer::{Code, CodeResult, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, StorageValue};
+use foyer::{
+    Code, CodeResult, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    LargeObjectEngineBuilder, StorageValue,
+};
 
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -59,11 +62,16 @@ impl Code for Bar {
 async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
 
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(256 * 1024 * 1024)
+        .boxed()
+        .build()?;
+
     let hybrid: HybridCache<u64, V> = HybridCacheBuilder::new()
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(64 * 1024 * 1024)
-        .storage() // use large object disk cache engine only
-        .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(256 * 1024 * 1024))
+        .storage()
+        .with_engine_builder(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;
 

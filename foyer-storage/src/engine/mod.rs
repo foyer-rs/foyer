@@ -22,7 +22,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Device, Runtime, Statistics};
+use crate::{error::Result, io::engine::IoEngine, keeper::PieceRef, Device, Pick, Runtime};
 
 /// Load result.
 #[derive(Debug)]
@@ -98,14 +98,10 @@ pub enum RecoverMode {
 
 /// Context for building the disk cache engine.
 pub struct EngineBuildContext {
-    /// IO device for the disk cache engine.
-    pub device: Arc<dyn Device>,
     /// IO engine for the disk cache engine.
     pub io_engine: Arc<dyn IoEngine>,
     /// Shared metrics for all components.
     pub metrics: Arc<Metrics>,
-    /// Shared statistics for all components.
-    pub statistics: Arc<Statistics>,
     /// The runtime for the disk cache engine.
     pub runtime: Runtime,
     /// The recover mode of the disk cache engine.
@@ -139,6 +135,12 @@ where
     V: StorageValue,
     P: Properties,
 {
+    /// Get the device used by this disk cache engine.
+    fn device(&self) -> &Arc<dyn Device>;
+
+    /// Return if the given key can be picked by the disk cache engine.
+    fn pick(&self, hash: u64) -> Pick;
+
     /// Push a in-memory cache piece to the disk cache write queue.
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 

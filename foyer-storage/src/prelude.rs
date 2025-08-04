@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #[cfg(target_os = "linux")]
-pub use crate::io::engine::uring::UringIoEngineBuilder;
+pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineBuilder};
 pub use crate::{
     compress::Compression,
     engine::{
@@ -27,21 +27,26 @@ pub use crate::{
     error::{Error, Result},
     io::{
         device::{
-            combined::CombinedDeviceBuilder, file::FileDeviceBuilder, fs::FsDeviceBuilder, noop::NoopDeviceBuilder,
-            partial::PartialDeviceBuilder, Device, DeviceBuilder, RawFile,
+            combined::CombinedDeviceBuilder,
+            file::FileDeviceBuilder,
+            fs::FsDeviceBuilder,
+            noop::NoopDeviceBuilder,
+            partial::PartialDeviceBuilder,
+            statistics::Statistics,
+            throttle::{IopsCounter, Throttle},
+            Device, DeviceBuilder, RawFile,
         },
-        engine::{noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder, IoHandle},
+        engine::{
+            noop::{NoopIoEngine, NoopIoEngineBuilder},
+            psync::{PsyncIoEngine, PsyncIoEngineBuilder},
+            IoEngine, IoEngineBuilder, IoHandle,
+        },
         error::{IoError, IoResult},
-        throttle::{IoThrottler, IopsCounter, Throttle},
     },
     picker::{
-        utils::{
-            AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, IoThrottlerPicker,
-            IoThrottlerTarget, RejectAllPicker,
-        },
+        utils::{AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, RejectAllPicker},
         AdmissionPicker, Pick, ReinsertionPicker,
     },
     runtime::Runtime,
-    statistics::Statistics,
     store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
 };

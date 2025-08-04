@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
 };
 
+use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
@@ -29,7 +30,7 @@ use crate::{
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
     },
-    RawFile, Runtime,
+    RawFile,
 };
 
 #[derive(Debug)]
@@ -71,7 +72,9 @@ impl DerefMut for FileHandle {
 
 /// Builder for synchronous I/O engine with pread(2)/pwrite(2).
 #[derive(Debug)]
-pub struct PsyncIoEngineBuilder;
+pub struct PsyncIoEngineBuilder {
+    handle: Option<tokio::runtime::Handle>,
+}
 
 impl Default for PsyncIoEngineBuilder {
     fn default() -> Self {
@@ -82,20 +85,33 @@ impl Default for PsyncIoEngineBuilder {
 impl PsyncIoEngineBuilder {
     /// Create a new synchronous I/O engine builder with default configurations.
     pub fn new() -> Self {
-        Self
+        Self { handle: None }
+    }
+
+    /// Set the Tokio runtime to use for blocking operations.
+    ///
+    /// The psync io engine only uses the thread pool of the Tokio runtime for blocking operations.
+    pub fn with_tokio(mut self, handle: tokio::runtime::Handle) -> Self {
+        self.handle = Some(handle);
+        self
     }
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self: Box<Self>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>> {
-        let engine = PsyncIoEngine { runtime };
-        let engine = Arc::new(engine);
-        Ok(engine)
+    fn build(self: Box<Self>) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+        async move {
+            let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
+            let engine = PsyncIoEngine { handle };
+            let engine: Arc<dyn IoEngine> = Arc::new(engine);
+            Ok(engine)
+        }
+        .boxed()
     }
 }
 
+/// The synchronous I/O engine that uses pread(2)/pwrite(2) and tokio thread pool for reading and writing.
 pub struct PsyncIoEngine {
-    runtime: Runtime,
+    handle: tokio::runtime::Handle,
 }
 
 impl Debug for PsyncIoEngine {
@@ -110,10 +126,9 @@ impl IoEngine for PsyncIoEngine {
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         let file = FileHandle::from(raw);
-        let runtime = self.runtime.clone();
+        let runtime = self.handle.clone();
         async move {
             let res = match runtime
-                .read()
                 .spawn_blocking(move || {
                     #[cfg(target_family = "windows")]
                     {
@@ -144,10 +159,9 @@ impl IoEngine for PsyncIoEngine {
         let (ptr, len) = buf.as_raw_parts();
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         let file = FileHandle::from(raw);
-        let runtime = self.runtime.clone();
+        let runtime = self.handle.clone();
         async move {
             let res = match runtime
-                .write()
                 .spawn_blocking(move || {
                     #[cfg(target_family = "windows")]
                     {

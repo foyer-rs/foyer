@@ -22,9 +22,8 @@ use fs4::free_space;
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
+        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
         error::IoResult,
-        throttle::Throttle,
         PAGE,
     },
     IoError, RawFile,
@@ -113,12 +112,12 @@ impl DeviceBuilder for FileDeviceBuilder {
         }
         let file = Arc::new(file);
 
-        let throttle = self.throttle;
+        let statistics = Arc::new(Statistics::new(self.throttle));
 
         let device = FileDevice {
             file,
             capacity,
-            throttle,
+            statistics,
             partitions: RwLock::new(vec![]),
         };
         let device: Arc<dyn Device> = Arc::new(device);
@@ -131,8 +130,8 @@ impl DeviceBuilder for FileDeviceBuilder {
 pub struct FileDevice {
     file: Arc<File>,
     capacity: usize,
-    throttle: Throttle,
     partitions: RwLock<Vec<Arc<FilePartition>>>,
+    statistics: Arc<Statistics>,
 }
 
 impl Device for FileDevice {
@@ -161,6 +160,7 @@ impl Device for FileDevice {
             id,
             size,
             offset,
+            statistics: self.statistics.clone(),
         });
         partitions.push(partition.clone());
         Ok(partition)
@@ -174,8 +174,8 @@ impl Device for FileDevice {
         self.partitions.read().unwrap()[id as usize].clone()
     }
 
-    fn throttle(&self) -> &Throttle {
-        &self.throttle
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }
 
@@ -185,6 +185,7 @@ pub struct FilePartition {
     id: PartitionId,
     size: usize,
     offset: u64,
+    statistics: Arc<Statistics>,
 }
 
 impl Partition for FilePartition {
@@ -211,5 +212,9 @@ impl Partition for FilePartition {
 
         let address = self.offset + address;
         (raw, address)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }

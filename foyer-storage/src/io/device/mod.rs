@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod statistics;
+pub mod throttle;
+
 use std::{any::Any, fmt::Debug, sync::Arc};
 
-use crate::io::{error::IoResult, throttle::Throttle};
+use crate::io::{device::statistics::Statistics, error::IoResult};
 
 pub type PartitionId = u32;
 
@@ -68,6 +71,9 @@ pub trait Partition: Send + Sync + 'static + Debug + Any {
 
     /// Translate an address to a raw file descriptor and address.
     fn translate(&self, address: u64) -> (RawFile, u64);
+
+    /// Get the statistics of the device this partition belongs to.
+    fn statistics(&self) -> &Arc<Statistics>;
 }
 
 /// Device trait.
@@ -99,8 +105,8 @@ pub trait Device: Send + Sync + 'static + Debug + Any {
     /// Get the partition with given id in the device.
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition>;
 
-    /// The throttle config for the device.
-    fn throttle(&self) -> &Throttle;
+    /// Get the statistics of the device this partition belongs to.
+    fn statistics(&self) -> &Arc<Statistics>;
 }
 
 pub mod file;

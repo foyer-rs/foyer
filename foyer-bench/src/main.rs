@@ -40,9 +40,9 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineBuilder;
 use foyer::{
-    Code, CodeError, Compression, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
+    Code, CodeError, Compression, Device, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
     FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
-    IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
+    IoEngine, IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
     RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
 };
 use futures_util::future::join_all;
@@ -555,7 +555,7 @@ async fn benchmark(args: Args) {
         .with_read_throughput(args.disk_read_throughput.as_u64() as _)
         .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
-    let device_builder: Box<dyn DeviceBuilder> = match (args.file.as_ref(), args.dir.as_ref()) {
+    let device: Arc<dyn Device> = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => {
             let mut builder = FileDeviceBuilder::new(file);
             builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
@@ -563,7 +563,7 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.boxed()
+            builder.boxed().boxed().build().unwrap()
         }
         (None, Some(dir)) => {
             let mut builder = FsDeviceBuilder::new(dir);
@@ -572,14 +572,14 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.boxed()
+            builder.boxed().boxed().build().unwrap()
         }
-        (None, None) => NoopDeviceBuilder::default().boxed(),
+        (None, None) => NoopDeviceBuilder::default().boxed().build().unwrap(),
         _ => unreachable!(),
     };
 
-    let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
-        "psync" => PsyncIoEngineBuilder::new().boxed(),
+    let io_engine: Arc<dyn IoEngine> = match args.io_engine.as_str() {
+        "psync" => PsyncIoEngineBuilder::new().boxed().build().await.unwrap(),
         #[cfg(target_os = "linux")]
         "io_uring" => UringIoEngineBuilder::new()
             .with_threads(args.io_uring_threads)
@@ -590,12 +590,15 @@ async fn benchmark(args: Args) {
             .with_sqpoll_cpus(args.io_uring_sqpoll_cpus.clone())
             .with_iopoll(args.io_uring_iopoll)
             .with_weight(args.io_uring_weight)
-            .boxed(),
+            .boxed()
+            .build()
+            .await
+            .unwrap(),
         _ => unreachable!(),
     };
 
     let engine_builder: Box<dyn EngineBuilder<u64, Value, HybridCacheProperties>> = {
-        let mut builder = LargeObjectEngineBuilder::new()
+        let mut builder = LargeObjectEngineBuilder::new(device)
             .with_region_size(args.region_size.as_u64() as _)
             .with_indexer_shards(args.shards)
             .with_recover_concurrency(args.recover_concurrency)
@@ -617,8 +620,7 @@ async fn benchmark(args: Args) {
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
-        .with_device_builder(device_builder)
-        .with_io_engine_builder(io_engine_builder)
+        .with_io_engine(io_engine)
         .with_engine_builder(engine_builder);
 
     builder = builder

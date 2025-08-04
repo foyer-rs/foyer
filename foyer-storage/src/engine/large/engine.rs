@@ -60,10 +60,13 @@ use crate::{
     error::{Error, Result},
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
-    picker::{utils::RejectAllPicker, ReinsertionPicker},
+    picker::{
+        utils::{IoThrottlerPicker, RejectAllPicker},
+        ReinsertionPicker,
+    },
     runtime::Runtime,
     serde::EntryDeserializer,
-    Load,
+    AdmissionPicker, AdmitAllPicker, ChainedAdmissionPickerBuilder, Device, Load,
 };
 
 /// Builder for the large object disk cache engine.
@@ -73,6 +76,7 @@ where
     V: StorageValue,
     P: Properties,
 {
+    device: Arc<dyn Device>,
     region_size: usize,
     compression: Compression,
     indexer_shards: usize,
@@ -84,6 +88,7 @@ where
     submit_queue_size_threshold: usize,
     clean_region_threshold: usize,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
+    admission_picker: Arc<dyn AdmissionPicker>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
     enable_tombstone_log: bool,
     marker: PhantomData<(K, V, P)>,
@@ -97,6 +102,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LargeObjectEngineBuilder")
+            .field("device", &self.device)
             .field("region_size", &self.region_size)
             .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
@@ -108,20 +114,10 @@ where
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_region_threshold", &self.clean_region_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
+            .field("admission_picker", &self.admission_picker)
             .field("reinsertion_picker", &self.reinsertion_picker)
             .field("enable_tombstone_log", &self.enable_tombstone_log)
             .finish()
-    }
-}
-
-impl<K, V, P> Default for LargeObjectEngineBuilder<K, V, P>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -132,8 +128,9 @@ where
     P: Properties,
 {
     /// Create a new large object disk cache engine builder with default configurations.
-    pub fn new() -> Self {
+    pub fn new(device: Arc<dyn Device>) -> Self {
         Self {
+            device,
             region_size: 16 * 1024 * 1024, // 16 MiB
             compression: Compression::default(),
             indexer_shards: 64,
@@ -145,6 +142,7 @@ where
             submit_queue_size_threshold: 16 * 1024 * 1024, // 16 MiB
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
+            admission_picker: Arc::<AdmitAllPicker>::default(),
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
             enable_tombstone_log: false,
             marker: PhantomData,
@@ -187,6 +185,16 @@ where
     /// Default: `1`.
     pub fn with_flushers(mut self, flushers: usize) -> Self {
         self.flushers = flushers;
+        self
+    }
+
+    /// Set the admission pickers for th disk cache store.
+    ///
+    /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
+    ///
+    /// Default: [`AdmitAllPicker`].
+    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker>) -> Self {
+        self.admission_picker = admission_picker;
         self
     }
 
@@ -289,19 +297,21 @@ where
     pub async fn build(
         self: Box<Self>,
         EngineBuildContext {
-            device,
             io_engine,
             metrics,
-            statistics,
             runtime,
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<LargeObjectEngine<K, V, P>>> {
+        let device = self.device;
         let region_size = self.region_size;
 
         let mut tombstones = vec![];
 
         let tombstone_log = if self.enable_tombstone_log {
+            // TODO(MrCroxx): The tombstone log support multiples partitions for multiple device support.
+            let mut partitions = vec![];
+
             let max_entries = device.capacity() / PAGE;
             let pages = max_entries / TombstoneLog::SLOTS_PER_PAGE
                 + if max_entries % TombstoneLog::SLOTS_PER_PAGE > 0 {
@@ -310,7 +320,9 @@ where
                     0
                 };
             let partition = device.create_partition(pages * PAGE)?;
-            let tombstone_log = TombstoneLog::open(partition, io_engine.clone(), &mut tombstones).await?;
+            partitions.push(partition);
+
+            let tombstone_log = TombstoneLog::open(partitions, io_engine.clone(), &mut tombstones).await?;
             Some(tombstone_log)
         } else {
             None
@@ -329,7 +341,7 @@ where
             flushers.clone(),
             self.reinsertion_picker,
             self.blob_index_size,
-            statistics.clone(),
+            device.statistics().clone(),
             runtime.clone(),
         );
         let reclaimer: Arc<dyn ReclaimerTrait> = Arc::new(reclaimer);
@@ -391,7 +403,16 @@ where
             )?;
         }
 
+        let admission_picker = Arc::new(
+            ChainedAdmissionPickerBuilder::default()
+                .chain(Arc::<IoThrottlerPicker>::default())
+                .chain(self.admission_picker)
+                .build(),
+        );
+
         let inner = LargeObjectEngineInner {
+            admission_picker,
+            device,
             indexer,
             region_manager,
             flushers,
@@ -460,6 +481,10 @@ where
     V: StorageValue,
     P: Properties,
 {
+    admission_picker: Arc<dyn AdmissionPicker>,
+
+    device: Arc<dyn Device>,
+
     indexer: Indexer,
     region_manager: RegionManager,
 
@@ -577,6 +602,10 @@ where
             tracing::trace!(hash, ?addr, "[lodc]: load");
 
             let region = region_manager.region(addr.region);
+            if region.partition().statistics().is_read_throttled() {
+                return Ok(Load::Throttled);
+            }
+
             let buf = IoSliceMut::new(bits::align_up(PAGE, addr.len as _));
             let (buf, res) = region.read(Box::new(buf), addr.offset as _).await;
             match res {
@@ -751,6 +780,14 @@ where
     V: StorageValue,
     P: Properties,
 {
+    fn device(&self) -> &Arc<dyn Device> {
+        &self.inner.device
+    }
+
+    fn pick(&self, hash: u64) -> crate::Pick {
+        self.inner.admission_picker.pick(self.inner.device.statistics(), hash)
+    }
+
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         self.enqueue(piece, estimated_size);
     }
@@ -798,14 +835,13 @@ mod tests {
         engine::RecoverMode,
         io::{
             self,
-            device::{fs::FsDeviceBuilder, DeviceBuilder},
+            device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
             engine::{IoEngine, IoEngineBuilder},
-            throttle::IopsCounter,
         },
         picker::utils::RejectAllPicker,
         serde::EntrySerializer,
         test_utils::BiasedPicker,
-        CombinedDeviceBuilder, PsyncIoEngineBuilder, Statistics,
+        PsyncIoEngineBuilder,
     };
 
     const KB: usize = 1024;
@@ -818,12 +854,12 @@ mod tests {
             .build()
     }
 
-    fn io_engine_for_test() -> Arc<dyn IoEngine> {
+    async fn io_engine_for_test() -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        // io::engine::uring::UringIoEngineBuilder::new().build(device).unwrap()
         io::engine::psync::PsyncIoEngineBuilder::new()
             .boxed()
-            .build(Runtime::current())
+            .build()
+            .await
             .unwrap()
     }
 
@@ -841,11 +877,11 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test();
+        let io_engine = io_engine_for_test().await;
         let metrics = Arc::new(Metrics::noop());
-        let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
+            device,
             region_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
@@ -853,6 +889,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_region_threshold: 1,
+            admission_picker: Arc::<AdmitAllPicker>::default(),
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
             enable_tombstone_log: false,
@@ -865,10 +902,8 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
-                device,
                 io_engine,
                 metrics,
-                statistics,
                 runtime,
                 recover_mode: RecoverMode::Strict,
             })
@@ -884,11 +919,11 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test();
+        let io_engine = io_engine_for_test().await;
         let metrics = Arc::new(Metrics::noop());
-        let statistics = Arc::new(Statistics::new(IopsCounter::per_io()));
         let runtime = Runtime::new(None, None, Handle::current());
         let builder = LargeObjectEngineBuilder {
+            device,
             region_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
@@ -897,6 +932,7 @@ mod tests {
             reclaimers: 1,
             clean_region_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
+            admission_picker: Arc::<AdmitAllPicker>::default(),
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
             enable_tombstone_log: true,
             buffer_pool_size: 16 * 1024 * 1024,
@@ -907,10 +943,8 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
-                device,
                 io_engine,
                 metrics,
-                statistics,
                 runtime,
                 recover_mode: RecoverMode::Strict,
             })
@@ -1336,15 +1370,13 @@ mod tests {
             .boxed()
             .build()
             .unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().boxed().build(runtime.clone()).unwrap();
-        let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new()
+        let io_engine = PsyncIoEngineBuilder::new().boxed().build().await.unwrap();
+        let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
             .with_region_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {
-                device,
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),
-                statistics: Arc::new(Statistics::new(IopsCounter::per_io())),
                 runtime,
                 recover_mode: RecoverMode::None,
             })

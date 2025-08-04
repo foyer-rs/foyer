@@ -20,7 +20,9 @@ use std::{path::Path, sync::Arc};
 
 use foyer_common::{hasher::ModHasher, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
-use foyer_storage::{test_utils::Recorder, Compression, FsDeviceBuilder, LargeObjectEngineBuilder, StoreBuilder};
+use foyer_storage::{
+    test_utils::Recorder, Compression, DeviceBuilder, FsDeviceBuilder, LargeObjectEngineBuilder, StoreBuilder,
+};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * 1024;
@@ -105,16 +107,20 @@ fn basic(
     recorder: &Arc<Recorder>,
 ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
-    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop()))
-        .with_device_builder(FsDeviceBuilder::new(path).with_capacity(4 * MB))
-        .with_engine_builder(
-            LargeObjectEngineBuilder::new()
-                .with_region_size(MB)
-                .with_recover_concurrency(2)
-                .with_indexer_shards(4)
-                .with_reinsertion_picker(recorder.clone()),
+    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_builder(
+        LargeObjectEngineBuilder::new(
+            FsDeviceBuilder::new(path)
+                .with_capacity(4 * MB)
+                .boxed()
+                .build()
+                .unwrap(),
         )
         .with_admission_picker(recorder.clone())
+        .with_region_size(MB)
+        .with_recover_concurrency(2)
+        .with_indexer_shards(4)
+        .with_reinsertion_picker(recorder.clone()),
+    )
 }
 
 #[test_log::test(tokio::test)]

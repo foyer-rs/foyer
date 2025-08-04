@@ -25,7 +25,6 @@ mod keeper;
 mod picker;
 mod runtime;
 mod serde;
-mod statistics;
 mod store;
 
 mod prelude;
