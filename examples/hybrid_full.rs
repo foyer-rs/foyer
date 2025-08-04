@@ -36,10 +36,9 @@ async fn main() -> anyhow::Result<()> {
                 .with_read_throughput(800 * 1024 * 1024)
                 .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
         )
-        .boxed()
         .build()?;
 
-    let io_engine = PsyncIoEngineBuilder::new().boxed().build().await?;
+    let io_engine = PsyncIoEngineBuilder::new().build().await?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .with_name("my-hybrid-cache")

@@ -63,7 +63,7 @@ where
     P: Properties,
 {
     pub fn build(self) -> Arc<NoopEngine<K, V, P>> {
-        let device = NoopDeviceBuilder::default().boxed().build().unwrap();
+        let device = NoopDeviceBuilder::default().build().unwrap();
         let device: Arc<dyn Device> = device;
         Arc::new(NoopEngine {
             device,

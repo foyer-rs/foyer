@@ -42,7 +42,7 @@ impl Default for NoopDeviceBuilder {
 }
 
 impl DeviceBuilder for NoopDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
         let statistics = Arc::new(Statistics::new(Throttle::default()));
         Ok(Arc::new(NoopDevice {
             partitions: RwLock::new(vec![]),

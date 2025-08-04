@@ -64,7 +64,6 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
 
     let device = FsDeviceBuilder::new(dir.path())
         .with_capacity(256 * 1024 * 1024)
-        .boxed()
         .build()?;
 
     let hybrid: HybridCache<u64, V> = HybridCacheBuilder::new()

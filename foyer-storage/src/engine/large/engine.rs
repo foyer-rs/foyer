@@ -856,11 +856,7 @@ mod tests {
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        io::engine::psync::PsyncIoEngineBuilder::new()
-            .boxed()
-            .build()
-            .await
-            .unwrap()
+        io::engine::psync::PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
@@ -874,7 +870,6 @@ mod tests {
     ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as _)
-            .boxed()
             .build()
             .unwrap();
         let io_engine = io_engine_for_test().await;
@@ -916,7 +911,6 @@ mod tests {
     ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as usize + ByteSize::kib(4).as_u64() as usize)
-            .boxed()
             .build()
             .unwrap();
         let io_engine = io_engine_for_test().await;
@@ -1350,27 +1344,23 @@ mod tests {
 
         let d1 = FsDeviceBuilder::new(dir.path().join("dev1"))
             .with_capacity(MB)
-            .boxed()
             .build()
             .unwrap();
         let d2 = FsDeviceBuilder::new(dir.path().join("dev2"))
             .with_capacity(2 * MB)
-            .boxed()
             .build()
             .unwrap();
         let d3 = FsDeviceBuilder::new(dir.path().join("dev3"))
             .with_capacity(4 * MB)
-            .boxed()
             .build()
             .unwrap();
         let device = CombinedDeviceBuilder::new()
             .with_device(d1)
             .with_device(d2)
             .with_device(d3)
-            .boxed()
             .build()
             .unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().boxed().build().await.unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
         let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
             .with_region_size(64 * KB)
             .boxed()

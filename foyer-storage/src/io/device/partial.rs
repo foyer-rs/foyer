@@ -50,7 +50,7 @@ impl PartialDeviceBuilder {
 }
 
 impl DeviceBuilder for PartialDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
         Ok(Arc::new(PartialDevice {
             inner: self.device,
             capacity: self.capacity,

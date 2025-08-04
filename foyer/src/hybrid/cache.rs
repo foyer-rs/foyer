@@ -1060,16 +1060,10 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
-                LargeObjectEngineBuilder::new(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(16 * MB)
-                        .boxed()
-                        .build()
-                        .unwrap(),
-                )
-                .with_region_size(MB),
+                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_region_size(MB),
             )
             .build()
             .await
@@ -1086,17 +1080,11 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
-                LargeObjectEngineBuilder::new(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(16 * MB)
-                        .boxed()
-                        .build()
-                        .unwrap(),
-                )
-                .with_region_size(MB)
-                .with_admission_picker(Arc::new(BiasedPicker::new(admits))),
+                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_region_size(MB)
+                    .with_admission_picker(Arc::new(BiasedPicker::new(admits))),
             )
             .build()
             .await
@@ -1114,16 +1102,10 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
-                LargeObjectEngineBuilder::new(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(16 * MB)
-                        .boxed()
-                        .build()
-                        .unwrap(),
-                )
-                .with_region_size(MB),
+                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_region_size(MB),
             )
             .build()
             .await
@@ -1142,17 +1124,11 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
-                LargeObjectEngineBuilder::new(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(16 * MB)
-                        .boxed()
-                        .build()
-                        .unwrap(),
-                )
-                .with_admission_picker(recorder.clone())
-                .with_region_size(MB),
+                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_admission_picker(recorder.clone())
+                    .with_region_size(MB),
             )
             .build()
             .await
@@ -1171,16 +1147,10 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
-                LargeObjectEngineBuilder::new(
-                    FsDeviceBuilder::new(dir)
-                        .with_capacity(16 * MB)
-                        .boxed()
-                        .build()
-                        .unwrap(),
-                )
-                .with_region_size(MB),
+                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_region_size(MB),
             )
             .build()
             .await
@@ -1529,16 +1499,10 @@ mod tests {
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
                 .storage()
-                .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+                .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
                 .with_engine_builder(
-                    LargeObjectEngineBuilder::new(
-                        FsDeviceBuilder::new(dir)
-                            .with_capacity(16 * MB)
-                            .boxed()
-                            .build()
-                            .unwrap(),
-                    )
-                    .with_region_size(64 * KB),
+                    LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                        .with_region_size(64 * KB),
                 )
                 .build()
                 .await

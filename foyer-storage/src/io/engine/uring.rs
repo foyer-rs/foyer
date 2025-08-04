@@ -153,7 +153,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self: Box<Self>) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
         async move {
             if self.threads == 0 {
                 return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));

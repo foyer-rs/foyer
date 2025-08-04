@@ -563,7 +563,7 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.boxed().boxed().build().unwrap()
+            builder.build().unwrap()
         }
         (None, Some(dir)) => {
             let mut builder = FsDeviceBuilder::new(dir);
@@ -572,14 +572,14 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.boxed().boxed().build().unwrap()
+            builder.build().unwrap()
         }
-        (None, None) => NoopDeviceBuilder::default().boxed().build().unwrap(),
+        (None, None) => NoopDeviceBuilder::default().build().unwrap(),
         _ => unreachable!(),
     };
 
     let io_engine: Arc<dyn IoEngine> = match args.io_engine.as_str() {
-        "psync" => PsyncIoEngineBuilder::new().boxed().build().await.unwrap(),
+        "psync" => PsyncIoEngineBuilder::new().build().await.unwrap(),
         #[cfg(target_os = "linux")]
         "io_uring" => UringIoEngineBuilder::new()
             .with_threads(args.io_uring_threads)
@@ -590,7 +590,6 @@ async fn benchmark(args: Args) {
             .with_sqpoll_cpus(args.io_uring_sqpoll_cpus.clone())
             .with_iopoll(args.io_uring_iopoll)
             .with_weight(args.io_uring_weight)
-            .boxed()
             .build()
             .await
             .unwrap(),

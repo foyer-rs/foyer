@@ -76,7 +76,7 @@ impl FsDeviceBuilder {
 }
 
 impl DeviceBuilder for FsDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
         // Normalize configurations.
 
         let align_v = |value: usize, align: usize| value - value % align;

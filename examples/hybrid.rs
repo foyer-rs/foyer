@@ -20,12 +20,12 @@ async fn main() -> anyhow::Result<()> {
 
     let device = FsDeviceBuilder::new(dir.path())
         .with_capacity(256 * 1024 * 1024)
-        .boxed()
         .build()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage() // use large object disk cache engine with default configuration
+        .storage()
+        // use large object disk cache engine with default configuration
         .with_engine_builder(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;

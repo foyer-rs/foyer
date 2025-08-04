@@ -76,7 +76,6 @@ async fn main() -> anyhow::Result<()> {
 
     let device = FsDeviceBuilder::new(dir.path())
         .with_capacity(256 * 1024 * 1024)
-        .boxed()
         .build()?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()

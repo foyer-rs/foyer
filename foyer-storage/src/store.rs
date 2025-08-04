@@ -497,7 +497,7 @@ where
             Some(ie) => ie,
             None => {
                 tracing::info!("[store builder]: No I/O engine is provided, use `PsyncIoEngine` with default parameters as default.");
-                PsyncIoEngineBuilder::new().boxed().build().await?
+                PsyncIoEngineBuilder::new().build().await?
             }
         };
         let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
@@ -559,12 +559,11 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
                 LargeObjectEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(64 * 1024)
-                        .boxed()
                         .build()
                         .unwrap(),
                 )
@@ -590,12 +589,11 @@ mod tests {
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
         let store = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine(PsyncIoEngineBuilder::new().boxed().build().await.unwrap())
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_builder(
                 LargeObjectEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(4 * 1024 * 1024)
-                        .boxed()
                         .build()
                         .unwrap(),
                 )

@@ -64,7 +64,7 @@ impl CombinedDeviceBuilder {
 }
 
 impl DeviceBuilder for CombinedDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
         let device = CombinedDevice {
             devices: self.devices,
             statistics: Arc::new(Statistics::new(self.throttle)),

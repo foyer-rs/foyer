@@ -98,7 +98,7 @@ impl PsyncIoEngineBuilder {
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self: Box<Self>) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
         async move {
             let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
             let engine = PsyncIoEngine { handle };

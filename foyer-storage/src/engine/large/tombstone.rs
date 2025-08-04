@@ -262,12 +262,11 @@ mod tests {
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones => 16K partition => 4 pages
         let device = FsDeviceBuilder::new(dir.path())
             .with_capacity(4 * 1024 * 1024 + 16 * 1024)
-            .boxed()
             .build()
             .unwrap();
         let p0 = device.create_partition(8 * 1024).unwrap();
         let p1 = device.create_partition(8 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().boxed().build().await.unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
 
         let log = TombstoneLog::open(vec![p0.clone(), p1.clone()], io_engine.clone(), &mut vec![])
             .await
