@@ -33,7 +33,7 @@ use rand::seq::IteratorRandom;
 use tokio::sync::oneshot;
 
 use crate::{
-    engine::large::{
+    engine::block::{
         eviction::{EvictionInfo, EvictionPicker},
         reclaimer::ReclaimerTrait,
     },
@@ -46,21 +46,21 @@ use crate::{
     Device, IoError, Runtime,
 };
 
-pub type RegionId = u32;
+pub type BlockId = u32;
 
-/// Region statistics.
+/// Block statistics.
 #[derive(Debug, Default)]
-pub struct RegionStatistics {
-    /// Estimated invalid bytes in the region.
+pub struct BlockStatistics {
+    /// Estimated invalid bytes in the block.
     /// FIXME(MrCroxx): This value is way too coarse. Need fix.
     pub invalid: AtomicUsize,
-    /// Access count of the region.
+    /// Access count of the block.
     pub access: AtomicUsize,
-    /// Marked as `true` if the region is about to be evicted by some eviction picker.
+    /// Marked as `true` if the block is about to be evicted by some eviction picker.
     pub probation: AtomicBool,
 }
 
-impl RegionStatistics {
+impl BlockStatistics {
     pub(crate) fn reset(&self) {
         self.invalid.store(0, Ordering::Relaxed);
         self.access.store(0, Ordering::Relaxed);
@@ -69,31 +69,31 @@ impl RegionStatistics {
 }
 
 #[derive(Debug)]
-struct RegionInner {
-    id: RegionId,
+struct BlockInner {
+    id: BlockId,
     partition: Arc<dyn Partition>,
     io_engine: Arc<dyn IoEngine>,
-    statistics: Arc<RegionStatistics>,
+    statistics: Arc<BlockStatistics>,
 }
 
-/// A region is a logical partition of a device. It is used to manage the device's storage space.
+/// A block is a logical partition of a device. It is used to manage the device's storage space.
 #[derive(Debug, Clone)]
-pub struct Region {
-    inner: Arc<RegionInner>,
+pub struct Block {
+    inner: Arc<BlockInner>,
 }
 
-impl Region {
-    /// Get region id.
-    pub fn id(&self) -> RegionId {
+impl Block {
+    /// Get block id.
+    pub fn id(&self) -> BlockId {
         self.inner.id
     }
 
-    /// Get Region Statistics.
-    pub fn statistics(&self) -> &Arc<RegionStatistics> {
+    /// Get block Statistics.
+    pub fn statistics(&self) -> &Arc<BlockStatistics> {
         &self.inner.statistics
     }
 
-    /// Get region size.
+    /// Get block size.
     pub fn size(&self) -> usize {
         self.inner.partition.size()
     }
@@ -122,29 +122,29 @@ impl Region {
 }
 
 #[cfg(test)]
-impl Region {
-    pub(crate) fn new_for_test(id: RegionId, partition: Arc<dyn Partition>, io_engine: Arc<dyn IoEngine>) -> Self {
-        let inner = RegionInner {
+impl Block {
+    pub(crate) fn new_for_test(id: BlockId, partition: Arc<dyn Partition>, io_engine: Arc<dyn IoEngine>) -> Self {
+        let inner = BlockInner {
             id,
             partition,
             io_engine,
-            statistics: Arc::<RegionStatistics>::default(),
+            statistics: Arc::<BlockStatistics>::default(),
         };
         let inner = Arc::new(inner);
         Self { inner }
     }
 }
 
-pub type GetCleanRegionHandle = Shared<BoxFuture<'static, Region>>;
+pub type GetCleanBlockHandle = Shared<BoxFuture<'static, Block>>;
 
 #[derive(Debug)]
 struct State {
-    clean_regions: VecDeque<RegionId>,
-    evictable_regions: HashSet<RegionId>,
-    writing_regions: HashSet<RegionId>,
-    reclaiming_regions: HashSet<RegionId>,
+    clean_blocks: VecDeque<BlockId>,
+    evictable_blocks: HashSet<BlockId>,
+    writing_blocks: HashSet<BlockId>,
+    reclaiming_blocks: HashSet<BlockId>,
 
-    clean_region_waiters: Vec<oneshot::Sender<Region>>,
+    clean_block_waiters: Vec<oneshot::Sender<Block>>,
 
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
 
@@ -153,75 +153,75 @@ struct State {
 
 #[derive(Debug)]
 struct Inner {
-    regions: Vec<Region>,
+    blocks: Vec<Block>,
     state: RwLock<State>,
     reclaimer: Arc<dyn ReclaimerTrait>,
     reclaim_concurrency: usize,
-    clean_region_threshold: usize,
+    clean_block_threshold: usize,
     metrics: Arc<Metrics>,
     runtime: Runtime,
 }
 
 #[derive(Debug, Clone)]
-pub struct RegionManager {
+pub struct BlockManager {
     inner: Arc<Inner>,
 }
 
-impl RegionManager {
+impl BlockManager {
     #[expect(clippy::too_many_arguments)]
     pub fn open(
         device: Arc<dyn Device>,
         io_engine: Arc<dyn IoEngine>,
-        region_size: usize,
+        block_size: usize,
         mut eviction_pickers: Vec<Box<dyn EvictionPicker>>,
         reclaimer: Arc<dyn ReclaimerTrait>,
         reclaim_concurrency: usize,
-        clean_region_threshold: usize,
+        clean_block_threshold: usize,
         metrics: Arc<Metrics>,
         runtime: Runtime,
     ) -> Result<Self> {
-        let mut regions = vec![];
+        let mut blocks = vec![];
 
-        while device.free() >= region_size {
-            let partition = match device.create_partition(region_size) {
+        while device.free() >= block_size {
+            let partition = match device.create_partition(block_size) {
                 Ok(partition) => partition,
                 Err(IoError::NoSpace { .. }) => break,
                 Err(e) => return Err(e.into()),
             };
-            let id = regions.len() as RegionId;
-            let region = Region {
-                inner: Arc::new(RegionInner {
+            let id = blocks.len() as BlockId;
+            let block = Block {
+                inner: Arc::new(BlockInner {
                     id,
                     partition,
                     io_engine: io_engine.clone(),
-                    statistics: Arc::<RegionStatistics>::default(),
+                    statistics: Arc::<BlockStatistics>::default(),
                 }),
             };
-            regions.push(region);
+            blocks.push(block);
         }
 
-        let rs = regions.iter().map(|r| r.id()).collect_vec();
+        let rs = blocks.iter().map(|r| r.id()).collect_vec();
         for pickers in eviction_pickers.iter_mut() {
-            pickers.init(&rs, region_size);
+            pickers.init(&rs, block_size);
         }
 
-        metrics.storage_lodc_region_size_bytes.absolute(region_size as _);
+        metrics.storage_block_engine_block_size_bytes.absolute(block_size as _);
 
         let state = State {
-            clean_regions: VecDeque::new(),
-            evictable_regions: HashSet::new(),
-            writing_regions: HashSet::new(),
-            reclaiming_regions: HashSet::new(),
-            clean_region_waiters: Vec::new(),
+            clean_blocks: VecDeque::new(),
+            evictable_blocks: HashSet::new(),
+            writing_blocks: HashSet::new(),
+            reclaiming_blocks: HashSet::new(),
+            clean_block_waiters: Vec::new(),
             eviction_pickers,
             reclaim_waiters: Vec::new(),
         };
         let inner = Inner {
-            regions,
+            blocks,
             state: RwLock::new(state),
             reclaimer,
             reclaim_concurrency,
-            clean_region_threshold,
+            clean_block_threshold,
             metrics,
             runtime,
         };
@@ -230,13 +230,13 @@ impl RegionManager {
         Ok(this)
     }
 
-    pub fn init(&self, clean_regions: &[RegionId]) {
+    pub fn init(&self, clean_blocks: &[BlockId]) {
         let mut state = self.inner.state.write().unwrap();
-        let mut evictable_regions: HashSet<RegionId> = self.inner.regions.iter().map(|r| r.id()).collect();
-        state.clean_regions = clean_regions
+        let mut evictable_blocks: HashSet<BlockId> = self.inner.blocks.iter().map(|r| r.id()).collect();
+        state.clean_blocks = clean_blocks
             .iter()
             .inspect(|id| {
-                evictable_regions.remove(id);
+                evictable_blocks.remove(id);
             })
             .copied()
             .collect();
@@ -245,16 +245,16 @@ impl RegionManager {
         let mut pickers = std::mem::take(&mut state.eviction_pickers);
 
         // Notify pickers.
-        for region in evictable_regions {
-            state.evictable_regions.insert(region);
+        for block in evictable_blocks {
+            state.evictable_blocks.insert(block);
             for picker in pickers.iter_mut() {
-                picker.on_region_evictable(
+                picker.on_block_evictable(
                     EvictionInfo {
-                        regions: &self.inner.regions,
-                        evictable: &state.evictable_regions,
-                        clean: state.clean_regions.len(),
+                        blocks: &self.inner.blocks,
+                        evictable: &state.evictable_blocks,
+                        clean: state.clean_blocks.len(),
                     },
-                    region,
+                    block,
                 );
             }
         }
@@ -266,43 +266,43 @@ impl RegionManager {
 
         let metrics = &self.inner.metrics;
         metrics
-            .storage_lodc_region_clean
-            .absolute(state.clean_regions.len() as _);
+            .storage_block_engine_block_clean
+            .absolute(state.clean_blocks.len() as _);
         metrics
-            .storage_lodc_region_evictable
-            .absolute(state.evictable_regions.len() as _);
+            .storage_block_engine_block_evictable
+            .absolute(state.evictable_blocks.len() as _);
         metrics
-            .storage_lodc_region_writing
-            .absolute(state.writing_regions.len() as _);
+            .storage_block_engine_block_writing
+            .absolute(state.writing_blocks.len() as _);
         metrics
-            .storage_lodc_region_reclaiming
-            .absolute(state.reclaiming_regions.len() as _);
+            .storage_block_engine_block_reclaiming
+            .absolute(state.reclaiming_blocks.len() as _);
     }
 
-    pub fn regions(&self) -> usize {
-        self.inner.regions.len()
+    pub fn blocks(&self) -> usize {
+        self.inner.blocks.len()
     }
 
-    pub fn region(&self, id: RegionId) -> &Region {
-        &self.inner.regions[id as usize]
+    pub fn block(&self, id: BlockId) -> &Block {
+        &self.inner.blocks[id as usize]
     }
 
-    pub fn get_clean_region(&self) -> GetCleanRegionHandle {
+    pub fn get_clean_block(&self) -> GetCleanBlockHandle {
         let this = self.clone();
         async move {
             // Wrap state lock guard to make borrow checker happy.
             let rx = {
                 let mut state = this.inner.state.write().unwrap();
-                if let Some(id) = state.clean_regions.pop_front() {
-                    let region = this.inner.regions[id as usize].clone();
-                    state.writing_regions.insert(id);
-                    this.inner.metrics.storage_lodc_region_clean.decrease(1);
-                    this.inner.metrics.storage_lodc_region_writing.increase(1);
+                if let Some(id) = state.clean_blocks.pop_front() {
+                    let block = this.inner.blocks[id as usize].clone();
+                    state.writing_blocks.insert(id);
+                    this.inner.metrics.storage_block_engine_block_clean.decrease(1);
+                    this.inner.metrics.storage_block_engine_block_writing.increase(1);
                     this.reclaim_if_needed(&mut state);
-                    return region;
+                    return block;
                 } else {
                     let (tx, rx) = oneshot::channel();
-                    state.clean_region_waiters.push(tx);
+                    state.clean_block_waiters.push(tx);
                     drop(state);
                     rx
                 }
@@ -313,12 +313,12 @@ impl RegionManager {
         .shared()
     }
 
-    pub fn on_writing_finish(&self, region: Region) {
+    pub fn on_writing_finish(&self, block: Block) {
         let mut state = self.inner.state.write().unwrap();
-        state.writing_regions.remove(&region.id());
-        self.inner.metrics.storage_lodc_region_writing.decrease(1);
-        let inserted = state.evictable_regions.insert(region.id());
-        self.inner.metrics.storage_lodc_region_evictable.increase(1);
+        state.writing_blocks.remove(&block.id());
+        self.inner.metrics.storage_block_engine_block_writing.decrease(1);
+        let inserted = state.evictable_blocks.insert(block.id());
+        self.inner.metrics.storage_block_engine_block_evictable.increase(1);
 
         assert!(inserted);
 
@@ -327,13 +327,13 @@ impl RegionManager {
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
-            picker.on_region_evictable(
+            picker.on_block_evictable(
                 EvictionInfo {
-                    regions: &self.inner.regions,
-                    evictable: &state.evictable_regions,
-                    clean: state.clean_regions.len(),
+                    blocks: &self.inner.blocks,
+                    evictable: &state.evictable_blocks,
+                    clean: state.clean_blocks.len(),
                 },
-                region.id(),
+                block.id(),
             );
         }
 
@@ -343,26 +343,26 @@ impl RegionManager {
         assert!(pickers.is_empty());
 
         tracing::debug!(
-            id = region.id(),
-            "[region manager]: Region state transfers from writing to evictable."
+            id = block.id(),
+            "[block manager]: Block state transfers from writing to evictable."
         );
 
         self.reclaim_if_needed(&mut state);
     }
 
-    fn on_reclaim_finish(&self, region: Region) {
+    fn on_reclaim_finish(&self, block: Block) {
         let mut state = self.inner.state.write().unwrap();
-        state.reclaiming_regions.remove(&region.id());
-        self.inner.metrics.storage_lodc_region_reclaiming.decrease(1);
-        if let Some(waiter) = state.clean_region_waiters.pop() {
-            self.inner.metrics.storage_lodc_region_writing.increase(1);
-            let _ = waiter.send(region);
+        state.reclaiming_blocks.remove(&block.id());
+        self.inner.metrics.storage_block_engine_block_reclaiming.decrease(1);
+        if let Some(waiter) = state.clean_block_waiters.pop() {
+            self.inner.metrics.storage_block_engine_block_writing.increase(1);
+            let _ = waiter.send(block);
         } else {
-            self.inner.metrics.storage_lodc_region_clean.increase(1);
-            state.clean_regions.push_back(region.id());
+            self.inner.metrics.storage_block_engine_block_clean.increase(1);
+            state.clean_blocks.push_back(block.id());
         }
         self.reclaim_if_needed(&mut state);
-        if state.reclaiming_regions.is_empty() {
+        if state.reclaiming_blocks.is_empty() {
             for tx in std::mem::take(&mut state.reclaim_waiters) {
                 let _ = tx.send(());
             }
@@ -370,66 +370,59 @@ impl RegionManager {
     }
 
     fn reclaim_if_needed<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) {
-        if state.clean_regions.len() < self.inner.clean_region_threshold
-            && state.reclaiming_regions.len() < self.inner.reclaim_concurrency
+        if state.clean_blocks.len() < self.inner.clean_block_threshold
+            && state.reclaiming_blocks.len() < self.inner.reclaim_concurrency
         {
-            if let Some(region) = self.evict(state) {
-                state.reclaiming_regions.insert(region.id());
-                self.inner.metrics.storage_lodc_region_reclaiming.increase(1);
-                let region = ReclaimingRegion {
-                    region_manager: self.clone(),
-                    region,
+            if let Some(block) = self.evict(state) {
+                state.reclaiming_blocks.insert(block.id());
+                self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
+                let block = ReclaimingBlock {
+                    block_manager: self.clone(),
+                    block,
                 };
-                let future = self.inner.reclaimer.reclaim(region);
+                let future = self.inner.reclaimer.reclaim(block);
                 self.inner.runtime.write().spawn(future);
             }
         }
     }
 
-    fn evict<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) -> Option<Region> {
+    fn evict<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) -> Option<Block> {
         let mut picked = None;
 
-        if state.evictable_regions.is_empty() {
+        if state.evictable_blocks.is_empty() {
             return None;
         }
 
         // Temporarily take pickers to make borrow checker happy.
         let mut pickers = std::mem::take(&mut state.eviction_pickers);
 
-        // Pick a region to evict with pickers.
+        // Pick a block to evict with pickers.
         for picker in pickers.iter_mut() {
-            if let Some(region) = picker.pick(EvictionInfo {
-                regions: &self.inner.regions,
-                evictable: &state.evictable_regions,
-                clean: state.clean_regions.len(),
+            if let Some(block) = picker.pick(EvictionInfo {
+                blocks: &self.inner.blocks,
+                evictable: &state.evictable_blocks,
+                clean: state.clean_blocks.len(),
             }) {
-                picked = Some(region);
+                picked = Some(block);
                 break;
             }
         }
 
-        // If no region is selected, just randomly pick one.
-        let picked = picked.unwrap_or_else(|| {
-            state
-                .evictable_regions
-                .iter()
-                .choose(&mut rand::rng())
-                .copied()
-                .unwrap()
-        });
+        // If no block is selected, just randomly pick one.
+        let picked = picked.unwrap_or_else(|| state.evictable_blocks.iter().choose(&mut rand::rng()).copied().unwrap());
 
         // Update evictable map.
-        let removed = state.evictable_regions.remove(&picked);
-        self.inner.metrics.storage_lodc_region_evictable.decrease(1);
+        let removed = state.evictable_blocks.remove(&picked);
+        self.inner.metrics.storage_block_engine_block_evictable.decrease(1);
         assert!(removed);
 
         // Notify pickers.
         for picker in pickers.iter_mut() {
-            picker.on_region_evict(
+            picker.on_block_evict(
                 EvictionInfo {
-                    regions: &self.inner.regions,
-                    evictable: &state.evictable_regions,
-                    clean: state.clean_regions.len(),
+                    blocks: &self.inner.blocks,
+                    evictable: &state.evictable_blocks,
+                    clean: state.clean_blocks.len(),
                 },
                 picked,
             );
@@ -439,15 +432,15 @@ impl RegionManager {
         std::mem::swap(&mut state.eviction_pickers, &mut pickers);
         assert!(pickers.is_empty());
 
-        let region = self.inner.regions[picked as usize].clone();
-        tracing::debug!("[region manager]: Region {picked} is evicted.");
+        let block = self.inner.blocks[picked as usize].clone();
+        tracing::debug!("[block manager]: Block {picked} is evicted.");
 
-        Some(region)
+        Some(block)
     }
 
     pub fn wait_reclaim(&self) -> BoxFuture<'static, ()> {
         let mut state = self.inner.state.write().unwrap();
-        if state.reclaiming_regions.is_empty() {
+        if state.reclaiming_blocks.is_empty() {
             return ready(()).boxed();
         }
         let (tx, rx) = oneshot::channel();
@@ -459,27 +452,27 @@ impl RegionManager {
     }
 }
 
-pub struct ReclaimingRegion {
-    region_manager: RegionManager,
-    region: Region,
+pub struct ReclaimingBlock {
+    block_manager: BlockManager,
+    block: Block,
 }
 
-impl Deref for ReclaimingRegion {
-    type Target = Region;
+impl Deref for ReclaimingBlock {
+    type Target = Block;
 
     fn deref(&self) -> &Self::Target {
-        &self.region
+        &self.block
     }
 }
 
-impl DerefMut for ReclaimingRegion {
+impl DerefMut for ReclaimingBlock {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.region
+        &mut self.block
     }
 }
 
-impl Drop for ReclaimingRegion {
+impl Drop for ReclaimingBlock {
     fn drop(&mut self) {
-        self.region_manager.on_reclaim_finish(self.region.clone());
+        self.block_manager.on_reclaim_finish(self.block.clone());
     }
 }

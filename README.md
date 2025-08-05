@@ -186,7 +186,7 @@ async fn main() -> Result<()> {
                 .with_flushers(2)
                 .with_reclaimers(2)
                 .with_buffer_pool_size(256 * 1024 * 1024)
-                .with_clean_region_threshold(4)
+                .with_clean_block_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
                 .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
                 .with_tombstone_log_config(

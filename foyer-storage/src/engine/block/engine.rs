@@ -44,14 +44,14 @@ use super::{
     recover::RecoverRunner,
 };
 #[cfg(test)]
-use crate::engine::large::test_utils::*;
+use crate::engine::block::test_utils::*;
 use crate::{
     compress::Compression,
     engine::{
-        large::{
+        block::{
             eviction::{EvictionPicker, FifoPicker, InvalidRatioPicker},
-            reclaimer::{Reclaimer, ReclaimerTrait, RegionCleaner},
-            region::{RegionId, RegionManager},
+            manager::{BlockId, BlockManager},
+            reclaimer::{BlockCleaner, Reclaimer, ReclaimerTrait},
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
         },
@@ -69,15 +69,22 @@ use crate::{
     AdmissionPicker, AdmitAllPicker, ChainedAdmissionPickerBuilder, Device, Load,
 };
 
-/// Builder for the large object disk cache engine.
-pub struct LargeObjectEngineBuilder<K, V, P>
+/// Builder for the block-based disk cache engine.
+///
+/// The block-based disk cache engine is suitable for general cache entries with size from 2K to hundreds of MiBs.
+///
+/// Each cache entry will be aligned to a multiplier of 4K on disk, hence too small cache entries will lead to heavy
+/// internal fragmentation.
+///
+/// The disk cache evicts cache entries in block unit.
+pub struct BlockEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
     device: Arc<dyn Device>,
-    region_size: usize,
+    block_size: usize,
     compression: Compression,
     indexer_shards: usize,
     recover_concurrency: usize,
@@ -86,7 +93,7 @@ where
     buffer_pool_size: usize,
     blob_index_size: usize,
     submit_queue_size_threshold: usize,
-    clean_region_threshold: usize,
+    clean_block_threshold: usize,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
     admission_picker: Arc<dyn AdmissionPicker>,
     reinsertion_picker: Arc<dyn ReinsertionPicker>,
@@ -94,16 +101,16 @@ where
     marker: PhantomData<(K, V, P)>,
 }
 
-impl<K, V, P> Debug for LargeObjectEngineBuilder<K, V, P>
+impl<K, V, P> Debug for BlockEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LargeObjectEngineBuilder")
+        f.debug_struct("BlockEngineBuilder")
             .field("device", &self.device)
-            .field("region_size", &self.region_size)
+            .field("block_size", &self.block_size)
             .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
             .field("recover_concurrency", &self.recover_concurrency)
@@ -112,7 +119,7 @@ where
             .field("buffer_pool_size", &self.buffer_pool_size)
             .field("blob_index_size", &self.blob_index_size)
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
-            .field("clean_region_threshold", &self.clean_region_threshold)
+            .field("clean_block_threshold", &self.clean_block_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
             .field("admission_picker", &self.admission_picker)
             .field("reinsertion_picker", &self.reinsertion_picker)
@@ -121,17 +128,17 @@ where
     }
 }
 
-impl<K, V, P> LargeObjectEngineBuilder<K, V, P>
+impl<K, V, P> BlockEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    /// Create a new large object disk cache engine builder with default configurations.
+    /// Create a new block-based disk cache engine builder with default configurations.
     pub fn new(device: Arc<dyn Device>) -> Self {
         Self {
             device,
-            region_size: 16 * 1024 * 1024, // 16 MiB
+            block_size: 16 * 1024 * 1024, // 16 MiB
             compression: Compression::default(),
             indexer_shards: 64,
             recover_concurrency: 8,
@@ -140,7 +147,7 @@ where
             buffer_pool_size: 16 * 1024 * 1024,            // 16 MiB
             blob_index_size: 4 * 1024,                     // 4 KiB
             submit_queue_size_threshold: 16 * 1024 * 1024, // 16 MiB
-            clean_region_threshold: 1,
+            clean_block_threshold: 1,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker>::default(),
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
@@ -149,16 +156,16 @@ where
         }
     }
 
-    /// Set the region size for the large object disk cache.
+    /// Set the block size for the block-based disk cache engine.
     ///
-    /// Region is the minimal cache eviction unit for the large object disk cache,
+    /// Block is the minimal cache eviction unit for the block-based disk cache,
     /// its size also limits the max cacheable entry size.
     ///
-    /// The region size must be 4K-aligned. the given value is not 4K-aligned, it will be automatically aligned up.
+    /// The block size must be 4K-aligned. the given value is not 4K-aligned, it will be automatically aligned up.
     ///
     /// Default: `16 MiB`.
-    pub fn with_region_size(mut self, region_size: usize) -> Self {
-        self.region_size = bits::align_up(PAGE, region_size);
+    pub fn with_block_size(mut self, block_size: usize) -> Self {
+        self.block_size = bits::align_up(PAGE, block_size);
         self
     }
 
@@ -180,7 +187,7 @@ where
 
     /// Set the flusher count for the disk cache store.
     ///
-    /// The flusher count limits how many regions can be concurrently written.
+    /// The flusher count limits how many blocks can be concurrently written.
     ///
     /// Default: `1`.
     pub fn with_flushers(mut self, flushers: usize) -> Self {
@@ -200,7 +207,7 @@ where
 
     /// Set the reclaimer count for the disk cache store.
     ///
-    /// The reclaimer count limits how many regions can be concurrently reclaimed.
+    /// The reclaimer count limits how many blocks can be concurrently reclaimed.
     ///
     /// Default: `1`.
     pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
@@ -245,24 +252,24 @@ where
         self
     }
 
-    /// Set the clean region threshold for the disk cache store.
+    /// Set the clean block threshold for the disk cache store.
     ///
-    /// The reclaimers only work when the clean region count is equal to or lower than the clean region threshold.
+    /// The reclaimers only work when the clean block count is equal to or lower than the clean block threshold.
     ///
     /// Default: the same value as the `reclaimers`.
-    pub fn with_clean_region_threshold(mut self, clean_region_threshold: usize) -> Self {
-        self.clean_region_threshold = clean_region_threshold;
+    pub fn with_clean_block_threshold(mut self, clean_block_threshold: usize) -> Self {
+        self.clean_block_threshold = clean_block_threshold;
         self
     }
 
     /// Set the eviction pickers for th disk cache store.
     ///
-    /// The eviction picker is used to pick the region to reclaim.
+    /// The eviction picker is used to pick the block to reclaim.
     ///
-    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any region, the next one
+    /// The eviction pickers are applied in order. If the previous eviction picker doesn't pick any block, the next one
     /// will be applied.
     ///
-    /// If no eviction picker picks a region, a region will be picked randomly.
+    /// If no eviction picker picks a block, a block will be picked randomly.
     ///
     /// Default: [ invalid ratio picker { threshold = 0.8 }, fifo picker ]
     pub fn with_eviction_pickers(mut self, eviction_pickers: Vec<Box<dyn EvictionPicker>>) -> Self {
@@ -293,7 +300,7 @@ where
         self
     }
 
-    /// Build the large object disk cache engine with the given configurations.
+    /// Build the block-based disk cache engine with the given configurations.
     pub async fn build(
         self: Box<Self>,
         EngineBuildContext {
@@ -302,9 +309,9 @@ where
             runtime,
             recover_mode,
         }: EngineBuildContext,
-    ) -> Result<Arc<LargeObjectEngine<K, V, P>>> {
+    ) -> Result<Arc<BlockEngine<K, V, P>>> {
         let device = self.device;
-        let region_size = self.region_size;
+        let block_size = self.block_size;
 
         let mut tombstones = vec![];
 
@@ -346,23 +353,23 @@ where
         );
         let reclaimer: Arc<dyn ReclaimerTrait> = Arc::new(reclaimer);
 
-        let region_manager = RegionManager::open(
+        let block_manager = BlockManager::open(
             device.clone(),
             io_engine,
-            region_size,
+            block_size,
             self.eviction_pickers,
             reclaimer,
             self.reclaimers,
-            self.clean_region_threshold,
+            self.clean_block_threshold,
             metrics.clone(),
             runtime.clone(),
         )?;
-        let regions = region_manager.regions();
+        let blocks = block_manager.blocks();
 
-        if self.flushers + self.clean_region_threshold > regions / 2 {
-            tracing::warn!("[lodc]: large object disk cache stable regions count is too small, flusher [{flushers}] + clean region threshold [{clean_region_threshold}] (default = reclaimers) is supposed to be much larger than the region count [{regions}]",
+        if self.flushers + self.clean_block_threshold > blocks / 2 {
+            tracing::warn!("[block engine]: block-based object disk cache stable blocks count is too small, flusher [{flushers}] + clean block threshold [{clean_block_threshold}] (default = reclaimers) is supposed to be much larger than the block count [{blocks}]",
                     flushers = self.flushers,
-                    clean_region_threshold = self.clean_region_threshold,
+                    clean_block_threshold = self.clean_block_threshold,
                 );
         }
 
@@ -372,10 +379,10 @@ where
             self.recover_concurrency,
             recover_mode,
             self.blob_index_size,
-            &(0..regions as RegionId).collect_vec(),
+            &(0..blocks as BlockId).collect_vec(),
             &sequence,
             &indexer,
-            &region_manager,
+            &block_manager,
             &tombstones,
             runtime.clone(),
             metrics.clone(),
@@ -389,12 +396,12 @@ where
         for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
             flusher.run(
                 rx,
-                region_size,
+                block_size,
                 io_buffer_size,
                 self.blob_index_size,
                 self.compression,
                 indexer.clone(),
-                region_manager.clone(),
+                block_manager.clone(),
                 tombstone_log.clone(),
                 metrics.clone(),
                 &runtime,
@@ -410,11 +417,11 @@ where
                 .build(),
         );
 
-        let inner = LargeObjectEngineInner {
+        let inner = BlockEngineInner {
             admission_picker,
             device,
             indexer,
-            region_manager,
+            block_manager,
             flushers,
             submit_queue_size,
             submit_queue_size_threshold: self.submit_queue_size_threshold,
@@ -426,13 +433,13 @@ where
             flush_holder,
         };
         let inner = Arc::new(inner);
-        let engine = LargeObjectEngine { inner };
+        let engine = BlockEngine { inner };
         let engine = Arc::new(engine);
         Ok(engine)
     }
 }
 
-impl<K, V, P> EngineConfig<K, V, P> for LargeObjectEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for BlockEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -443,28 +450,28 @@ where
     }
 }
 
-impl<K, V, P> From<LargeObjectEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
+impl<K, V, P> From<BlockEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    fn from(builder: LargeObjectEngineBuilder<K, V, P>) -> Self {
+    fn from(builder: BlockEngineBuilder<K, V, P>) -> Self {
         builder.boxed()
     }
 }
 
-/// Large object disk cache engine.
-pub struct LargeObjectEngine<K, V, P>
+/// Block-based disk cache engine.
+pub struct BlockEngine<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    inner: Arc<LargeObjectEngineInner<K, V, P>>,
+    inner: Arc<BlockEngineInner<K, V, P>>,
 }
 
-impl<K, V, P> Debug for LargeObjectEngine<K, V, P>
+impl<K, V, P> Debug for BlockEngine<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -475,7 +482,7 @@ where
     }
 }
 
-struct LargeObjectEngineInner<K, V, P>
+struct BlockEngineInner<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -486,7 +493,7 @@ where
     device: Arc<dyn Device>,
 
     indexer: Indexer,
-    region_manager: RegionManager,
+    block_manager: BlockManager,
 
     flushers: Vec<Flusher<K, V, P>>,
 
@@ -505,7 +512,7 @@ where
     flush_holder: FlushHolder,
 }
 
-impl<K, V, P> Clone for LargeObjectEngine<K, V, P>
+impl<K, V, P> Clone for BlockEngine<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -518,7 +525,7 @@ where
     }
 }
 
-impl<K, V, P> LargeObjectEngine<K, V, P>
+impl<K, V, P> BlockEngine<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -526,10 +533,10 @@ where
 {
     fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let flushers = self.inner.flushers.clone();
-        let region_manager = self.inner.region_manager.clone();
+        let block_manager = self.inner.block_manager.clone();
         async move {
             join_all(flushers.iter().map(|flusher| flusher.wait())).await;
-            region_manager.wait_reclaim().await;
+            block_manager.wait_reclaim().await;
         }
     }
 
@@ -545,7 +552,7 @@ where
 
     #[cfg_attr(
         feature = "tracing",
-        fastrace::trace(name = "foyer::storage::engine::large::generic::enqueue")
+        fastrace::trace(name = "foyer::storage::engine::block::generic::enqueue")
     )]
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
@@ -556,13 +563,13 @@ where
         tracing::trace!(
             hash = piece.hash(),
             source = ?piece.properties().source().unwrap_or_default(),
-            "[lodc]: enqueue"
+            "[block engine]: enqueue"
         );
         match piece.properties().source().unwrap_or_default() {
             Source::Populated(Populated { age }) => match age {
                 Age::Young => {
-                    // skip write lodc if the entry is still young
-                    self.inner.metrics.storage_lodc_enqueue_skip.increase(1);
+                    // skip write block engine if the entry is still young
+                    self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
                     return;
                 }
                 Age::Old => {}
@@ -585,11 +592,11 @@ where
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
-        tracing::trace!(hash, "[lodc]: load");
+        tracing::trace!(hash, "[block engine]: load");
 
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
-        let region_manager = self.inner.region_manager.clone();
+        let block_manager = self.inner.block_manager.clone();
 
         let load = async move {
             let addr = match indexer.get(hash) {
@@ -599,24 +606,24 @@ where
                 }
             };
 
-            tracing::trace!(hash, ?addr, "[lodc]: load");
+            tracing::trace!(hash, ?addr, "[block engine]: load");
 
-            let region = region_manager.region(addr.region);
-            if region.partition().statistics().is_read_throttled() {
+            let block = block_manager.block(addr.block);
+            if block.partition().statistics().is_read_throttled() {
                 return Ok(Load::Throttled);
             }
 
             let buf = IoSliceMut::new(bits::align_up(PAGE, addr.len as _));
-            let (buf, res) = region.read(Box::new(buf), addr.offset as _).await;
+            let (buf, res) = block.read(Box::new(buf), addr.offset as _).await;
             match res {
                 Ok(_) => {}
                 Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(?e, "[lodc load]: invalid io range, remove this entry and skip");
+                    tracing::warn!(?e, "[block engine load]: invalid io range, remove this entry and skip");
                     indexer.remove(hash);
                     return Ok(Load::Miss);
                 }
                 Err(e) => {
-                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
                     return Err(e);
                 }
             }
@@ -632,13 +639,13 @@ where
                         hash,
                         ?addr,
                         ?e,
-                        "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                        "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
                     );
                     indexer.remove(hash);
                     return Ok(Load::Miss);
                 }
                 Err(e) => {
-                    tracing::error!(hash, ?addr, ?e, "[lodc load]: load error");
+                    tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
                     return Err(e);
                 }
             };
@@ -662,13 +669,13 @@ where
                             ?addr,
                             ?header,
                             ?e,
-                            "[lodc load]: deserialize read buffer raise error, remove this entry and skip"
+                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
                         );
                         indexer.remove(hash);
                         return Ok(Load::Miss);
                     }
                     Err(e) => {
-                        tracing::error!(hash, ?addr, ?header, ?e, "[lodc load]: load error");
+                        tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
                         return Err(e);
                     }
                 };
@@ -678,7 +685,7 @@ where
                 res
             };
 
-            let age = match region.statistics().probation.load(Ordering::Relaxed) {
+            let age = match block.statistics().probation.load(Ordering::Relaxed) {
                 true => Age::Old,
                 false => Age::Young,
             };
@@ -691,7 +698,7 @@ where
         };
         #[cfg(feature = "tracing")]
         let load = load.in_span(Span::enter_with_local_parent(
-            "foyer::storage::engine::large::generic::load",
+            "foyer::storage::engine::block::generic::load",
         ));
         load
     }
@@ -708,7 +715,7 @@ where
             .indexer
             .insert_tombstone(hash, sequence)
             .map(|addr| InvalidStats {
-                region: addr.region,
+                block: addr.block,
                 size: bits::align_up(PAGE, addr.len as usize),
             });
 
@@ -747,12 +754,12 @@ where
             // otherwise the indices of the latest batch cannot be cleared.
             this.inner.indexer.clear();
 
-            // Clean regions.
-            try_join_all((0..this.inner.region_manager.regions() as RegionId).map(|id| {
-                let region = this.inner.region_manager.region(id).clone();
+            // Clean blocks.
+            try_join_all((0..this.inner.block_manager.blocks() as BlockId).map(|id| {
+                let block = this.inner.block_manager.block(id).clone();
                 async move {
-                    let res = RegionCleaner::clean(&region).await;
-                    region.statistics().reset();
+                    let res = BlockCleaner::clean(&block).await;
+                    block.statistics().reset();
                     res
                 }
             }))
@@ -774,7 +781,7 @@ where
     }
 }
 
-impl<K, V, P> Engine<K, V, P> for LargeObjectEngine<K, V, P>
+impl<K, V, P> Engine<K, V, P> for BlockEngine<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -859,15 +866,15 @@ mod tests {
         io::engine::psync::PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
-    /// 4 files, fifo eviction, 16 KiB region, 64 KiB capacity.
-    async fn engine_for_test(dir: impl AsRef<Path>) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
+    /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
+    async fn engine_for_test(dir: impl AsRef<Path>) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
         store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker>::default()).await
     }
 
     async fn store_for_test_with_reinsertion_picker(
         dir: impl AsRef<Path>,
         reinsertion_picker: Arc<dyn ReinsertionPicker>,
-    ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
+    ) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as _)
             .build()
@@ -875,15 +882,15 @@ mod tests {
         let io_engine = io_engine_for_test().await;
         let metrics = Arc::new(Metrics::noop());
         let runtime = Runtime::new(None, None, Handle::current());
-        let builder = LargeObjectEngineBuilder {
+        let builder = BlockEngineBuilder {
             device,
-            region_size: 16 * 1024,
+            block_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
-            clean_region_threshold: 1,
+            clean_block_threshold: 1,
             admission_picker: Arc::<AdmitAllPicker>::default(),
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_picker,
@@ -908,7 +915,7 @@ mod tests {
 
     async fn store_for_test_with_tombstone_log(
         dir: impl AsRef<Path>,
-    ) -> Arc<LargeObjectEngine<u64, Vec<u8>, TestProperties>> {
+    ) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as usize + ByteSize::kib(4).as_u64() as usize)
             .build()
@@ -916,15 +923,15 @@ mod tests {
         let io_engine = io_engine_for_test().await;
         let metrics = Arc::new(Metrics::noop());
         let runtime = Runtime::new(None, None, Handle::current());
-        let builder = LargeObjectEngineBuilder {
+        let builder = BlockEngineBuilder {
             device,
-            region_size: 16 * 1024,
+            block_size: 16 * 1024,
             compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
             reclaimers: 1,
-            clean_region_threshold: 1,
+            clean_block_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_picker: Arc::<AdmitAllPicker>::default(),
             reinsertion_picker: Arc::<RejectAllPicker>::default(),
@@ -947,7 +954,7 @@ mod tests {
     }
 
     fn enqueue(
-        store: &LargeObjectEngine<u64, Vec<u8>, TestProperties>,
+        store: &BlockEngine<u64, Vec<u8>, TestProperties>,
         entry: CacheEntry<u64, Vec<u8>, ModHasher, TestProperties>,
     ) {
         let estimated_size = EntrySerializer::estimated_size(entry.key(), entry.value());
@@ -1361,8 +1368,8 @@ mod tests {
             .build()
             .unwrap();
         let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
-        let engine = LargeObjectEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
-            .with_region_size(64 * KB)
+        let engine = BlockEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
+            .with_block_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {
                 io_engine,
@@ -1372,6 +1379,6 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(engine.inner.region_manager.regions(), (1 + 2 + 4) * MB / (64 * KB));
+        assert_eq!(engine.inner.block_manager.blocks(), (1 + 2 + 4) * MB / (64 * KB));
     }
 }

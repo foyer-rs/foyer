@@ -23,7 +23,7 @@ use foyer_common::{
 
 use crate::{
     compress::Compression,
-    engine::large::serde::{EntryHeader, Sequence},
+    engine::block::serde::{EntryHeader, Sequence},
     error::Error,
     io::{
         bytes::{IoSlice, IoSliceMut},
@@ -297,19 +297,19 @@ pub struct SplitCtx {
     current_part_blob_offset: usize,
     current_blob_index: BlobIndex,
 
-    current_blob_region_offset: usize,
+    current_blob_block_offset: usize,
 
-    region_size: usize,
+    block_size: usize,
     blob_index_size: usize,
 }
 
 impl SplitCtx {
-    pub fn new(region_size: usize, blob_index_size: usize) -> Self {
+    pub fn new(block_size: usize, blob_index_size: usize) -> Self {
         Self {
             current_part_blob_offset: blob_index_size,
             current_blob_index: BlobIndex::new(IoSliceMut::new(blob_index_size)),
-            current_blob_region_offset: 0,
-            region_size,
+            current_blob_block_offset: 0,
+            block_size,
             blob_index_size,
         }
     }
@@ -321,7 +321,7 @@ pub struct Splitter;
 impl Splitter {
     pub fn split(ctx: &mut SplitCtx, mut bytes: IoSlice, entry_infos: Vec<BufferEntryInfo>) -> Batch {
         let mut batch = Batch {
-            regions: vec![Region { blob_parts: vec![] }],
+            blocks: vec![Block { blob_parts: vec![] }],
             bytes: bytes.clone(),
         };
 
@@ -340,19 +340,19 @@ impl Splitter {
                 // Split blob if blob index is full.
                 if ctx.current_blob_index.is_full() {
                     if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
-                        batch.regions.last_mut().unwrap().blob_parts.push(part);
+                        batch.blocks.last_mut().unwrap().blob_parts.push(part);
                     }
                     continue 'handle;
                 }
 
-                // Split blob and region if region is full.
-                if ctx.current_blob_region_offset + ctx.current_part_blob_offset + part_size + info.aligned()
-                    > ctx.region_size
+                // Split blob and block if block is full.
+                if ctx.current_blob_block_offset + ctx.current_part_blob_offset + part_size + info.aligned()
+                    > ctx.block_size
                 {
                     if let Some(part) = Self::split_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
-                        batch.regions.last_mut().unwrap().blob_parts.push(part);
+                        batch.blocks.last_mut().unwrap().blob_parts.push(part);
                     }
-                    Self::split_region(ctx, &mut batch);
+                    Self::split_block(ctx, &mut batch);
                     continue 'handle;
                 }
 
@@ -374,7 +374,7 @@ impl Splitter {
         }
 
         if let Some(part) = Self::seal_blob(ctx, &mut indices, &mut part_size, &mut bytes) {
-            batch.regions.last_mut().unwrap().blob_parts.push(part);
+            batch.blocks.last_mut().unwrap().blob_parts.push(part);
         }
 
         batch
@@ -391,7 +391,7 @@ impl Splitter {
             // The blob part is empty, only need to set the state.
             assert_eq!(*part_size, 0);
             ctx.current_blob_index.reset();
-            ctx.current_blob_region_offset += ctx.current_part_blob_offset;
+            ctx.current_blob_block_offset += ctx.current_part_blob_offset;
             ctx.current_part_blob_offset = ctx.blob_index_size;
 
             None
@@ -403,14 +403,14 @@ impl Splitter {
             let indices = std::mem::take(indices);
 
             let part = BlobPart {
-                blob_region_offset: ctx.current_blob_region_offset,
+                blob_block_offset: ctx.current_blob_block_offset,
                 index,
                 part_blob_offset: ctx.current_part_blob_offset,
                 data: bytes.slice(..*part_size),
                 indices,
             };
 
-            ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + *part_size;
+            ctx.current_blob_block_offset = ctx.current_blob_block_offset + ctx.current_part_blob_offset + *part_size;
             ctx.current_part_blob_offset = ctx.blob_index_size;
             *bytes = bytes.slice(*part_size..);
             *part_size = 0;
@@ -419,10 +419,10 @@ impl Splitter {
         }
     }
 
-    fn split_region(ctx: &mut SplitCtx, batch: &mut Batch) {
-        tracing::trace!("[splitter]; split region");
-        batch.regions.push(Region { blob_parts: vec![] });
-        ctx.current_blob_region_offset = 0;
+    fn split_block(ctx: &mut SplitCtx, batch: &mut Batch) {
+        tracing::trace!("[splitter]; split block");
+        batch.blocks.push(Block { blob_parts: vec![] });
+        ctx.current_blob_block_offset = 0;
     }
 
     fn seal_blob(
@@ -443,7 +443,7 @@ impl Splitter {
         let indices = std::mem::take(indices);
 
         let part = BlobPart {
-            blob_region_offset: ctx.current_blob_region_offset,
+            blob_block_offset: ctx.current_blob_block_offset,
             index,
             part_blob_offset: ctx.current_part_blob_offset,
             data: shared_io_slice.slice(..*part_size),
@@ -453,7 +453,7 @@ impl Splitter {
         if ctx.current_blob_index.is_full() {
             tracing::trace!("[splitter]: seal blob, split blob because index is full");
             ctx.current_blob_index.reset();
-            ctx.current_blob_region_offset = ctx.current_blob_region_offset + ctx.current_part_blob_offset + *part_size;
+            ctx.current_blob_block_offset = ctx.current_blob_block_offset + ctx.current_part_blob_offset + *part_size;
             ctx.current_part_blob_offset = ctx.blob_index_size;
         } else {
             ctx.current_part_blob_offset += *part_size;
@@ -465,8 +465,8 @@ impl Splitter {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlobPart {
-    /// Blob offset to the region.
-    pub blob_region_offset: usize,
+    /// Blob offset to the block.
+    pub blob_block_offset: usize,
     pub index: IoSliceMut,
     /// Blob part offset to the blob.
     pub part_blob_offset: usize,
@@ -476,13 +476,13 @@ pub struct BlobPart {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Region {
+pub struct Block {
     pub blob_parts: Vec<BlobPart>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Batch {
-    pub regions: Vec<Region>,
+    pub blocks: Vec<Block>,
     pub bytes: IoSlice,
 }
 
@@ -519,12 +519,12 @@ mod tests {
 
     #[test_log::test]
     fn test_buffer() {
-        const REGION_SIZE: usize = 16 * KB;
+        const BLOCK_SIZE: usize = 16 * KB;
         const BLOB_INDEX_SIZE: usize = 4 * KB;
-        const MAX_ENTRY_SIZE: usize = REGION_SIZE - BLOB_INDEX_SIZE;
+        const MAX_ENTRY_SIZE: usize = BLOCK_SIZE - BLOB_INDEX_SIZE;
         const BATCH_SIZE: usize = 64 * KB;
 
-        let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
+        let mut ctx = SplitCtx::new(BLOCK_SIZE, BLOB_INDEX_SIZE);
 
         // 1. Test write single blob part.
 
@@ -547,10 +547,10 @@ mod tests {
             batch,
             Batch {
                 bytes: buf.clone(),
-                regions: vec![Region {
+                blocks: vec![Block {
                     blob_parts: vec![BlobPart {
-                        blob_region_offset: 0,
-                        index: batch.regions[0].blob_parts[0].index.clone(),
+                        blob_block_offset: 0,
+                        index: batch.blocks[0].blob_parts[0].index.clone(),
                         part_blob_offset: BLOB_INDEX_SIZE,
                         data: buf.slice(0..8 * KB),
                         indices: vec![
@@ -572,17 +572,17 @@ mod tests {
             }
         );
 
-        // 2. Test continue to write blob part and region split.
+        // 2. Test continue to write blob part and block split.
 
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
-        // 4K, region split
+        // 4K, block split
         assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4));
 
         // 8K
         assert!(buffer.push(&5u64, &vec![5u8; 7 * KB], 5, Compression::None, 5));
 
-        // 8K, region early split
+        // 8K, block early split
         assert!(buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, 6));
 
         let (buf, infos) = buffer.finish();
@@ -593,11 +593,11 @@ mod tests {
             batch,
             Batch {
                 bytes: buf.clone(),
-                regions: vec![
-                    Region {
+                blocks: vec![
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 0,
-                            index: batch.regions[0].blob_parts[0].index.clone(),
+                            blob_block_offset: 0,
+                            index: batch.blocks[0].blob_parts[0].index.clone(),
                             part_blob_offset: BLOB_INDEX_SIZE + 8 * KB,
                             data: buf.slice(0..4 * KB),
                             indices: vec![BlobEntryIndex {
@@ -608,10 +608,10 @@ mod tests {
                             }]
                         }]
                     },
-                    Region {
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 0,
-                            index: batch.regions[1].blob_parts[0].index.clone(),
+                            blob_block_offset: 0,
+                            index: batch.blocks[1].blob_parts[0].index.clone(),
                             part_blob_offset: BLOB_INDEX_SIZE,
                             data: buf.slice(4 * KB..12 * KB),
                             indices: vec![BlobEntryIndex {
@@ -622,10 +622,10 @@ mod tests {
                             }]
                         }]
                     },
-                    Region {
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 0,
-                            index: batch.regions[2].blob_parts[0].index.clone(),
+                            blob_block_offset: 0,
+                            index: batch.blocks[2].blob_parts[0].index.clone(),
                             part_blob_offset: BLOB_INDEX_SIZE,
                             data: buf.slice(12 * KB..20 * KB),
                             indices: vec![BlobEntryIndex {
@@ -640,11 +640,11 @@ mod tests {
             }
         );
 
-        // 3. Test leave first region empty.
+        // 3. Test leave first block empty.
 
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
-        // 8K, region split
+        // 8K, block split
         assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7));
 
         let (buf, infos) = buffer.finish();
@@ -655,12 +655,12 @@ mod tests {
             batch,
             Batch {
                 bytes: buf.clone(),
-                regions: vec![
-                    Region { blob_parts: vec![] },
-                    Region {
+                blocks: vec![
+                    Block { blob_parts: vec![] },
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 0,
-                            index: batch.regions[1].blob_parts[0].index.clone(),
+                            blob_block_offset: 0,
+                            index: batch.blocks[1].blob_parts[0].index.clone(),
                             part_blob_offset: BLOB_INDEX_SIZE,
                             data: buf.slice(0..8 * KB),
                             indices: vec![BlobEntryIndex {
@@ -677,16 +677,16 @@ mod tests {
     }
 
     #[test_log::test]
-    fn test_split_region_last_entry() {
+    fn test_split_block_last_entry() {
         const KB: usize = 1 << 10;
 
-        const REGION_SIZE: usize = 64 * KB;
+        const BLOCK_SIZE: usize = 64 * KB;
         const BLOB_INDEX_SIZE: usize = 4 * KB;
         const BATCH_SIZE: usize = 128 * KB;
 
         // Remain 4 KB in size and 1 entry in count.
-        let mut ctx = SplitCtx::new(REGION_SIZE, BLOB_INDEX_SIZE);
-        ctx.current_blob_region_offset = 40 * KB;
+        let mut ctx = SplitCtx::new(BLOCK_SIZE, BLOB_INDEX_SIZE);
+        ctx.current_blob_block_offset = 40 * KB;
         ctx.current_part_blob_offset = 16 * KB;
         ctx.current_blob_index.count = ctx.current_blob_index.capacity() - 1;
 
@@ -714,11 +714,11 @@ mod tests {
         assert_eq!(
             batch,
             Batch {
-                regions: vec![
-                    Region {
+                blocks: vec![
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 40 * KB,
-                            index: batch.regions[0].blob_parts[0].index.clone(),
+                            blob_block_offset: 40 * KB,
+                            index: batch.blocks[0].blob_parts[0].index.clone(),
                             part_blob_offset: 16 * KB,
                             data: shared_io_slice.slice(0..4 * KB),
                             indices: vec![BlobEntryIndex {
@@ -729,10 +729,10 @@ mod tests {
                             }]
                         }]
                     },
-                    Region {
+                    Block {
                         blob_parts: vec![BlobPart {
-                            blob_region_offset: 0,
-                            index: batch.regions[1].blob_parts[0].index.clone(),
+                            blob_block_offset: 0,
+                            index: batch.blocks[1].blob_parts[0].index.clone(),
                             part_blob_offset: 4 * KB,
                             data: shared_io_slice.slice(4 * KB..8 * KB),
                             indices: vec![BlobEntryIndex {

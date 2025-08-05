@@ -21,7 +21,7 @@ use std::{path::Path, sync::Arc};
 use foyer_common::{hasher::ModHasher, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 use foyer_storage::{
-    test_utils::Recorder, Compression, DeviceBuilder, FsDeviceBuilder, LargeObjectEngineBuilder, StoreBuilder,
+    test_utils::Recorder, BlockEngineBuilder, Compression, DeviceBuilder, FsDeviceBuilder, StoreBuilder,
 };
 
 const KB: usize = 1024;
@@ -108,9 +108,9 @@ fn basic(
 ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_config(
-        LargeObjectEngineBuilder::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())
+        BlockEngineBuilder::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())
             .with_admission_picker(recorder.clone())
-            .with_region_size(MB)
+            .with_block_size(MB)
             .with_recover_concurrency(2)
             .with_indexer_shards(4)
             .with_reinsertion_picker(recorder.clone()),

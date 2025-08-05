@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use foyer::{
-    Code, CodeResult, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    LargeObjectEngineBuilder, StorageValue,
+    BlockEngineBuilder, Code, CodeResult, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    HybridCachePolicy, StorageValue,
 };
 
 #[cfg(feature = "serde")]
@@ -70,7 +70,7 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(64 * 1024 * 1024)
         .storage()
-        .with_engine_config(LargeObjectEngineBuilder::new(device))
+        .with_engine_config(BlockEngineBuilder::new(device))
         .build()
         .await?;
 

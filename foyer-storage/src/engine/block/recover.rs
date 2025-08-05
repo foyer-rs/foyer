@@ -27,10 +27,10 @@ use tokio::sync::Semaphore;
 use super::indexer::{EntryAddress, Indexer};
 use crate::{
     engine::{
-        large::{
+        block::{
             indexer::HashedEntryAddress,
-            region::{Region, RegionId, RegionManager},
-            scanner::{EntryInfo, RegionScanner},
+            manager::{Block, BlockId, BlockManager},
+            scanner::{BlockScanner, EntryInfo},
             serde::{AtomicSequence, Sequence},
             tombstone::Tombstone,
         },
@@ -49,25 +49,25 @@ impl RecoverRunner {
         recover_concurrency: usize,
         recover_mode: RecoverMode,
         blob_index_size: usize,
-        regions: &[RegionId],
+        blocks: &[BlockId],
         sequence: &AtomicSequence,
         indexer: &Indexer,
-        region_manager: &RegionManager,
+        block_manager: &BlockManager,
         tombstones: &[Tombstone],
         runtime: Runtime,
         metrics: Arc<Metrics>,
     ) -> Result<()> {
         let now = Instant::now();
 
-        // Recover regions concurrently.
+        // Recover blocks concurrently.
         let semaphore = Arc::new(Semaphore::new(recover_concurrency));
         let mode = recover_mode;
-        let handles = regions.iter().map(|id| {
+        let handles = blocks.iter().map(|id| {
             let semaphore = semaphore.clone();
-            let region = region_manager.region(*id).clone();
+            let block = block_manager.block(*id).clone();
             runtime.user().spawn(async move {
                 let permit = semaphore.acquire().await;
-                let res = RegionRecoverRunner::run(mode, region, blob_index_size).await;
+                let res = BlockRecoverRunner::run(mode, block, blob_index_size).await;
                 drop(permit);
                 res
             })
@@ -90,15 +90,15 @@ impl RecoverRunner {
         // Dedup entries.
         let mut latest_sequence = 0;
         let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstone)>> = HashMap::new();
-        let mut clean_regions = vec![];
-        let mut evictable_regions = vec![];
-        for (region, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
-            let region = region as RegionId;
+        let mut clean_blocks = vec![];
+        let mut evictable_blocks = vec![];
+        for (block, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
+            let block = block as BlockId;
 
             if infos.is_empty() {
-                clean_regions.push(region);
+                clean_blocks.push(block);
             } else {
-                evictable_regions.push(region);
+                evictable_blocks.push(block);
             }
 
             for EntryInfo { hash, addr } in infos {
@@ -133,9 +133,9 @@ impl RecoverRunner {
 
         // Log recovery.
         tracing::info!(
-            "Recovers {e} regions with data, {c} clean regions, {t} total entries with max sequence as {s}..",
-            e = evictable_regions.len(),
-            c = clean_regions.len(),
+            "Recovers {e} blocks with data, {c} clean blocks, {t} total entries with max sequence as {s}..",
+            e = evictable_blocks.len(),
+            c = clean_blocks.len(),
             t = indices.len(),
             s = latest_sequence,
         );
@@ -143,30 +143,32 @@ impl RecoverRunner {
         // Update components.
         indexer.insert_batch(indices);
         sequence.store(latest_sequence + 1, Ordering::Release);
-        region_manager.init(&clean_regions);
+        block_manager.init(&clean_blocks);
 
         let elapsed = now.elapsed();
         tracing::info!("[recover] finish in {:?}", elapsed);
 
-        metrics.storage_lodc_recover_duration.record(elapsed.as_secs_f64());
+        metrics
+            .storage_block_engine_recover_duration
+            .record(elapsed.as_secs_f64());
 
         Ok(())
     }
 }
 
 #[derive(Debug)]
-struct RegionRecoverRunner;
+struct BlockRecoverRunner;
 
-impl RegionRecoverRunner {
-    async fn run(mode: RecoverMode, region: Region, blob_index_size: usize) -> Result<Vec<EntryInfo>> {
+impl BlockRecoverRunner {
+    async fn run(mode: RecoverMode, block: Block, blob_index_size: usize) -> Result<Vec<EntryInfo>> {
         if mode == RecoverMode::None {
             return Ok(vec![]);
         }
 
         let mut recovered = vec![];
 
-        let id = region.id();
-        let mut iter = RegionScanner::new(region, blob_index_size);
+        let id = block.id();
+        let mut iter = BlockScanner::new(block, blob_index_size);
         'recover: loop {
             let r = iter.next().await;
             let infos = match r {
@@ -176,7 +178,7 @@ impl RegionRecoverRunner {
                     if mode == RecoverMode::Strict {
                         return Err(e);
                     } else {
-                        tracing::warn!("error raised when recovering region {id}, skip further recovery for {id}.");
+                        tracing::warn!("error raised when recovering block {id}, skip further recovery for {id}.");
                         break;
                     }
                 }

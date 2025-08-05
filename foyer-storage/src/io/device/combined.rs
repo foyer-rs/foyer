@@ -22,7 +22,7 @@ use crate::{
     RawFile, Statistics, Throttle,
 };
 
-/// Builder for a combined device that wraps multiple devices and allows access to their regions.
+/// Builder for a combined device that wraps multiple devices and allows access to their blocks.
 ///
 /// The throttle and statistics of the combined device will override the inner devices' throttles and statistics.
 ///

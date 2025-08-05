@@ -289,7 +289,7 @@ jobs:
         run: |
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine psync
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine psync
       - name: Run foyer-bench with coverage (insertion, psync)
         env:
           RUST_BACKTRACE: 1
@@ -297,7 +297,7 @@ jobs:
         run: |
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine psync
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine psync
       - name: Run foyer-bench with coverage (eviction, io_uring)
         env:
           RUST_BACKTRACE: 1
@@ -305,7 +305,7 @@ jobs:
         run: |
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine io_uring
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine io_uring
       - name: Run foyer-bench with coverage (insertion, io_uring)
         env:
           RUST_BACKTRACE: 1
@@ -313,7 +313,7 @@ jobs:
         run: |
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine io_uring
+          cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine io_uring
       
       # - name: Run foyer-bench with coverage (large, eviction)
       #   env:
@@ -322,7 +322,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction
       # - name: Run foyer-bench with coverage (large, insertion)
       #   env:
       #     RUST_BACKTRACE: 1
@@ -330,7 +330,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine large --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion
       # - name: Run foyer-bench with coverage (small, eviction)
       #   env:
       #     RUST_BACKTRACE: 1
@@ -338,7 +338,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy eviction
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy eviction
       # - name: Run foyer-bench with coverage (small, insertion)
       #   env:
       #     RUST_BACKTRACE: 1
@@ -346,7 +346,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy insertion
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine small --mem 4MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 1MiB --entry-size-min 1KiB --entry-size-max 24KiB --time 60 --policy insertion
       # - name: Run foyer-bench with coverage (mixed, eviction)
       #   env:
       #     RUST_BACKTRACE: 1
@@ -354,7 +354,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy eviction
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy eviction
       # - name: Run foyer-bench with coverage (mixed, insertion)
       #   env:
       #     RUST_BACKTRACE: 1
@@ -362,7 +362,7 @@ jobs:
       #   run: |
       #     rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
       #     mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov
-      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy insertion
+      #     cargo llvm-cov --no-report run --package foyer-bench --bin foyer-bench --features "strict_assertions" -- --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/codecov --engine mixed=0.1 --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 1KiB --entry-size-max 128KiB --time 60 --policy insertion
       - name: Generate codecov report
         run: |
           cargo llvm-cov report --lcov --output-path lcov.info
@@ -461,7 +461,7 @@ jobs:
         run: |-
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine psync
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine psync
       - name: Run foyer-bench with single worker thread and deadlock detection (insertion, psync)
         env:
           RUST_BACKTRACE: 1
@@ -472,7 +472,7 @@ jobs:
         run: |-
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine psync
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine psync
       - name: Run foyer-bench with single worker thread and deadlock detection (eviction, io_uring)
         env:
           RUST_BACKTRACE: 1
@@ -483,7 +483,7 @@ jobs:
         run: |-
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine io_uring
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy eviction --io-engine io_uring
       - name: Run foyer-bench with single worker thread and deadlock detection (insertion, io_uring)
         env:
           RUST_BACKTRACE: 1
@@ -494,7 +494,7 @@ jobs:
         run: |-
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
-          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine io_uring
+          timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine io_uring
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
@@ -536,7 +536,7 @@ jobs:
         run: |-
           cargo +$RUST_TOOLCHAIN_NIGHTLY build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
-          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --region-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
+          timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
       - name: Prepare Artifacts on Failure
         if: ${{ failure() }}
         run: |-

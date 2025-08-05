@@ -74,7 +74,7 @@ pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
 pub trait IoEngine: Send + Sync + 'static + Debug {
     /// Read data into the buffer from the specified partition and offset.
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
-    /// Write data from the buffer to the specified region and offset.
+    /// Write data from the buffer to the specified block and offset.
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle;
 }
 
