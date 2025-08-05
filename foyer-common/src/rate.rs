@@ -46,7 +46,8 @@ impl RateLimiter {
     /// Consume some quota from the rate limiter.
     ///
     /// If there is not enough quota left, return a duration for the caller to wait.
-    pub fn consume(&self, weight: f64) -> Option<Duration> {
+    /// Otherwise, return [`Duration::ZERO`] indicating no need to wait.
+    pub fn consume(&self, weight: f64) -> Duration {
         let mut inner = self.inner.lock();
         let now = Instant::now();
         let refill = now.duration_since(inner.last).as_secs_f64() * self.rate;
@@ -54,10 +55,9 @@ impl RateLimiter {
         inner.quota = f64::min(inner.quota + refill, self.rate);
         inner.quota -= weight;
         if inner.quota >= 0.0 {
-            return None;
+            return Duration::ZERO;
         }
-        let wait = Duration::from_secs_f64((-inner.quota) / self.rate);
-        Some(wait)
+        Duration::from_secs_f64((-inner.quota) / self.rate)
     }
 }
 
@@ -88,7 +88,8 @@ mod tests {
                 if start.elapsed() >= DURATION {
                     break;
                 }
-                if let Some(dur) = limiter.consume(rate as f64) {
+                let dur = limiter.consume(rate as f64);
+                if !dur.is_zero() {
                     std::thread::sleep(dur);
                 }
                 v.fetch_add(rate, Ordering::Relaxed);

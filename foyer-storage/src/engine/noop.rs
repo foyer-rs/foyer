@@ -22,10 +22,10 @@ use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
-    engine::{Engine, EngineBuildContext, EngineBuilder},
+    engine::{Engine, EngineBuildContext, EngineConfig},
     error::Result,
     keeper::PieceRef,
-    Load,
+    Device, DeviceBuilder, Load, NoopDeviceBuilder, Pick,
 };
 
 pub struct NoopEngineBuilder<K, V, P>(PhantomData<(K, V, P)>)
@@ -63,11 +63,16 @@ where
     P: Properties,
 {
     pub fn build(self) -> Arc<NoopEngine<K, V, P>> {
-        Arc::new(NoopEngine { marker: PhantomData })
+        let device = NoopDeviceBuilder::default().build().unwrap();
+        let device: Arc<dyn Device> = device;
+        Arc::new(NoopEngine {
+            device,
+            marker: PhantomData,
+        })
     }
 }
 
-impl<K, V, P> EngineBuilder<K, V, P> for NoopEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for NoopEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -78,7 +83,7 @@ where
     }
 }
 
-impl<K, V, P> From<NoopEngineBuilder<K, V, P>> for Box<dyn EngineBuilder<K, V, P>>
+impl<K, V, P> From<NoopEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
@@ -95,6 +100,7 @@ where
     V: StorageValue,
     P: Properties,
 {
+    device: Arc<dyn Device>,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -115,6 +121,14 @@ where
     V: StorageValue,
     P: Properties,
 {
+    fn device(&self) -> &Arc<dyn Device> {
+        &self.device
+    }
+
+    fn pick(&self, _: u64) -> Pick {
+        Pick::Reject
+    }
+
     fn enqueue(&self, _: PieceRef<K, V, P>, _: usize) {}
 
     fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {

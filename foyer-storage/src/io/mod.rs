@@ -16,6 +16,5 @@ pub mod bytes;
 pub mod device;
 pub mod engine;
 pub mod error;
-pub mod throttle;
 
 pub const PAGE: usize = 4096;

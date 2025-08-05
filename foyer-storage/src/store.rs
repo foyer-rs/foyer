@@ -36,24 +36,15 @@ use crate::test_utils::*;
 use crate::{
     compress::Compression,
     engine::{
-        large::engine::LargeObjectEngineBuilder,
         noop::{NoopEngine, NoopEngineBuilder},
-        Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
+        Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },
     error::{Error, Result},
-    io::{
-        device::{
-            noop::{NoopDevice, NoopDeviceBuilder},
-            DeviceBuilder,
-        },
-        engine::{monitor::MonitoredIoEngine, noop::NoopIoEngineBuilder, psync::PsyncIoEngineBuilder, IoEngineBuilder},
-        throttle::Throttle,
-    },
+    io::engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngineBuilder},
     keeper::Keeper,
     runtime::Runtime,
     serde::EntrySerializer,
-    statistics::Statistics,
-    AdmissionPicker, AdmitAllPicker, ChainedAdmissionPickerBuilder, IoThrottlerPicker, IoThrottlerTarget, Pick,
+    Device, IoEngine, Pick, Statistics, Throttle,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -79,15 +70,10 @@ where
     keeper: Keeper<K, V, P>,
     engine: Arc<dyn Engine<K, V, P>>,
 
-    admission_picker: Arc<dyn AdmissionPicker>,
-    load_throttler: Option<IoThrottlerPicker>,
-
     compression: Compression,
 
     runtime: Runtime,
 
-    throttle: Throttle,
-    statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
 
     #[cfg(feature = "test_utils")]
@@ -105,8 +91,6 @@ where
         f.debug_struct("Store")
             .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
-            .field("admission_picker", &self.inner.admission_picker)
-            .field("load_throttler", &self.inner.load_throttler)
             .field("compression", &self.inner.compression)
             .field("runtimes", &self.inner.runtime)
             .finish()
@@ -143,7 +127,7 @@ where
 
     /// Return if the given key can be picked by the admission picker.
     pub fn pick(&self, hash: u64) -> Pick {
-        self.inner.admission_picker.pick(&self.inner.statistics, hash)
+        self.inner.engine.pick(hash)
     }
 
     /// Push a in-memory cache piece to the disk cache write queue.
@@ -189,30 +173,6 @@ where
                 .storage_throttled_duration
                 .record(now.elapsed().as_secs_f64());
             return Ok(Load::Throttled);
-        }
-
-        if let Some(throttler) = self.inner.load_throttler.as_ref() {
-            match throttler.pick(&self.inner.statistics, hash) {
-                Pick::Admit => {}
-                Pick::Reject => unreachable!(),
-                Pick::Throttled(_) => {
-                    if self.inner.engine.may_contains(hash) {
-                        self.inner.metrics.storage_throttled.increase(1);
-                        self.inner
-                            .metrics
-                            .storage_throttled_duration
-                            .record(now.elapsed().as_secs_f64());
-                        return Ok(Load::Throttled);
-                    } else {
-                        self.inner.metrics.storage_miss.increase(1);
-                        self.inner
-                            .metrics
-                            .storage_miss_duration
-                            .record(now.elapsed().as_secs_f64());
-                        return Ok(Load::Miss);
-                    }
-                }
-            }
         }
 
         let future = self.inner.engine.load(hash);
@@ -297,14 +257,19 @@ where
         self.inner.engine.destroy().await
     }
 
+    /// Get the device of the disk cache.
+    pub fn device(&self) -> &Arc<dyn Device> {
+        self.inner.engine.device()
+    }
+
     /// Get the statistics information of the disk cache.
     pub fn statistics(&self) -> &Arc<Statistics> {
-        &self.inner.statistics
+        self.inner.engine.device().statistics()
     }
 
     /// Get the io throttle of the disk cache.
     pub fn throttle(&self) -> &Throttle {
-        &self.inner.throttle
+        self.inner.engine.device().statistics().throttle()
     }
 
     /// Get the runtime.
@@ -383,13 +348,11 @@ where
     memory: Cache<K, V, S, P>,
     metrics: Arc<Metrics>,
 
-    device_builder: Box<dyn DeviceBuilder>,
-    io_engine_builder: Box<dyn IoEngineBuilder>,
-    engine_builder: Box<dyn EngineBuilder<K, V, P>>,
+    io_engine: Option<Arc<dyn IoEngine>>,
+    engine_builder: Option<Box<dyn EngineConfig<K, V, P>>>,
 
     runtime_config: RuntimeOptions,
 
-    admission_picker: Arc<dyn AdmissionPicker>,
     compression: Compression,
     recover_mode: RecoverMode,
 }
@@ -406,11 +369,9 @@ where
             .field("name", &self.name)
             .field("memory", &self.memory)
             .field("metrics", &self.metrics)
-            .field("device_builder", &self.device_builder)
-            .field("io_engine_builder", &self.io_engine_builder)
+            .field("io_engine", &self.io_engine)
             .field("engine_builder", &self.engine_builder)
             .field("runtime_config", &self.runtime_config)
-            .field("admission_picker", &self.admission_picker)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
             .finish()
@@ -431,33 +392,27 @@ where
             memory,
             metrics,
 
-            device_builder: Box::<NoopDeviceBuilder>::default(),
-            io_engine_builder: PsyncIoEngineBuilder::new().boxed(),
-            engine_builder: LargeObjectEngineBuilder::new().boxed(),
+            io_engine: None,
+            engine_builder: None,
 
             runtime_config: RuntimeOptions::Disabled,
 
-            admission_picker: Arc::<AdmitAllPicker>::default(),
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
         }
     }
 
-    /// Set device builder for the disk cache store.
-    pub fn with_device_builder(mut self, builder: impl Into<Box<dyn DeviceBuilder>>) -> Self {
-        self.device_builder = builder.into();
+    /// Set io engine for the disk cache store.
+    ///
+    /// Default: [`crate::io::engine::psync::PsyncIoEngine`].
+    pub fn with_io_engine(mut self, io_engine: Arc<dyn IoEngine>) -> Self {
+        self.io_engine = Some(io_engine);
         self
     }
 
-    /// Set io engine builder for the disk cache store.
-    pub fn with_io_engine_builder(mut self, builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
-        self.io_engine_builder = builder.into();
-        self
-    }
-
-    /// Set engine builder for the disk cache store.
-    pub fn with_engine_builder(mut self, builder: impl Into<Box<dyn EngineBuilder<K, V, P>>>) -> Self {
-        self.engine_builder = builder.into();
+    /// Set engine config for the disk cache store.
+    pub fn with_engine_config(mut self, config: impl Into<Box<dyn EngineConfig<K, V, P>>>) -> Self {
+        self.engine_builder = Some(config.into());
         self
     }
 
@@ -479,16 +434,6 @@ where
         self
     }
 
-    /// Set the admission pickers for th disk cache store.
-    ///
-    /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
-    ///
-    /// Default: [`AdmitAllPicker`].
-    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker>) -> Self {
-        self.admission_picker = admission_picker;
-        self
-    }
-
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
         self.runtime_config = runtime_options;
@@ -497,14 +442,13 @@ where
 
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
-        (*self.device_builder).type_id() == TypeId::of::<Arc<NoopDeviceBuilder>>()
+        self.io_engine.is_none()
     }
 
     /// Build the disk cache store with the given configuration.
-    pub async fn build(mut self) -> Result<Store<K, V, S, P>> {
+    pub async fn build(self) -> Result<Store<K, V, S, P>> {
         let memory = self.memory.clone();
         let metrics = self.metrics.clone();
-        let mut admission_picker = self.admission_picker.clone();
 
         let compression = self.compression;
 
@@ -549,45 +493,34 @@ where
         };
         let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
-        let device = self.device_builder.build()?;
-        let throttle = device.throttle().clone();
-        let statistics = Arc::new(Statistics::new(throttle.iops_counter.clone()));
-        if device.type_id() == TypeId::of::<Arc<NoopDevice>>() {
-            tracing::info!("[store builder]: No device is provided, run disk cache in mock mode that do nothing.");
-            self.io_engine_builder = Box::<NoopIoEngineBuilder>::default();
-            self.engine_builder = Box::<NoopEngineBuilder<K, V, P>>::default();
-        }
+        let io_engine = match self.io_engine {
+            Some(ie) => ie,
+            None => {
+                tracing::info!("[store builder]: No I/O engine is provided, use `PsyncIoEngine` with default parameters as default.");
+                PsyncIoEngineBuilder::new().build().await?
+            }
+        };
+        let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
 
-        let io_engine = self.io_engine_builder.build(runtime.clone())?;
-        let io_engine = MonitoredIoEngine::new(io_engine, statistics.clone(), metrics.clone());
-        let engine = self
-            .engine_builder
+        let engine_builder = match self.engine_builder {
+            Some(eb) => eb,
+            None => {
+                tracing::info!(
+                    "[store builder]: No engine builder is provided, run disk cache in mock mode that do nothing."
+                );
+
+                Box::<NoopEngineBuilder<K, V, P>>::default()
+            }
+        };
+
+        let engine = engine_builder
             .build(EngineBuildContext {
-                device,
                 io_engine,
                 metrics: metrics.clone(),
-                statistics: statistics.clone(),
                 runtime: runtime.clone(),
                 recover_mode: self.recover_mode,
             })
             .await?;
-
-        if throttle.write_throughput.is_some() || throttle.write_iops.is_some() {
-            tracing::debug!(?throttle, "[store builder]: Device is throttled.");
-            admission_picker = Arc::new(
-                ChainedAdmissionPickerBuilder::default()
-                    .chain(Arc::new(IoThrottlerPicker::new(
-                        IoThrottlerTarget::Write,
-                        throttle.write_throughput,
-                        throttle.write_iops,
-                    )))
-                    .chain(admission_picker)
-                    .build(),
-            );
-        }
-        let load_throttler = (throttle.read_throughput.is_some() || throttle.read_iops.is_some()).then_some(
-            IoThrottlerPicker::new(IoThrottlerTarget::Read, throttle.read_throughput, throttle.read_iops),
-        );
 
         let keeper = Keeper::new(memory.shards());
         let hasher = memory.hash_builder().clone();
@@ -595,14 +528,9 @@ where
             hasher,
             keeper,
             engine,
-            admission_picker,
-            load_throttler,
             compression,
             runtime,
-            throttle,
             metrics,
-            statistics,
-
             #[cfg(feature = "test_utils")]
             load_throttle_switch: LoadThrottleSwitch::default(),
         };
@@ -622,6 +550,7 @@ mod tests {
     use crate::{
         engine::large::engine::LargeObjectEngineBuilder,
         io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineBuilder},
+        DeviceBuilder,
     };
 
     #[tokio::test]
@@ -630,13 +559,17 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
-            .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(64 * 1024))
-            .with_io_engine_builder(PsyncIoEngineBuilder::new())
-            .with_engine_builder(
-                LargeObjectEngineBuilder::new()
-                    .with_flushers(3)
-                    .with_region_size(16 * 1024)
-                    .with_buffer_pool_size(128 * 1024 * 1024),
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_engine_config(
+                LargeObjectEngineBuilder::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(64 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_flushers(3)
+                .with_region_size(16 * 1024)
+                .with_buffer_pool_size(128 * 1024 * 1024),
             )
             .build()
             .await
@@ -656,9 +589,16 @@ mod tests {
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
         let store = StoreBuilder::new("test", memory, metrics)
-            .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(4 * 1024 * 1024))
-            .with_io_engine_builder(PsyncIoEngineBuilder::new())
-            .with_engine_builder(LargeObjectEngineBuilder::new().with_region_size(16 * 1024))
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_engine_config(
+                LargeObjectEngineBuilder::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_region_size(16 * 1024),
+            )
             .build()
             .await
             .unwrap();

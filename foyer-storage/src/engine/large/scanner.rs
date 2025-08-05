@@ -114,7 +114,7 @@ mod tests {
             engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
             PAGE,
         },
-        Compression, Runtime,
+        Compression,
     };
 
     const KB: usize = 1024;
@@ -122,13 +122,12 @@ mod tests {
     async fn device_for_test(dir: impl AsRef<Path>, file_size: usize, files: usize) -> Arc<dyn Device> {
         FsDeviceBuilder::new(dir)
             .with_capacity(file_size * files)
-            .boxed()
             .build()
             .unwrap()
     }
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
-        PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap()
+        PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
     #[test_log::test(tokio::test)]

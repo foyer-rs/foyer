@@ -16,9 +16,8 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
+        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
         error::IoResult,
-        throttle::Throttle,
     },
     RawFile,
 };
@@ -43,11 +42,12 @@ impl Default for NoopDeviceBuilder {
 }
 
 impl DeviceBuilder for NoopDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
+        let statistics = Arc::new(Statistics::new(Throttle::default()));
         Ok(Arc::new(NoopDevice {
             partitions: RwLock::new(vec![]),
             capacity: self.capacity,
-            throttle: Throttle::default(),
+            statistics,
         }))
     }
 }
@@ -58,7 +58,7 @@ pub struct NoopDevice {
 
     capacity: usize,
 
-    throttle: Throttle,
+    statistics: Arc<Statistics>,
 }
 
 impl Device for NoopDevice {
@@ -73,7 +73,11 @@ impl Device for NoopDevice {
     fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let id = partitions.len() as PartitionId;
-        let partition = Arc::new(NoopPartition { id, size });
+        let partition = Arc::new(NoopPartition {
+            id,
+            size,
+            statistics: self.statistics.clone(),
+        });
         partitions.push(partition.clone());
         Ok(partition)
     }
@@ -86,15 +90,26 @@ impl Device for NoopDevice {
         self.partitions.read().unwrap()[id as usize].clone()
     }
 
-    fn throttle(&self) -> &Throttle {
-        &self.throttle
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct NoopPartition {
     id: PartitionId,
     size: usize,
+    statistics: Arc<Statistics>,
+}
+
+impl Default for NoopPartition {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            size: 0,
+            statistics: Arc::new(Statistics::new(Throttle::default())),
+        }
+    }
 }
 
 impl Partition for NoopPartition {
@@ -108,5 +123,9 @@ impl Partition for NoopPartition {
 
     fn translate(&self, _: u64) -> (RawFile, u64) {
         (RawFile(0 as _), 0)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }

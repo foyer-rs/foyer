@@ -18,12 +18,15 @@ use crate::{
     io::{
         device::{Device, DeviceBuilder, Partition, PartitionId},
         error::{IoError, IoResult},
-        throttle::Throttle,
     },
-    RawFile,
+    RawFile, Statistics, Throttle,
 };
 
 /// Builder for a combined device that wraps multiple devices and allows access to their regions.
+///
+/// The throttle and statistics of the combined device will override the inner devices' throttles and statistics.
+///
+/// NOTE: The kind of device is a preview, the throttle and statistics strategy is likely to be modified later.
 #[derive(Debug)]
 pub struct CombinedDeviceBuilder {
     devices: Vec<Arc<dyn Device>>,
@@ -37,7 +40,7 @@ impl Default for CombinedDeviceBuilder {
 }
 
 impl CombinedDeviceBuilder {
-    /// Create a new combined device builder with empty devices..
+    /// Create a new combined device builder with empty devices.
     pub fn new() -> Self {
         Self {
             devices: vec![],
@@ -61,10 +64,10 @@ impl CombinedDeviceBuilder {
 }
 
 impl DeviceBuilder for CombinedDeviceBuilder {
-    fn build(self: Box<Self>) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> IoResult<Arc<dyn Device>> {
         let device = CombinedDevice {
             devices: self.devices,
-            throttle: self.throttle,
+            statistics: Arc::new(Statistics::new(self.throttle)),
             inner: RwLock::new(Inner {
                 partitions: vec![],
                 next: 0,
@@ -85,8 +88,8 @@ struct Inner {
 #[derive(Debug)]
 pub struct CombinedDevice {
     devices: Vec<Arc<dyn Device>>,
-    throttle: Throttle,
     inner: RwLock<Inner>,
+    statistics: Arc<Statistics>,
 }
 
 impl Device for CombinedDevice {
@@ -124,6 +127,7 @@ impl Device for CombinedDevice {
                     let partition = CombinedPartition {
                         inner: p,
                         id: inner.partitions.len() as PartitionId,
+                        statistics: self.statistics.clone(),
                     };
                     let partition = Arc::new(partition);
                     inner.partitions.push(partition.clone());
@@ -144,8 +148,8 @@ impl Device for CombinedDevice {
         self.inner.read().unwrap().partitions[id as usize].clone()
     }
 
-    fn throttle(&self) -> &Throttle {
-        &self.throttle
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }
 
@@ -153,6 +157,7 @@ impl Device for CombinedDevice {
 pub struct CombinedPartition {
     inner: Arc<dyn Partition>,
     id: PartitionId,
+    statistics: Arc<Statistics>,
 }
 
 impl Partition for CombinedPartition {
@@ -166,5 +171,9 @@ impl Partition for CombinedPartition {
 
     fn translate(&self, address: u64) -> (RawFile, u64) {
         self.inner.translate(address)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 }

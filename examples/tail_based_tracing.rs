@@ -14,7 +14,9 @@
 
 use std::time::Duration;
 
-use foyer::{FsDeviceBuilder, HybridCache, HybridCacheBuilder, TracingOptions};
+use foyer::{
+    DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, LargeObjectEngineBuilder, TracingOptions,
+};
 
 #[cfg(feature = "jaeger")]
 fn init_jaeger_exporter() {
@@ -72,10 +74,14 @@ async fn main() -> anyhow::Result<()> {
 
     let dir = tempfile::tempdir()?;
 
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(256 * 1024 * 1024)
+        .build()?;
+
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
         .storage()
-        .with_device_builder(FsDeviceBuilder::new(dir.path()).with_capacity(256 * 1024 * 1024))
+        .with_engine_config(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;
 

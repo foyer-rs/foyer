@@ -16,19 +16,15 @@ use std::{fmt::Debug, sync::Arc, time::Instant};
 
 use foyer_common::metrics::Metrics;
 
-use crate::{
-    io::{
-        bytes::{IoBuf, IoBufMut},
-        device::Partition,
-        engine::{IoEngine, IoHandle},
-    },
-    Statistics,
+use crate::io::{
+    bytes::{IoBuf, IoBufMut},
+    device::Partition,
+    engine::{IoEngine, IoHandle},
 };
 
 #[derive(Debug)]
 struct Inner {
     io_engine: Arc<dyn IoEngine>,
-    statistics: Arc<Statistics>,
     metrics: Arc<Metrics>,
 }
 
@@ -38,12 +34,8 @@ pub struct MonitoredIoEngine {
 }
 
 impl MonitoredIoEngine {
-    pub fn new(io_engine: Arc<dyn IoEngine>, statistics: Arc<Statistics>, metrics: Arc<Metrics>) -> Arc<Self> {
-        let inner = Inner {
-            io_engine,
-            statistics,
-            metrics,
-        };
+    pub fn new(io_engine: Arc<dyn IoEngine>, metrics: Arc<Metrics>) -> Arc<Self> {
+        let inner = Inner { io_engine, metrics };
         Arc::new(Self { inner: Arc::new(inner) })
     }
 }
@@ -63,7 +55,7 @@ impl IoEngine for MonitoredIoEngine {
 
         let handle = self.inner.io_engine.read(buf, partition, offset);
 
-        self.inner.statistics.record_disk_read(bytes);
+        partition.statistics().record_disk_read(bytes);
         self.inner.metrics.storage_disk_read.increase(1);
         self.inner.metrics.storage_disk_read_bytes.increase(bytes as u64);
         self.inner
@@ -80,7 +72,7 @@ impl IoEngine for MonitoredIoEngine {
 
         let handle = self.inner.io_engine.write(buf, partition, offset);
 
-        self.inner.statistics.record_disk_write(bytes);
+        partition.statistics().record_disk_write(bytes);
         self.inner.metrics.storage_disk_write.increase(1);
         self.inner.metrics.storage_disk_write_bytes.increase(bytes as u64);
         self.inner

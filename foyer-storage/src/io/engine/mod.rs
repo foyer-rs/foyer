@@ -30,13 +30,10 @@ use std::{
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
-use crate::{
-    io::{
-        bytes::{IoB, IoBuf, IoBufMut},
-        device::Partition,
-        error::IoResult,
-    },
-    Runtime,
+use crate::io::{
+    bytes::{IoB, IoBuf, IoBufMut},
+    device::Partition,
+    error::IoResult,
 };
 
 /// A detached I/O handle that can be polled for completion.
@@ -70,24 +67,7 @@ impl Future for IoHandle {
 /// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self: Box<Self>, runtime: Runtime) -> IoResult<Arc<dyn IoEngine>>;
-
-    /// Box the builder.
-    fn boxed(self) -> Box<Self>
-    where
-        Self: Sized,
-    {
-        Box::new(self)
-    }
-}
-
-impl<T> From<T> for Box<dyn IoEngineBuilder>
-where
-    T: IoEngineBuilder,
-{
-    fn from(builder: T) -> Self {
-        builder.boxed()
-    }
+    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>>;
 }
 
 /// I/O engine builder trait.
@@ -118,7 +98,7 @@ mod tests {
     const MIB: usize = 1024 * 1024;
 
     fn build_test_file_device(path: impl AsRef<Path>) -> IoResult<Arc<dyn Device>> {
-        let device = FileDeviceBuilder::new(&path).with_capacity(16 * MIB).boxed().build()?;
+        let device = FileDeviceBuilder::new(&path).with_capacity(16 * MIB).build()?;
         for _ in 0..16 {
             device.create_partition(MIB)?;
         }
@@ -151,15 +131,15 @@ mod tests {
             let engine = UringIoEngineBuilder::new()
                 .with_threads(4)
                 .with_io_depth(64)
-                .boxed()
-                .build(Runtime::current())
+                .build()
+                .await
                 .unwrap();
             test_read_write(engine, device.as_ref()).await;
         }
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
-        let engine = PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap();
+        let engine = PsyncIoEngineBuilder::new().build().await.unwrap();
         test_read_write(engine, device.as_ref()).await;
     }
 }

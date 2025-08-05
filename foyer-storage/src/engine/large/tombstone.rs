@@ -65,31 +65,33 @@ impl TombstoneLog {
     ///
     /// The tombstone log will
     pub async fn open(
-        partition: Arc<dyn Partition>,
+        partitions: Vec<Arc<dyn Partition>>,
         io_engine: Arc<dyn IoEngine>,
         tombstones: &mut Vec<Tombstone>,
     ) -> Result<Self> {
         let mut recovered = vec![];
 
-        for offset in (0..partition.size()).step_by(PAGE) {
-            tracing::trace!(offset, "[tombstone log]: recover at");
-            let buf = IoSliceMut::new(PAGE);
-            let (buffer, res) = io_engine.read(Box::new(buf), partition.as_ref(), offset as u64).await;
-            res?;
+        for partition in partitions.iter() {
+            for offset in (0..partition.size()).step_by(PAGE) {
+                tracing::trace!(offset, "[tombstone log]: recover at");
+                let buf = IoSliceMut::new(PAGE);
+                let (buffer, res) = io_engine.read(Box::new(buf), partition.as_ref(), offset as u64).await;
+                res?;
 
-            let mut seq = 0;
-            let mut addr = 0;
+                let mut seq = 0;
+                let mut addr = 0;
 
-            for (slot, buf) in buffer.chunks_exact(Tombstone::serialized_len()).enumerate() {
-                let tombstone = Tombstone::read(buf);
-                if tombstone.sequence > seq {
-                    seq = tombstone.sequence;
-                    addr = slot * Tombstone::serialized_len();
+                for (slot, buf) in buffer.chunks_exact(Tombstone::serialized_len()).enumerate() {
+                    let tombstone = Tombstone::read(buf);
+                    if tombstone.sequence > seq {
+                        seq = tombstone.sequence;
+                        addr = slot * Tombstone::serialized_len();
+                    }
+                    if tombstone.sequence == 0 {
+                        continue;
+                    }
+                    recovered.push((tombstone, addr));
                 }
-                if tombstone.sequence == 0 {
-                    continue;
-                }
-                recovered.push((tombstone, addr));
             }
         }
 
@@ -115,10 +117,10 @@ impl TombstoneLog {
                 + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::serialized_len()
         };
 
-        let pages = partition.size() / PAGE;
+        let pages = partitions.iter().map(|p| p.size()).sum::<usize>() / PAGE;
         let slot = latest_tombstone_slot + 1;
         let (page, _) = Self::calculate_slot_addr(pages, slot);
-        let buffer = PageBuffer::open(io_engine, partition, page as _).await?;
+        let buffer = PageBuffer::open(io_engine, partitions, page as _).await?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(TombstoneLogInner { buffer, slot })),
@@ -165,7 +167,7 @@ pub struct PageBuffer {
     buffer: Option<IoSliceMut>,
 
     io_engine: Arc<dyn IoEngine>,
-    partition: Arc<dyn Partition>,
+    partitions: Vec<Arc<dyn Partition>>,
     page: u32,
 }
 
@@ -182,11 +184,11 @@ impl AsMut<[u8]> for PageBuffer {
 }
 
 impl PageBuffer {
-    pub async fn open(io_engine: Arc<dyn IoEngine>, partition: Arc<dyn Partition>, page: u32) -> Result<Self> {
+    pub async fn open(io_engine: Arc<dyn IoEngine>, partitions: Vec<Arc<dyn Partition>>, page: u32) -> Result<Self> {
         let mut this = Self {
             buffer: Some(IoSliceMut::new(PAGE)),
             io_engine,
-            partition,
+            partitions,
             page,
         };
 
@@ -197,9 +199,10 @@ impl PageBuffer {
 
     pub async fn update(&mut self) -> Result<()> {
         let buf = self.buffer.take().unwrap();
+        let (partition, offset) = self.locate(self.page);
         let (buf, res) = self
             .io_engine
-            .read(Box::new(buf), self.partition.as_ref(), Self::offset(self.page))
+            .read(Box::new(buf), self.partitions[partition].as_ref(), offset)
             .await;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
@@ -216,9 +219,10 @@ impl PageBuffer {
     pub async fn flush(&mut self) -> Result<()> {
         tracing::trace!(page = self.page, "[tombstone log page buffer]: flush page");
         let buf = self.buffer.take().unwrap();
+        let (partition, offset) = self.locate(self.page);
         let (buf, res) = self
             .io_engine
-            .write(Box::new(buf), self.partition.as_ref(), Self::offset(self.page))
+            .write(Box::new(buf), self.partitions[partition].as_ref(), offset)
             .await;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
@@ -226,8 +230,17 @@ impl PageBuffer {
         Ok(())
     }
 
-    fn offset(page: u32) -> u64 {
-        PAGE as u64 * page as u64
+    fn locate(&self, mut page: u32) -> (usize, u64) {
+        let mut partition = 0;
+
+        loop {
+            let partition_pages = self.partitions[partition].size() as u32 / PAGE as u32;
+            if page < partition_pages {
+                break (partition, PAGE as u64 * page as u64);
+            }
+            page -= partition_pages;
+            partition += 1;
+        }
     }
 }
 
@@ -239,7 +252,7 @@ mod tests {
     use super::*;
     use crate::{
         io::device::{fs::FsDeviceBuilder, DeviceBuilder},
-        IoEngineBuilder, PsyncIoEngineBuilder, Runtime,
+        IoEngineBuilder, PsyncIoEngineBuilder,
     };
 
     #[test_log::test(tokio::test)]
@@ -249,13 +262,13 @@ mod tests {
         // 4 MB cache device => 16 KB tombstone log => 1K tombstones => 16K partition => 4 pages
         let device = FsDeviceBuilder::new(dir.path())
             .with_capacity(4 * 1024 * 1024 + 16 * 1024)
-            .boxed()
             .build()
             .unwrap();
-        let partition = device.create_partition(16 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().boxed().build(Runtime::current()).unwrap();
+        let p0 = device.create_partition(8 * 1024).unwrap();
+        let p1 = device.create_partition(8 * 1024).unwrap();
+        let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
 
-        let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
+        let log = TombstoneLog::open(vec![p0.clone(), p1.clone()], io_engine.clone(), &mut vec![])
             .await
             .unwrap();
 
@@ -280,7 +293,7 @@ mod tests {
 
         drop(log);
 
-        let log = TombstoneLog::open(partition.clone(), io_engine.clone(), &mut vec![])
+        let log = TombstoneLog::open(vec![p0.clone(), p1.clone()], io_engine.clone(), &mut vec![])
             .await
             .unwrap();
 

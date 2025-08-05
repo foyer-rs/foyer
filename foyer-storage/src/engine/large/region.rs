@@ -115,6 +115,10 @@ impl Region {
             .await;
         (buf, res.map_err(|e| e.into()))
     }
+
+    pub(crate) fn partition(&self) -> &Arc<dyn Partition> {
+        &self.inner.partition
+    }
 }
 
 #[cfg(test)]
@@ -177,6 +181,7 @@ impl RegionManager {
         runtime: Runtime,
     ) -> Result<Self> {
         let mut regions = vec![];
+
         while device.free() >= region_size {
             let partition = match device.create_partition(region_size) {
                 Ok(partition) => partition,

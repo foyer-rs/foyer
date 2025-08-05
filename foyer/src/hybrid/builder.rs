@@ -22,10 +22,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
-use foyer_storage::{
-    AdmissionPicker, Compression, DeviceBuilder, EngineBuilder, IoEngineBuilder, RecoverMode, RuntimeOptions,
-    StoreBuilder,
-};
+use foyer_storage::{Compression, EngineConfig, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::{
@@ -238,9 +235,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set device builder for the disk cache store.
-    pub fn with_device_builder(self, builder: impl Into<Box<dyn DeviceBuilder>>) -> Self {
-        let builder = self.builder.with_device_builder(builder);
+    /// Set io engine for the disk cache store.
+    pub fn with_io_engine(self, io_engine: Arc<dyn IoEngine>) -> Self {
+        let builder = self.builder.with_io_engine(io_engine);
         Self {
             name: self.name,
             options: self.options,
@@ -250,21 +247,9 @@ where
         }
     }
 
-    /// Set io engine builder for the disk cache store.
-    pub fn with_io_engine_builder(self, builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
-        let builder = self.builder.with_io_engine_builder(builder);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set engine builder for the disk cache store.
-    pub fn with_engine_builder(self, builder: impl Into<Box<dyn EngineBuilder<K, V, HybridCacheProperties>>>) -> Self {
-        let builder = self.builder.with_engine_builder(builder);
+    /// Set engine config for the disk cache store.
+    pub fn with_engine_config(self, config: impl Into<Box<dyn EngineConfig<K, V, HybridCacheProperties>>>) -> Self {
+        let builder = self.builder.with_engine_config(config);
         Self {
             name: self.name,
             options: self.options,
@@ -281,22 +266,6 @@ where
     /// Default: [`RecoverMode::Quiet`].
     pub fn with_recover_mode(self, recover_mode: RecoverMode) -> Self {
         let builder = self.builder.with_recover_mode(recover_mode);
-        Self {
-            name: self.name,
-            options: self.options,
-            metrics: self.metrics,
-            memory: self.memory,
-            builder,
-        }
-    }
-
-    /// Set the admission pickers for th disk cache store.
-    ///
-    /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
-    ///
-    /// Default: [`crate::AdmitAllPicker`].
-    pub fn with_admission_picker(self, admission_picker: Arc<dyn AdmissionPicker>) -> Self {
-        let builder = self.builder.with_admission_picker(admission_picker);
         Self {
             name: self.name,
             options: self.options,

@@ -15,7 +15,7 @@
 #[cfg(feature = "tracing")]
 pub use crate::common::tracing::TracingOptions;
 #[cfg(target_os = "linux")]
-pub use crate::storage::UringIoEngineBuilder;
+pub use crate::storage::{UringIoEngine, UringIoEngineBuilder};
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
@@ -36,11 +36,11 @@ pub use crate::{
     },
     storage::{
         AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, CombinedDeviceBuilder,
-        Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineBuilder, EvictionInfo, EvictionPicker,
+        Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EvictionInfo, EvictionPicker,
         FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
-        IoHandle, IoResult, IoThrottler, IoThrottlerPicker, IoThrottlerTarget, IopsCounter, LargeObjectEngineBuilder,
-        Load, NoopDeviceBuilder, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngineBuilder, RawFile,
-        RecoverMode, Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics,
-        Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        IoHandle, IoResult, IopsCounter, LargeObjectEngineBuilder, Load, NoopDeviceBuilder, NoopIoEngine,
+        NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode,
+        Region, RegionStatistics, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions, Statistics, Store,
+        StoreBuilder, Throttle, TokioRuntimeOptions,
     },
 };
