@@ -1061,7 +1061,7 @@ mod tests {
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_region_size(MB),
             )
@@ -1081,7 +1081,7 @@ mod tests {
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_region_size(MB)
                     .with_admission_picker(Arc::new(BiasedPicker::new(admits))),
@@ -1103,7 +1103,7 @@ mod tests {
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_region_size(MB),
             )
@@ -1125,7 +1125,7 @@ mod tests {
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_admission_picker(recorder.clone())
                     .with_region_size(MB),
@@ -1148,7 +1148,7 @@ mod tests {
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_region_size(MB),
             )
@@ -1500,7 +1500,7 @@ mod tests {
                 .memory(4 * MB)
                 .storage()
                 .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-                .with_engine_builder(
+                .with_engine_config(
                     LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                         .with_region_size(64 * KB),
                 )

@@ -22,7 +22,7 @@ use foyer_common::{
     metrics::Metrics,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
-use foyer_storage::{Compression, EngineBuilder, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
+use foyer_storage::{Compression, EngineConfig, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::{
@@ -247,9 +247,9 @@ where
         }
     }
 
-    /// Set engine builder for the disk cache store.
-    pub fn with_engine_builder(self, builder: impl Into<Box<dyn EngineBuilder<K, V, HybridCacheProperties>>>) -> Self {
-        let builder = self.builder.with_engine_builder(builder);
+    /// Set engine config for the disk cache store.
+    pub fn with_engine_config(self, config: impl Into<Box<dyn EngineConfig<K, V, HybridCacheProperties>>>) -> Self {
+        let builder = self.builder.with_engine_config(config);
         Self {
             name: self.name,
             options: self.options,

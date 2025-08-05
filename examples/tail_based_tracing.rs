@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
         .storage()
-        .with_engine_builder(LargeObjectEngineBuilder::new(device))
+        .with_engine_config(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;
 

@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         .memory(64 * 1024 * 1024)
         .storage()
         // use large object disk cache engine with default configuration
-        .with_engine_builder(LargeObjectEngineBuilder::new(device))
+        .with_engine_config(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;
 

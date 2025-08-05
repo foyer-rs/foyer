@@ -36,7 +36,7 @@ pub use crate::{
     },
     storage::{
         AdmissionPicker, AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, CombinedDeviceBuilder,
-        Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineBuilder, EvictionInfo, EvictionPicker,
+        Compression, Device, DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EvictionInfo, EvictionPicker,
         FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
         IoHandle, IoResult, IopsCounter, LargeObjectEngineBuilder, Load, NoopDeviceBuilder, NoopIoEngine,
         NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode,

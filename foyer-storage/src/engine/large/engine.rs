@@ -55,7 +55,7 @@ use crate::{
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
         },
-        Engine, EngineBuildContext, EngineBuilder,
+        Engine, EngineBuildContext, EngineConfig,
     },
     error::{Error, Result},
     io::{bytes::IoSliceMut, PAGE},
@@ -432,7 +432,7 @@ where
     }
 }
 
-impl<K, V, P> EngineBuilder<K, V, P> for LargeObjectEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for LargeObjectEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -443,7 +443,7 @@ where
     }
 }
 
-impl<K, V, P> From<LargeObjectEngineBuilder<K, V, P>> for Box<dyn EngineBuilder<K, V, P>>
+impl<K, V, P> From<LargeObjectEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,

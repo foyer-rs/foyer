@@ -22,7 +22,7 @@ use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
-    engine::{Engine, EngineBuildContext, EngineBuilder},
+    engine::{Engine, EngineBuildContext, EngineConfig},
     error::Result,
     keeper::PieceRef,
     Device, DeviceBuilder, Load, NoopDeviceBuilder, Pick,
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<K, V, P> EngineBuilder<K, V, P> for NoopEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for NoopEngineBuilder<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -83,7 +83,7 @@ where
     }
 }
 
-impl<K, V, P> From<NoopEngineBuilder<K, V, P>> for Box<dyn EngineBuilder<K, V, P>>
+impl<K, V, P> From<NoopEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,

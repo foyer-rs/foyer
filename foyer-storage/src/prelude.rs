@@ -22,7 +22,7 @@ pub use crate::{
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             region::{Region, RegionStatistics},
         },
-        Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
+        Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },
     error::{Error, Result},
     io::{

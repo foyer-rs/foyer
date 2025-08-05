@@ -162,7 +162,7 @@ impl Device for FsDevice {
             id,
             size,
             file,
-            staticistics: self.statistics.clone(),
+            statistics: self.statistics.clone(),
         });
         partitions.push(partition.clone());
         Ok(partition)
@@ -185,7 +185,7 @@ impl Device for FsDevice {
 pub struct FsPartition {
     id: PartitionId,
     size: usize,
-    staticistics: Arc<Statistics>,
+    statistics: Arc<Statistics>,
     file: File,
 }
 
@@ -215,6 +215,6 @@ impl Partition for FsPartition {
     }
 
     fn statistics(&self) -> &Arc<Statistics> {
-        &self.staticistics
+        &self.statistics
     }
 }

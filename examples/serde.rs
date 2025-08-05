@@ -70,7 +70,7 @@ async fn case<V: StorageValue + Clone + Eq + Debug>(value: V) -> anyhow::Result<
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(64 * 1024 * 1024)
         .storage()
-        .with_engine_builder(LargeObjectEngineBuilder::new(device))
+        .with_engine_config(LargeObjectEngineBuilder::new(device))
         .build()
         .await?;
 

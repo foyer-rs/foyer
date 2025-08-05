@@ -107,7 +107,7 @@ fn basic(
     recorder: &Arc<Recorder>,
 ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
-    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_builder(
+    StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_config(
         LargeObjectEngineBuilder::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())
             .with_admission_picker(recorder.clone())
             .with_region_size(MB)

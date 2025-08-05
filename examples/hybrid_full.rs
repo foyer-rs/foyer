@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .with_weighter(|_key, value: &String| value.len())
         .storage()
         .with_io_engine(io_engine)
-        .with_engine_builder(
+        .with_engine_config(
             LargeObjectEngineBuilder::new(device)
                 .with_region_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)

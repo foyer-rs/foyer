@@ -40,7 +40,7 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineBuilder;
 use foyer::{
-    Code, CodeError, Compression, Device, DeviceBuilder, EngineBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
+    Code, CodeError, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker, FileDeviceBuilder,
     FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
     IoEngine, IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
     RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
@@ -596,7 +596,7 @@ async fn benchmark(args: Args) {
         _ => unreachable!(),
     };
 
-    let engine_builder: Box<dyn EngineBuilder<u64, Value, HybridCacheProperties>> = {
+    let engine_config: Box<dyn EngineConfig<u64, Value, HybridCacheProperties>> = {
         let mut builder = LargeObjectEngineBuilder::new(device)
             .with_region_size(args.region_size.as_u64() as _)
             .with_indexer_shards(args.shards)
@@ -620,7 +620,7 @@ async fn benchmark(args: Args) {
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
         .with_io_engine(io_engine)
-        .with_engine_builder(engine_builder);
+        .with_engine_config(engine_config);
 
     builder = builder
         .with_recover_mode(args.recover_mode)

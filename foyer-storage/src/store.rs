@@ -37,7 +37,7 @@ use crate::{
     compress::Compression,
     engine::{
         noop::{NoopEngine, NoopEngineBuilder},
-        Engine, EngineBuildContext, EngineBuilder, Load, RecoverMode,
+        Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },
     error::{Error, Result},
     io::engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngineBuilder},
@@ -349,7 +349,7 @@ where
     metrics: Arc<Metrics>,
 
     io_engine: Option<Arc<dyn IoEngine>>,
-    engine_builder: Option<Box<dyn EngineBuilder<K, V, P>>>,
+    engine_builder: Option<Box<dyn EngineConfig<K, V, P>>>,
 
     runtime_config: RuntimeOptions,
 
@@ -410,9 +410,9 @@ where
         self
     }
 
-    /// Set engine builder for the disk cache store.
-    pub fn with_engine_builder(mut self, builder: impl Into<Box<dyn EngineBuilder<K, V, P>>>) -> Self {
-        self.engine_builder = Some(builder.into());
+    /// Set engine config for the disk cache store.
+    pub fn with_engine_config(mut self, config: impl Into<Box<dyn EngineConfig<K, V, P>>>) -> Self {
+        self.engine_builder = Some(config.into());
         self
     }
 
@@ -560,7 +560,7 @@ mod tests {
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(64 * 1024)
@@ -590,7 +590,7 @@ mod tests {
 
         let store = StoreBuilder::new("test", memory, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_builder(
+            .with_engine_config(
                 LargeObjectEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(4 * 1024 * 1024)

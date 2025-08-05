@@ -110,7 +110,7 @@ pub struct EngineBuildContext {
 
 /// Disk cache engine builder trait.
 #[expect(clippy::type_complexity)]
-pub trait EngineBuilder<K, V, P>: Send + Sync + 'static + Debug
+pub trait EngineConfig<K, V, P>: Send + Sync + 'static + Debug
 where
     K: StorageKey,
     V: StorageValue,
