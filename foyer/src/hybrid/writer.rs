@@ -18,7 +18,7 @@ use std::{
 };
 
 use foyer_common::code::{DefaultHasher, HashBuilder, StorageKey, StorageValue};
-use foyer_storage::Pick;
+use foyer_storage::FilterResult;
 
 use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
 
@@ -71,7 +71,7 @@ where
     hash: u64,
 
     force: bool,
-    picked: Option<Pick>,
+    filter_result: Option<FilterResult>,
     pick_duration: Duration,
 }
 
@@ -88,30 +88,32 @@ where
             key,
             hash,
             force: false,
-            picked: None,
+            filter_result: None,
             pick_duration: Duration::default(),
         }
     }
 
-    /// Check if the entry can be admitted by the admission picker of the disk cache.
+    /// Check if the entry can be admitted by the admission filter of the disk cache.
     ///
-    /// After calling `pick`, the writer will not be checked by the admission picker again.
-    pub fn pick(&mut self) -> Pick {
+    /// The `estimated_size` is the estimated size of the whole entry to be inserted.
+    ///
+    /// After calling `filter`, the writer will not be checked by the admission filter again.
+    pub fn filter(&mut self, estimated_size: usize) -> FilterResult {
         let now = Instant::now();
 
-        let picked = self.hybrid.storage().pick(self.hash);
-        self.picked = Some(picked);
+        let picked = self.hybrid.storage().filter(self.hash, estimated_size);
+        self.filter_result = Some(picked);
 
         self.pick_duration = now.elapsed();
 
         picked
     }
 
-    fn may_pick(&mut self) -> Pick {
-        if let Some(picked) = self.picked {
+    fn may_pick(&mut self, estimated_size: usize) -> FilterResult {
+        if let Some(picked) = self.filter_result {
             picked
         } else {
-            self.pick()
+            self.filter(estimated_size)
         }
     }
 
@@ -126,7 +128,11 @@ where
     fn insert_inner(mut self, value: V, properties: HybridCacheProperties) -> Option<HybridCacheEntry<K, V, S>> {
         let now = Instant::now();
 
-        if !self.force && !self.may_pick().admitted() {
+        if !self.force
+            && !self
+                .may_pick(self.key.estimated_size() + value.estimated_size())
+                .is_admitted()
+        {
             return None;
         }
 

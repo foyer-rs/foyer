@@ -1042,11 +1042,14 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{path::Path, sync::Arc};
+    use std::path::Path;
 
     use foyer_common::hasher::ModHasher;
-    use foyer_storage::test_utils::{Record, Recorder};
-    use storage::test_utils::BiasedPicker;
+    use foyer_storage::{
+        test_utils::{Record, Recorder},
+        Filter,
+    };
+    use storage::test_utils::Biased;
 
     use crate::*;
 
@@ -1084,7 +1087,7 @@ mod tests {
             .with_engine_config(
                 BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_block_size(MB)
-                    .with_admission_picker(Arc::new(BiasedPicker::new(admits))),
+                    .with_admission_filter(Filter::new().with_condition(Biased::new(admits))),
             )
             .build()
             .await
@@ -1115,8 +1118,8 @@ mod tests {
     async fn open_with_policy_and_recorder(
         dir: impl AsRef<Path>,
         policy: HybridCachePolicy,
-    ) -> (HybridCache<u64, Vec<u8>, ModHasher>, Arc<Recorder>) {
-        let recorder = Arc::<Recorder>::default();
+    ) -> (HybridCache<u64, Vec<u8>, ModHasher>, Recorder) {
+        let recorder = Recorder::default();
         let hybrid = HybridCacheBuilder::new()
             .with_name("test")
             .with_policy(policy)
@@ -1127,7 +1130,8 @@ mod tests {
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
                 BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_admission_picker(recorder.clone())
+                    .with_admission_filter(Filter::new().with_condition(recorder.admission()))
+                    .with_reinsertion_filter(Filter::new().with_condition(recorder.eviction()))
                     .with_block_size(MB),
             )
             .build()

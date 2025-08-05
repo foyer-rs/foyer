@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
+use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
-    HybridCachePolicy, IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker,
-    Result, RuntimeOptions, Throttle, TokioRuntimeOptions,
+    BlockEngineBuilder, DeviceBuilder, FifoPicker, Filter, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    HybridCachePolicy, IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, Result,
+    RuntimeOptions, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
@@ -62,8 +62,8 @@ async fn main() -> anyhow::Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_block_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_admission_picker(Arc::<AdmitAllPicker>::default())
-                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
+                .with_admission_filter(Filter::new())
+                .with_reinsertion_filter(Filter::new().with_condition(RejectAll))
                 .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)
