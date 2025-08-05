@@ -25,6 +25,10 @@ pub use crate::{
         Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },
     error::{Error, Result},
+    filter::{
+        conditions::{AdmitAll, RejectAll},
+        Filter, FilterCondition, FilterResult,
+    },
     io::{
         device::{
             combined::CombinedDeviceBuilder,
@@ -42,10 +46,6 @@ pub use crate::{
             IoEngine, IoEngineBuilder, IoHandle,
         },
         error::{IoError, IoResult},
-    },
-    picker::{
-        utils::{AdmitAllPicker, ChainedAdmissionPicker, ChainedAdmissionPickerBuilder, RejectAllPicker},
-        AdmissionPicker, Pick, ReinsertionPicker,
     },
     runtime::Runtime,
     store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},

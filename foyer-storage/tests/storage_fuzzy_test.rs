@@ -21,7 +21,7 @@ use std::{path::Path, sync::Arc};
 use foyer_common::{hasher::ModHasher, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 use foyer_storage::{
-    test_utils::Recorder, BlockEngineBuilder, Compression, DeviceBuilder, FsDeviceBuilder, StoreBuilder,
+    test_utils::Recorder, BlockEngineBuilder, Compression, DeviceBuilder, Filter, FsDeviceBuilder, StoreBuilder,
 };
 
 const KB: usize = 1024;
@@ -35,7 +35,7 @@ async fn test_store(
     builder: impl Fn(
         &Cache<u64, Vec<u8>, ModHasher, TestProperties>,
     ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties>,
-    recorder: Arc<Recorder>,
+    recorder: Recorder,
 ) {
     let store = builder(&memory).build().await.unwrap();
 
@@ -104,23 +104,23 @@ async fn test_store(
 fn basic(
     memory: &Cache<u64, Vec<u8>, ModHasher, TestProperties>,
     path: impl AsRef<Path>,
-    recorder: &Arc<Recorder>,
+    recorder: &Recorder,
 ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_config(
         BlockEngineBuilder::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())
-            .with_admission_picker(recorder.clone())
+            .with_admission_filter(Filter::new().with_condition(recorder.admission()))
             .with_block_size(MB)
             .with_recover_concurrency(2)
             .with_indexer_shards(4)
-            .with_reinsertion_picker(recorder.clone()),
+            .with_reinsertion_filter(Filter::new().with_condition(recorder.eviction())),
     )
 }
 
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())
@@ -133,7 +133,7 @@ async fn test_direct_fs_store() {
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())
@@ -148,7 +148,7 @@ async fn test_direct_fs_store_zstd() {
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())

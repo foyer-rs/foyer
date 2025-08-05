@@ -25,18 +25,15 @@ use std::{
 
 use parking_lot::Mutex;
 
-use crate::{
-    io::device::statistics::Statistics,
-    picker::{AdmissionPicker, Pick, ReinsertionPicker},
-};
+use crate::{io::device::statistics::Statistics, FilterCondition, FilterResult};
 
 /// A picker that only admits hash from the given list.
 #[derive(Debug)]
-pub struct BiasedPicker {
+pub struct Biased {
     admits: HashSet<u64>,
 }
 
-impl BiasedPicker {
+impl Biased {
     /// Create a biased picker with the given admit list.
     pub fn new(admits: impl IntoIterator<Item = u64>) -> Self {
         Self {
@@ -45,15 +42,13 @@ impl BiasedPicker {
     }
 }
 
-impl AdmissionPicker for BiasedPicker {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
-        self.admits.contains(&hash).into()
-    }
-}
-
-impl ReinsertionPicker for BiasedPicker {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
-        self.admits.contains(&hash).into()
+impl FilterCondition for Biased {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+        if self.admits.contains(&hash) {
+            FilterResult::Admit
+        } else {
+            FilterResult::Reject
+        }
     }
 }
 
@@ -66,22 +61,19 @@ pub enum Record {
     Evict(u64),
 }
 
-/// A recorder that records the cache entry admission and eviction of a disk cache.
-///
-/// [`Recorder`] should be used as both the admission picker and the reinsertion picker to record.
 #[derive(Debug, Default)]
-pub struct Recorder {
+struct RecorderInner {
     records: Mutex<Vec<Record>>,
 }
 
-impl Recorder {
+impl RecorderInner {
     /// Dump the record entries of the recorder.
-    pub fn dump(&self) -> Vec<Record> {
+    fn dump(&self) -> Vec<Record> {
         self.records.lock().clone()
     }
 
     /// Get the hash set of the remaining hash at the moment.
-    pub fn remains(&self) -> HashSet<u64> {
+    fn remains(&self) -> HashSet<u64> {
         let records = self.dump();
         let mut res = HashSet::default();
         for record in records {
@@ -98,17 +90,67 @@ impl Recorder {
     }
 }
 
-impl AdmissionPicker for Recorder {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
-        self.records.lock().push(Record::Admit(hash));
-        Pick::Admit
+/// A recorder that records the cache entry admission of a disk cache.
+///
+/// This is supposed to be used as a admission filter condition.
+#[derive(Debug)]
+pub struct AdmitRecorder {
+    inner: Arc<RecorderInner>,
+}
+
+/// A recorder that records the cache entry eviction of a disk cache.
+///
+/// This is supposed to be used as a reinsertion filter condition.
+#[derive(Debug)]
+pub struct EvictRecorder {
+    inner: Arc<RecorderInner>,
+}
+
+impl FilterCondition for AdmitRecorder {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+        self.inner.records.lock().push(Record::Admit(hash));
+        FilterResult::Admit
     }
 }
 
-impl ReinsertionPicker for Recorder {
-    fn pick(&self, _: &Arc<Statistics>, hash: u64) -> Pick {
-        self.records.lock().push(Record::Evict(hash));
-        Pick::Reject
+impl FilterCondition for EvictRecorder {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+        self.inner.records.lock().push(Record::Evict(hash));
+        FilterResult::Reject
+    }
+}
+
+/// A recorder that records the cache entry admission and eviction of a disk cache.
+///
+/// [`Recorder`] should be used as both the admission picker and the reinsertion picker to record.
+#[derive(Debug, Default, Clone)]
+pub struct Recorder {
+    inner: Arc<RecorderInner>,
+}
+
+impl Recorder {
+    /// Dump the record entries of the recorder.
+    pub fn dump(&self) -> Vec<Record> {
+        self.inner.dump()
+    }
+
+    /// Get the hash set of the remaining hash at the moment.
+    pub fn remains(&self) -> HashSet<u64> {
+        self.inner.remains()
+    }
+
+    /// Get the recorder for admission.
+    pub fn admission(&self) -> AdmitRecorder {
+        AdmitRecorder {
+            inner: self.inner.clone(),
+        }
+    }
+
+    /// Get the recorder for eviction.
+    pub fn eviction(&self) -> EvictRecorder {
+        EvictRecorder {
+            inner: self.inner.clone(),
+        }
     }
 }
 
