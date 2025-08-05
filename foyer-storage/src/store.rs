@@ -40,11 +40,14 @@ use crate::{
         Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },
     error::{Error, Result},
-    io::engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngineBuilder},
+    io::{
+        device::{statistics::Statistics, throttle::Throttle, Device},
+        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
+    },
     keeper::Keeper,
     runtime::Runtime,
     serde::EntrySerializer,
-    Device, IoEngine, Pick, Statistics, Throttle,
+    FilterResult,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -125,9 +128,9 @@ where
         self.inner.engine.close().await
     }
 
-    /// Return if the given key can be picked by the admission picker.
-    pub fn pick(&self, hash: u64) -> Pick {
-        self.inner.engine.pick(hash)
+    /// Return if the given key can be picked by the admission filter.
+    pub fn filter(&self, hash: u64, estimated_size: usize) -> FilterResult {
+        self.inner.engine.filter(hash, estimated_size)
     }
 
     /// Push a in-memory cache piece to the disk cache write queue.
@@ -135,7 +138,14 @@ where
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
-        if force || self.pick(piece.hash()).admitted() {
+        if force
+            || self
+                .filter(
+                    piece.hash(),
+                    piece.key().estimated_size() + piece.value().estimated_size(),
+                )
+                .is_admitted()
+        {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);

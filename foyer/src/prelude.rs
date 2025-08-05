@@ -35,12 +35,11 @@ pub use crate::{
         S3FifoConfig, Weighter,
     },
     storage::{
-        AdmissionPicker, AdmitAllPicker, Block, BlockEngineBuilder, BlockStatistics, ChainedAdmissionPicker,
-        ChainedAdmissionPickerBuilder, CombinedDeviceBuilder, Compression, Device, DeviceBuilder, Engine,
-        EngineBuildContext, EngineConfig, EvictionInfo, EvictionPicker, FifoPicker, FileDeviceBuilder, FsDeviceBuilder,
-        InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError, IoHandle, IoResult, IopsCounter, Load,
-        NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder, PartialDeviceBuilder, Pick, PsyncIoEngine,
-        PsyncIoEngineBuilder, RawFile, RecoverMode, ReinsertionPicker, RejectAllPicker, Runtime, RuntimeOptions,
-        Statistics, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        AdmitAll, Block, BlockEngineBuilder, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
+        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
+        FifoPicker, FileDeviceBuilder, Filter, FilterCondition, FilterResult, FsDeviceBuilder, InvalidRatioPicker,
+        IoEngine, IoEngineBuilder, IoError, IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine,
+        NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode,
+        RejectAll, Runtime, RuntimeOptions, Statistics, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
     },
 };

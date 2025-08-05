@@ -36,9 +36,8 @@ use crate::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
     },
-    picker::ReinsertionPicker,
     runtime::Runtime,
-    Statistics,
+    Filter, Statistics,
 };
 
 pub trait ReclaimerTrait: Send + Sync + 'static + Debug {
@@ -53,7 +52,7 @@ where
 {
     indexer: Indexer,
     flushers: Vec<Flusher<K, V, P>>,
-    reinsertion_picker: Arc<dyn ReinsertionPicker>,
+    reinsertion_filter: Arc<Filter>,
     blob_index_size: usize,
     statistics: Arc<Statistics>,
     runtime: Runtime,
@@ -79,7 +78,7 @@ where
     pub fn new(
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, P>>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker>,
+        reinsertion_filter: Arc<Filter>,
         blob_index_size: usize,
         statistics: Arc<Statistics>,
         runtime: Runtime,
@@ -87,7 +86,7 @@ where
         Self {
             indexer,
             flushers,
-            reinsertion_picker,
+            reinsertion_filter,
             blob_index_size,
             statistics,
             runtime,
@@ -102,7 +101,7 @@ where
     P: Properties,
 {
     fn reclaim(&self, block: ReclaimingBlock) -> BoxFuture<'static, ()> {
-        let reinsertion_picker = self.reinsertion_picker.clone();
+        let reinsertion_picker = self.reinsertion_filter.clone();
         let statistics = self.statistics.clone();
         let blob_index_size = self.blob_index_size;
         let flushers = self.flushers.clone();
@@ -136,7 +135,7 @@ where
                     Ok(Some(infos)) => infos,
                 };
                 for info in infos {
-                    if reinsertion_picker.pick(&statistics, info.hash).admitted() {
+                    if reinsertion_picker.filter(&statistics, info.hash, info.addr.len as _).is_admitted() {
                         let buf = IoSliceMut::new(bits::align_up(PAGE, info.addr.len as _));
                         let (buf, res) = block.read(Box::new(buf), info.addr.offset as _).await;
                         if let Err(e) = res {

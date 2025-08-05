@@ -58,15 +58,12 @@ use crate::{
         Engine, EngineBuildContext, EngineConfig,
     },
     error::{Error, Result},
+    filter::conditions::IoThrottle,
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
-    picker::{
-        utils::{IoThrottlerPicker, RejectAllPicker},
-        ReinsertionPicker,
-    },
     runtime::Runtime,
     serde::EntryDeserializer,
-    AdmissionPicker, AdmitAllPicker, ChainedAdmissionPickerBuilder, Device, Load,
+    Device, Filter, FilterResult, Load, RejectAll,
 };
 
 /// Builder for the block-based disk cache engine.
@@ -95,8 +92,8 @@ where
     submit_queue_size_threshold: usize,
     clean_block_threshold: usize,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    admission_picker: Arc<dyn AdmissionPicker>,
-    reinsertion_picker: Arc<dyn ReinsertionPicker>,
+    admission_filter: Filter,
+    reinsertion_filter: Filter,
     enable_tombstone_log: bool,
     marker: PhantomData<(K, V, P)>,
 }
@@ -121,8 +118,8 @@ where
             .field("submit_queue_size_threshold", &self.submit_queue_size_threshold)
             .field("clean_block_threshold", &self.clean_block_threshold)
             .field("eviction_pickers", &self.eviction_pickers)
-            .field("admission_picker", &self.admission_picker)
-            .field("reinsertion_picker", &self.reinsertion_picker)
+            .field("admission_filter", &self.admission_filter)
+            .field("reinsertion_filter", &self.reinsertion_filter)
             .field("enable_tombstone_log", &self.enable_tombstone_log)
             .finish()
     }
@@ -149,8 +146,8 @@ where
             submit_queue_size_threshold: 16 * 1024 * 1024, // 16 MiB
             clean_block_threshold: 1,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker>::default(),
-            reinsertion_picker: Arc::<RejectAllPicker>::default(),
+            admission_filter: Filter::new(),
+            reinsertion_filter: Filter::new().with_condition(RejectAll),
             enable_tombstone_log: false,
             marker: PhantomData,
         }
@@ -195,13 +192,13 @@ where
         self
     }
 
-    /// Set the admission pickers for th disk cache store.
+    /// Set the admission filter for th disk cache store.
     ///
-    /// The admission picker is used to pick the entries that can be inserted into the disk cache store.
+    /// The admission filter is used to pick the entries that can be inserted into the disk cache store.
     ///
-    /// Default: [`AdmitAllPicker`].
-    pub fn with_admission_picker(mut self, admission_picker: Arc<dyn AdmissionPicker>) -> Self {
-        self.admission_picker = admission_picker;
+    /// Default: Admit all.
+    pub fn with_admission_filter(mut self, filter: Filter) -> Self {
+        self.admission_filter = filter;
         self
     }
 
@@ -277,17 +274,17 @@ where
         self
     }
 
-    /// Set the reinsertion pickers for th disk cache store.
+    /// Set the reinsertion filter for th disk cache store.
     ///
-    /// The reinsertion picker is used to pick the entries that can be reinsertion into the disk cache store while
+    /// The reinsertion filter is used to pick the entries that can be reinsertion into the disk cache store while
     /// reclaiming.
     ///
     /// Note: Only extremely important entries should be picked. If too many entries are picked, both insertion and
     /// reinsertion will be stuck.
     ///
-    /// Default: [`RejectAllPicker`].
-    pub fn with_reinsertion_picker(mut self, reinsertion_picker: Arc<dyn ReinsertionPicker>) -> Self {
-        self.reinsertion_picker = reinsertion_picker;
+    /// Default: Reject all.
+    pub fn with_reinsertion_filter(mut self, filter: Filter) -> Self {
+        self.reinsertion_filter = filter;
         self
     }
 
@@ -346,7 +343,7 @@ where
         let reclaimer = Reclaimer::new(
             indexer.clone(),
             flushers.clone(),
-            self.reinsertion_picker,
+            Arc::new(self.reinsertion_filter),
             self.blob_index_size,
             device.statistics().clone(),
             runtime.clone(),
@@ -410,15 +407,10 @@ where
             )?;
         }
 
-        let admission_picker = Arc::new(
-            ChainedAdmissionPickerBuilder::default()
-                .chain(Arc::<IoThrottlerPicker>::default())
-                .chain(self.admission_picker)
-                .build(),
-        );
+        let admission_filter = self.admission_filter.with_condition(IoThrottle);
 
         let inner = BlockEngineInner {
-            admission_picker,
+            admission_filter,
             device,
             indexer,
             block_manager,
@@ -488,7 +480,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    admission_picker: Arc<dyn AdmissionPicker>,
+    admission_filter: Filter,
 
     device: Arc<dyn Device>,
 
@@ -791,8 +783,10 @@ where
         &self.inner.device
     }
 
-    fn pick(&self, hash: u64) -> crate::Pick {
-        self.inner.admission_picker.pick(self.inner.device.statistics(), hash)
+    fn filter(&self, hash: u64, estimated_size: usize) -> FilterResult {
+        self.inner
+            .admission_filter
+            .filter(self.inner.device.statistics(), hash, estimated_size)
     }
 
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
@@ -845,10 +839,9 @@ mod tests {
             device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
             engine::{IoEngine, IoEngineBuilder},
         },
-        picker::utils::RejectAllPicker,
         serde::EntrySerializer,
-        test_utils::BiasedPicker,
-        PsyncIoEngineBuilder,
+        test_utils::Biased,
+        PsyncIoEngineBuilder, RejectAll,
     };
 
     const KB: usize = 1024;
@@ -868,12 +861,12 @@ mod tests {
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
     async fn engine_for_test(dir: impl AsRef<Path>) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
-        store_for_test_with_reinsertion_picker(dir, Arc::<RejectAllPicker>::default()).await
+        store_for_test_with_reinsertion_filter(dir, Filter::new().with_condition(RejectAll)).await
     }
 
-    async fn store_for_test_with_reinsertion_picker(
+    async fn store_for_test_with_reinsertion_filter(
         dir: impl AsRef<Path>,
-        reinsertion_picker: Arc<dyn ReinsertionPicker>,
+        reinsertion_filter: Filter,
     ) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as _)
@@ -891,9 +884,9 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_block_threshold: 1,
-            admission_picker: Arc::<AdmitAllPicker>::default(),
+            admission_filter: Filter::new(),
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            reinsertion_picker,
+            reinsertion_filter,
             enable_tombstone_log: false,
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
@@ -933,8 +926,8 @@ mod tests {
             reclaimers: 1,
             clean_block_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_picker: Arc::<AdmitAllPicker>::default(),
-            reinsertion_picker: Arc::<RejectAllPicker>::default(),
+            admission_filter: Filter::new(),
+            reinsertion_filter: Filter::new().with_condition(RejectAll),
             enable_tombstone_log: true,
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
@@ -1196,9 +1189,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let memory = cache_for_test();
-        let store = store_for_test_with_reinsertion_picker(
+        let store = store_for_test_with_reinsertion_filter(
             dir.path(),
-            Arc::new(BiasedPicker::new(vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19])),
+            Filter::new().with_condition(Biased::new(vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19])),
         )
         .await;
 
