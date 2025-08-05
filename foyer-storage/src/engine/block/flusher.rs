@@ -232,14 +232,14 @@ where
     }
 
     pub fn submit(&self, submission: Submission<K, V, P>) {
-        tracing::trace!(id = self.id, "[lodc flusher]: submit task: {submission:?}");
+        tracing::trace!(id = self.id, "[block engine flusher]: submit task: {submission:?}");
         if let Submission::CacheEntry { estimated_size, .. } = &submission {
             self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
         }
         if let Err(e) = self.tx.send(submission) {
             tracing::error!(
                 id = self.id,
-                "[lodc flusher]: error raised when submitting task, error: {e}"
+                "[block engine flusher]: error raised when submitting task, error: {e}"
             );
         }
     }
@@ -360,7 +360,7 @@ where
 
                 let efficiency =
                     infos.last().map(|info| info.offset + info.len).unwrap_or_default() as f64 / io_buffer.len() as f64;
-                self.metrics.storage_lodc_buffer_efficiency.record(efficiency);
+                self.metrics.storage_block_engine_buffer_efficiency.record(efficiency);
 
                 let shared_io_slice = io_buffer.into_io_slice();
                 let batch = Splitter::split(&mut self.ctx, shared_io_slice, infos);
@@ -400,7 +400,11 @@ where
     }
 
     fn recv(&mut self, submission: Submission<K, V, P>) {
-        tracing::trace!(id = self.id, ?submission, "[lodc flush runner]: recv submission");
+        tracing::trace!(
+            id = self.id,
+            ?submission,
+            "[block engine flush runner]: recv submission"
+        );
 
         if self.queue_init.is_none() {
             self.queue_init = Some(Instant::now());
@@ -570,7 +574,7 @@ where
                     }
 
                     let olds = indexer.insert_batch(addrs);
-                    metrics.storage_lodc_indexer_conflict.increase(olds.len() as _);
+                    metrics.storage_block_engine_indexer_conflict.increase(olds.len() as _);
 
                     // Window expect window is full, make it evictable.
                     let id = block.id();
@@ -620,7 +624,7 @@ where
                     tombstone_infos,
                 },
                 Ok(Err(e)) => {
-                    tracing::error!(id, ?e, "[lodc flusher]: io task error");
+                    tracing::error!(id, ?e, "[block engine flusher]: io task error");
                     IoTaskCtx {
                         handle: None,
                         piece_refs,
@@ -631,7 +635,7 @@ where
                     }
                 }
                 Err(e) => {
-                    tracing::error!(id, ?e, "[lodc flusher]: join io task error");
+                    tracing::error!(id, ?e, "[block engine flusher]: join io task error");
                     IoTaskCtx {
                         handle: None,
                         piece_refs,

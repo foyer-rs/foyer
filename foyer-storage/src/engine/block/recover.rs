@@ -148,7 +148,9 @@ impl RecoverRunner {
         let elapsed = now.elapsed();
         tracing::info!("[recover] finish in {:?}", elapsed);
 
-        metrics.storage_lodc_recover_duration.record(elapsed.as_secs_f64());
+        metrics
+            .storage_block_engine_recover_duration
+            .record(elapsed.as_secs_f64());
 
         Ok(())
     }

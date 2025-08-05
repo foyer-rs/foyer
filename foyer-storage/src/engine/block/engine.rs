@@ -569,7 +569,7 @@ where
             Source::Populated(Populated { age }) => match age {
                 Age::Young => {
                     // skip write block engine if the entry is still young
-                    self.inner.metrics.storage_lodc_enqueue_skip.increase(1);
+                    self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
                     return;
                 }
                 Age::Old => {}

@@ -205,7 +205,7 @@ impl BlockManager {
             pickers.init(&rs, block_size);
         }
 
-        metrics.storage_lodc_block_size_bytes.absolute(block_size as _);
+        metrics.storage_block_engine_block_size_bytes.absolute(block_size as _);
 
         let state = State {
             clean_blocks: VecDeque::new(),
@@ -265,15 +265,17 @@ impl BlockManager {
         assert!(pickers.is_empty());
 
         let metrics = &self.inner.metrics;
-        metrics.storage_lodc_block_clean.absolute(state.clean_blocks.len() as _);
         metrics
-            .storage_lodc_block_evictable
+            .storage_block_engine_block_clean
+            .absolute(state.clean_blocks.len() as _);
+        metrics
+            .storage_block_engine_block_evictable
             .absolute(state.evictable_blocks.len() as _);
         metrics
-            .storage_lodc_block_writing
+            .storage_block_engine_block_writing
             .absolute(state.writing_blocks.len() as _);
         metrics
-            .storage_lodc_block_reclaiming
+            .storage_block_engine_block_reclaiming
             .absolute(state.reclaiming_blocks.len() as _);
     }
 
@@ -294,8 +296,8 @@ impl BlockManager {
                 if let Some(id) = state.clean_blocks.pop_front() {
                     let block = this.inner.blocks[id as usize].clone();
                     state.writing_blocks.insert(id);
-                    this.inner.metrics.storage_lodc_block_clean.decrease(1);
-                    this.inner.metrics.storage_lodc_block_writing.increase(1);
+                    this.inner.metrics.storage_block_engine_block_clean.decrease(1);
+                    this.inner.metrics.storage_block_engine_block_writing.increase(1);
                     this.reclaim_if_needed(&mut state);
                     return block;
                 } else {
@@ -314,9 +316,9 @@ impl BlockManager {
     pub fn on_writing_finish(&self, block: Block) {
         let mut state = self.inner.state.write().unwrap();
         state.writing_blocks.remove(&block.id());
-        self.inner.metrics.storage_lodc_block_writing.decrease(1);
+        self.inner.metrics.storage_block_engine_block_writing.decrease(1);
         let inserted = state.evictable_blocks.insert(block.id());
-        self.inner.metrics.storage_lodc_block_evictable.increase(1);
+        self.inner.metrics.storage_block_engine_block_evictable.increase(1);
 
         assert!(inserted);
 
@@ -351,12 +353,12 @@ impl BlockManager {
     fn on_reclaim_finish(&self, block: Block) {
         let mut state = self.inner.state.write().unwrap();
         state.reclaiming_blocks.remove(&block.id());
-        self.inner.metrics.storage_lodc_block_reclaiming.decrease(1);
+        self.inner.metrics.storage_block_engine_block_reclaiming.decrease(1);
         if let Some(waiter) = state.clean_block_waiters.pop() {
-            self.inner.metrics.storage_lodc_block_writing.increase(1);
+            self.inner.metrics.storage_block_engine_block_writing.increase(1);
             let _ = waiter.send(block);
         } else {
-            self.inner.metrics.storage_lodc_block_clean.increase(1);
+            self.inner.metrics.storage_block_engine_block_clean.increase(1);
             state.clean_blocks.push_back(block.id());
         }
         self.reclaim_if_needed(&mut state);
@@ -373,7 +375,7 @@ impl BlockManager {
         {
             if let Some(block) = self.evict(state) {
                 state.reclaiming_blocks.insert(block.id());
-                self.inner.metrics.storage_lodc_block_reclaiming.increase(1);
+                self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
                 let block = ReclaimingBlock {
                     block_manager: self.clone(),
                     block,
@@ -411,7 +413,7 @@ impl BlockManager {
 
         // Update evictable map.
         let removed = state.evictable_blocks.remove(&picked);
-        self.inner.metrics.storage_lodc_block_evictable.decrease(1);
+        self.inner.metrics.storage_block_engine_block_evictable.decrease(1);
         assert!(removed);
 
         // Notify pickers.

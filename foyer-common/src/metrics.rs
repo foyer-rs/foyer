@@ -62,20 +62,20 @@ pub struct Metrics {
     pub storage_disk_read_duration: BoxedHistogram,
     pub storage_disk_flush_duration: BoxedHistogram,
 
-    pub storage_lodc_block_clean: BoxedGauge,
-    pub storage_lodc_block_writing: BoxedGauge,
-    pub storage_lodc_block_evictable: BoxedGauge,
-    pub storage_lodc_block_reclaiming: BoxedGauge,
+    pub storage_block_engine_block_clean: BoxedGauge,
+    pub storage_block_engine_block_writing: BoxedGauge,
+    pub storage_block_engine_block_evictable: BoxedGauge,
+    pub storage_block_engine_block_reclaiming: BoxedGauge,
 
-    pub storage_lodc_block_size_bytes: BoxedGauge,
+    pub storage_block_engine_block_size_bytes: BoxedGauge,
 
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
 
-    pub storage_lodc_indexer_conflict: BoxedCounter,
-    pub storage_lodc_enqueue_skip: BoxedCounter,
-    pub storage_lodc_buffer_efficiency: BoxedHistogram,
-    pub storage_lodc_recover_duration: BoxedHistogram,
+    pub storage_block_engine_indexer_conflict: BoxedCounter,
+    pub storage_block_engine_enqueue_skip: BoxedCounter,
+    pub storage_block_engine_buffer_efficiency: BoxedHistogram,
+    pub storage_block_engine_recover_duration: BoxedHistogram,
 
     /* hybrid cache metrics */
     pub hybrid_insert: BoxedCounter,
@@ -175,13 +175,13 @@ impl Metrics {
             Buckets::exponential(0.000_001, 2.0, 23),
         );
 
-        let foyer_storage_lodc_block = registry.register_gauge_vec(
-            "foyer_storage_lodc_block".into(),
+        let foyer_storage_block_engine_block = registry.register_gauge_vec(
+            "foyer_storage_block_engine_block".into(),
             "foyer large object disk cache blocks".into(),
             &["name", "type"],
         );
-        let foyer_storage_lodc_block_size_bytes = registry.register_gauge_vec(
-            "foyer_storage_lodc_block_size_bytes".into(),
+        let foyer_storage_block_engine_block_size_bytes = registry.register_gauge_vec(
+            "foyer_storage_block_engine_block_size_bytes".into(),
             "foyer large object disk cache blocks sizes".into(),
             &["name"],
         );
@@ -194,22 +194,22 @@ impl Metrics {
             Buckets::exponential(0.000_000_01, 2.0, 23),
         );
 
-        let foyer_storage_lodc_op_total = registry.register_counter_vec(
-            "foyer_storage_lodc_op_total".into(),
+        let foyer_storage_block_engine_op_total = registry.register_counter_vec(
+            "foyer_storage_block_engine_op_total".into(),
             "foyer large object disk cache operations".into(),
             &["name", "op"],
         );
 
-        let foyer_storage_lodc_buffer_efficiency = registry.register_histogram_vec_with_buckets(
-            "foyer_storage_lodc_buffer_efficiency".into(),
+        let foyer_storage_block_engine_buffer_efficiency = registry.register_histogram_vec_with_buckets(
+            "foyer_storage_block_engine_buffer_efficiency".into(),
             "foyer large object disk cache buffer efficiency".into(),
             &["name"],
             // 0% ~ 100%
             Buckets::linear(0.1, 0.1, 10),
         );
 
-        let foyer_storage_lodc_recover_duration = registry.register_histogram_vec_with_buckets(
-            "foyer_storage_lodc_recover_duration".into(),
+        let foyer_storage_block_engine_recover_duration = registry.register_histogram_vec_with_buckets(
+            "foyer_storage_block_engine_recover_duration".into(),
             "foyer large object disk cache recover duration".into(),
             &["name"],
             // 1ms ~ 1000s
@@ -249,23 +249,29 @@ impl Metrics {
         let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "read".into()]);
         let storage_disk_flush_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "flush".into()]);
 
-        let storage_lodc_block_clean = foyer_storage_lodc_block.gauge(&[name.clone(), "clean".into()]);
-        let storage_lodc_block_writing = foyer_storage_lodc_block.gauge(&[name.clone(), "writing".into()]);
-        let storage_lodc_block_evictable = foyer_storage_lodc_block.gauge(&[name.clone(), "evictable".into()]);
-        let storage_lodc_block_reclaiming = foyer_storage_lodc_block.gauge(&[name.clone(), "reclaiming".into()]);
+        let storage_block_engine_block_clean = foyer_storage_block_engine_block.gauge(&[name.clone(), "clean".into()]);
+        let storage_block_engine_block_writing =
+            foyer_storage_block_engine_block.gauge(&[name.clone(), "writing".into()]);
+        let storage_block_engine_block_evictable =
+            foyer_storage_block_engine_block.gauge(&[name.clone(), "evictable".into()]);
+        let storage_block_engine_block_reclaiming =
+            foyer_storage_block_engine_block.gauge(&[name.clone(), "reclaiming".into()]);
 
-        let storage_lodc_block_size_bytes = foyer_storage_lodc_block_size_bytes.gauge(&[name.clone()]);
+        let storage_block_engine_block_size_bytes = foyer_storage_block_engine_block_size_bytes.gauge(&[name.clone()]);
 
         let storage_entry_serialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
         let storage_entry_deserialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "deserialize".into()]);
 
-        let storage_lodc_indexer_conflict =
-            foyer_storage_lodc_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
-        let storage_lodc_enqueue_skip = foyer_storage_lodc_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
-        let storage_lodc_buffer_efficiency = foyer_storage_lodc_buffer_efficiency.histogram(&[name.clone()]);
-        let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(&[name.clone()]);
+        let storage_block_engine_indexer_conflict =
+            foyer_storage_block_engine_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
+        let storage_block_engine_enqueue_skip =
+            foyer_storage_block_engine_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
+        let storage_block_engine_buffer_efficiency =
+            foyer_storage_block_engine_buffer_efficiency.histogram(&[name.clone()]);
+        let storage_block_engine_recover_duration =
+            foyer_storage_block_engine_recover_duration.histogram(&[name.clone()]);
 
         /* hybrid cache metrics */
 
@@ -329,17 +335,17 @@ impl Metrics {
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,
-            storage_lodc_block_clean,
-            storage_lodc_block_writing,
-            storage_lodc_block_evictable,
-            storage_lodc_block_reclaiming,
-            storage_lodc_block_size_bytes,
+            storage_block_engine_block_clean,
+            storage_block_engine_block_writing,
+            storage_block_engine_block_evictable,
+            storage_block_engine_block_reclaiming,
+            storage_block_engine_block_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
-            storage_lodc_indexer_conflict,
-            storage_lodc_enqueue_skip,
-            storage_lodc_buffer_efficiency,
-            storage_lodc_recover_duration,
+            storage_block_engine_indexer_conflict,
+            storage_block_engine_enqueue_skip,
+            storage_block_engine_buffer_efficiency,
+            storage_block_engine_recover_duration,
 
             hybrid_insert,
             hybrid_hit,
