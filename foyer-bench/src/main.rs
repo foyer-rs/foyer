@@ -40,9 +40,9 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineBuilder;
 use foyer::{
-    Code, CodeError, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker, FileDeviceBuilder,
-    FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties, InvalidRatioPicker,
-    IoEngine, IoEngineBuilder, LargeObjectEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
+    BlockEngineBuilder, Code, CodeError, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
+    FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
+    InvalidRatioPicker, IoEngine, IoEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
     RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
 };
 use futures_util::future::join_all;
@@ -118,9 +118,9 @@ struct Args {
     #[arg(long, default_value_t = 10000)]
     get_range: u64,
 
-    /// Disk cache region size.
+    /// Disk cache blocks size.
     #[arg(long, default_value_t = ByteSize::mib(64))]
-    region_size: ByteSize,
+    block_size: ByteSize,
 
     /// Flusher count.
     #[arg(long, default_value_t = 4)]
@@ -163,7 +163,7 @@ struct Args {
 
     /// `0` means use default.
     #[arg(long, default_value_t = 0)]
-    clean_region_threshold: usize,
+    clean_block_threshold: usize,
 
     /// Shards of both in-memory cache and disk cache indexer.
     #[arg(long, default_value_t = 64)]
@@ -221,10 +221,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
 
-    // // TODO(MrCroxx): use mixed engine by default.
-    // /// Disk cache engine.
-    // #[arg(long, default_value = "large")]
-    // engine: String,
+    /// Disk cache engine.
+    #[arg(long, value_parser = PossibleValuesParser::new(["block"]), default_value = "block")]
+    engine: String,
+
     /// Time-series operation distribution.
     ///
     /// Available values: "none", "uniform", "zipf".
@@ -289,7 +289,7 @@ struct Args {
     flush_on_close: bool,
 
     #[arg(long, default_value_t = 0.1)]
-    lodc_fifo_probation_ratio: f64,
+    block_engine_fifo_probation_ratio: f64,
 
     #[arg(long, value_parser = PossibleValuesParser::new(["psync", "io_uring"]), default_value = "psync")]
     io_engine: String,
@@ -597,20 +597,20 @@ async fn benchmark(args: Args) {
     };
 
     let engine_config: Box<dyn EngineConfig<u64, Value, HybridCacheProperties>> = {
-        let mut builder = LargeObjectEngineBuilder::new(device)
-            .with_region_size(args.region_size.as_u64() as _)
+        let mut builder = BlockEngineBuilder::new(device)
+            .with_block_size(args.block_size.as_u64() as _)
             .with_indexer_shards(args.shards)
             .with_recover_concurrency(args.recover_concurrency)
             .with_flushers(args.flushers)
             .with_reclaimers(args.reclaimers)
             .with_eviction_pickers(vec![
                 Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-                Box::new(FifoPicker::new(args.lodc_fifo_probation_ratio)),
+                Box::new(FifoPicker::new(args.block_engine_fifo_probation_ratio)),
             ])
             .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
             .with_blob_index_size(args.blob_index_size.as_u64() as _);
-        if args.clean_region_threshold > 0 {
-            builder = builder.with_clean_region_threshold(args.clean_region_threshold);
+        if args.clean_block_threshold > 0 {
+            builder = builder.with_clean_block_threshold(args.clean_block_threshold);
         }
         builder
     }

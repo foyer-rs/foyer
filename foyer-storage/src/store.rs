@@ -548,7 +548,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        engine::large::engine::LargeObjectEngineBuilder,
+        engine::block::engine::BlockEngineBuilder,
         io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineBuilder},
         DeviceBuilder,
     };
@@ -561,14 +561,14 @@ mod tests {
         let _ = StoreBuilder::new("test", memory, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(
+                BlockEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(64 * 1024)
                         .build()
                         .unwrap(),
                 )
                 .with_flushers(3)
-                .with_region_size(16 * 1024)
+                .with_block_size(16 * 1024)
                 .with_buffer_pool_size(128 * 1024 * 1024),
             )
             .build()
@@ -591,13 +591,13 @@ mod tests {
         let store = StoreBuilder::new("test", memory, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(
+                BlockEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(4 * 1024 * 1024)
                         .build()
                         .unwrap(),
                 )
-                .with_region_size(16 * 1024),
+                .with_block_size(16 * 1024),
             )
             .build()
             .await

@@ -61,12 +61,12 @@ pub enum Error {
         get: Range<usize>,
     },
     /// Invalid I/O range.
-    #[error("invalid io range: {range:?}, region size: {region_size}, capacity: {capacity}")]
+    #[error("invalid io range: {range:?}, block size: {block_size}, capacity: {capacity}")]
     InvalidIoRange {
         /// I/O range
         range: Range<usize>,
-        /// Region size
-        region_size: usize,
+        /// Block size
+        block_size: usize,
         /// Capacity
         capacity: usize,
     },

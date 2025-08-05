@@ -1062,8 +1062,8 @@ mod tests {
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_region_size(MB),
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_block_size(MB),
             )
             .build()
             .await
@@ -1082,8 +1082,8 @@ mod tests {
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_region_size(MB)
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_block_size(MB)
                     .with_admission_picker(Arc::new(BiasedPicker::new(admits))),
             )
             .build()
@@ -1104,8 +1104,8 @@ mod tests {
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_region_size(MB),
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_block_size(MB),
             )
             .build()
             .await
@@ -1126,9 +1126,9 @@ mod tests {
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_admission_picker(recorder.clone())
-                    .with_region_size(MB),
+                    .with_block_size(MB),
             )
             .build()
             .await
@@ -1149,8 +1149,8 @@ mod tests {
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
-                LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_region_size(MB),
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_block_size(MB),
             )
             .build()
             .await
@@ -1501,8 +1501,8 @@ mod tests {
                 .storage()
                 .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
                 .with_engine_config(
-                    LargeObjectEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                        .with_region_size(64 * KB),
+                    BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                        .with_block_size(64 * KB),
                 )
                 .build()
                 .await

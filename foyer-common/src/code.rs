@@ -105,7 +105,7 @@ pub trait Code {
 
     /// Estimated serialized size of the object.
     ///
-    /// The estimated serialized size is used by selector between large and small object disk cache engines.
+    /// The estimated serialized size is used by selector between different disk cache engines.
     fn estimated_size(&self) -> usize;
 }
 

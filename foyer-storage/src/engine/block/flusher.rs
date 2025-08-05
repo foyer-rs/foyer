@@ -39,13 +39,13 @@ use itertools::Itertools;
 use tokio::sync::oneshot;
 
 #[cfg(test)]
-use crate::engine::large::test_utils::*;
+use crate::engine::block::test_utils::*;
 use crate::{
-    engine::large::{
-        buffer::{Batch, BlobPart, Buffer, Region, SplitCtx, Splitter},
+    engine::block::{
+        buffer::{Batch, BlobPart, Block, Buffer, SplitCtx, Splitter},
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
+        manager::{BlockId, BlockManager, GetCleanBlockHandle},
         reclaimer::Reinsertion,
-        region::{GetCleanRegionHandle, RegionId, RegionManager},
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
@@ -168,12 +168,12 @@ where
     pub fn run(
         &self,
         rx: flume::Receiver<Submission<K, V, P>>,
-        region_size: usize,
+        block_size: usize,
         io_buffer_size: usize,
         blob_index_size: usize,
         compression: Compression,
         indexer: Indexer,
-        region_manager: RegionManager,
+        block_manager: BlockManager,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
@@ -186,7 +186,7 @@ where
         bits::assert_aligned(PAGE, io_buffer_size);
         bits::assert_aligned(PAGE, blob_index_size);
 
-        let max_entry_size = region_size - blob_index_size;
+        let max_entry_size = block_size - blob_index_size;
 
         let bytes = IoSliceMut::new(io_buffer_size);
         let rotate_buffer = Some(IoSliceMut::new(io_buffer_size));
@@ -194,9 +194,9 @@ where
         let buffer = Buffer::new(bytes, max_entry_size, metrics.clone());
         let buffer = Some(buffer);
 
-        let current_region_handle = region_manager.get_clean_region();
+        let current_block_handle = block_manager.get_clean_block();
 
-        let ctx = SplitCtx::new(region_size, blob_index_size);
+        let ctx = SplitCtx::new(block_size, blob_index_size);
 
         let runner = Runner {
             id,
@@ -209,14 +209,14 @@ where
             rotate_buffer,
             queue_init: None,
             submit_queue_size: self.submit_queue_size.clone(),
-            region_manager,
+            block_manager,
             indexer,
             tombstone_log,
             compression,
             runtime: runtime.clone(),
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
-            current_region_handle,
+            current_block_handle,
             max_entry_size,
             #[cfg(test)]
             flush_holder,
@@ -255,7 +255,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct InvalidStats {
-    pub region: RegionId,
+    pub block: BlockId,
     pub size: usize,
 }
 
@@ -271,7 +271,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    handle: Option<GetCleanRegionHandle>,
+    handle: Option<GetCleanBlockHandle>,
     waiters: Vec<oneshot::Sender<()>>,
     piece_refs: Vec<PieceRef<K, V, P>>,
     init: Instant,
@@ -304,9 +304,9 @@ where
 
     submit_queue_size: Arc<AtomicUsize>,
 
-    current_region_handle: GetCleanRegionHandle,
+    current_block_handle: GetCleanBlockHandle,
 
-    region_manager: RegionManager,
+    block_manager: BlockManager,
     indexer: Indexer,
     tombstone_log: Option<TombstoneLog>,
 
@@ -383,7 +383,7 @@ where
                 biased;
                 IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
-                        self.current_region_handle = handle;
+                        self.current_block_handle = handle;
                     }
                     self.handle_io_complete(piece_refs, waiters, tombstone_infos, init);
                     // `try_into_io_buffer` must return `Some(..)` here.
@@ -465,61 +465,55 @@ where
             "[flusher] commit batch"
         );
 
-        let region_handle_iter = if batch.regions.is_empty() {
+        let block_handle_iter = if batch.blocks.is_empty() {
             vec![]
         } else {
-            std::iter::once(self.current_region_handle.clone())
-                .chain((0..batch.regions.len() - 1).map(|_| self.region_manager.get_clean_region()))
+            std::iter::once(self.current_block_handle.clone())
+                .chain((0..batch.blocks.len() - 1).map(|_| self.block_manager.get_clean_block()))
                 .collect_vec()
         };
 
         let bytes = batch.bytes;
-        let regions = batch.regions.len();
-        // Write regions concurrently.
+        let blocks = batch.blocks.len();
+        // Write blocks concurrently.
         let futures = batch
-            .regions
+            .blocks
             .into_iter()
-            .zip_eq(region_handle_iter)
+            .zip_eq(block_handle_iter)
             .enumerate()
-            .map(|(i, (Region { blob_parts }, region_handle))| {
+            .map(|(i, (Block { blob_parts }, block_handle))| {
                 let indexer = self.indexer.clone();
-                let region_manager = self.region_manager.clone();
+                let block_manager = self.block_manager.clone();
                 let metrics = self.metrics.clone();
 
                 async move {
-                    // Wait for region is clean.
-                    let region = region_handle.clone().await;
+                    // Wait for block is clean.
+                    let block = block_handle.clone().await;
 
                     let tasks = blob_parts.into_iter().map(
                         |BlobPart {
-                             blob_region_offset,
+                             blob_block_offset,
                              index,
                              part_blob_offset,
                              data,
                              indices,
                          }| {
-                            let offset = blob_region_offset + part_blob_offset;
+                            let offset = blob_block_offset + part_blob_offset;
                             let len = data.len();
 
                             bits::assert_aligned(PAGE, offset);
                             bits::assert_aligned(PAGE, len);
 
-                            let region = region.clone();
+                            let block = block.clone();
                             async move {
                                 if len > 0 {
-                                    tracing::trace!(
-                                        id,
-                                        region = region.id(),
-                                        offset,
-                                        len,
-                                        "[flusher]: write blob data"
-                                    );
+                                    tracing::trace!(id, block = block.id(), offset, len, "[flusher]: write blob data");
 
-                                    let (_, res) = region.write(Box::new(data), offset as _).await;
+                                    let (_, res) = block.write(Box::new(data), offset as _).await;
                                     if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
-                                            blob_region_offset,
+                                            blob_block_offset,
                                             part_blob_offset,
                                             ?indices,
                                             ?res,
@@ -529,13 +523,13 @@ where
                                     }
                                     res?;
 
-                                    tracing::trace!(id, offset = blob_region_offset, "[flusher]: write blob index");
+                                    tracing::trace!(id, offset = blob_block_offset, "[flusher]: write blob index");
 
-                                    let (_, res) = region.write(Box::new(index), blob_region_offset as _).await;
+                                    let (_, res) = block.write(Box::new(index), blob_block_offset as _).await;
                                     if let Err(e) = res.as_ref() {
                                         tracing::error!(
                                             id,
-                                            blob_region_offset,
+                                            blob_block_offset,
                                             part_blob_offset,
                                             ?indices,
                                             ?res,
@@ -547,24 +541,24 @@ where
                                 } else {
                                     tracing::trace!(
                                         id,
-                                        region = region.id(),
-                                        "[flusher]: skip write region, because the window is empty"
+                                        block = block.id(),
+                                        "[flusher]: skip write block, because the window is empty"
                                     );
                                 }
 
-                                Ok::<_, Error>((region.id(), blob_region_offset, indices))
+                                Ok::<_, Error>((block.id(), blob_block_offset, indices))
                             }
                         },
                     );
                     let infos = try_join_all(tasks).await?;
 
                     let mut addrs = Vec::with_capacity(infos.iter().map(|(_, _, indices)| indices.len()).sum());
-                    for (region, blob_offset, indices) in infos {
+                    for (block, blob_offset, indices) in infos {
                         for index in indices {
                             let addr = HashedEntryAddress {
                                 hash: index.hash,
                                 address: EntryAddress {
-                                    region,
+                                    block,
                                     offset: blob_offset as u32 + index.offset,
                                     len: index.len,
                                     sequence: index.sequence,
@@ -579,19 +573,19 @@ where
                     metrics.storage_lodc_indexer_conflict.increase(olds.len() as _);
 
                     // Window expect window is full, make it evictable.
-                    let id = region.id();
-                    if i != regions - 1 {
-                        region_manager.on_writing_finish(region);
+                    let id = block.id();
+                    if i != blocks - 1 {
+                        block_manager.on_writing_finish(block);
                     }
-                    tracing::trace!(id, "[flusher]: write region finish.");
+                    tracing::trace!(id, "[flusher]: write block finish.");
 
-                    Ok::<_, Error>(region_handle)
+                    Ok::<_, Error>(block_handle)
                 }
             })
             .collect_vec();
 
         let future = {
-            let region_manager = self.region_manager.clone();
+            let block_manager = self.block_manager.clone();
             let tombstone_log = self.tombstone_log.clone();
             let tombstone_infos = tombstone_infos.clone();
             async move {
@@ -600,8 +594,8 @@ where
                 }
                 for TombstoneInfo { tombstone: _, stats } in tombstone_infos {
                     if let Some(stats) = stats {
-                        region_manager
-                            .region(stats.region)
+                        block_manager
+                            .block(stats.block)
                             .statistics()
                             .invalid
                             .fetch_add(stats.size, Ordering::Relaxed);
@@ -611,7 +605,7 @@ where
             }
         };
 
-        let f: BoxFuture<'_, Result<(Vec<GetCleanRegionHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
+        let f: BoxFuture<'_, Result<(Vec<GetCleanBlockHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
             .runtime
             .write()

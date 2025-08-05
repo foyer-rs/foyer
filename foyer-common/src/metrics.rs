@@ -62,12 +62,12 @@ pub struct Metrics {
     pub storage_disk_read_duration: BoxedHistogram,
     pub storage_disk_flush_duration: BoxedHistogram,
 
-    pub storage_lodc_region_clean: BoxedGauge,
-    pub storage_lodc_region_writing: BoxedGauge,
-    pub storage_lodc_region_evictable: BoxedGauge,
-    pub storage_lodc_region_reclaiming: BoxedGauge,
+    pub storage_lodc_block_clean: BoxedGauge,
+    pub storage_lodc_block_writing: BoxedGauge,
+    pub storage_lodc_block_evictable: BoxedGauge,
+    pub storage_lodc_block_reclaiming: BoxedGauge,
 
-    pub storage_lodc_region_size_bytes: BoxedGauge,
+    pub storage_lodc_block_size_bytes: BoxedGauge,
 
     pub storage_entry_serialize_duration: BoxedHistogram,
     pub storage_entry_deserialize_duration: BoxedHistogram,
@@ -175,14 +175,14 @@ impl Metrics {
             Buckets::exponential(0.000_001, 2.0, 23),
         );
 
-        let foyer_storage_lodc_region = registry.register_gauge_vec(
-            "foyer_storage_lodc_region".into(),
-            "foyer large object disk cache regions".into(),
+        let foyer_storage_lodc_block = registry.register_gauge_vec(
+            "foyer_storage_lodc_block".into(),
+            "foyer large object disk cache blocks".into(),
             &["name", "type"],
         );
-        let foyer_storage_lodc_region_size_bytes = registry.register_gauge_vec(
-            "foyer_storage_lodc_region_size_bytes".into(),
-            "foyer large object disk cache region sizes".into(),
+        let foyer_storage_lodc_block_size_bytes = registry.register_gauge_vec(
+            "foyer_storage_lodc_block_size_bytes".into(),
+            "foyer large object disk cache blocks sizes".into(),
             &["name"],
         );
 
@@ -249,12 +249,12 @@ impl Metrics {
         let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "read".into()]);
         let storage_disk_flush_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "flush".into()]);
 
-        let storage_lodc_region_clean = foyer_storage_lodc_region.gauge(&[name.clone(), "clean".into()]);
-        let storage_lodc_region_writing = foyer_storage_lodc_region.gauge(&[name.clone(), "writing".into()]);
-        let storage_lodc_region_evictable = foyer_storage_lodc_region.gauge(&[name.clone(), "evictable".into()]);
-        let storage_lodc_region_reclaiming = foyer_storage_lodc_region.gauge(&[name.clone(), "reclaiming".into()]);
+        let storage_lodc_block_clean = foyer_storage_lodc_block.gauge(&[name.clone(), "clean".into()]);
+        let storage_lodc_block_writing = foyer_storage_lodc_block.gauge(&[name.clone(), "writing".into()]);
+        let storage_lodc_block_evictable = foyer_storage_lodc_block.gauge(&[name.clone(), "evictable".into()]);
+        let storage_lodc_block_reclaiming = foyer_storage_lodc_block.gauge(&[name.clone(), "reclaiming".into()]);
 
-        let storage_lodc_region_size_bytes = foyer_storage_lodc_region_size_bytes.gauge(&[name.clone()]);
+        let storage_lodc_block_size_bytes = foyer_storage_lodc_block_size_bytes.gauge(&[name.clone()]);
 
         let storage_entry_serialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
@@ -329,11 +329,11 @@ impl Metrics {
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,
-            storage_lodc_region_clean,
-            storage_lodc_region_writing,
-            storage_lodc_region_evictable,
-            storage_lodc_region_reclaiming,
-            storage_lodc_region_size_bytes,
+            storage_lodc_block_clean,
+            storage_lodc_block_writing,
+            storage_lodc_block_evictable,
+            storage_lodc_block_reclaiming,
+            storage_lodc_block_size_bytes,
             storage_entry_serialize_duration,
             storage_entry_deserialize_duration,
             storage_lodc_indexer_conflict,

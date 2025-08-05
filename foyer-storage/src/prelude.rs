@@ -17,10 +17,10 @@ pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineBuilder};
 pub use crate::{
     compress::Compression,
     engine::{
-        large::{
-            engine::LargeObjectEngineBuilder,
+        block::{
+            engine::BlockEngineBuilder,
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
-            region::{Region, RegionStatistics},
+            manager::{Block, BlockStatistics},
         },
         Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
     },

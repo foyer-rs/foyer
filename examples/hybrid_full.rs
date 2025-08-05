@@ -16,9 +16,9 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize, sync::Arc};
 
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IoEngineBuilder, IopsCounter, LargeObjectEngineBuilder, LruConfig, PsyncIoEngineBuilder, RecoverMode,
-    RejectAllPicker, Result, RuntimeOptions, Throttle, TokioRuntimeOptions,
+    AdmitAllPicker, BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    HybridCachePolicy, IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAllPicker,
+    Result, RuntimeOptions, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
@@ -53,14 +53,14 @@ async fn main() -> anyhow::Result<()> {
         .storage()
         .with_io_engine(io_engine)
         .with_engine_config(
-            LargeObjectEngineBuilder::new(device)
-                .with_region_size(16 * 1024 * 1024)
+            BlockEngineBuilder::new(device)
+                .with_block_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)
                 .with_flushers(2)
                 .with_reclaimers(2)
                 .with_buffer_pool_size(256 * 1024 * 1024)
-                .with_clean_region_threshold(4)
+                .with_clean_block_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
                 .with_admission_picker(Arc::<AdmitAllPicker>::default())
                 .with_reinsertion_picker(Arc::<RejectAllPicker>::default())

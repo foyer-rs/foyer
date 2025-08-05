@@ -24,11 +24,11 @@ use futures_util::{future::join_all, FutureExt};
 use itertools::Itertools;
 
 use crate::{
-    engine::large::{
+    engine::block::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
-        region::{ReclaimingRegion, Region},
-        scanner::RegionScanner,
+        manager::{Block, ReclaimingBlock},
+        scanner::BlockScanner,
         serde::Sequence,
     },
     error::Result,
@@ -42,7 +42,7 @@ use crate::{
 };
 
 pub trait ReclaimerTrait: Send + Sync + 'static + Debug {
-    fn reclaim(&self, region: ReclaimingRegion) -> BoxFuture<'static, ()>;
+    fn reclaim(&self, block: ReclaimingBlock) -> BoxFuture<'static, ()>;
 }
 
 pub struct Reclaimer<K, V, P>
@@ -101,7 +101,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn reclaim(&self, region: ReclaimingRegion) -> BoxFuture<'static, ()> {
+    fn reclaim(&self, block: ReclaimingBlock) -> BoxFuture<'static, ()> {
         let reinsertion_picker = self.reinsertion_picker.clone();
         let statistics = self.statistics.clone();
         let blob_index_size = self.blob_index_size;
@@ -109,11 +109,11 @@ where
         let runtime = self.runtime.clone();
         let indexer = self.indexer.clone();
         async move {
-            let id = region.id();
+            let id = block.id();
 
-            tracing::debug!(id, "[reclaimer]: Start reclaiming region.");
+            tracing::debug!(id, "[reclaimer]: Start reclaiming block.");
 
-            let mut scanner = RegionScanner::new(region.clone(), blob_index_size);
+            let mut scanner = BlockScanner::new(block.clone(), blob_index_size);
             let mut picked_count = 0;
             let mut unpicked = vec![];
             // The loop will ends when:
@@ -128,8 +128,8 @@ where
                     Ok(None) => break 'reinsert,
                     Err(e) => {
                         tracing::warn!(
-                            "[reclaimer]: Error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                            id = region.id()
+                            "[reclaimer]: Error raised when reclaiming block {id}, skip the subsequent entries, err: {e}",
+                            id = block.id()
                         );
                         break 'reinsert;
                     }
@@ -138,11 +138,11 @@ where
                 for info in infos {
                     if reinsertion_picker.pick(&statistics, info.hash).admitted() {
                         let buf = IoSliceMut::new(bits::align_up(PAGE, info.addr.len as _));
-                        let (buf, res) = region.read(Box::new(buf), info.addr.offset as _).await;
+                        let (buf, res) = block.read(Box::new(buf), info.addr.offset as _).await;
                         if let Err(e) = res {
                             tracing::warn!(
-                                    "[reclaimer]: error raised when reclaiming region {id}, skip the subsequent entries, err: {e}",
-                                    id = region.id()
+                                    "[reclaimer]: error raised when reclaiming block {id}, skip the subsequent entries, err: {e}",
+                                    id = block.id()
                                 );
                             break 'reinsert;
                         }
@@ -172,29 +172,29 @@ where
             });
             indexer.remove_batch(unpicked);
 
-            if let Err(e) = RegionCleaner::clean(&region).await {
-                tracing::warn!("reclaimer]: mark region {id} clean error: {e}", id = region.id());
+            if let Err(e) = BlockCleaner::clean(&block).await {
+                tracing::warn!("reclaimer]: mark block {id} clean error: {e}", id = block.id());
             }
 
             tracing::debug!(
-                "[reclaimer]: Finish reclaiming region {id}, picked: {picked_count}, unpicked: {unpicked_count}."
+                "[reclaimer]: Finish reclaiming block {id}, picked: {picked_count}, unpicked: {unpicked_count}."
             );
 
-            region.statistics().reset();
+            block.statistics().reset();
 
-            drop(region);
+            drop(block);
         }.boxed()
     }
 }
 
 #[derive(Debug)]
-pub struct RegionCleaner;
+pub struct BlockCleaner;
 
-impl RegionCleaner {
-    pub async fn clean(region: &Region) -> Result<()> {
+impl BlockCleaner {
+    pub async fn clean(block: &Block) -> Result<()> {
         let mut page = IoSliceMut::new(PAGE);
         page.fill(0);
-        let (_, res) = region.write(Box::new(page), 0).await;
+        let (_, res) = block.write(Box::new(page), 0).await;
         res?;
         Ok(())
     }
