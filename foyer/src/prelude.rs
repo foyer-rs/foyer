@@ -36,9 +36,9 @@ pub use crate::{
     },
     storage::{
         AdmitAll, Block, BlockEngineBuilder, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
-        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EvictionInfo, EvictionPicker, FifoPicker,
-        FileDeviceBuilder, Filter, FilterCondition, FilterResult, FsDeviceBuilder, InvalidRatioPicker, IoEngine,
-        IoEngineBuilder, IoError, IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine,
+        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
+        FifoPicker, FileDeviceBuilder, Filter, FilterCondition, FilterResult, FsDeviceBuilder, InvalidRatioPicker,
+        IoEngine, IoEngineBuilder, IoError, IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine,
         NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode,
         RejectAll, Runtime, RuntimeOptions, Statistics, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
     },

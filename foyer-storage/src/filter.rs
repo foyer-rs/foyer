@@ -17,7 +17,7 @@ use std::{fmt::Debug, sync::Arc, time::Duration};
 use crate::io::device::statistics::Statistics;
 
 /// Filter result for admission pickers and reinsertion pickers.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterResult {
     /// Admittion.
     Admit,
@@ -86,6 +86,8 @@ impl Filter {
 
 pub mod conditions {
 
+    use std::ops::{Bound, Range, RangeBounds};
+
     pub use super::*;
 
     /// Admit all entries.
@@ -120,5 +122,53 @@ pub mod conditions {
                 FilterResult::Throttled(duration)
             }
         }
+    }
+
+    /// A condition that checks if the estimated size is within a specified range.
+    #[derive(Debug)]
+    pub struct EstimatedSize {
+        range: Range<usize>,
+    }
+
+    impl EstimatedSize {
+        /// Create a new `EstimatedSize` condition with a specified range.
+        pub fn new<R: RangeBounds<usize>>(range: R) -> Self {
+            let start = match range.start_bound() {
+                Bound::Included(v) => *v,
+                Bound::Excluded(v) => *v + 1,
+                Bound::Unbounded => 0,
+            };
+            let end = match range.end_bound() {
+                Bound::Included(v) => *v + 1,
+                Bound::Excluded(v) => *v,
+                Bound::Unbounded => usize::MAX,
+            };
+            Self { range: start..end }
+        }
+    }
+
+    impl FilterCondition for EstimatedSize {
+        fn filter(&self, _: &Arc<Statistics>, _: u64, estimated_size: usize) -> FilterResult {
+            if self.range.contains(&estimated_size) {
+                FilterResult::Admit
+            } else {
+                FilterResult::Reject
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::conditions::*;
+    use crate::Throttle;
+
+    #[test]
+    fn test_estimated_size_condition() {
+        let condition = EstimatedSize::new(10..20);
+        let statistics = Arc::new(Statistics::new(Throttle::default()));
+        assert_eq!(condition.filter(&statistics, 0, 15), FilterResult::Admit);
+        assert_eq!(condition.filter(&statistics, 0, 5), FilterResult::Reject);
+        assert_eq!(condition.filter(&statistics, 0, 20), FilterResult::Reject);
     }
 }

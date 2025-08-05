@@ -26,7 +26,7 @@ pub use crate::{
     },
     error::{Error, Result},
     filter::{
-        conditions::{AdmitAll, RejectAll},
+        conditions::{AdmitAll, EstimatedSize, RejectAll},
         Filter, FilterCondition, FilterResult,
     },
     io::{
