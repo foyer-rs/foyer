@@ -127,7 +127,7 @@ impl Metrics {
         let memory_queue = foyer_memory_op_total.counter(&[name.clone(), "queue".into()]);
         let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]);
 
-        let memory_usage = foyer_memory_usage.gauge(&[name.clone()]);
+        let memory_usage = foyer_memory_usage.gauge(std::slice::from_ref(&name));
 
         /* disk cache metrics */
 
@@ -257,7 +257,8 @@ impl Metrics {
         let storage_block_engine_block_reclaiming =
             foyer_storage_block_engine_block.gauge(&[name.clone(), "reclaiming".into()]);
 
-        let storage_block_engine_block_size_bytes = foyer_storage_block_engine_block_size_bytes.gauge(&[name.clone()]);
+        let storage_block_engine_block_size_bytes =
+            foyer_storage_block_engine_block_size_bytes.gauge(std::slice::from_ref(&name));
 
         let storage_entry_serialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
@@ -269,9 +270,9 @@ impl Metrics {
         let storage_block_engine_enqueue_skip =
             foyer_storage_block_engine_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
         let storage_block_engine_buffer_efficiency =
-            foyer_storage_block_engine_buffer_efficiency.histogram(&[name.clone()]);
+            foyer_storage_block_engine_buffer_efficiency.histogram(std::slice::from_ref(&name));
         let storage_block_engine_recover_duration =
-            foyer_storage_block_engine_recover_duration.histogram(&[name.clone()]);
+            foyer_storage_block_engine_recover_duration.histogram(std::slice::from_ref(&name));
 
         /* hybrid cache metrics */
 
