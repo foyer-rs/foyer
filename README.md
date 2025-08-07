@@ -60,7 +60,7 @@ Feel free to open a PR and add your projects here:
 - [Percas](https://github.com/scopedb/percas): A distributed persistent cache service optimized for high performance NVMe SSD.
 - [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services.
 - [si](https://github.com/systeminit/si): The System Initiative software.
-- [AntTP](https://github.com/traktion/AntTP): AntTP is a HTTP service which serves data from Autonomi over conventional HTTP connections.
+- [AntTP](https://github.com/traktion/AntTP): Serves Autonomi Network data over HTTP protocol.
 
 ## Quick Start
 
