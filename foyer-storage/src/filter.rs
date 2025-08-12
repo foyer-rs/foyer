@@ -40,15 +40,15 @@ impl StorageFilterResult {
     }
 }
 
-/// Condition for [`Filter`].
+/// Condition for [`StorageFilter`].
 pub trait StorageFilterCondition: Send + Sync + Debug + 'static {
     /// Decide whether to pick an entry by hash.
     fn filter(&self, stats: &Arc<Statistics>, hash: u64, estimated_size: usize) -> StorageFilterResult;
 }
 
-/// [`Filter`] filters entries based on multiple conditions for admission and reinsertion.
+/// [`StorageFilter`] filters entries based on multiple conditions for admission and reinsertion.
 ///
-/// [`Filter`] admits all entries if no conditions are set.
+/// [`StorageFilter`] admits all entries if no conditions are set.
 #[derive(Debug, Default)]
 pub struct StorageFilter {
     conditions: Vec<Box<dyn StorageFilterCondition>>,

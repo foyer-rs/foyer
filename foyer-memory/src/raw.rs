@@ -1353,6 +1353,7 @@ mod tests {
         assert!(fifo.get(&1).is_none());
     }
 
+    #[expect(clippy::type_complexity)]
     #[test_log::test]
     fn test_insert_filter() {
         let fifo: RawCache<
@@ -1365,10 +1366,7 @@ mod tests {
             eviction_config: FifoConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
-            filter: Arc::new(|k, _| match *k {
-                42 => false,
-                _ => true,
-            }),
+            filter: Arc::new(|k, _| !matches!(*k, 42)),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         });
