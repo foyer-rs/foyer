@@ -21,7 +21,7 @@ use foyer_common::{
     event::EventListener,
     metrics::Metrics,
 };
-use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Weighter};
+use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Filter, Weighter};
 use foyer_storage::{Compression, EngineConfig, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
@@ -194,6 +194,26 @@ where
     /// Set in-memory cache weighter.
     pub fn with_weighter(self, weighter: impl Weighter<K, V>) -> Self {
         let builder = self.builder.with_weighter(weighter);
+        HybridCacheBuilderPhaseMemory {
+            name: self.name,
+            options: self.options,
+            metrics: self.metrics,
+            builder,
+        }
+    }
+
+    /// Set the filter for the in-memory cache.
+    ///
+    /// The filter is used to decide whether to admit or reject an entry based on its key and value.
+    ///
+    /// If the filter returns true, the key value can be inserted into the in-memory cache;
+    /// otherwise, the key value cannot be inserted.
+    ///
+    /// To ensure API consistency, the in-memory cache will still return a cache entry,
+    /// but it will not count towards the in-memory cache usage,
+    /// and it will be immediately reclaimed when the cache entry is dropped.
+    pub fn with_filter(self, filter: impl Filter<K, V>) -> Self {
+        let builder = self.builder.with_filter(filter);
         HybridCacheBuilderPhaseMemory {
             name: self.name,
             options: self.options,

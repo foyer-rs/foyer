@@ -1072,7 +1072,7 @@ mod tests {
     use foyer_common::hasher::ModHasher;
     use foyer_storage::{
         test_utils::{Record, Recorder},
-        Filter,
+        StorageFilter,
     };
     use storage::test_utils::Biased;
 
@@ -1112,7 +1112,7 @@ mod tests {
             .with_engine_config(
                 BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                     .with_block_size(MB)
-                    .with_admission_filter(Filter::new().with_condition(Biased::new(admits))),
+                    .with_admission_filter(StorageFilter::new().with_condition(Biased::new(admits))),
             )
             .build()
             .await
@@ -1155,8 +1155,8 @@ mod tests {
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
                 BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_admission_filter(Filter::new().with_condition(recorder.admission()))
-                    .with_reinsertion_filter(Filter::new().with_condition(recorder.eviction()))
+                    .with_admission_filter(StorageFilter::new().with_condition(recorder.admission()))
+                    .with_reinsertion_filter(StorageFilter::new().with_condition(recorder.eviction()))
                     .with_block_size(MB),
             )
             .build()

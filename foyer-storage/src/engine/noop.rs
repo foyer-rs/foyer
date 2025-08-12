@@ -25,7 +25,7 @@ use crate::{
     engine::{Engine, EngineBuildContext, EngineConfig},
     error::Result,
     keeper::PieceRef,
-    Device, DeviceBuilder, FilterResult, Load, NoopDeviceBuilder,
+    Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
 };
 
 pub struct NoopEngineBuilder<K, V, P>(PhantomData<(K, V, P)>)
@@ -125,8 +125,8 @@ where
         &self.device
     }
 
-    fn filter(&self, _: u64, _: usize) -> FilterResult {
-        FilterResult::Reject
+    fn filter(&self, _: u64, _: usize) -> StorageFilterResult {
+        StorageFilterResult::Reject
     }
 
     fn enqueue(&self, _: PieceRef<K, V, P>, _: usize) {}

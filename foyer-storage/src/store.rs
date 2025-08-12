@@ -47,7 +47,7 @@ use crate::{
     keeper::Keeper,
     runtime::Runtime,
     serde::EntrySerializer,
-    FilterResult,
+    StorageFilterResult,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -129,7 +129,7 @@ where
     }
 
     /// Return if the given key can be picked by the admission filter.
-    pub fn filter(&self, hash: u64, estimated_size: usize) -> FilterResult {
+    pub fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult {
         self.inner.engine.filter(hash, estimated_size)
     }
 

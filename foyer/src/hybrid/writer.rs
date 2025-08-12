@@ -18,7 +18,7 @@ use std::{
 };
 
 use foyer_common::code::{DefaultHasher, HashBuilder, StorageKey, StorageValue};
-use foyer_storage::FilterResult;
+use foyer_storage::StorageFilterResult;
 
 use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
 
@@ -71,7 +71,7 @@ where
     hash: u64,
 
     force: bool,
-    filter_result: Option<FilterResult>,
+    filter_result: Option<StorageFilterResult>,
     pick_duration: Duration,
 }
 
@@ -98,7 +98,7 @@ where
     /// The `estimated_size` is the estimated size of the whole entry to be inserted.
     ///
     /// After calling `filter`, the writer will not be checked by the admission filter again.
-    pub fn filter(&mut self, estimated_size: usize) -> FilterResult {
+    pub fn filter(&mut self, estimated_size: usize) -> StorageFilterResult {
         let now = Instant::now();
 
         let picked = self.hybrid.storage().filter(self.hash, estimated_size);
@@ -109,7 +109,7 @@ where
         picked
     }
 
-    fn may_pick(&mut self, estimated_size: usize) -> FilterResult {
+    fn may_pick(&mut self, estimated_size: usize) -> StorageFilterResult {
         if let Some(picked) = self.filter_result {
             picked
         } else {

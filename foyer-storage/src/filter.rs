@@ -18,7 +18,7 @@ use crate::io::device::statistics::Statistics;
 
 /// Filter result for admission pickers and reinsertion pickers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterResult {
+pub enum StorageFilterResult {
     /// Admittion.
     Admit,
     /// Rejection.
@@ -28,58 +28,58 @@ pub enum FilterResult {
     Throttled(Duration),
 }
 
-impl FilterResult {
+impl StorageFilterResult {
     /// Convert the filter result to a boolean value.
     pub fn is_admitted(&self) -> bool {
-        matches!(self, FilterResult::Admit)
+        matches!(self, StorageFilterResult::Admit)
     }
 
     /// Convert the filter result to a boolean value.
     pub fn is_rejected(&self) -> bool {
-        matches!(self, FilterResult::Reject)
+        matches!(self, StorageFilterResult::Reject)
     }
 }
 
-/// Condition for [`Filter`].
-pub trait FilterCondition: Send + Sync + Debug + 'static {
+/// Condition for [`StorageFilter`].
+pub trait StorageFilterCondition: Send + Sync + Debug + 'static {
     /// Decide whether to pick an entry by hash.
-    fn filter(&self, stats: &Arc<Statistics>, hash: u64, estimated_size: usize) -> FilterResult;
+    fn filter(&self, stats: &Arc<Statistics>, hash: u64, estimated_size: usize) -> StorageFilterResult;
 }
 
-/// [`Filter`] filters entries based on multiple conditions for admission and reinsertion.
+/// [`StorageFilter`] filters entries based on multiple conditions for admission and reinsertion.
 ///
-/// [`Filter`] admits all entries if no conditions are set.
+/// [`StorageFilter`] admits all entries if no conditions are set.
 #[derive(Debug, Default)]
-pub struct Filter {
-    conditions: Vec<Box<dyn FilterCondition>>,
+pub struct StorageFilter {
+    conditions: Vec<Box<dyn StorageFilterCondition>>,
 }
 
-impl Filter {
+impl StorageFilter {
     /// Create a new empty filter.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Push a new condition to the filter.
-    pub fn with_condition<C: FilterCondition>(mut self, condition: C) -> Self {
+    pub fn with_condition<C: StorageFilterCondition>(mut self, condition: C) -> Self {
         self.conditions.push(Box::new(condition));
         self
     }
 
     /// Check if the entry can be admitted by the filter conditions.
-    pub fn filter(&self, stats: &Arc<Statistics>, hash: u64, estimated_size: usize) -> FilterResult {
+    pub fn filter(&self, stats: &Arc<Statistics>, hash: u64, estimated_size: usize) -> StorageFilterResult {
         let mut duration = Duration::ZERO;
         for condition in &self.conditions {
             match condition.filter(stats, hash, estimated_size) {
-                FilterResult::Admit => {}
-                FilterResult::Reject => return FilterResult::Reject,
-                FilterResult::Throttled(dur) => duration += dur,
+                StorageFilterResult::Admit => {}
+                StorageFilterResult::Reject => return StorageFilterResult::Reject,
+                StorageFilterResult::Throttled(dur) => duration += dur,
             }
         }
         if duration.is_zero() {
-            FilterResult::Admit
+            StorageFilterResult::Admit
         } else {
-            FilterResult::Throttled(duration)
+            StorageFilterResult::Throttled(duration)
         }
     }
 }
@@ -94,9 +94,9 @@ pub mod conditions {
     #[derive(Debug, Default)]
     pub struct AdmitAll;
 
-    impl FilterCondition for AdmitAll {
-        fn filter(&self, _: &Arc<Statistics>, _: u64, _: usize) -> FilterResult {
-            FilterResult::Admit
+    impl StorageFilterCondition for AdmitAll {
+        fn filter(&self, _: &Arc<Statistics>, _: u64, _: usize) -> StorageFilterResult {
+            StorageFilterResult::Admit
         }
     }
 
@@ -104,22 +104,22 @@ pub mod conditions {
     #[derive(Debug, Default)]
     pub struct RejectAll;
 
-    impl FilterCondition for RejectAll {
-        fn filter(&self, _: &Arc<Statistics>, _: u64, _: usize) -> FilterResult {
-            FilterResult::Reject
+    impl StorageFilterCondition for RejectAll {
+        fn filter(&self, _: &Arc<Statistics>, _: u64, _: usize) -> StorageFilterResult {
+            StorageFilterResult::Reject
         }
     }
 
     #[derive(Debug, Default)]
     pub struct IoThrottle;
 
-    impl FilterCondition for IoThrottle {
-        fn filter(&self, stats: &Arc<Statistics>, _: u64, _: usize) -> FilterResult {
+    impl StorageFilterCondition for IoThrottle {
+        fn filter(&self, stats: &Arc<Statistics>, _: u64, _: usize) -> StorageFilterResult {
             let duration = stats.write_throttle();
             if duration.is_zero() {
-                FilterResult::Admit
+                StorageFilterResult::Admit
             } else {
-                FilterResult::Throttled(duration)
+                StorageFilterResult::Throttled(duration)
             }
         }
     }
@@ -147,12 +147,12 @@ pub mod conditions {
         }
     }
 
-    impl FilterCondition for EstimatedSize {
-        fn filter(&self, _: &Arc<Statistics>, _: u64, estimated_size: usize) -> FilterResult {
+    impl StorageFilterCondition for EstimatedSize {
+        fn filter(&self, _: &Arc<Statistics>, _: u64, estimated_size: usize) -> StorageFilterResult {
             if self.range.contains(&estimated_size) {
-                FilterResult::Admit
+                StorageFilterResult::Admit
             } else {
-                FilterResult::Reject
+                StorageFilterResult::Reject
             }
         }
     }
@@ -167,8 +167,8 @@ mod tests {
     fn test_estimated_size_condition() {
         let condition = EstimatedSize::new(10..20);
         let statistics = Arc::new(Statistics::new(Throttle::default()));
-        assert_eq!(condition.filter(&statistics, 0, 15), FilterResult::Admit);
-        assert_eq!(condition.filter(&statistics, 0, 5), FilterResult::Reject);
-        assert_eq!(condition.filter(&statistics, 0, 20), FilterResult::Reject);
+        assert_eq!(condition.filter(&statistics, 0, 15), StorageFilterResult::Admit);
+        assert_eq!(condition.filter(&statistics, 0, 5), StorageFilterResult::Reject);
+        assert_eq!(condition.filter(&statistics, 0, 20), StorageFilterResult::Reject);
     }
 }
