@@ -581,6 +581,16 @@ where
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
+        if record.properties().disposable().unwrap_or_default() {
+            // If the record is disposable, we do not insert it into the cache.
+            // Instead, we just return it and let it be dropped immediately after the last reference drops.
+            record.inc_refs(1);
+            return RawCacheEntry {
+                record,
+                inner: self.inner.clone(),
+            };
+        }
+
         let mut garbages = vec![];
         let mut waiters = vec![];
 
@@ -808,6 +818,11 @@ where
         let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
 
         if self.record.dec_refs(1) == 0 {
+            if self.record.properties().disposable().unwrap_or_default() {
+                // TODO(MrCroxx): Send it to disk cache write queue with pipe?
+                return;
+            }
+
             match E::release() {
                 Op::Noop => {}
                 Op::Immutable(_) => shard.read().with(|shard| shard.release_immutable(&self.record)),
@@ -1274,6 +1289,23 @@ mod tests {
         assert_eq!(fifo.usage(), 1);
         drop(e2b);
         assert_eq!(fifo.usage(), 1);
+    }
+
+    #[test_log::test]
+    fn test_insert_disposable() {
+        let fifo = fifo_cache_for_test();
+
+        let e1 = fifo.insert_with_properties(1, 1, TestProperties::default().with_disposable(true));
+        assert_eq!(fifo.usage(), 0);
+        drop(e1);
+        assert_eq!(fifo.usage(), 0);
+
+        let e2a = fifo.insert_with_properties(2, 2, TestProperties::default().with_disposable(true));
+        assert_eq!(fifo.usage(), 0);
+        assert!(fifo.get(&2).is_none());
+        assert_eq!(fifo.usage(), 0);
+        drop(e2a);
+        assert_eq!(fifo.usage(), 0);
     }
 
     #[test]

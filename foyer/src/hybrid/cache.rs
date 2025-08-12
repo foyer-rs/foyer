@@ -93,6 +93,7 @@ macro_rules! try_cancel {
 /// Entry properties for in-memory only cache.
 #[derive(Debug, Clone, Default)]
 pub struct HybridCacheProperties {
+    disposable: bool,
     ephemeral: bool,
     hint: Hint,
     location: Location,
@@ -100,6 +101,22 @@ pub struct HybridCacheProperties {
 }
 
 impl HybridCacheProperties {
+    /// Set disposable.
+    ///
+    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
+    /// reference drops.
+    ///
+    /// Disposable property is used to simplify the design consistency of the APIs.
+    fn with_disposable(mut self, disposable: bool) -> Self {
+        self.disposable = disposable;
+        self
+    }
+
+    /// Get if the entry is disposable.
+    fn disposable(&self) -> bool {
+        self.disposable
+    }
+
     /// Set the entry to be ephemeral.
     ///
     /// An ephemeral entry will be evicted immediately after all its holders drop it,
@@ -143,6 +160,14 @@ impl HybridCacheProperties {
 }
 
 impl Properties for HybridCacheProperties {
+    fn with_disposable(self, disposable: bool) -> Self {
+        self.with_disposable(disposable)
+    }
+
+    fn disposable(&self) -> Option<bool> {
+        Some(self.disposable())
+    }
+
     fn with_ephemeral(self, ephemeral: bool) -> Self {
         self.with_ephemeral(ephemeral)
     }

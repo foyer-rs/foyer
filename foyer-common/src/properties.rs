@@ -102,7 +102,22 @@ impl Default for Source {
 /// The in-memory only cache and the hybrid cache may have different properties implementations to minimize the overhead
 /// of necessary properties in different scenarios.
 pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
+    /// Set disposable.
+    ///
+    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
+    /// reference drops.
+    ///
+    /// Disposable property is used to simplify the design consistency of the APIs.
+    fn with_disposable(self, disposable: bool) -> Self;
+
+    /// Entry disposable.
+    fn disposable(&self) -> Option<bool>;
+
     /// Set entry ephemeral.
+    ///
+    /// Ephemeral entries are removed immediately after the last reference drops.
+    ///
+    /// Ephemeral property is used by disk-cache-only cache entries.
     fn with_ephemeral(self, ephemeral: bool) -> Self;
 
     /// Entry ephemeral.
