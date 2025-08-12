@@ -22,7 +22,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, filter::FilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
 
 /// Load result.
 #[derive(Debug)]
@@ -139,7 +139,7 @@ where
     fn device(&self) -> &Arc<dyn Device>;
 
     /// Return if the given key can be picked by the disk cache engine.
-    fn filter(&self, hash: u64, estimated_size: usize) -> FilterResult;
+    fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult;
 
     /// Push a in-memory cache piece to the disk cache write queue.
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);

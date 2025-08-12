@@ -16,9 +16,9 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
 use chrono::Datelike;
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, FifoPicker, Filter, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
-    HybridCachePolicy, IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, Result,
-    RuntimeOptions, Throttle, TokioRuntimeOptions,
+    BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, Result, RuntimeOptions,
+    StorageFilter, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
+        .with_filter(|_, _| true)
         .storage()
         .with_io_engine(io_engine)
         .with_engine_config(
@@ -62,8 +63,8 @@ async fn main() -> anyhow::Result<()> {
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_block_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_admission_filter(Filter::new())
-                .with_reinsertion_filter(Filter::new().with_condition(RejectAll))
+                .with_admission_filter(StorageFilter::new())
+                .with_reinsertion_filter(StorageFilter::new().with_condition(RejectAll))
                 .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)

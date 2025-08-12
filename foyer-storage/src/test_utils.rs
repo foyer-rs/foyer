@@ -25,7 +25,7 @@ use std::{
 
 use parking_lot::Mutex;
 
-use crate::{io::device::statistics::Statistics, FilterCondition, FilterResult};
+use crate::{io::device::statistics::Statistics, StorageFilterCondition, StorageFilterResult};
 
 /// A picker that only admits hash from the given list.
 #[derive(Debug)]
@@ -42,12 +42,12 @@ impl Biased {
     }
 }
 
-impl FilterCondition for Biased {
-    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+impl StorageFilterCondition for Biased {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> StorageFilterResult {
         if self.admits.contains(&hash) {
-            FilterResult::Admit
+            StorageFilterResult::Admit
         } else {
-            FilterResult::Reject
+            StorageFilterResult::Reject
         }
     }
 }
@@ -106,17 +106,17 @@ pub struct EvictRecorder {
     inner: Arc<RecorderInner>,
 }
 
-impl FilterCondition for AdmitRecorder {
-    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+impl StorageFilterCondition for AdmitRecorder {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> StorageFilterResult {
         self.inner.records.lock().push(Record::Admit(hash));
-        FilterResult::Admit
+        StorageFilterResult::Admit
     }
 }
 
-impl FilterCondition for EvictRecorder {
-    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> FilterResult {
+impl StorageFilterCondition for EvictRecorder {
+    fn filter(&self, _: &Arc<Statistics>, hash: u64, _: usize) -> StorageFilterResult {
         self.inner.records.lock().push(Record::Evict(hash));
-        FilterResult::Reject
+        StorageFilterResult::Reject
     }
 }
 

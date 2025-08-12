@@ -60,6 +60,19 @@ use crate::{
 pub trait Weighter<K, V>: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 impl<K, V, T> Weighter<K, V> for T where T: Fn(&K, &V) -> usize + Send + Sync + 'static {}
 
+/// The filter for the in-memory cache.
+///
+/// The filter is used to decide whether to admit or reject an entry based on its key and value.
+///
+/// If the filter returns true, the key value can be inserted into the in-memory cache;
+/// otherwise, the key value cannot be inserted.
+///
+/// To ensure API consistency, the in-memory cache will still return a cache entry,
+/// but it will not count towards the in-memory cache usage,
+/// and it will be immediately reclaimed when the cache entry is dropped.
+pub trait Filter<K, V>: Fn(&K, &V) -> bool + Send + Sync + 'static {}
+impl<K, V, T> Filter<K, V> for T where T: Fn(&K, &V) -> bool + Send + Sync + 'static {}
+
 pub struct RawCacheConfig<E, S>
 where
     E: Eviction,
@@ -70,6 +83,7 @@ where
     pub eviction_config: E::Config,
     pub hash_builder: S,
     pub weighter: Arc<dyn Weighter<E::Key, E::Value>>,
+    pub filter: Arc<dyn Filter<E::Key, E::Value>>,
     pub event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
     pub metrics: Arc<Metrics>,
 }
@@ -398,6 +412,7 @@ where
 
     hash_builder: Arc<S>,
     weighter: Arc<dyn Weighter<E::Key, E::Value>>,
+    filter: Arc<dyn Filter<E::Key, E::Value>>,
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -491,6 +506,7 @@ where
             capacity: config.capacity,
             hash_builder: Arc::new(config.hash_builder),
             weighter: config.weighter,
+            filter: config.filter,
             metrics: config.metrics,
             event_listener: config.event_listener,
             pipe: ArcSwap::new(Arc::new(pipe)),
@@ -559,10 +575,13 @@ where
         &self,
         key: E::Key,
         value: E::Value,
-        properties: E::Properties,
+        mut properties: E::Properties,
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
+        if !(self.inner.filter)(&key, &value) {
+            properties = properties.with_disposable(true);
+        }
         let record = Arc::new(Record::new(Data {
             key,
             value,
@@ -582,6 +601,17 @@ where
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
         if record.properties().disposable().unwrap_or_default() {
+            // Remove the stale record if it exists.
+            self.inner.shards[self.shard(record.hash())]
+                .write()
+                .remove(record.hash(), record.key())
+                .inspect(|r| {
+                    // Deallocate data out of the lock critical section.
+                    if let Some(listener) = self.inner.event_listener.as_ref() {
+                        listener.on_leave(Event::Replace, r.key(), r.value());
+                    }
+                });
+
             // If the record is disposable, we do not insert it into the cache.
             // Instead, we just return it and let it be dropped immediately after the last reference drops.
             record.inc_refs(1);
@@ -1212,6 +1242,7 @@ mod tests {
             eviction_config: FifoConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
@@ -1226,6 +1257,7 @@ mod tests {
             eviction_config: S3FifoConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
@@ -1240,6 +1272,7 @@ mod tests {
             eviction_config: LruConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
@@ -1254,6 +1287,7 @@ mod tests {
             eviction_config: LfuConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
@@ -1268,6 +1302,7 @@ mod tests {
             eviction_config: SieveConfig {},
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
@@ -1306,6 +1341,45 @@ mod tests {
         assert_eq!(fifo.usage(), 0);
         drop(e2a);
         assert_eq!(fifo.usage(), 0);
+
+        let fifo = fifo_cache_for_test();
+        fifo.insert(1, 1);
+        assert_eq!(fifo.usage(), 1);
+        assert_eq!(fifo.get(&1).unwrap().value(), &1);
+        let e2 = fifo.insert_with_properties(1, 100, TestProperties::default().with_disposable(true));
+        assert_eq!(fifo.usage(), 0);
+        drop(e2);
+        assert_eq!(fifo.usage(), 0);
+        assert!(fifo.get(&1).is_none());
+    }
+
+    #[test_log::test]
+    fn test_insert_filter() {
+        let fifo: RawCache<
+            Fifo<u64, u64, TestProperties>,
+            ModHasher,
+            HashTableIndexer<Fifo<u64, u64, TestProperties>>,
+        > = RawCache::new(RawCacheConfig {
+            capacity: 256,
+            shards: 4,
+            eviction_config: FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|k, _| match *k {
+                42 => false,
+                _ => true,
+            }),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        });
+
+        fifo.insert(1, 1);
+        fifo.insert(2, 2);
+        fifo.insert(42, 42);
+        assert_eq!(fifo.usage(), 2);
+        assert_eq!(fifo.get(&1).unwrap().value(), &1);
+        assert_eq!(fifo.get(&2).unwrap().value(), &2);
+        assert!(fifo.get(&42).is_none());
     }
 
     #[test]
@@ -1338,6 +1412,7 @@ mod tests {
             eviction_config: FifoConfig::default(),
             hash_builder: Default::default(),
             weighter: Arc::new(|k, v| k.len() + v.len()),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         });
@@ -1440,6 +1515,7 @@ mod tests {
                 eviction_config: FifoConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
@@ -1455,6 +1531,7 @@ mod tests {
                 eviction_config: S3FifoConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
@@ -1470,6 +1547,7 @@ mod tests {
                 eviction_config: LruConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
@@ -1485,6 +1563,7 @@ mod tests {
                 eviction_config: LfuConfig::default(),
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });
@@ -1500,6 +1579,7 @@ mod tests {
                 eviction_config: SieveConfig {},
                 hash_builder: Default::default(),
                 weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
             });

@@ -31,15 +31,16 @@ pub use crate::{
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
-        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FetchState, FifoConfig, LfuConfig, LruConfig,
-        S3FifoConfig, Weighter,
+        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FetchState, FifoConfig, Filter, LfuConfig,
+        LruConfig, S3FifoConfig, Weighter,
     },
     storage::{
         AdmitAll, Block, BlockEngineBuilder, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
         DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
-        FifoPicker, FileDeviceBuilder, Filter, FilterCondition, FilterResult, FsDeviceBuilder, InvalidRatioPicker,
-        IoEngine, IoEngineBuilder, IoError, IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine,
-        NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode,
-        RejectAll, Runtime, RuntimeOptions, Statistics, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoError,
+        IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder,
+        PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll, Runtime,
+        RuntimeOptions, Statistics, StorageFilter, StorageFilterCondition, StorageFilterResult, Store, StoreBuilder,
+        Throttle, TokioRuntimeOptions,
     },
 };

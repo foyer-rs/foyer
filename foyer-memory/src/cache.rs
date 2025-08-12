@@ -36,7 +36,7 @@ use crate::{
         s3fifo::{S3Fifo, S3FifoConfig},
         sieve::{Sieve, SieveConfig},
     },
-    raw::{FetchContext, FetchState, FetchTarget, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
+    raw::{FetchContext, FetchState, FetchTarget, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch, Weighter},
     Piece, Pipe, Result,
 };
 
@@ -427,6 +427,7 @@ where
 
     hash_builder: S,
     weighter: Arc<dyn Weighter<K, V>>,
+    filter: Arc<dyn Filter<K, V>>,
 
     event_listener: Option<Arc<dyn EventListener<Key = K, Value = V>>>,
 
@@ -450,6 +451,7 @@ where
 
             hash_builder: Default::default(),
             weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
             event_listener: None,
 
             registry: Box::new(NoopMetricsRegistry),
@@ -501,6 +503,7 @@ where
             eviction_config: self.eviction_config,
             hash_builder,
             weighter: self.weighter,
+            filter: self.filter,
             event_listener: self.event_listener,
             registry: self.registry,
             metrics: self.metrics,
@@ -510,6 +513,21 @@ where
     /// Set in-memory cache weighter.
     pub fn with_weighter(mut self, weighter: impl Weighter<K, V>) -> Self {
         self.weighter = Arc::new(weighter);
+        self
+    }
+
+    /// Set the filter for the in-memory cache.
+    ///
+    /// The filter is used to decide whether to admit or reject an entry based on its key and value.
+    ///
+    /// If the filter returns true, the key value can be inserted into the in-memory cache;
+    /// otherwise, the key value cannot be inserted.
+    ///
+    /// To ensure API consistency, the in-memory cache will still return a cache entry,
+    /// but it will not count towards the in-memory cache usage,
+    /// and it will be immediately reclaimed when the cache entry is dropped.
+    pub fn with_filter(mut self, filter: impl Filter<K, V>) -> Self {
+        self.filter = Arc::new(filter);
         self
     }
 
@@ -560,6 +578,7 @@ where
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
             }))),
@@ -569,6 +588,7 @@ where
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
             }))),
@@ -578,6 +598,7 @@ where
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
             }))),
@@ -587,6 +608,7 @@ where
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
             }))),
@@ -596,6 +618,7 @@ where
                 eviction_config,
                 hash_builder: self.hash_builder,
                 weighter: self.weighter,
+                filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
             }))),

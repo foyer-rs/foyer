@@ -27,7 +27,7 @@ pub use crate::{
     error::{Error, Result},
     filter::{
         conditions::{AdmitAll, EstimatedSize, RejectAll},
-        Filter, FilterCondition, FilterResult,
+        StorageFilter, StorageFilterCondition, StorageFilterResult,
     },
     io::{
         device::{

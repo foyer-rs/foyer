@@ -63,7 +63,7 @@ use crate::{
     keeper::PieceRef,
     runtime::Runtime,
     serde::EntryDeserializer,
-    Device, Filter, FilterResult, Load, RejectAll,
+    Device, Load, RejectAll, StorageFilter, StorageFilterResult,
 };
 
 /// Builder for the block-based disk cache engine.
@@ -92,8 +92,8 @@ where
     submit_queue_size_threshold: usize,
     clean_block_threshold: usize,
     eviction_pickers: Vec<Box<dyn EvictionPicker>>,
-    admission_filter: Filter,
-    reinsertion_filter: Filter,
+    admission_filter: StorageFilter,
+    reinsertion_filter: StorageFilter,
     enable_tombstone_log: bool,
     marker: PhantomData<(K, V, P)>,
 }
@@ -146,8 +146,8 @@ where
             submit_queue_size_threshold: 16 * 1024 * 1024, // 16 MiB
             clean_block_threshold: 1,
             eviction_pickers: vec![Box::new(InvalidRatioPicker::new(0.8)), Box::<FifoPicker>::default()],
-            admission_filter: Filter::new(),
-            reinsertion_filter: Filter::new().with_condition(RejectAll),
+            admission_filter: StorageFilter::new(),
+            reinsertion_filter: StorageFilter::new().with_condition(RejectAll),
             enable_tombstone_log: false,
             marker: PhantomData,
         }
@@ -197,7 +197,7 @@ where
     /// The admission filter is used to pick the entries that can be inserted into the disk cache store.
     ///
     /// Default: Admit all.
-    pub fn with_admission_filter(mut self, filter: Filter) -> Self {
+    pub fn with_admission_filter(mut self, filter: StorageFilter) -> Self {
         self.admission_filter = filter;
         self
     }
@@ -283,7 +283,7 @@ where
     /// reinsertion will be stuck.
     ///
     /// Default: Reject all.
-    pub fn with_reinsertion_filter(mut self, filter: Filter) -> Self {
+    pub fn with_reinsertion_filter(mut self, filter: StorageFilter) -> Self {
         self.reinsertion_filter = filter;
         self
     }
@@ -480,7 +480,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    admission_filter: Filter,
+    admission_filter: StorageFilter,
 
     device: Arc<dyn Device>,
 
@@ -783,7 +783,7 @@ where
         &self.inner.device
     }
 
-    fn filter(&self, hash: u64, estimated_size: usize) -> FilterResult {
+    fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult {
         self.inner
             .admission_filter
             .filter(self.inner.device.statistics(), hash, estimated_size)
@@ -861,12 +861,12 @@ mod tests {
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
     async fn engine_for_test(dir: impl AsRef<Path>) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
-        store_for_test_with_reinsertion_filter(dir, Filter::new().with_condition(RejectAll)).await
+        store_for_test_with_reinsertion_filter(dir, StorageFilter::new().with_condition(RejectAll)).await
     }
 
     async fn store_for_test_with_reinsertion_filter(
         dir: impl AsRef<Path>,
-        reinsertion_filter: Filter,
+        reinsertion_filter: StorageFilter,
     ) -> Arc<BlockEngine<u64, Vec<u8>, TestProperties>> {
         let device = FsDeviceBuilder::new(dir)
             .with_capacity(ByteSize::kib(64).as_u64() as _)
@@ -884,7 +884,7 @@ mod tests {
             flushers: 1,
             reclaimers: 1,
             clean_block_threshold: 1,
-            admission_filter: Filter::new(),
+            admission_filter: StorageFilter::new(),
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             reinsertion_filter,
             enable_tombstone_log: false,
@@ -926,8 +926,8 @@ mod tests {
             reclaimers: 1,
             clean_block_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
-            admission_filter: Filter::new(),
-            reinsertion_filter: Filter::new().with_condition(RejectAll),
+            admission_filter: StorageFilter::new(),
+            reinsertion_filter: StorageFilter::new().with_condition(RejectAll),
             enable_tombstone_log: true,
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
@@ -1191,7 +1191,7 @@ mod tests {
         let memory = cache_for_test();
         let store = store_for_test_with_reinsertion_filter(
             dir.path(),
-            Filter::new().with_condition(Biased::new(vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19])),
+            StorageFilter::new().with_condition(Biased::new(vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19])),
         )
         .await;
 

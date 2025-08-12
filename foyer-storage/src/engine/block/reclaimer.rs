@@ -37,7 +37,7 @@ use crate::{
         PAGE,
     },
     runtime::Runtime,
-    Filter, Statistics,
+    Statistics, StorageFilter,
 };
 
 pub trait ReclaimerTrait: Send + Sync + 'static + Debug {
@@ -52,7 +52,7 @@ where
 {
     indexer: Indexer,
     flushers: Vec<Flusher<K, V, P>>,
-    reinsertion_filter: Arc<Filter>,
+    reinsertion_filter: Arc<StorageFilter>,
     blob_index_size: usize,
     statistics: Arc<Statistics>,
     runtime: Runtime,
@@ -78,7 +78,7 @@ where
     pub fn new(
         indexer: Indexer,
         flushers: Vec<Flusher<K, V, P>>,
-        reinsertion_filter: Arc<Filter>,
+        reinsertion_filter: Arc<StorageFilter>,
         blob_index_size: usize,
         statistics: Arc<Statistics>,
         runtime: Runtime,
