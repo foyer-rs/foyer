@@ -818,7 +818,7 @@ where
         let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
 
         if self.record.dec_refs(1) == 0 {
-            if !self.record.properties().disposable().unwrap_or_default() {
+            if self.record.properties().disposable().unwrap_or_default() {
                 // TODO(MrCroxx): Send it to disk cache write queue with pipe?
                 return;
             }

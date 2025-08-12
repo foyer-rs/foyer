@@ -103,7 +103,8 @@ pub struct HybridCacheProperties {
 impl HybridCacheProperties {
     /// Set disposable.
     ///
-    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last reference drops.
+    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
+    /// reference drops.
     ///
     /// Disposable property is used to simplify the design consistency of the APIs.
     fn with_disposable(mut self, disposable: bool) -> Self {
