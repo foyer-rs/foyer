@@ -526,6 +526,11 @@ where
         &self.inner.memory
     }
 
+    /// Access the disk cache.
+    pub fn storage(&self) -> &Store<K, V, S, HybridCacheProperties> {
+        &self.inner.storage
+    }
+
     /// Enable tracing.
     #[cfg(feature = "tracing")]
     pub fn enable_tracing(&self) {
@@ -845,10 +850,6 @@ where
     /// Return `false` if the hybrid cache is running in in-memory mode but with hybrid cache compatible APIs.
     pub fn is_hybrid(&self) -> bool {
         self.inner.storage.is_enabled()
-    }
-
-    pub(crate) fn storage(&self) -> &Store<K, V, S, HybridCacheProperties> {
-        &self.inner.storage
     }
 
     pub(crate) fn metrics(&self) -> &Arc<Metrics> {
