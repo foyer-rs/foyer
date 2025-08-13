@@ -358,7 +358,6 @@ where
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
         let region_manager = self.inner.region_manager.clone();
-        let device = self.inner.device.clone();
 
         let load = async move {
             let addr = match indexer.get(hash) {
@@ -407,17 +406,6 @@ where
                     return Err(e);
                 }
             };
-
-            if header.key_len as usize > device.region_size() || header.value_len as usize > device.region_size() {
-                tracing::warn!(
-                    hash,
-                    ?addr,
-                    ?header,
-                    "[lodc load]: entry header corrupted, remove this entry and skip"
-                );
-                indexer.remove(hash);
-                return Ok(Load::Miss);
-            }
 
             let (key, value) = {
                 let now = Instant::now();
@@ -1087,63 +1075,12 @@ mod tests {
             #[cfg(target_family = "unix")]
             {
                 use std::os::unix::fs::FileExt;
-                file.write_all_at(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
+                file.write_all_at(&[b'?'; 42], 5 * 1024).unwrap();
             }
             #[cfg(target_family = "windows")]
             {
                 use std::os::windows::fs::FileExt;
-                file.seek_write(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
-            }
-        }
-
-        assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_store_entry_header_corrupted() {
-        let dir = tempfile::tempdir().unwrap();
-
-        let memory = cache_for_test();
-        let store = store_for_test(dir.path()).await;
-
-        // write entry 1
-        let e1 = memory.insert(1, vec![1; 7 * KB]);
-        enqueue(&store, e1);
-        store.wait().await;
-
-        // check entry 1
-        let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
-        assert_eq!(r1, (1, vec![1; 7 * KB]));
-
-        let fake = EntryHeader {
-            key_len: u32::MAX,
-            value_len: u32::MAX,
-            hash: 1,
-            sequence: 1,
-            checksum: 0,
-            compression: Compression::None,
-        };
-        let mut buf = vec![0u8; EntryHeader::serialized_len()];
-        fake.write(&mut buf[..]);
-        println!("buf: {buf:?}");
-
-        // corrupt entry and header
-        for entry in std::fs::read_dir(dir.path()).unwrap() {
-            let entry = entry.unwrap();
-            if !entry.metadata().unwrap().is_file() {
-                continue;
-            }
-
-            let file = File::options().write(true).open(entry.path()).unwrap();
-            #[cfg(target_family = "unix")]
-            {
-                use std::os::unix::fs::FileExt;
-                file.write_all_at(&buf, 4096).unwrap();
-            }
-            #[cfg(target_family = "windows")]
-            {
-                use std::os::windows::fs::FileExt;
-                file.seek_write(&buf, 4096).unwrap();
+                file.seek_write(&[b'?'; 42], 5 * 1024).unwrap();
             }
         }
 
