@@ -177,14 +177,6 @@ impl EntryDeserializer {
             });
         }
 
-        // deserialize value
-        let buf = &buffer[..value_len];
-        let value = Self::deserialize_value(buf, compression)?;
-
-        // deserialize key
-        let buf = &buffer[value_len..value_len + ken_len];
-        let key = Self::deserialize_key(buf)?;
-
         // calculate checksum if needed
         if let Some(expected) = checksum {
             let get = Checksummer::checksum64(&buffer[..value_len + ken_len]);
@@ -192,6 +184,14 @@ impl EntryDeserializer {
                 return Err(Error::ChecksumMismatch { expected, get });
             }
         }
+
+        // deserialize value
+        let buf = &buffer[..value_len];
+        let value = Self::deserialize_value(buf, compression)?;
+
+        // deserialize key
+        let buf = &buffer[value_len..value_len + ken_len];
+        let key = Self::deserialize_key(buf)?;
 
         Ok((key, value))
     }
