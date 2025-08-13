@@ -126,7 +126,7 @@ impl Metrics {
         let memory_queue = foyer_memory_op_total.counter(&[name.clone(), "queue".into()]);
         let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]);
 
-        let memory_usage = foyer_memory_usage.gauge(&[name.clone()]);
+        let memory_usage = foyer_memory_usage.gauge(std::slice::from_ref(&name));
 
         /* disk cache metrics */
 
@@ -252,7 +252,7 @@ impl Metrics {
         let storage_region_clean = foyer_storage_region.gauge(&[name.clone(), "clean".into()]);
         let storage_region_evictable = foyer_storage_region.gauge(&[name.clone(), "evictable".into()]);
 
-        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(&[name.clone()]);
+        let storage_region_size_bytes = foyer_storage_region_size_bytes.gauge(std::slice::from_ref(&name));
 
         let storage_entry_serialize_duration =
             foyer_storage_entry_serde_duration.histogram(&[name.clone(), "serialize".into()]);
@@ -262,8 +262,9 @@ impl Metrics {
         let storage_lodc_indexer_conflict =
             foyer_storage_lodc_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
         let storage_lodc_enqueue_skip = foyer_storage_lodc_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
-        let storage_lodc_buffer_efficiency = foyer_storage_lodc_buffer_efficiency.histogram(&[name.clone()]);
-        let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(&[name.clone()]);
+        let storage_lodc_buffer_efficiency =
+            foyer_storage_lodc_buffer_efficiency.histogram(std::slice::from_ref(&name));
+        let storage_lodc_recover_duration = foyer_storage_lodc_recover_duration.histogram(std::slice::from_ref(&name));
 
         /* hybrid cache metrics */
 

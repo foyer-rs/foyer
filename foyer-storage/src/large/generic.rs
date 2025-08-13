@@ -358,6 +358,7 @@ where
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
         let region_manager = self.inner.region_manager.clone();
+        let device = self.inner.device.clone();
 
         let load = async move {
             let addr = match indexer.get(hash) {
@@ -406,6 +407,17 @@ where
                     return Err(e);
                 }
             };
+
+            if header.key_len as usize > device.region_size() || header.value_len as usize > device.region_size() {
+                tracing::warn!(
+                    hash,
+                    ?addr,
+                    ?header,
+                    "[lodc load]: entry header corrupted, remove this entry and skip"
+                );
+                indexer.remove(hash);
+                return Ok(Load::Miss);
+            }
 
             let (key, value) = {
                 let now = Instant::now();
