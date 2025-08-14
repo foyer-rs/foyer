@@ -20,7 +20,7 @@ default = []
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 clap = ["foyer-storage/clap"]
 tracing = [
-  "fastrace/enable",
+  "dep:fastrace",
   "foyer-common/tracing",
   "foyer-memory/tracing",
   "foyer-storage/tracing",
