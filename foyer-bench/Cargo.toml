@@ -18,7 +18,7 @@ tokio-console = ["dep:console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
-tracing = ["foyer/tracing", "dep:fastrace-jaeger", "dep:fastrace"]
+tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
 
 [dependencies]
 anyhow = { workspace = true }

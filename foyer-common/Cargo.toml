@@ -18,7 +18,7 @@ development = ["criterion", "serde_bytes"]
 [features]
 serde = ["dep:serde", "dep:bincode"]
 strict_assertions = []
-tracing = ["fastrace/enable"]
+tracing = ["dep:fastrace"]
 
 [dependencies]
 bincode = { workspace = true, optional = true }

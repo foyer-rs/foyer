@@ -16,7 +16,7 @@ nightly = ["hashbrown/nightly"]
 test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = ["foyer-common/strict_assertions"]
-tracing = ["fastrace/enable", "foyer-common/tracing"]
+tracing = ["dep:fastrace", "foyer-common/tracing"]
 
 [dependencies]
 arc-swap = { workspace = true }
