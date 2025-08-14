@@ -9,6 +9,31 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-08-13
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.19.0 |
+| foyer-common | 0.19.0 |
+| foyer-memory | 0.19.0 |
+| foyer-storage | 0.19.0 |
+| foyer-bench | 0.19.0 |
+
+### Changes
+
+- Refactor: Introduce new disk cache engine, io engine, io device abstraction.
+- Feature: Introduce io_uirng based disk cache io engine.
+- Feature: Support combine multiple devices for disk cache engine.
+- Feature: Make disk cache write queue queryable.
+- Feature: Support filter for in-memory cache.
+- Fix: Remove `fastrace/enable` when feature `tracing` is enabled. 
+- Refactor: Rename large object disk cache engine to block engine.
+- Refactor: Decouple block engine block size with device region size, remove device region size abstraction.
+- Refactor: Refactor disk cache builder to provide more user-friendly and developer-friendly APIs.
+- Refactor: Temporarily **REMOVE** small object disk cache engine and mixed disk cache engine. Plan to add them back in the refactored form in the next version.
+
 ## 2025-07-13
 
 ### Releases
@@ -24,7 +49,7 @@ date: 2023-05-12T11:02:09+08:00
 ### Changes
 
 - Introduce SIEVE algorithm for in-memory cache eviction policy.
-- Wrap key and value with `Arc` inside foyer implementation to be compatible with more features. `fetch()` doesn't requires keys to be `Clone` anymore.
+- Auto close hybrid cache on the last reference drops.
 - Expose internal foyer error types.
 - Fix `delete()` implementation for large object disk cache to prevent from phantom entries.
 - Remove unnecessary and confusing `with_flush()` API.
