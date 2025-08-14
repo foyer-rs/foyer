@@ -69,13 +69,13 @@ Feel free to open a PR and add your projects here:
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.18"
+foyer = "0.19"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.18", features = ["nightly"] }
+foyer = { version = "0.19", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -100,16 +100,21 @@ fn main() {
 The setup of a hybrid cache is extremely easy.
 
 ```rust
-use foyer::{DirectFsDeviceOptions, Engine, HybridCache, HybridCacheBuilder};
+use foyer::{BlockEngineBuilder, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
 
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(256 * 1024 * 1024)
+        .build()?;
+
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage(Engine::Large) // use large object disk cache engine only
-        .with_device_options(DirectFsDeviceOptions::new(dir.path()).with_capacity(256 * 1024 * 1024))
+        .storage()
+        // use block-based disk cache engine with default configuration
+        .with_engine_config(BlockEngineBuilder::new(device))
         .build()
         .await?;
 
@@ -128,20 +133,33 @@ async fn main() -> anyhow::Result<()> {
 Here is an example of a hybrid cache setup with almost all configurations to show th possibilities of tuning.
 
 ```rust
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
-use anyhow::Result;
 use chrono::Datelike;
 use foyer::{
-    AdmitAllPicker, DirectFsDeviceOptions, Engine, FifoPicker, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LargeEngineOptions, LruConfig, RecoverMode, RejectAllPicker, RuntimeOptions, SmallEngineOptions,
-    Throttle, TokioRuntimeOptions, TombstoneLogConfigBuilder,
+    BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, Result, RuntimeOptions,
+    StorageFilter, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
+
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(64 * 1024 * 1024)
+        .with_throttle(
+            Throttle::new()
+                .with_read_iops(4000)
+                .with_write_iops(2000)
+                .with_write_throughput(100 * 1024 * 1024)
+                .with_read_throughput(800 * 1024 * 1024)
+                .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+        )
+        .build()?;
+
+    let io_engine = PsyncIoEngineBuilder::new().build().await?;
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .with_name("my-hybrid-cache")
@@ -151,24 +169,26 @@ async fn main() -> Result<()> {
         .with_eviction_config(LruConfig {
             high_priority_pool_ratio: 0.1,
         })
-        .with_hash_builder(ahash::RandomState::default())
+        .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
-        .storage(Engine::Mixed(0.1))
-        .with_device_options(
-            DirectFsDeviceOptions::new(dir.path())
-                .with_capacity(64 * 1024 * 1024)
-                .with_file_size(4 * 1024 * 1024)
-                .with_throttle(
-                    Throttle::new()
-                        .with_read_iops(4000)
-                        .with_write_iops(2000)
-                        .with_write_throughput(100 * 1024 * 1024)
-                        .with_read_throughput(800 * 1024 * 1024)
-                        .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
-                ),
+        .with_filter(|_, _| true)
+        .storage()
+        .with_io_engine(io_engine)
+        .with_engine_config(
+            BlockEngineBuilder::new(device)
+                .with_block_size(16 * 1024 * 1024)
+                .with_indexer_shards(64)
+                .with_recover_concurrency(8)
+                .with_flushers(2)
+                .with_reclaimers(2)
+                .with_buffer_pool_size(256 * 1024 * 1024)
+                .with_clean_block_threshold(4)
+                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
+                .with_admission_filter(StorageFilter::new())
+                .with_reinsertion_filter(StorageFilter::new().with_condition(RejectAll))
+                .with_tombstone_log(false),
         )
         .with_recover_mode(RecoverMode::Quiet)
-        .with_admission_picker(Arc::<AdmitAllPicker>::default())
         .with_compression(foyer::Compression::Lz4)
         .with_runtime_options(RuntimeOptions::Separated {
             read_runtime_options: TokioRuntimeOptions {
@@ -180,28 +200,6 @@ async fn main() -> Result<()> {
                 max_blocking_threads: 8,
             },
         })
-        .with_large_object_disk_cache_options(
-            LargeEngineOptions::new()
-                .with_indexer_shards(64)
-                .with_recover_concurrency(8)
-                .with_flushers(2)
-                .with_reclaimers(2)
-                .with_buffer_pool_size(256 * 1024 * 1024)
-                .with_clean_block_threshold(4)
-                .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
-                .with_reinsertion_picker(Arc::<RejectAllPicker>::default())
-                .with_tombstone_log_config(
-                    TombstoneLogConfigBuilder::new(dir.path().join("tombstone-log-file"))
-                        .with_flush(true)
-                        .build(),
-                ),
-        )
-        .with_small_object_disk_cache_options(
-            SmallEngineOptions::new()
-                .with_set_size(16 * 1024)
-                .with_set_cache_capacity(64)
-                .with_flushers(2),
-        )
         .build()
         .await?;
 
@@ -228,7 +226,8 @@ async fn main() -> Result<()> {
 async fn mock() -> Result<String> {
     let now = chrono::Utc::now();
     if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
-        return Err(anyhow::anyhow!("Hi, time traveler!"));
+        let e: Box<dyn std::error::Error + Send + Sync + 'static> = "Hi, time traveler!".into();
+        return Err(e.into());
     }
     Ok("Hello, foyer.".to_string())
 }

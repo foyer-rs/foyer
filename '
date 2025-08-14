@@ -1,0 +1,15 @@
+fix: remove fastrace/enable when tracing is enabled
+
+Signed-off-by: MrCroxx <mrcroxx@outlook.com>
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch xx/ffastrace
+# Changes to be committed:
+#	modified:   foyer-bench/Cargo.toml
+#	modified:   foyer-common/Cargo.toml
+#	modified:   foyer-memory/Cargo.toml
+#	modified:   foyer-storage/Cargo.toml
+#	modified:   foyer/Cargo.toml
+#
