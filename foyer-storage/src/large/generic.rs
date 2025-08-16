@@ -1075,12 +1075,12 @@ mod tests {
             #[cfg(target_family = "unix")]
             {
                 use std::os::unix::fs::FileExt;
-                file.write_all_at(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
+                file.write_all_at(&[b'?'; 42], 5 * 1024).unwrap();
             }
             #[cfg(target_family = "windows")]
             {
                 use std::os::windows::fs::FileExt;
-                file.seek_write(&[b'x'; 4 * 1024], 4 * 1024).unwrap();
+                file.seek_write(&[b'?'; 42], 5 * 1024).unwrap();
             }
         }
 
