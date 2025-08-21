@@ -48,6 +48,7 @@ impl Default for Hint {
 /// NOTE: `CacheLocation` only affects the first time the entry is handle.
 /// After it is populated, the entry may not follow the given advice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Location {
     /// The default location.
     ///
@@ -68,6 +69,7 @@ impl Default for Location {
 
 /// Entry age in the disk cache. Used by hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Age {
     /// THe entry is still young and will be reserved in the disk cache for a while.
     Young,
@@ -77,6 +79,7 @@ pub enum Age {
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Populated {
     /// The age of the entry.
     pub age: Age,
@@ -84,6 +87,7 @@ pub struct Populated {
 
 /// Entry source used by hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Source {
     /// Comes from outer system of foyer.
     Outer,
