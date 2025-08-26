@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-08-21
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.19.1 |
+| foyer-common | 0.19.1 |
+| foyer-memory | 0.19.1 |
+| foyer-storage | 0.19.1 |
+| foyer-bench | 0.19.1 |
+
+### Changes
+
+- Feature: Support `serde` for properties. 
+
 ## 2025-08-16
 
 ### Releases
