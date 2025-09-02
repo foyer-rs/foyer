@@ -452,7 +452,7 @@ where
 
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
-        self.io_engine.is_none()
+        self.engine_builder.is_none()
     }
 
     /// Build the disk cache store with the given configuration.
