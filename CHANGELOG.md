@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-09-02
+
+### Releases
+
+| crate | version |
+| - | - |
+| foyer | 0.19.2 |
+| foyer-common | 0.19.2 |
+| foyer-memory | 0.19.2 |
+| foyer-storage | 0.19.2 |
+| foyer-bench | 0.19.2 |
+
+### Changes
+
+- Fix: Fix hybrid cache in-memory compatible mode conditional statement without `io_engine` specified.
+
 ## 2025-08-21
 
 ### Releases
