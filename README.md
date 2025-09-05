@@ -61,6 +61,7 @@ Feel free to open a PR and add your projects here:
 - [dna](https://github.com/apibara/dna): The fastest platform to build production-grade indexers that connect onchain data to web2 services.
 - [si](https://github.com/systeminit/si): The System Initiative software.
 - [AntTP](https://github.com/traktion/AntTP): Serves Autonomi Network data over HTTP protocol.
+- [Cachey](https://github.com/s2-streamstore/cachey): Read-through cache for object storage.
 
 ## Quick Start
 
