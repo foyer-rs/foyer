@@ -1,8 +1,10 @@
 # Overview
 
-<p align="center">
-  <img src="/img/logo/slogan.min.svg" style="width: 280px;" />
-</p>
+<div style="text-align:center">
+
+![logo](/img/logo/slogan.min.svg)
+
+</div>
 
 <div style="text-align: center;">
 
