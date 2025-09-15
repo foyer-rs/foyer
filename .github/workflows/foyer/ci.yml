@@ -6,11 +6,15 @@ on:
       - "main"
       - "forks/*"
       - release-*.*
+    paths-ignore:
+      - "website/**"
   pull_request:
     branches:
       - "main"
       - "v*.*.*-rc"
       - release-*.*
+    paths-ignore:
+      - "website/**"
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
