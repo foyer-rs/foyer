@@ -13,8 +13,8 @@ on:
       - main
       - "v*.*.*-rc"
       - release-*.*
-    paths-ignore:
-      - "website/**"
+    # paths-ignore:
+    #   - "website/**"
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
