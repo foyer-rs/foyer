@@ -6,6 +6,7 @@ import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 
 function HomepageHeader() {
   const { siteConfig } = useDocusaurusContext();
@@ -16,7 +17,7 @@ function HomepageHeader() {
           {siteConfig.title}
         </Heading>
         <p className="hero__subtitle">{siteConfig.tagline}</p> */}
-        <img src='/img/logo/slogan.min.svg' alt='logo' className={styles.heroSvg} />
+        <img src={useBaseUrl('/img/logo/slogan.min.svg')} alt='logo' className={styles.heroSvg} />
         <div className={styles.buttons}>
           <Link
             className="button button--primary button--lg"
