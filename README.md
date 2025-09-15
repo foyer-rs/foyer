@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-    <a href="https://foyer.rs">
-        <img src="https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&down_message=website&style=for-the-badge&logo=htmx" alt="docs.rs" />
+    <a href="https://foyer-rs.github.io/foyer">
+        <img src="https://img.shields.io/website?url=https%3A%2F%2Ffoyer-rs.github.io/foyer&up_message=foyer-rs.github.io/foyer&down_message=website&style=for-the-badge&logo=htmx" alt="docs.rs" />
     </a>
     <a href="https://crates.io/crates/foyer">
         <img src="https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555" alt="crates.io" />
@@ -16,7 +16,7 @@
 
 <p align="center">
     <b>Tutorial & Document:</b>
-    <a href="https://foyer.rs"><b>https://foyer.rs</b></a>
+    <a href="https://foyer-rs.github.io/foyer"><b>https://foyer-rs.github.io/foyer</b></a>
 </p>
 
 # foyer
@@ -33,10 +33,10 @@ foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cac
 
 However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
-For more details, please visit foyer's website: https://foyer.rs 🥰
+For more details, please visit foyer's website: https://foyer-rs.github.io/foyer 🥰
 
-[Website](https://foyer.rs) |
-[Tutorial](https://foyer.rs/docs/overview) |
+[Website](https://foyer-rs.github.io/foyer) |
+[Tutorial](https://foyer-rs.github.io/foyer/docs/overview) |
 [API Docs](https://docs.rs/foyer) |
 [Crate](https://crates.io/crates/foyer)
 
@@ -65,7 +65,7 @@ Feel free to open a PR and add your projects here:
 
 ## Quick Start
 
-**This section only shows briefs. Please visit https://foyer.rs for more details.**
+**This section only shows briefs. Please visit https://foyer-rs.github.io/foyer for more details.**
 
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 

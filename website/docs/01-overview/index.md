@@ -1,12 +1,14 @@
 # Overview
 
-<p align="center">
-  <img src="/img/logo/slogan.min.svg" style="width: 280px;" />
-</p>
+<div style="text-align:center">
+
+![logo](/img/logo/slogan.min.svg)
+
+</div>
 
 <div style="text-align: center;">
 
-![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer.rs&up_message=foyer.rs&style=for-the-badge&logo=rust&labelColor=555555)
+![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer-rs.github.io/foyer&up_message=foyer-rs.github.io/foyer&style=for-the-badge&logo=rust&labelColor=555555)
 ![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
 ![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=docs.rs&labelColor=555555)
 
