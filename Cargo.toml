@@ -21,6 +21,7 @@ keywords = ["cache", "hybrid"]
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 license = "Apache-2.0"
 readme = "README.md"
+exclude = ["website/*"]
 
 [workspace.dependencies]
 allocator-api2 = "0.2"

@@ -10,6 +10,7 @@ keywords = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 readme = { workspace = true }
+exclude.workspace = true
 
 [features]
 nightly = ["hashbrown/nightly"]
