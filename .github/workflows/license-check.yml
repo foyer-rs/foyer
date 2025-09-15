@@ -3,14 +3,18 @@ name: License Checker
 on:
   push:
     branches:
-    - main
-    - "forks/*"
-    - release-*.*
+      - main
+      - "forks/*"
+      - release-*.*
+    paths-ignore:
+      - "website/**"
   pull_request:
     branches: 
-    - main
-    - "v*.*.*-rc"
-    - release-*.*
+      - main
+      - "v*.*.*-rc"
+      - release-*.*
+    # paths-ignore:
+    #   - "website/**"
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
