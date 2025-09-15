@@ -117,16 +117,6 @@ pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
     /// Entry disposable.
     fn disposable(&self) -> Option<bool>;
 
-    /// Set entry ephemeral.
-    ///
-    /// Ephemeral entries are removed immediately after the last reference drops.
-    ///
-    /// Ephemeral property is used by disk-cache-only cache entries.
-    fn with_ephemeral(self, ephemeral: bool) -> Self;
-
-    /// Entry ephemeral.
-    fn ephemeral(&self) -> Option<bool>;
-
     /// Set entry hint.
     fn with_hint(self, hint: Hint) -> Self;
 

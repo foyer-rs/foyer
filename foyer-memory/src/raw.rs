@@ -168,12 +168,9 @@ where
         }
         strict_assert!(record.is_in_indexer());
 
-        let ephemeral = record.properties().ephemeral().unwrap_or_default();
-        record.set_ephemeral(ephemeral);
-        if !ephemeral {
-            self.eviction.push(record.clone());
-            strict_assert!(record.is_in_eviction());
-        }
+        strict_assert!(!record.is_in_eviction());
+        self.eviction.push(record.clone());
+        strict_assert!(record.is_in_eviction());
 
         self.usage += weight;
         // Increase the reference count within the lock section.
@@ -260,8 +257,6 @@ where
         };
 
         strict_assert!(record.is_in_indexer());
-
-        record.set_ephemeral(false);
 
         record.inc_refs(1);
 
@@ -608,9 +603,14 @@ where
                 .inspect(|r| {
                     // Deallocate data out of the lock critical section.
                     if let Some(listener) = self.inner.event_listener.as_ref() {
-                        listener.on_leave(Event::Replace, r.key(), r.value());
+                        listener.on_leave(Event::Evict, r.key(), r.value());
                     }
                 });
+
+            let pipe = self.inner.pipe.load();
+            if pipe.is_enabled() {
+                pipe.send(Piece::new(record.clone()));
+            }
 
             // If the record is disposable, we do not insert it into the cache.
             // Instead, we just return it and let it be dropped immediately after the last reference drops.
@@ -857,26 +857,6 @@ where
                 Op::Noop => {}
                 Op::Immutable(_) => shard.read().with(|shard| shard.release_immutable(&self.record)),
                 Op::Mutable(_) => shard.write().with(|mut shard| shard.release_mutable(&self.record)),
-            }
-
-            if self.record.is_ephemeral() {
-                shard
-                    .write()
-                    .with(|mut shard| shard.remove(hash, self.key()))
-                    .inspect(|record| {
-                        // Deallocate data out of the lock critical section.
-                        let pipe = self.inner.pipe.load();
-                        let piped = pipe.is_enabled();
-                        let event = Event::Evict;
-                        if self.inner.event_listener.is_some() || piped {
-                            if let Some(listener) = self.inner.event_listener.as_ref() {
-                                listener.on_leave(Event::Evict, record.key(), record.value());
-                            }
-                        }
-                        if piped && event == Event::Evict {
-                            pipe.send(self.piece());
-                        }
-                    });
             }
         }
     }
@@ -1183,7 +1163,7 @@ where
                     properties = properties.with_source(ctx.source)
                 };
                 let location = properties.location().unwrap_or_default();
-                properties = properties.with_ephemeral(matches! {location, Location::OnDisk});
+                properties = properties.with_disposable(matches! {location, Location::OnDisk});
                 let entry = match target.into() {
                     FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
                     FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
@@ -1306,24 +1286,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-    }
-
-    #[test_log::test]
-    fn test_insert_ephemeral() {
-        let fifo = fifo_cache_for_test();
-
-        let e1 = fifo.insert_with_properties(1, 1, TestProperties::default().with_ephemeral(true));
-        assert_eq!(fifo.usage(), 1);
-        drop(e1);
-        assert_eq!(fifo.usage(), 0);
-
-        let e2a = fifo.insert_with_properties(2, 2, TestProperties::default().with_ephemeral(true));
-        assert_eq!(fifo.usage(), 1);
-        let e2b = fifo.get(&2).expect("entry 2 should exist");
-        drop(e2a);
-        assert_eq!(fifo.usage(), 1);
-        drop(e2b);
-        assert_eq!(fifo.usage(), 1);
     }
 
     #[test_log::test]

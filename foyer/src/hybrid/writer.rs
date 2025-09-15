@@ -17,7 +17,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use foyer_common::code::{DefaultHasher, HashBuilder, StorageKey, StorageValue};
+use foyer_common::{
+    code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
+    properties::Properties,
+};
 use foyer_storage::StorageFilterResult;
 
 use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
@@ -139,7 +142,7 @@ where
         let entry = self
             .hybrid
             .memory()
-            .insert_with_properties(self.key, value, properties.with_ephemeral(true));
+            .insert_with_properties(self.key, value, properties.with_disposable(true));
         if self.hybrid.policy() == HybridCachePolicy::WriteOnInsertion {
             self.hybrid.storage().enqueue(entry.piece(), true);
         }

@@ -44,7 +44,7 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub struct CacheProperties {
     disposable: bool,
-    ephemeral: bool,
+
     hint: Hint,
 }
 
@@ -55,27 +55,14 @@ impl CacheProperties {
     /// reference drops.
     ///
     /// Disposable property is used to simplify the design consistency of the APIs.
-    fn with_disposable(mut self, disposable: bool) -> Self {
+    pub fn with_disposable(mut self, disposable: bool) -> Self {
         self.disposable = disposable;
         self
     }
 
     /// Get if the entry is disposable.
-    fn disposable(&self) -> bool {
+    pub fn disposable(&self) -> bool {
         self.disposable
-    }
-
-    /// Set the entry to be ephemeral.
-    ///
-    /// An ephemeral entry will be evicted immediately after all its holders drop it,
-    /// no matter if the capacity is reached.
-    pub fn with_ephemeral(self, ephemeral: bool) -> Self {
-        Self { ephemeral, ..self }
-    }
-
-    /// Get if the entry is ephemeral.
-    pub fn ephemeral(&self) -> bool {
-        self.ephemeral
     }
 
     /// Set entry hint.
@@ -97,14 +84,6 @@ impl Properties for CacheProperties {
 
     fn disposable(&self) -> Option<bool> {
         Some(self.disposable())
-    }
-
-    fn with_ephemeral(self, ephemeral: bool) -> Self {
-        self.with_ephemeral(ephemeral)
-    }
-
-    fn ephemeral(&self) -> Option<bool> {
-        Some(self.ephemeral())
     }
 
     fn with_hint(self, hint: Hint) -> Self {
