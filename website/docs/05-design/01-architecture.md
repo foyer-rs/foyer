@@ -37,5 +37,27 @@ If you only need to use ***foyer*** as a pure in-memory cache, you can directly 
 
 ## 2. Memory Cache
 
+***foyer***'s memory cache provides a high-performance, flexible, and composable pure in-memory cache implementation with the following key features:
+
+- **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
+- **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
+- **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
+
+***foyer***'s in-memory cache consists of three main components:
+
+1. **Flexible & Composable Framework:** A framework that adopts a flexible and composable design. Supports arbitrary combinations of different indexer implementations and eviction algorithm implementations. Provides basic CRUD operation support, lock/lock-free algorithm supports, automatic cache refill and request dedup supports on cache miss.
+2. **Indexer:** Pluggable indexer implementations. Currently, hash table implementation provided by hashbrown is supported to enable point get queries. In future versions, indexer implementations based on trie are planned to support advanced functions like prefix queries.
+3. **Eviction Algorithm:** Pluggable cache eviction algorithm implementations. Currently, ***foyer*** provides algorithms such as FIFO, LRU with high priorities, w-TinyLFU, S3-FIFO, and SIEVE. More production-ready algorithms and a simpler custom algorithm framework will be supported in future versions.
+
+<div style="text-align:center">
+
+![memory-cache](assets/memory-cache.svg)
+
+</div>
+
+Thanks to Rust's powerful type system, ***foyer***'s in-memory cache is zero-copy. The lifecycle and ownership of cache entries are managed by ***foyer***. Cache entries in the in-memory cache do not require any serialization or deserialization.
+
+For ultimate performance optimization, ***foyer***'s in-memory cache is implemented using intrusive data structures. This not only increases ***foyer***'s performance ceiling but also enables ***foyer*** to model the indexer and eviction algorithm as containers. The in-memory cache data structure is designed as a multi-indexer data structure, providing more flexible and composable support for the indexer and eviction algorithm.
+
 ***TBC ... ...***
 
