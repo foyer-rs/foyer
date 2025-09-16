@@ -23,6 +23,7 @@ authors.workspace = true
 license.workspace = true
 readme.workspace = true
 rust-version.workspace = true
+exclude.workspace = true
 publish = false
 
 [dependencies]
