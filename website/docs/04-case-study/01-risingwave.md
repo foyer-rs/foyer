@@ -1,3 +1,0 @@
-# RisingWave
-
-***TBC ... ...***
