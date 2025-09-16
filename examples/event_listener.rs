@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer::{Cache, CacheBuilder, CacheProperties, Event, EventListener, FifoConfig};
+use foyer::{Cache, CacheBuilder, Event, EventListener, FifoConfig};
 
 struct EchoEventListener;
 
@@ -32,18 +32,25 @@ impl EventListener for EchoEventListener {
 /// ```plain
 /// Entry [key = 2] [value = First] is released.
 /// Entry [key = 1] [value = Second] is released.
-/// Entry [key = 3] [value = Third] is released.
+/// Entry [key = 2] [value = Third] is released.
 /// Entry [key = 3] [value = Forth] is released.
+/// Entry [key = ..] [value = ===] is released.
+/// Entry [key = ..] [value = ===] is released.
+/// Entry [key = ..] [value = ===] is released.
 /// ```
 fn main() {
-    let cache: Cache<u64, String> = CacheBuilder::new(2)
+    let cache: Cache<u64, String> = CacheBuilder::new(3)
         .with_event_listener(Arc::new(EchoEventListener))
         .with_eviction_config(FifoConfig::default())
         .with_shards(1)
         .build();
 
     cache.insert(1, "Second".to_string());
-    cache.insert_with_properties(2, "First".to_string(), CacheProperties::default().with_ephemeral(true));
-    cache.insert(3, "Third".to_string());
+    cache.insert(2, "First".to_string());
+    cache.insert(2, "Third".to_string());
     cache.insert(3, "Forth".to_string());
+
+    cache.insert(100, "===".to_string());
+    cache.insert(101, "===".to_string());
+    cache.insert(102, "===".to_string());
 }

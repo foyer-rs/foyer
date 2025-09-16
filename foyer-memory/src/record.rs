@@ -27,7 +27,6 @@ bitflags! {
     pub struct Flags: u64 {
         const IN_INDEXER = 0b00000001;
         const IN_EVICTION = 0b00000010;
-        const EPHEMERAL= 0b00000100;
     }
 }
 
@@ -133,16 +132,6 @@ where
     /// Get in indexer flag with relaxed memory order.
     pub fn is_in_indexer(&self) -> bool {
         self.get_flags(Flags::IN_INDEXER, Ordering::Acquire)
-    }
-
-    /// Set ephemeral flag with relaxed memory order.
-    pub fn set_ephemeral(&self, val: bool) {
-        self.set_flags(Flags::EPHEMERAL, val, Ordering::Release);
-    }
-
-    /// Get ephemeral flag with relaxed memory order.
-    pub fn is_ephemeral(&self) -> bool {
-        self.get_flags(Flags::EPHEMERAL, Ordering::Acquire)
     }
 
     /// Set the record atomic flags.
