@@ -37,5 +37,53 @@ If you only need to use ***foyer*** as a pure in-memory cache, you can directly 
 
 ## 2. Memory Cache
 
+***foyer***'s memory cache provides a high-performance, flexible, and composable pure in-memory cache implementation with the following key features:
+
+- **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
+- **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
+- **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
+
+***foyer***'s in-memory cache consists of three main components:
+
+1. **Flexible & Composable Framework:** A framework that adopts a flexible and composable design. Supports arbitrary combinations of different indexer implementations and eviction algorithm implementations. Provides basic CRUD operation support, lock/lock-free algorithm supports, automatic cache refill and request dedup supports on cache miss.
+2. **Indexer:** Pluggable indexer implementations. Currently, hash table implementation provided by hashbrown is supported to enable point get queries. In future versions, indexer implementations based on trie are planned to support advanced functions like prefix queries.
+3. **Eviction Algorithm:** Pluggable cache eviction algorithm implementations. Currently, ***foyer*** provides algorithms such as FIFO, LRU with high priorities, w-TinyLFU, S3-FIFO, and SIEVE. More production-ready algorithms and a simpler custom algorithm framework will be supported in future versions.
+
+<div style="text-align:center">
+
+![memory-cache](assets/memory-cache.svg)
+
+</div>
+
+The memory cache framework of foyer adopts sharding design to improve performance under high concurrency loads. Each shard has its own indexer and eviction algorithm container. This design greatly simplifies the engineering of concurrent data structures. Although usage imbalance between shards may occur when the capacity is extremely small, such severe data skew rarely happens in production environments.
+
+<div style="text-align:center">
+
+![memory-cache-shards](assets/memory-cache-shards.svg)
+
+</div>
+
+For ultimate performance optimization, ***foyer***'s in-memory cache is implemented using intrusive data structures. This not only increases ***foyer***'s performance ceiling but also enables ***foyer*** to model the indexer and eviction algorithm as containers. The in-memory cache data structure is designed as a multi-indexer data structure, providing more flexible and composable support for the indexer and eviction algorithm.
+
+<div style="text-align:center">
+
+![intrusive-data-structure](assets/intrusive-data-structure.svg)
+
+</div>
+
+***foyer*** provides a powerful `fetch()` API. When using the `fetch()` API to access an entry, the caller can provide an async task that fetches the entry from remote storage. If a cache miss occurs, ***foyer*** will automatically call this async task to retrieve the entry and backfill it into the cache. Additionally, this interface is optimized for concurrent requests for the same key. If multiple concurrent `fetch()` requests access the same key, only one request will be sent to remote storage; other callers will wait for the task to backfill the entry into the cache and then retrieve the result directly from the cache, thereby reducing the load on remote storage.
+
+<div style="text-align:center">
+
+![fetch](assets/fetch.svg)
+
+</div>
+
+Moreover, hybrid cache also provides a `fetch()` API. Unlike the `fetch()` API of memory cache, the `fetch()` API of the hybrid cache offers additional compatibility and optimization for disk cache: when concurrent requests encounter a memory cache miss, only one request will be sent to the disk cache. If the disk cache also misses, then only one request will be sent to the remote storage. In addition, the `fetch()` API of this hybrid cache will also perform targeted optimizations based on the causes of disk cache misses: for example, if the miss is due to disk cache performance throttling, cache refill will not be triggered, and so on.
+
+Thanks to Rust's powerful type system, ***foyer***'s in-memory cache is zero-copy. The lifecycle and ownership of cache entries are managed by ***foyer***. Cache entries in the in-memory cache do not require any serialization or deserialization.
+
+## 3. Disk Cache
+
 ***TBC ... ...***
 
