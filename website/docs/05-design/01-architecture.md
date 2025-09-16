@@ -14,7 +14,7 @@ Obviously, ***foyer*** consists of three components to provide hybrid cache func
 
 <div style="text-align:center">
 
-![hybrid-cache](assets/hybrid-cache.svg)
+![hybrid-cache](./assets/hybrid-cache.svg)
 
 </div>
 
@@ -22,7 +22,7 @@ Besides the hybrid cache mode, ***foyer*** can also operate as a pure in-memory 
 
 <div style="text-align:center">
 
-![hybrid-cache-compatible-mode](assets/hybrid-cache-compatible-mode.svg)
+![hybrid-cache-compatible-mode](./assets/hybrid-cache-compatible-mode.svg)
 
 </div>
 
@@ -31,7 +31,7 @@ If you only need to use ***foyer*** as a pure in-memory cache, you can directly 
 
 <div style="text-align:center">
 
-![cache](assets/cache.svg)
+![cache](./assets/cache.svg)
 
 </div>
 
@@ -51,7 +51,7 @@ If you only need to use ***foyer*** as a pure in-memory cache, you can directly 
 
 <div style="text-align:center">
 
-![memory-cache](assets/memory-cache.svg)
+![memory-cache](./assets/memory-cache.svg)
 
 </div>
 
@@ -59,7 +59,7 @@ The memory cache framework of foyer adopts sharding design to improve performanc
 
 <div style="text-align:center">
 
-![memory-cache-shards](assets/memory-cache-shards.svg)
+![memory-cache-shards](./assets/memory-cache-shards.svg)
 
 </div>
 
@@ -67,7 +67,7 @@ For ultimate performance optimization, ***foyer***'s in-memory cache is implemen
 
 <div style="text-align:center">
 
-![intrusive-data-structure](assets/intrusive-data-structure.svg)
+![intrusive-data-structure](./assets/intrusive-data-structure.svg)
 
 </div>
 
@@ -75,7 +75,7 @@ For ultimate performance optimization, ***foyer***'s in-memory cache is implemen
 
 <div style="text-align:center">
 
-![fetch](assets/fetch.svg)
+![fetch](./assets/fetch.svg)
 
 </div>
 
@@ -84,6 +84,26 @@ Moreover, hybrid cache also provides a `fetch()` API. Unlike the `fetch()` API o
 Thanks to Rust's powerful type system, ***foyer***'s in-memory cache is zero-copy. The lifecycle and ownership of cache entries are managed by ***foyer***. Cache entries in the in-memory cache do not require any serialization or deserialization.
 
 ## 3. Disk Cache
+
+***foyer***'s disk cache is designed to support disk caches ranging from tens of gigabytes to hundreds of terabytes in size with minimal overhead. It consists of the following main components:
+
+1. **Flexible & Composable Framework:** A flexible and composable framework adaptable to various disk cache engines, IO engines, and IO devices.
+2. **Disk Cache Engine:** Pluggable disk cache engine. Users can choose a specific engine for their own scenarios to better adapt to their workload. Currently, ***foyer*** provides or plans to provide the following types of disk cache engines:
+    - *Set-Associated Engine (WIP):*: Optimized for ~4KiB cache entries.  
+    - *Block Engine:* General-proposed engine that is optimized for 4KiB~1GiB cache entries.
+    - *Object Engine (WIP):* Optimized for 1MiB~ cache entries.
+    - *Customized Engine*: Users can customize the disk cache engine, or combine the existing disk cache engines provided by ***foyer*** according to rules.
+3. **IO Engine:** Engine for performing disk cache IO operations. Currently, ***foyer*** provides or plans to provide the following types of io engines:
+    - *Psync Engine:* Use a thread pool and blocking `pread(2)/pwrite(2)` syscalls to perform IO operations.
+    - *Libaio Engine (WIP):* Use `libaio` asynchronous IO to perform IO operations.
+    - *Uring Engine:* Use `io_uring` asynchronous IO toe perform IO operations.
+4. **IO Device:** Device abstraction layer. Currently supports single file, raw block device, and filesystem directory.
+
+<div style="text-align:center">
+
+![disk-cache](./assets/disk-cache.svg)
+
+</div>
 
 ***TBC ... ...***
 
