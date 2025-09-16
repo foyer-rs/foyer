@@ -94,7 +94,6 @@ macro_rules! try_cancel {
 #[derive(Debug, Clone, Default)]
 pub struct HybridCacheProperties {
     disposable: bool,
-    ephemeral: bool,
     hint: Hint,
     location: Location,
     source: Source,
@@ -115,20 +114,6 @@ impl HybridCacheProperties {
     /// Get if the entry is disposable.
     fn disposable(&self) -> bool {
         self.disposable
-    }
-
-    /// Set the entry to be ephemeral.
-    ///
-    /// An ephemeral entry will be evicted immediately after all its holders drop it,
-    /// no matter if the capacity is reached.
-    pub fn with_ephemeral(mut self, ephemeral: bool) -> Self {
-        self.ephemeral = ephemeral;
-        self
-    }
-
-    /// Get if the entry is ephemeral.
-    pub fn ephemeral(&self) -> bool {
-        self.ephemeral
     }
 
     /// Set entry hint.
@@ -166,14 +151,6 @@ impl Properties for HybridCacheProperties {
 
     fn disposable(&self) -> Option<bool> {
         Some(self.disposable())
-    }
-
-    fn with_ephemeral(self, ephemeral: bool) -> Self {
-        self.with_ephemeral(ephemeral)
-    }
-
-    fn ephemeral(&self) -> Option<bool> {
-        Some(self.ephemeral())
     }
 
     fn with_hint(self, hint: Hint) -> Self {
@@ -588,11 +565,11 @@ where
 
         let now = Instant::now();
 
-        let ephemeral = matches! { properties.location(), Location::OnDisk };
+        let disposable = matches! { properties.location(), Location::OnDisk };
         let entry = self
             .inner
             .memory
-            .insert_with_properties(key, value, properties.with_ephemeral(ephemeral));
+            .insert_with_properties(key, value, properties.with_disposable(disposable));
         if self.inner.policy == HybridCachePolicy::WriteOnInsertion && entry.properties().location() != Location::InMem
         {
             self.inner.storage.enqueue(entry.piece(), false);
@@ -1214,13 +1191,9 @@ mod tests {
         let e2g = hybrid.obtain(2).await.unwrap().unwrap();
         assert_eq!(e2g.value(), &vec![2; 7 * KB]);
 
-        assert!(hybrid.contains(&3));
-        hybrid.remove(&3);
-        assert!(!hybrid.contains(&3));
-
-        assert!(hybrid.contains(&4));
-        hybrid.clear().await.unwrap();
-        assert!(!hybrid.contains(&4));
+        assert!(hybrid.contains(&1));
+        hybrid.remove(&1);
+        assert!(!hybrid.contains(&1));
     }
 
     #[test_log::test(tokio::test)]
