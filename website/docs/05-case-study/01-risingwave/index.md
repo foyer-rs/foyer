@@ -27,7 +27,7 @@ For example, RisingWave is often used to handle streaming join tasks where the s
 
 <div style="text-align:center">
 
-![woring-set](./assets/working-set.svg)
+![working-set](./assets/working-set.svg)
 
 </div>
 
@@ -37,7 +37,7 @@ After introducing ***foyer***, ***foyer*** can use both memory and disk as cache
 
 <div style="text-align:center">
 
-![woring-set-disk-foyer](./assets/working-set-foyer.svg)
+![working-set-disk-foyer](./assets/working-set-foyer.svg)
 
 </div>
 
@@ -86,7 +86,7 @@ Moreover, as mentioned in the tips above, RisingWave actually fetches S3 in bloc
 
 ### 3. Trade-off between block size, S3 access and fragmentation
 
-
+As a stream processing system, RisingWave often gets its upstream data from the CDC of OLTP systems, and its access tend to favor random reads rather than large-scale sequential reads. Also, since S3 has relatively high access latency and charges based on the number of accesses, selecting an appropriate minimum unit for fetching S3 data—that is, the block size—is very important for RisingWave.
 
 
 ***TBC ... ...***
