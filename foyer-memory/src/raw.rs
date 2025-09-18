@@ -117,6 +117,9 @@ where
     fn evict(&mut self, target: usize, garbages: &mut Vec<(Event, Arc<Record<E>>)>) {
         // Evict overflow records.
         while self.usage > target {
+            // Add extra validation before popping from eviction
+            let current_usage = self.usage;
+            
             let evicted = match self.eviction.pop() {
                 Some(evicted) => evicted,
                 None => break,
@@ -124,33 +127,69 @@ where
             self.metrics.memory_evict.increase(1);
 
             // Verify invariants before attempting removal
+            let is_in_indexer = evicted.is_in_indexer();
+            let is_in_eviction = evicted.is_in_eviction();
+            
             tracing::debug!(
-                "evict: attempting to remove record with hash={}, is_in_indexer={}, is_in_eviction={}",
+                "evict: popped record with hash={}, is_in_indexer={}, is_in_eviction={}, usage_before={}, target={}",
                 evicted.hash(),
-                evicted.is_in_indexer(),
-                evicted.is_in_eviction()
+                is_in_indexer,
+                is_in_eviction,
+                current_usage,
+                target
             );
 
-            // The record should be in indexer if it was popped from eviction
-            // This is a fundamental invariant that must hold
+            // After popping from eviction, the record should no longer be in eviction
+            // but should still be in indexer until we remove it
+            if is_in_eviction {
+                tracing::warn!(
+                    "Record still shows as in_eviction after being popped - possible flag management bug. hash={}",
+                    evicted.hash()
+                );
+            }
+            
+            if !is_in_indexer {
+                tracing::error!(
+                    "Record not in indexer after being popped from eviction - invariant violation! hash={}",
+                    evicted.hash()
+                );
+            }
+
+            // Attempt to remove from indexer
             match self.indexer.remove(evicted.hash(), evicted.key()) {
                 Some(e) => {
+                    // Verify it's the same record
+                    if !Arc::ptr_eq(&evicted, &e) {
+                        tracing::error!(
+                            "Indexer returned different record than expected! hash={}, evicted_ptr={:p}, returned_ptr={:p}",
+                            evicted.hash(),
+                            Arc::as_ptr(&evicted),
+                            Arc::as_ptr(&e)
+                        );
+                    }
                     assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
+                    
                     strict_assert!(!evicted.as_ref().is_in_indexer());
                     strict_assert!(!evicted.as_ref().is_in_eviction());
+                    
                     self.usage -= evicted.weight();
                     garbages.push((Event::Evict, evicted));
+                    
+                    tracing::debug!(
+                        "evict: successfully removed record, usage_after={}",
+                        self.usage
+                    );
                 }
                 None => {
                     // This should never happen by design - it indicates a serious bug
                     // where a record exists in eviction but not in indexer
                     tracing::error!(
                         "INVARIANT VIOLATION: record popped from eviction not found in indexer! \
-                        hash={}, is_in_indexer={}, is_in_eviction={}, usage={}, target={}",
+                        hash={}, is_in_indexer_flag={}, is_in_eviction_flag={}, usage={}, target={}",
                         evicted.hash(),
-                        evicted.is_in_indexer(),
-                        evicted.is_in_eviction(),
-                        self.usage,
+                        is_in_indexer,
+                        is_in_eviction,
+                        current_usage,
                         target
                     );
                     
@@ -161,8 +200,13 @@ where
                     // Log this as an eviction event for metrics, but mark it as a problematic one
                     garbages.push((Event::Evict, evicted));
                     
+                    tracing::error!(
+                        "evict: compensated usage after failed removal, usage_after={}",
+                        self.usage
+                    );
+                    
                     // This is a serious bug that needs investigation
-                    // TODO: In debug builds, we could panic here to help find the root cause
+                    // In debug builds, we could panic here to help find the root cause during testing
                     #[cfg(debug_assertions)]
                     {
                         panic!("Record popped from eviction not found in indexer - this indicates a serious consistency bug");
