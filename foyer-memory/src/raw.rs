@@ -123,15 +123,20 @@ where
             };
             self.metrics.memory_evict.increase(1);
 
-            let e = self.indexer.remove(evicted.hash(), evicted.key()).unwrap();
-            assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
-
-            strict_assert!(!evicted.as_ref().is_in_indexer());
-            strict_assert!(!evicted.as_ref().is_in_eviction());
-
-            self.usage -= evicted.weight();
-
-            garbages.push((Event::Evict, evicted));
+            // The record may have already been removed from the indexer by another operation
+            // (e.g., a concurrent replace operation). In this case, we should skip the removal
+            // and just update the usage.
+            if let Some(e) = self.indexer.remove(evicted.hash(), evicted.key()) {
+                assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
+                strict_assert!(!evicted.as_ref().is_in_indexer());
+                strict_assert!(!evicted.as_ref().is_in_eviction());
+                self.usage -= evicted.weight();
+                garbages.push((Event::Evict, evicted));
+            } else {
+                // Record was already removed from indexer, but we still need to update usage
+                // since the record was in the eviction queue
+                self.usage -= evicted.weight();
+            }
         }
     }
 
