@@ -25,7 +25,7 @@ use futures_util::FutureExt;
 
 use crate::{
     io::{
-        bytes::{IoB, IoBuf, IoBufMut},
+        bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
@@ -147,7 +147,7 @@ impl IoEngine for PsyncIoEngine {
                 .await
             {
                 Ok((buf, res)) => (buf, res),
-                Err(e) => return (Box::new(crate::io::bytes::Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -182,7 +182,7 @@ impl IoEngine for PsyncIoEngine {
                 .await
             {
                 Ok((buf, res)) => (buf, res),
-                Err(e) => return (Box::new(crate::io::bytes::Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
