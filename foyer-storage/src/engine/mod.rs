@@ -168,7 +168,18 @@ where
     ///
     /// `close` will wait for all ongoing flush and reclaim tasks to finish.
     fn close(&self) -> BoxFuture<'static, Result<()>>;
+
+    /// Get the test utils of the engine.
+    #[cfg(any(test, feature = "test_utils"))]
+    fn test_utils(&self) -> &dyn test_utils::EngineTestUtils;
 }
 
 pub mod block;
 pub mod noop;
+
+#[cfg(any(test, feature = "test_utils"))]
+pub mod test_utils {
+    use super::*;
+
+    pub trait EngineTestUtils: Send + Sync + 'static + Any {}
+}

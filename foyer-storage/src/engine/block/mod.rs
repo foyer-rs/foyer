@@ -24,5 +24,5 @@ pub mod scanner;
 pub mod serde;
 pub mod tombstone;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;

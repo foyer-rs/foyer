@@ -67,6 +67,8 @@ where
         let device: Arc<dyn Device> = device;
         Arc::new(NoopEngine {
             device,
+            #[cfg(any(test, feature = "test_utils"))]
+            test_utils: Box::new(test_utils::NoopEngineTestUtils),
             marker: PhantomData,
         })
     }
@@ -101,6 +103,10 @@ where
     P: Properties,
 {
     device: Arc<dyn Device>,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    test_utils: Box<test_utils::NoopEngineTestUtils>,
+
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -152,4 +158,18 @@ where
     fn close(&self) -> BoxFuture<'static, Result<()>> {
         async move { Ok(()) }.boxed()
     }
+
+    #[cfg(any(test, feature = "test_utils"))]
+    fn test_utils(&self) -> &dyn crate::engine::test_utils::EngineTestUtils {
+        self.test_utils.as_ref()
+    }
+}
+
+#[cfg(any(test, feature = "test_utils"))]
+pub mod test_utils {
+    use crate::engine::test_utils::EngineTestUtils;
+
+    pub struct NoopEngineTestUtils;
+
+    impl EngineTestUtils for NoopEngineTestUtils {}
 }

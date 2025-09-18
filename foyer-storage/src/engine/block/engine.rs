@@ -43,7 +43,7 @@ use super::{
     indexer::Indexer,
     recover::RecoverRunner,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::engine::block::test_utils::*;
 use crate::{
     compress::Compression,
@@ -386,8 +386,8 @@ where
         )
         .await?;
 
-        #[cfg(test)]
-        let flush_holder = FlushHolder::default();
+        #[cfg(any(test, feature = "test_utils"))]
+        let flush_holder = Arc::new(FlushHolder::default());
 
         let io_buffer_size = self.buffer_pool_size / self.flushers;
         for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
@@ -402,7 +402,7 @@ where
                 tombstone_log.clone(),
                 metrics.clone(),
                 &runtime,
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test_utils"))]
                 flush_holder.clone(),
             )?;
         }
@@ -421,7 +421,7 @@ where
             runtime,
             active: AtomicBool::new(true),
             metrics,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test_utils"))]
             flush_holder,
         };
         let inner = Arc::new(inner);
@@ -500,8 +500,8 @@ where
 
     metrics: Arc<Metrics>,
 
-    #[cfg(test)]
-    flush_holder: FlushHolder,
+    #[cfg(any(test, feature = "test_utils"))]
+    flush_holder: Arc<FlushHolder>,
 }
 
 impl<K, V, P> Clone for BlockEngine<K, V, P>
@@ -817,6 +817,11 @@ where
 
     fn close(&self) -> BoxFuture<'static, Result<()>> {
         self.close()
+    }
+
+    #[cfg(any(test, feature = "test_utils"))]
+    fn test_utils(&self) -> &dyn crate::engine::test_utils::EngineTestUtils {
+        self.inner.flush_holder.as_ref()
     }
 }
 

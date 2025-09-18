@@ -1045,12 +1045,12 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::path::Path;
+    use std::{any::Any, path::Path};
 
     use foyer_common::hasher::ModHasher;
     use foyer_storage::{
         test_utils::{Record, Recorder},
-        StorageFilter,
+        FlushHolder, StorageFilter,
     };
     use storage::test_utils::Biased;
 
@@ -1522,5 +1522,35 @@ mod tests {
 
         let hybrid = open(&dir).await;
         assert_eq!(*hybrid.get(&1).await.unwrap().unwrap(), vec![1; 3 * KB]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_insert_piece_still_exists() {
+        fn holder(hybrid: &HybridCache<u64, Vec<u8>>) -> &FlushHolder {
+            let utils = hybrid.storage().engine_test_utils() as &dyn Any;
+            utils.downcast_ref::<FlushHolder>().unwrap()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid: HybridCache<u64, Vec<u8>> = HybridCacheBuilder::new()
+            .with_name("test")
+            .with_policy(HybridCachePolicy::WriteOnInsertion)
+            .memory(4 * MB)
+            .storage()
+            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_engine_config(
+                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    .with_block_size(64 * KB),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        // Hold disk cache engine flush.
+        holder(&hybrid).hold();
+
+        // Insert an entry, its piece will goes into the disk cache engine write queue.
+        // Since the flush is held, the piece will be held in keeper.
+        hybrid.insert(1, vec![1; 3 * KB]);
     }
 }

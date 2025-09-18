@@ -303,6 +303,12 @@ where
         &self.inner.load_throttle_switch
     }
 
+    /// Get the test utils of the engine.
+    #[cfg(feature = "test_utils")]
+    pub fn engine_test_utils(&self) -> &dyn crate::engine::test_utils::EngineTestUtils {
+        self.inner.engine.test_utils()
+    }
+
     /// If the disk cache is enabled.
     pub fn is_enabled(&self) -> bool {
         self.inner.engine.type_id() != TypeId::of::<Arc<NoopEngine<K, V, P>>>()

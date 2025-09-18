@@ -12,26 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-#[derive(Debug, Clone, Default)]
+use crate::engine::test_utils::EngineTestUtils;
+
+/// [`FlushHolder`] is a simple holder to block flush operations when needed.
+#[derive(Debug, Default)]
 pub struct FlushHolder {
-    hold: Arc<AtomicBool>,
+    hold: AtomicBool,
 }
 
 impl FlushHolder {
+    /// Reurns whether the flush is currently held.
     pub fn is_held(&self) -> bool {
         self.hold.load(Ordering::Relaxed)
     }
 
+    /// Holds the flush operation.
     pub fn hold(&self) {
         self.hold.store(true, Ordering::Relaxed);
     }
 
+    /// Unholds the flush operation.
     pub fn unhold(&self) {
         self.hold.store(false, Ordering::Relaxed);
     }
 }
+
+impl EngineTestUtils for FlushHolder {}

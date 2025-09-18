@@ -32,3 +32,6 @@ pub use prelude::*;
 
 #[cfg(any(test, feature = "test_utils"))]
 pub mod test_utils;
+
+#[cfg(any(test, feature = "test_utils"))]
+pub use crate::engine::block::test_utils::*;
