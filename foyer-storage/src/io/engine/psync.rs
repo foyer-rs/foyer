@@ -25,7 +25,7 @@ use futures_util::FutureExt;
 
 use crate::{
     io::{
-        bytes::{IoB, IoBuf, IoBufMut},
+        bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
         error::{IoError, IoResult},
@@ -123,29 +123,31 @@ impl Debug for PsyncIoEngine {
 impl IoEngine for PsyncIoEngine {
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
-        let (ptr, len) = buf.as_raw_parts();
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
         async move {
-            let res = match runtime
+            let (buf, res) = match runtime
                 .spawn_blocking(move || {
-                    #[cfg(target_family = "windows")]
-                    {
-                        use std::os::windows::fs::FileExt;
-                        file.seek_read(slice, offset).map_err(IoError::from)?;
+                    let (ptr, len) = buf.as_raw_parts();
+                    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+                    let res = {
+                        #[cfg(target_family = "windows")]
+                        {
+                            use std::os::windows::fs::FileExt;
+                            file.seek_read(slice, offset).map(|_| ()).map_err(IoError::from)
+                        }
+                        #[cfg(target_family = "unix")]
+                        {
+                            use std::os::unix::fs::FileExt;
+                            file.read_exact_at(slice, offset).map_err(IoError::from)
+                        }
                     };
-                    #[cfg(target_family = "unix")]
-                    {
-                        use std::os::unix::fs::FileExt;
-                        file.read_exact_at(slice, offset).map_err(IoError::from)?;
-                    };
-                    Ok(())
+                    (buf, res)
                 })
                 .await
             {
-                Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Ok((buf, res)) => (buf, res),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -156,29 +158,31 @@ impl IoEngine for PsyncIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
-        let (ptr, len) = buf.as_raw_parts();
-        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
         async move {
-            let res = match runtime
+            let (buf, res) = match runtime
                 .spawn_blocking(move || {
-                    #[cfg(target_family = "windows")]
-                    {
-                        use std::os::windows::fs::FileExt;
-                        file.seek_write(slice, offset).map_err(IoError::from)?;
+                    let (ptr, len) = buf.as_raw_parts();
+                    let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+                    let res = {
+                        #[cfg(target_family = "windows")]
+                        {
+                            use std::os::windows::fs::FileExt;
+                            file.seek_write(slice, offset).map(|_| ()).map_err(IoError::from)
+                        }
+                        #[cfg(target_family = "unix")]
+                        {
+                            use std::os::unix::fs::FileExt;
+                            file.write_all_at(slice, offset).map_err(IoError::from)
+                        }
                     };
-                    #[cfg(target_family = "unix")]
-                    {
-                        use std::os::unix::fs::FileExt;
-                        file.write_all_at(slice, offset).map_err(IoError::from)?;
-                    };
-                    Ok(())
+                    (buf, res)
                 })
                 .await
             {
-                Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Ok((buf, res)) => (buf, res),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
