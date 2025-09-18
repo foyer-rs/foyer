@@ -128,7 +128,15 @@ impl<K, V, P> Piece<K, V, P> {
     {
         self.drop_fn = |_| {};
         let record = self.record as *const Record<E>;
-        unsafe { Arc::from_raw(record) }
+        let arc_record = unsafe { Arc::from_raw(record) };
+        
+        // Clear indexer and eviction flags since this record is being reinserted
+        // from the pipe (e.g., from disk cache). This prevents race conditions
+        // where the record still has flags set from a previous insertion.
+        arc_record.set_in_indexer(false);
+        arc_record.set_in_eviction(false);
+        
+        arc_record
     }
 }
 
