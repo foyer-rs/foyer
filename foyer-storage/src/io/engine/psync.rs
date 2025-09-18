@@ -134,7 +134,7 @@ impl IoEngine for PsyncIoEngine {
                         #[cfg(target_family = "windows")]
                         {
                             use std::os::windows::fs::FileExt;
-                            file.seek_read(slice, offset).map_err(IoError::from)
+                            file.seek_read(slice, offset).map(|_| ()).map_err(IoError::from)
                         }
                         #[cfg(target_family = "unix")]
                         {
@@ -169,7 +169,7 @@ impl IoEngine for PsyncIoEngine {
                         #[cfg(target_family = "windows")]
                         {
                             use std::os::windows::fs::FileExt;
-                            file.seek_write(slice, offset).map_err(IoError::from)
+                            file.seek_write(slice, offset).map(|_| ()).map_err(IoError::from)
                         }
                         #[cfg(target_family = "unix")]
                         {
