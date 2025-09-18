@@ -86,7 +86,30 @@ Moreover, as mentioned in the tips above, RisingWave actually fetches S3 in bloc
 
 ### 3. Trade-off between block size, S3 access and fragmentation
 
-As a stream processing system, RisingWave often gets its upstream data from the CDC of OLTP systems, and its access tend to favor random reads rather than large-scale sequential reads. Also, since S3 has relatively high access latency and charges based on the number of accesses, selecting an appropriate minimum unit for fetching S3 data—that is, the block size—is very important for RisingWave.
+As a stream processing system, RisingWave often gets its upstream data from the CDC of OLTP systems, and its access tend to favor random reads rather than large-scale sequential reads. Also, since S3 has relatively high access latency and charges based on the number of accesses, selecting an appropriate minimum unit for fetching S3 data, that is, the block size is very important for RisingWave.
 
+
+<div style="text-align:center">
+
+![block-size](./assets/block-size.svg)
+
+</div>
+
+For example, in the image above, the gray squares are fetch S3 units, and the green part is the actual required data.
+
+- If the unit is too small, more S3 accesses are needed to obtain the required data.
+- If the fetch unit is too large, although the number of S3 accesses decreases, it will create more internal fragmentation when caching blocks.
+
+If there is only a memory cache, it is difficult to achieve a balanced trade-off because memory is more valuable and has a smaller capacity.
+
+After introducing Foyer, Foyer can fully utilize both memory and disk to form a hybrid cache, with disk cache often being 10 to 1000 times larger than memory cache. Therefore, even if a relatively large block size is selected, the overhead caused by cache fragmentation is still acceptable.
+
+<div style="text-align:center">
+
+![huge-disk-cache](./assets/huge-disk-cache.svg)
+
+</div>
+
+This gives RisingWave the opportunity to optimize the performance and cost overhead caused by S3 access by fetching more data at once through operations such as prefetching and refilling.
 
 ***TBC ... ...***
