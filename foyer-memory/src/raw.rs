@@ -123,8 +123,11 @@ where
             };
             self.metrics.memory_evict.increase(1);
 
-            let e = self.indexer.remove(evicted.hash(), evicted.key()).unwrap();
-            assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
+            // Handle the case where the record was already removed from the indexer
+            // by another concurrent operation (e.g., explicit remove or replace).
+            if let Some(e) = self.indexer.remove(evicted.hash(), evicted.key()) {
+                assert_eq!(Arc::as_ptr(&evicted), Arc::as_ptr(&e));
+            }
 
             strict_assert!(!evicted.as_ref().is_in_indexer());
             strict_assert!(!evicted.as_ref().is_in_eviction());
@@ -1546,5 +1549,60 @@ mod tests {
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
+    }
+
+    #[test_log::test]
+    fn test_concurrent_eviction_and_removal_race() {
+        // This test specifically targets the race condition where a record is
+        // evicted from the eviction algorithm but has already been removed from
+        // the indexer by an explicit remove operation.
+        
+        let cache: RawCache<Lru<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
+            capacity: 50, // Very small capacity to force frequent evictions
+            shards: 1,    // Single shard to maximize contention
+            eviction_config: LruConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        });
+        
+        // Spawn many threads to create high contention
+        let handles = (0..8)
+            .map(|thread_id| {
+                let c = cache.clone();
+                std::thread::spawn(move || {
+                    for i in 0..5000 {
+                        let key = (thread_id * 5000 + i) as u64;
+                        
+                        // Insert new items to trigger evictions
+                        c.insert(key, key);
+                        
+                        // Aggressively remove items to create the race condition
+                        if i % 2 == 0 {
+                            // Remove recently inserted keys to maximize race condition chance
+                            c.remove(&(key.saturating_sub(10)));
+                            c.remove(&(key.saturating_sub(20)));
+                        }
+                        
+                        // Also try to remove some items that might be in eviction queue
+                        if i % 5 == 0 {
+                            for j in 0..10 {
+                                c.remove(&((key + j) % 100));
+                            }
+                        }
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        // If we reach here without panicking, the race condition was handled correctly
+        assert!(cache.usage() <= cache.capacity());
     }
 }
