@@ -143,6 +143,14 @@ where
     ) -> Arc<Record<E>> {
         *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
 
+        // Hotfix for issue: https://github.com/foyer-rs/foyer/issues/1121
+        // This branch protects against the case of duplicate piece insertion under race conditions.
+        // After identifying the reason for the duplicate insertion of pieces, remove this protection.
+        if record.is_in_indexer() {
+            record.inc_refs(waiters.len() + 1);
+            return record;
+        }
+
         let weight = record.weight();
         let old_usage = self.usage;
 
