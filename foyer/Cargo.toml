@@ -33,6 +33,7 @@ strict_assertions = [
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
 ]
+test_utils = ["foyer-storage/test_utils"]
 
 [dependencies]
 equivalent = { workspace = true }
@@ -70,8 +71,13 @@ tokio = { workspace = true, features = [
 
 [dev-dependencies]
 foyer-storage = { workspace = true, features = ["test_utils"] }
+rand = "0.9"
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "hybrid_cache_fuzzy_test"
+required-features = ["test_utils"]
