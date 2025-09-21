@@ -259,7 +259,13 @@ foyer = { version = "*", features = ["serde"] }
 - [Export Metrics with `prometheus` and `hyper`](https://github.com/foyer-rs/foyer/tree/main/examples/export_metrics_prometheus_hyper.rs)
 - [Tail-based Tracing](https://github.com/foyer-rs/foyer/tree/main/examples/tail_based_tracing.rs)
 
-More examples and details can be found [here](https://github.com/foyer-rs/foyer/tree/main/examples).
+More code examples and details can be found [here](https://github.com/foyer-rs/foyer/tree/main/examples).
+
+Case study of real-world usage in the production system can be found in [Document - Case Study - RisingWave](https://foyer-rs.github.io/foyer/docs/case-study/risingwave)
+
+## Architecture
+
+The architecture of ***foyer*** is still not mature and is undergoing rapid iteration. Currently, the architectural design can refer to [Document - Architecture](https://foyer-rs.github.io/foyer/docs/design/architecture)
 
 ## Supported Rust Versions
 
