@@ -6,7 +6,7 @@ This article will guide you through the process of setting up an in-memory cache
 
 The in-memory cache `Cache` is literally an in-memory only cache. Which provides non-overhead in-memory cache implement for users only want to replace their in-memory cache with ***foyer***, and cannot upgrade to a hybrid cache later.
 
-The hybrid cache `HybridCache` also provides a in-memory only mode. If you want to try ***foyer*** out with the in-memory mode and have the needs of a hybrid cache, please use `HybridCache`. See [Tutorial - Hybrid Cache](/docs/tutorial/hybrid-cache).
+The hybrid cache `HybridCache` also provides a in-memory only mode. If you want to try ***foyer*** out with the in-memory mode and have the needs of a hybrid cache, please use `HybridCache`. See [Tutorial - Hybrid Cache](/docs/getting-started/hybrid-cache).
 
 :::
 

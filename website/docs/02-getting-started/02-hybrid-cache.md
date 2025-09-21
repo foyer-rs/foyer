@@ -42,7 +42,7 @@ For more details, please refer to the API document.[^hybrid-cache-builder].
 
 :::tip dynamic tail-based tracing config
 
-The tracing config is used for configure the dynamic tail-based tracing. It can also be modified later. To learn more, see [Tutorial - Setup Monitor System](/docs/tutorial/monitor).
+The tracing config is used for configure the dynamic tail-based tracing. It can also be modified later. To learn more, see [Tutorial - Setup Monitor System](/docs/getting-started/monitor).
 
 :::
 
@@ -54,7 +54,7 @@ Setting up the in-memory cache is the same with using `CacheBuilder`[^cache-buil
 let mut builder = HybridCacheBuilder::new().memory(1024);
 ```
 
-The default configuration count the usage by entry count. If you needs to change it or change other configurations, please refer to [Tutorial - Setup In-memory Cache - 2. Build a `Cache`](/docs/tutorial/in-memory-cache#2-build-a-cache).
+The default configuration count the usage by entry count. If you needs to change it or change other configurations, please refer to [Tutorial - Setup In-memory Cache - 2. Build a `Cache`](/docs/getting-started/in-memory-cache#2-build-a-cache).
 
 ### 2.3 Build disk cache
 

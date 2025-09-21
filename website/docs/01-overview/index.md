@@ -77,7 +77,7 @@ For the needs as an in-memory only cache, ***foyer*** also provides compatible i
 
 ## What's next?
 
-- Learn how to use ***foyer*** in your project, goto [Tutorial](/docs/category/tutorial).
+- Learn how to use ***foyer*** in your project, goto [Getting Started](/docs/category/getting-started).
 - Learn how to solve various challenging situations with ***foyer***, goto [Topic](/docs/category/topic).
 - Learn how other projects use ***foyer***, goto [Case Study](/docs/category/case-study).
 - Learn the design of ***foyer***, goto [Design](/docs/category/design).

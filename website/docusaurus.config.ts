@@ -83,9 +83,9 @@ const config: Config = {
       items: [
         {
           type: 'docSidebar',
-          sidebarId: 'learnSidebar',
+          sidebarId: 'tutorialSidebar',
           position: 'left',
-          label: 'Learn',
+          label: 'Tutorial',
         },
         { to: '/blog', label: 'Blog', position: 'left' },
         { to: '/blog/remote/CHANGELOG', label: 'Changelog', position: 'left' },
@@ -122,8 +122,8 @@ const config: Config = {
               to: '/docs/overview',
             },
             {
-              label: 'Tutorial',
-              to: '/docs/category/tutorial',
+              label: 'Getting Started',
+              to: '/docs/category/getting-started',
             },
             {
               label: 'Topic',
