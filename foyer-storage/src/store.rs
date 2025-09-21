@@ -161,14 +161,16 @@ where
     /// Load a cache entry from the disk cache.
     pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V, P>>
     where
-        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
+        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static + std::fmt::Debug,
     {
         let now = Instant::now();
 
         let hash = self.inner.hasher.hash_one(key);
 
+        tracing::trace!(tid = ?tokio::task::id(), ?key, hash, "[store]: load key");
+
         if let Some(piece) = self.inner.keeper.get(hash, key) {
-            tracing::trace!(hash, "[store]: load from keeper");
+            tracing::trace!(tid = ?tokio::task::id(), hash, "[store]: load from keeper");
             return Ok(Load::Piece {
                 piece,
                 populated: Populated { age: Age::Young },

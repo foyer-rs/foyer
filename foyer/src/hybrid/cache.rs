@@ -612,7 +612,7 @@ where
     /// Get cached entry with the given key from the hybrid cache.
     pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone + std::fmt::Debug,
     {
         root_span!(self, span, "foyer::hybrid::cache::get");
 

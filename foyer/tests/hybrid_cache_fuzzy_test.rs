@@ -25,7 +25,7 @@ use std::{
 
 use foyer::{
     BlockEngineBuilder, DeviceBuilder, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
-    HybridCachePolicy, IoEngineBuilder, PsyncIoEngineBuilder,
+    HybridCachePolicy, HybridCacheProperties, IoEngineBuilder, Location, PsyncIoEngineBuilder,
 };
 use rand::{rng, Rng};
 
@@ -36,6 +36,7 @@ const WRITERS: usize = 8;
 const READERS: usize = 16;
 
 const WRITES: usize = 100000;
+const DUPLICATES: usize = 10;
 const READS: usize = 100000;
 
 const FETCH_WAIT: Duration = Duration::from_millis(10);
@@ -137,8 +138,16 @@ async fn write(hybrid: HybridCache<u64, Vec<u8>>, _: Arc<RecentEvictionQueue>, i
         if key % INTERVAL as u64 == 0 {
             tracing::info!("Inserted {key} items");
         }
-        hybrid.insert(key, value(key));
-        tokio::time::sleep(WRITE_WAIT).await;
+        for k in key.saturating_sub(DUPLICATES as u64)..=key {
+            hybrid.insert_with_properties(
+                k,
+                value(k),
+                HybridCacheProperties::default()
+                    .with_ephemeral(true)
+                    .with_location(Location::OnDisk),
+            );
+            tokio::time::sleep(WRITE_WAIT).await;
+        }
     }
 }
 

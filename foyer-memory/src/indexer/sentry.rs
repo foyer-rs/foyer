@@ -44,7 +44,11 @@ where
     type Eviction = I::Eviction;
 
     fn insert(&mut self, record: Arc<Record<Self::Eviction>>) -> Option<Arc<Record<Self::Eviction>>> {
-        strict_assert!(!record.is_in_indexer());
+        strict_assert!(
+            !record.is_in_indexer(),
+            "record is already in indexer, hash: {}",
+            record.hash()
+        );
         record.set_in_indexer(true);
         self.indexer.insert(record).inspect(|old| {
             strict_assert!(old.is_in_indexer());

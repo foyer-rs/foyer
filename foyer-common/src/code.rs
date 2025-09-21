@@ -17,11 +17,11 @@ use std::hash::{BuildHasher, BuildHasherDefault, Hash};
 use twox_hash::XxHash64;
 
 /// Key trait for the in-memory cache.
-pub trait Key: Send + Sync + 'static + Hash + Eq {}
+pub trait Key: Send + Sync + 'static + Hash + Eq + std::fmt::Debug {}
 /// Value trait for the in-memory cache.
 pub trait Value: Send + Sync + 'static {}
 
-impl<T: Send + Sync + 'static + std::hash::Hash + Eq> Key for T {}
+impl<T: Send + Sync + 'static + std::hash::Hash + Eq + std::fmt::Debug> Key for T {}
 impl<T: Send + Sync + 'static> Value for T {}
 
 /// Hash builder trait.

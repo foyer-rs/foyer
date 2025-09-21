@@ -194,6 +194,8 @@ where
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
+        tracing::trace!(tid = ?tokio::task::id(), hash,"remove key");
+
         let record = self.indexer.remove(hash, key)?;
 
         if record.is_in_eviction() {
@@ -600,6 +602,7 @@ where
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
+        tracing::trace!(tid = ?tokio::task::id(), key = ?record.key(), hash = record.hash(), "insert key");
         if record.properties().disposable().unwrap_or_default() {
             // Remove the stale record if it exists.
             self.inner.shards[self.shard(record.hash())]
@@ -1147,19 +1150,27 @@ where
 
         match raw {
             RawShardFetch::Hit(record) => {
+                tracing::trace!(tid = ?tokio::task::id(), ?key, hash, "fetch key returns Hit");
                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
                     record,
                     inner: self.inner.clone(),
-                })))
+                })));
             }
-            RawShardFetch::Wait(future) => return RawFetch::new(RawFetchInner::Wait(future)),
-            RawShardFetch::Miss => {}
+            RawShardFetch::Wait(future) => {
+                tracing::trace!(tid = ?tokio::task::id(), ?key, hash, "fetch key returns Wait");
+                return RawFetch::new(RawFetchInner::Wait(future));
+            }
+            RawShardFetch::Miss => {
+                tracing::trace!(tid = ?tokio::task::id(), ?key, hash, "fetch key returns Miss");
+            }
         }
 
         let cache = self.clone();
         let future = fetch();
         let join = runtime.spawn({
             let task = async move {
+                tracing::trace!(tid = ?tokio::task::id(), ?key, hash, "start fetch task");
+
                 #[cfg(feature = "tracing")]
                 let Diversion { target, store } = future
                     .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
