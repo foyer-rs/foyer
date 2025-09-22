@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    // collections::hash_map::{Entry as HashMapEntry, HashMap},
+    collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -40,7 +40,6 @@ use foyer_common::{
     strict_assert,
     utils::scope::Scope,
 };
-use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
