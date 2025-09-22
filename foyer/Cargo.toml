@@ -18,15 +18,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-serde = ["foyer-common/serde", "foyer-storage/serde"]
 clap = ["foyer-storage/clap"]
+serde = ["foyer-common/serde", "foyer-storage/serde"]
+nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 tracing = [
   "dep:fastrace",
   "foyer-common/tracing",
   "foyer-memory/tracing",
   "foyer-storage/tracing",
 ]
-nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
+test_utils = ["foyer-storage/test_utils"]
 deadlock = ["foyer-storage/deadlock"]
 strict_assertions = [
   "foyer-common/strict_assertions",
@@ -69,9 +70,15 @@ tokio = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+foyer = { workspace = true, features = ["test_utils"] }
 foyer-storage = { workspace = true, features = ["test_utils"] }
+rand = "0.9"
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "hybrid_cache_fuzzy_test"
+required-features = ["test_utils"]

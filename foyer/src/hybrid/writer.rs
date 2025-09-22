@@ -23,7 +23,7 @@ use foyer_common::{
 };
 use foyer_storage::StorageFilterResult;
 
-use crate::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties};
+use crate::{HybridCache, HybridCacheEntry, HybridCacheProperties};
 
 /// Writer for hybrid cache to support more flexible write APIs.
 pub struct HybridCacheWriter<K, V, S = DefaultHasher>
@@ -141,11 +141,7 @@ where
 
         let entry = self
             .hybrid
-            .memory()
-            .insert_with_properties(self.key, value, properties.with_disposable(true));
-        if self.hybrid.policy() == HybridCachePolicy::WriteOnInsertion {
-            self.hybrid.storage().enqueue(entry.piece(), true);
-        }
+            .insert_with_properties(self.key, value, properties.with_phantom(true));
         self.hybrid.metrics().hybrid_insert.increase(1);
         self.hybrid
             .metrics()

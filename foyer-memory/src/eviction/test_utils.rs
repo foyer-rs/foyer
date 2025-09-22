@@ -81,20 +81,20 @@ pub fn assert_ptr_vec_vec_eq<T>(vva: Vec<Vec<Arc<T>>>, vvb: Vec<Vec<Arc<T>>>) {
 /// Properties for test, support all properties.
 #[derive(Debug, Clone, Default)]
 pub struct TestProperties {
-    disposable: bool,
+    phantom: bool,
     hint: Hint,
     location: Location,
     source: Source,
 }
 
 impl Properties for TestProperties {
-    fn with_disposable(mut self, disposable: bool) -> Self {
-        self.disposable = disposable;
+    fn with_phantom(mut self, phantom: bool) -> Self {
+        self.phantom = phantom;
         self
     }
 
-    fn disposable(&self) -> Option<bool> {
-        Some(self.disposable)
+    fn phantom(&self) -> Option<bool> {
+        Some(self.phantom)
     }
 
     fn with_hint(mut self, hint: Hint) -> Self {
