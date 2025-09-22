@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    collections::hash_map::{Entry as HashMapEntry, HashMap},
+    // collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -40,6 +40,7 @@ use foyer_common::{
     strict_assert,
     utils::scope::Scope,
 };
+use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
@@ -140,8 +141,27 @@ where
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
-    ) -> Arc<Record<E>> {
+    ) {
         *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
+
+        if record.properties().phantom().unwrap_or_default() {
+            if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
+                strict_assert!(!old.is_in_indexer());
+
+                if old.is_in_eviction() {
+                    self.eviction.remove(&old);
+                }
+                strict_assert!(!old.is_in_eviction());
+
+                self.usage -= old.weight();
+
+                garbages.push((Event::Replace, old));
+            }
+            record.inc_refs(waiters.len() + 1);
+            garbages.push((Event::Remove, record));
+            self.metrics.memory_insert.increase(1);
+            return;
+        }
 
         let weight = record.weight();
         let old_usage = self.usage;
@@ -182,8 +202,6 @@ where
             std::cmp::Ordering::Less => self.metrics.memory_usage.decrease((old_usage - self.usage) as _),
             std::cmp::Ordering::Equal => {}
         }
-
-        record
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::remove"))]
@@ -575,7 +593,12 @@ where
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
         if !(self.inner.filter)(&key, &value) {
-            properties = properties.with_disposable(true);
+            properties = properties.with_phantom(true);
+        }
+        if let Some(location) = properties.location() {
+            if location == Location::OnDisk {
+                properties = properties.with_phantom(true);
+            }
         }
         let record = Arc::new(Record::new(Data {
             key,
@@ -595,38 +618,12 @@ where
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
-        if record.properties().disposable().unwrap_or_default() {
-            // Remove the stale record if it exists.
-            self.inner.shards[self.shard(record.hash())]
-                .write()
-                .remove(record.hash(), record.key())
-                .inspect(|r| {
-                    // Deallocate data out of the lock critical section.
-                    if let Some(listener) = self.inner.event_listener.as_ref() {
-                        listener.on_leave(Event::Evict, r.key(), r.value());
-                    }
-                });
-
-            let pipe = self.inner.pipe.load();
-            if pipe.is_enabled() {
-                pipe.send(Piece::new(record.clone()));
-            }
-
-            // If the record is disposable, we do not insert it into the cache.
-            // Instead, we just return it and let it be dropped immediately after the last reference drops.
-            record.inc_refs(1);
-            return RawCacheEntry {
-                record,
-                inner: self.inner.clone(),
-            };
-        }
-
         let mut garbages = vec![];
         let mut waiters = vec![];
 
-        let record = self.inner.shards[self.shard(record.hash())]
+        self.inner.shards[self.shard(record.hash())]
             .write()
-            .with(|mut shard| shard.emplace(record, &mut garbages, &mut waiters));
+            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut waiters));
 
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
@@ -848,8 +845,14 @@ where
         let shard = &self.inner.shards[hash as usize % self.inner.shards.len()];
 
         if self.record.dec_refs(1) == 0 {
-            if self.record.properties().disposable().unwrap_or_default() {
-                // TODO(MrCroxx): Send it to disk cache write queue with pipe?
+            if self.record.properties().phantom().unwrap_or_default() {
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(Event::Evict, self.record.key(), self.record.value());
+                }
+                let pipe = self.inner.pipe.load();
+                if pipe.is_enabled() {
+                    pipe.send(Piece::new(self.record.clone()));
+                }
                 return;
             }
 
@@ -1127,18 +1130,25 @@ where
 
         match raw {
             RawShardFetch::Hit(record) => {
+                tracing::trace!(hash, "fetch => Hit");
                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
                     record,
                     inner: self.inner.clone(),
-                })))
+                })));
             }
-            RawShardFetch::Wait(future) => return RawFetch::new(RawFetchInner::Wait(future)),
-            RawShardFetch::Miss => {}
+            RawShardFetch::Wait(future) => {
+                tracing::trace!(hash, "fetch => Wait");
+                return RawFetch::new(RawFetchInner::Wait(future));
+            }
+            RawShardFetch::Miss => {
+                tracing::trace!(hash, "fetch => Miss");
+            }
         }
 
         let cache = self.clone();
         let future = fetch();
         let join = runtime.spawn({
+            tracing::trace!(hash, "fetch => join !!!");
             let task = async move {
                 #[cfg(feature = "tracing")]
                 let Diversion { target, store } = future
@@ -1158,12 +1168,13 @@ where
                 };
                 if let Some(ctx) = store.as_ref() {
                     if ctx.throttled {
+                        // TODO(MrCroxx): Make sure foyer doesn't issue tombstone to the disk cache.
+                        // TODO(MrCroxx): Also make sure the disk cache will write tombstone instead of this case.
                         properties = properties.with_location(Location::InMem)
                     }
                     properties = properties.with_source(ctx.source)
                 };
-                let location = properties.location().unwrap_or_default();
-                properties = properties.with_disposable(matches! {location, Location::OnDisk});
+                tracing::trace!(hash, "fetch => insert !!!");
                 let entry = match target.into() {
                     FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
                     FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
@@ -1289,15 +1300,15 @@ mod tests {
     }
 
     #[test_log::test]
-    fn test_insert_disposable() {
+    fn test_insert_phantom() {
         let fifo = fifo_cache_for_test();
 
-        let e1 = fifo.insert_with_properties(1, 1, TestProperties::default().with_disposable(true));
+        let e1 = fifo.insert_with_properties(1, 1, TestProperties::default().with_phantom(true));
         assert_eq!(fifo.usage(), 0);
         drop(e1);
         assert_eq!(fifo.usage(), 0);
 
-        let e2a = fifo.insert_with_properties(2, 2, TestProperties::default().with_disposable(true));
+        let e2a = fifo.insert_with_properties(2, 2, TestProperties::default().with_phantom(true));
         assert_eq!(fifo.usage(), 0);
         assert!(fifo.get(&2).is_none());
         assert_eq!(fifo.usage(), 0);
@@ -1308,7 +1319,7 @@ mod tests {
         fifo.insert(1, 1);
         assert_eq!(fifo.usage(), 1);
         assert_eq!(fifo.get(&1).unwrap().value(), &1);
-        let e2 = fifo.insert_with_properties(1, 100, TestProperties::default().with_disposable(true));
+        let e2 = fifo.insert_with_properties(1, 100, TestProperties::default().with_phantom(true));
         assert_eq!(fifo.usage(), 0);
         drop(e2);
         assert_eq!(fifo.usage(), 0);

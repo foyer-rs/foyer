@@ -47,24 +47,19 @@ impl Default for Hint {
 ///
 /// NOTE: `CacheLocation` only affects the first time the entry is handle.
 /// After it is populated, the entry may not follow the given advice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Location {
     /// The default location.
     ///
     /// Prefer to store the entry in the in-memory cache with in-memory cache.
     /// And prefer to store the entry in the hybrid cache with hybrid cache.
+    #[default]
     Default,
     /// Prefer to store the entry in the in-memory cache.
     InMem,
     /// Prefer to store the entry on the disk cache.
     OnDisk,
-}
-
-impl Default for Location {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// Entry age in the disk cache. Used by hybrid cache.
@@ -106,16 +101,16 @@ impl Default for Source {
 /// The in-memory only cache and the hybrid cache may have different properties implementations to minimize the overhead
 /// of necessary properties in different scenarios.
 pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
-    /// Set disposable.
+    /// Set entry as a phantom entry.
     ///
-    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
-    /// reference drops.
+    /// A phantom entry will not be actually inserted into the in-memory cache.
+    /// It is only used to keep the APIs consistent.
     ///
-    /// Disposable property is used to simplify the design consistency of the APIs.
-    fn with_disposable(self, disposable: bool) -> Self;
+    /// NOTE: This API is for internal usage only. It MUST NOT be exported publicly.
+    fn with_phantom(self, phantom: bool) -> Self;
 
-    /// Entry disposable.
-    fn disposable(&self) -> Option<bool>;
+    /// If the entry is a phantom entry.
+    fn phantom(&self) -> Option<bool>;
 
     /// Set entry hint.
     fn with_hint(self, hint: Hint) -> Self;

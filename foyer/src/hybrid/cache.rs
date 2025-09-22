@@ -93,27 +93,20 @@ macro_rules! try_cancel {
 /// Entry properties for in-memory only cache.
 #[derive(Debug, Clone, Default)]
 pub struct HybridCacheProperties {
-    disposable: bool,
+    phantom: bool,
     hint: Hint,
     location: Location,
     source: Source,
 }
 
 impl HybridCacheProperties {
-    /// Set disposable.
-    ///
-    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
-    /// reference drops.
-    ///
-    /// Disposable property is used to simplify the design consistency of the APIs.
-    fn with_disposable(mut self, disposable: bool) -> Self {
-        self.disposable = disposable;
+    fn with_phantom(mut self, phantom: bool) -> Self {
+        self.phantom = phantom;
         self
     }
 
-    /// Get if the entry is disposable.
-    fn disposable(&self) -> bool {
-        self.disposable
+    fn phantom(&self) -> bool {
+        self.phantom
     }
 
     /// Set entry hint.
@@ -145,12 +138,12 @@ impl HybridCacheProperties {
 }
 
 impl Properties for HybridCacheProperties {
-    fn with_disposable(self, disposable: bool) -> Self {
-        self.with_disposable(disposable)
+    fn with_phantom(self, phantom: bool) -> Self {
+        self.with_phantom(phantom)
     }
 
-    fn disposable(&self) -> Option<bool> {
-        Some(self.disposable())
+    fn phantom(&self) -> Option<bool> {
+        Some(self.phantom())
     }
 
     fn with_hint(self, hint: Hint) -> Self {
@@ -565,11 +558,7 @@ where
 
         let now = Instant::now();
 
-        let disposable = matches! { properties.location(), Location::OnDisk };
-        let entry = self
-            .inner
-            .memory
-            .insert_with_properties(key, value, properties.with_disposable(disposable));
+        let entry = self.inner.memory.insert_with_properties(key, value, properties);
         if self.inner.policy == HybridCachePolicy::WriteOnInsertion && entry.properties().location() != Location::InMem
         {
             self.inner.storage.enqueue(entry.piece(), false);

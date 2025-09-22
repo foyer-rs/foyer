@@ -43,26 +43,19 @@ use crate::{
 /// Entry properties for in-memory only cache.
 #[derive(Debug, Clone, Default)]
 pub struct CacheProperties {
-    disposable: bool,
-
+    phantom: bool,
     hint: Hint,
 }
 
 impl CacheProperties {
     /// Set disposable.
-    ///
-    /// If an entry is disposable, it will not actually inserted into the cache and removed immediately after the last
-    /// reference drops.
-    ///
-    /// Disposable property is used to simplify the design consistency of the APIs.
-    pub fn with_disposable(mut self, disposable: bool) -> Self {
-        self.disposable = disposable;
+    fn with_phantom(mut self, phantom: bool) -> Self {
+        self.phantom = phantom;
         self
     }
 
-    /// Get if the entry is disposable.
-    pub fn disposable(&self) -> bool {
-        self.disposable
+    fn phantom(&self) -> bool {
+        self.phantom
     }
 
     /// Set entry hint.
@@ -78,12 +71,12 @@ impl CacheProperties {
 }
 
 impl Properties for CacheProperties {
-    fn with_disposable(self, disposable: bool) -> Self {
-        self.with_disposable(disposable)
+    fn with_phantom(self, phantom: bool) -> Self {
+        self.with_phantom(phantom)
     }
 
-    fn disposable(&self) -> Option<bool> {
-        Some(self.disposable())
+    fn phantom(&self) -> Option<bool> {
+        Some(self.phantom())
     }
 
     fn with_hint(self, hint: Hint) -> Self {
