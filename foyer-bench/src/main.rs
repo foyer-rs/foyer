@@ -321,8 +321,21 @@ struct Args {
     #[arg(long, default_value_t = false)]
     io_uring_iopoll: bool,
 
+    /// Simulated fetch on cache miss latency.
     #[arg(long, default_value = "0ms")]
     latency: humantime::Duration,
+
+    /// Simulated additional write I/O latency for testing purposes.
+    ///
+    /// NOTE: Only effective when using `psync` io engine.
+    #[arg(long, required = false)]
+    write_io_latency: Option<humantime::Duration>,
+
+    /// Simulated additional read I/O latency for testing purposes.
+    ///
+    /// NOTE: Only effective when using `psync` io engine.
+    #[arg(long, required = false)]
+    read_io_latency: Option<humantime::Duration>,
 }
 
 #[derive(Debug)]
@@ -579,7 +592,19 @@ async fn benchmark(args: Args) {
     };
 
     let io_engine: Arc<dyn IoEngine> = match args.io_engine.as_str() {
-        "psync" => PsyncIoEngineBuilder::new().build().await.unwrap(),
+        "psync" => {
+            let mut builder = PsyncIoEngineBuilder::new();
+
+            if let Some(latency) = args.write_io_latency {
+                builder = builder.with_write_io_latency(latency.into()..latency.into());
+            }
+
+            if let Some(latency) = args.read_io_latency {
+                builder = builder.with_read_io_latency(latency.into()..latency.into());
+            }
+
+            builder.build().await.unwrap()
+        }
         #[cfg(target_os = "linux")]
         "io_uring" => UringIoEngineBuilder::new()
             .with_threads(args.io_uring_threads)

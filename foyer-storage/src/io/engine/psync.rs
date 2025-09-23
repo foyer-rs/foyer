@@ -74,6 +74,12 @@ impl DerefMut for FileHandle {
 #[derive(Debug)]
 pub struct PsyncIoEngineBuilder {
     handle: Option<tokio::runtime::Handle>,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    write_io_latency: Option<std::ops::Range<std::time::Duration>>,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    read_io_latency: Option<std::ops::Range<std::time::Duration>>,
 }
 
 impl Default for PsyncIoEngineBuilder {
@@ -85,7 +91,13 @@ impl Default for PsyncIoEngineBuilder {
 impl PsyncIoEngineBuilder {
     /// Create a new synchronous I/O engine builder with default configurations.
     pub fn new() -> Self {
-        Self { handle: None }
+        Self {
+            handle: None,
+            #[cfg(any(test, feature = "test_utils"))]
+            write_io_latency: None,
+            #[cfg(any(test, feature = "test_utils"))]
+            read_io_latency: None,
+        }
     }
 
     /// Set the Tokio runtime to use for blocking operations.
@@ -95,13 +107,33 @@ impl PsyncIoEngineBuilder {
         self.handle = Some(handle);
         self
     }
+
+    /// Set the simulated additional write I/O latency for testing purposes.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_write_io_latency(mut self, latency: std::ops::Range<std::time::Duration>) -> Self {
+        self.write_io_latency = Some(latency);
+        self
+    }
+
+    /// Set the simulated additional read I/O latency for testing purposes.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_read_io_latency(mut self, latency: std::ops::Range<std::time::Duration>) -> Self {
+        self.read_io_latency = Some(latency);
+        self
+    }
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
     fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
         async move {
             let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
-            let engine = PsyncIoEngine { handle };
+            let engine = PsyncIoEngine {
+                handle,
+                #[cfg(any(test, feature = "test_utils"))]
+                write_io_latency: None,
+                #[cfg(any(test, feature = "test_utils"))]
+                read_io_latency: None,
+            };
             let engine: Arc<dyn IoEngine> = Arc::new(engine);
             Ok(engine)
         }
@@ -112,6 +144,11 @@ impl IoEngineBuilder for PsyncIoEngineBuilder {
 /// The synchronous I/O engine that uses pread(2)/pwrite(2) and tokio thread pool for reading and writing.
 pub struct PsyncIoEngine {
     handle: tokio::runtime::Handle,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    write_io_latency: Option<std::ops::Range<std::time::Duration>>,
+    #[cfg(any(test, feature = "test_utils"))]
+    read_io_latency: Option<std::ops::Range<std::time::Duration>>,
 }
 
 impl Debug for PsyncIoEngine {
@@ -125,6 +162,8 @@ impl IoEngine for PsyncIoEngine {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
+        #[cfg(any(test, feature = "test_utils"))]
+        let read_io_latency = self.read_io_latency.clone();
         async move {
             let (buf, res) = match runtime
                 .spawn_blocking(move || {
@@ -142,6 +181,10 @@ impl IoEngine for PsyncIoEngine {
                             file.read_exact_at(slice, offset).map_err(IoError::from)
                         }
                     };
+                    #[cfg(any(test, feature = "test_utils"))]
+                    if let Some(lat) = read_io_latency {
+                        std::thread::sleep(rand::random_range(lat));
+                    }
                     (buf, res)
                 })
                 .await
@@ -160,6 +203,8 @@ impl IoEngine for PsyncIoEngine {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
+        #[cfg(any(test, feature = "test_utils"))]
+        let write_io_latency = self.write_io_latency.clone();
         async move {
             let (buf, res) = match runtime
                 .spawn_blocking(move || {
@@ -177,6 +222,10 @@ impl IoEngine for PsyncIoEngine {
                             file.write_all_at(slice, offset).map_err(IoError::from)
                         }
                     };
+                    #[cfg(any(test, feature = "test_utils"))]
+                    if let Some(lat) = write_io_latency {
+                        std::thread::sleep(rand::random_range(lat));
+                    }
                     (buf, res)
                 })
                 .await
