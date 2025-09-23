@@ -9,6 +9,25 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-09-23
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.20.0 |
+| foyer-common | 0.20.0 |
+| foyer-memory | 0.20.0 |
+| foyer-storage | 0.20.0 |
+| foyer-bench | 0.20.0 |
+
+### Changes
+
+- Fix race condition (panic / deadlock) when there are concurrent disk cache write operations and fetch operations on the same key.
+- Fix heap-use-after-free on dropping foyer cache / hybrid cache while there are still ongoing disk IOs.
+- Remove property `ephemeral`.
+
+
 ## 2025-09-02
 
 ### Releases
