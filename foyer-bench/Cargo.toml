@@ -28,7 +28,7 @@ clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { workspace = true, features = ["tracing", "clap"] }
+foyer = { workspace = true, features = ["tracing", "clap", "test_utils"] }
 futures-util = { workspace = true }
 hdrhistogram = { workspace = true }
 http-body-util = { workspace = true }
