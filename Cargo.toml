@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.20.0-dev"
+version = "0.20.0"
 edition = "2021"
 rust-version = "1.82.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -48,10 +48,10 @@ fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.12"
 flume = "0.11"
-foyer = { version = "0.20.0-dev", path = "foyer" }
-foyer-common = { version = "0.20.0-dev", path = "foyer-common" }
-foyer-memory = { version = "0.20.0-dev", path = "foyer-memory" }
-foyer-storage = { version = "0.20.0-dev", path = "foyer-storage" }
+foyer = { version = "0.20.0", path = "foyer" }
+foyer-common = { version = "0.20.0", path = "foyer-common" }
+foyer-memory = { version = "0.20.0", path = "foyer-memory" }
+foyer-storage = { version = "0.20.0", path = "foyer-storage" }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
