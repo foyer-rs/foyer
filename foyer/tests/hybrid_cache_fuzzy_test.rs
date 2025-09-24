@@ -33,14 +33,19 @@ const KB: usize = 1024;
 const MB: usize = 1024 * KB;
 
 const WRITERS: usize = 8;
-const READERS: usize = 16;
+const FETCHERS: usize = 16;
+const READERS: usize = 8;
 
 const WRITES: usize = 1000;
-const DUPLICATES: usize = 10;
+const FETCHES: usize = 1000;
 const READS: usize = 1000;
 
-const FETCH_WAIT: Duration = Duration::from_millis(10);
+const DUPLICATES: usize = 10;
+
+const MISS_WAIT: Duration = Duration::from_millis(10);
+
 const WRITE_WAIT: Duration = Duration::from_millis(1);
+const FETCH_WAIT: Duration = Duration::from_millis(1);
 const READ_WAIT: Duration = Duration::from_millis(1);
 
 const INTERVAL: usize = 100;
@@ -115,6 +120,11 @@ async fn test_concurrent_insert_disk_cache_and_fetch() {
         let i = idx.clone();
         handles.push(tokio::spawn(async move { write(h, r, i).await }));
     }
+    for _ in 0..FETCHERS {
+        let h = hybrid.clone();
+        let r = recent.clone();
+        handles.push(tokio::spawn(async move { fetch(h, r).await }));
+    }
     for _ in 0..READERS {
         let h = hybrid.clone();
         let r = recent.clone();
@@ -149,6 +159,33 @@ async fn write(hybrid: HybridCache<u64, Vec<u8>>, _: Arc<RecentEvictionQueue>, i
     }
 }
 
+async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue>) {
+    let mut cnt = 0;
+    loop {
+        tokio::time::sleep(FETCH_WAIT).await;
+        let key = match recent.pick() {
+            Some(v) => v,
+            None => continue,
+        };
+        let e = hybrid
+            .fetch(key, || async move {
+                tokio::time::sleep(MISS_WAIT).await;
+                Ok(value(key))
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(e.value(), &value(key));
+        cnt += 1;
+        if cnt % INTERVAL as u64 == 0 {
+            tracing::info!("Fetch {cnt} items");
+        }
+        if cnt >= FETCHES as u64 {
+            break;
+        }
+    }
+}
+
 async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue>) {
     let mut cnt = 0;
     loop {
@@ -157,15 +194,11 @@ async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue
             Some(v) => v,
             None => continue,
         };
-        let e = hybrid
-            .fetch(key, || async move {
-                tokio::time::sleep(FETCH_WAIT).await;
-                Ok(value(key))
-            })
-            .await
-            .unwrap();
+        let e = hybrid.get(&key).await.unwrap();
 
-        assert_eq!(e.value(), &value(key));
+        if let Some(e) = e {
+            assert_eq!(e.value(), &value(key));
+        }
         cnt += 1;
         if cnt % INTERVAL as u64 == 0 {
             tracing::info!("Read {cnt} items");
