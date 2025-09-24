@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    borrow::Cow,
     collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
     future::Future,
@@ -409,6 +410,8 @@ where
             }
         }
     }
+
+    // fn get_v2(&self,)
 }
 
 #[expect(clippy::type_complexity)]
@@ -947,6 +950,46 @@ where
     }
 }
 
+pub struct RawGet<'a, E, S, I, Q>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    Q: Hash + Equivalent<E::Key> + Send + Sync + 'static,
+{
+    cache: &'a RawCache<E, S, I>,
+    key: &'a Q,
+}
+
+impl<'a, E, S, I, Q> Debug for RawGet<'a, E, S, I, Q>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    Q: Hash + Equivalent<E::Key> + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawGet").finish()
+    }
+}
+
+impl<'a, E, S, I, Q> RawGet<'a, E, S, I, Q>
+where
+    E: Eviction<Key = Q>,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    Q: Hash + Equivalent<E::Key> + Send + Sync + 'static + Clone,
+{
+    pub fn unwrap_or_fetch<F, FU, ER>(mut self)
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
+        ER: Send + 'static + Debug,
+    {
+        todo!()
+    }
+}
+
 /// The state of `fetch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchState {
@@ -1067,8 +1110,9 @@ where
     E::Key: Clone,
 {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, ER, S, I>
+    pub fn fetch<Q, F, FU, ER>(&self, key: Q, fetch: F) -> RawFetch<E, ER, S, I>
     where
+        Q: Into<Cow<'static, E::Key>>,
         F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
@@ -1085,13 +1129,14 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
     )]
-    pub fn fetch_with_properties<F, FU, ER, ID>(
+    pub fn fetch_with_properties<Q, F, FU, ER, ID>(
         &self,
-        key: E::Key,
+        key: Q,
         properties: E::Properties,
         fetch: F,
     ) -> RawFetch<E, ER, S, I>
     where
+        Q: Into<Cow<'static, E::Key>>,
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
@@ -1105,20 +1150,22 @@ where
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<F, FU, ER, ID, IT>(
+    pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
         &self,
-        key: E::Key,
+        key: Q,
         mut properties: E::Properties,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
     where
+        Q: Into<Cow<'static, E::Key>>,
         F: FnOnce() -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
     {
+        let key = key.into();
         let hash = self.inner.hash_builder.hash_one(&key);
 
         let raw = match E::acquire() {
@@ -1175,7 +1222,7 @@ where
                 };
                 tracing::trace!(hash, "fetch => insert !!!");
                 let entry = match target.into() {
-                    FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
+                    FetchTarget::Value(value) => cache.insert_with_properties(key.into_owned(), value, properties),
                     FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
                 };
                 Diversion {
