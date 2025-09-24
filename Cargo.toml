@@ -25,7 +25,6 @@ exclude = ["website/*"]
 
 [workspace.dependencies]
 allocator-api2 = "0.2"
-# dependencies
 anyhow = "1"
 arc-swap = "1"
 auto_enums = "0.8"
@@ -40,13 +39,13 @@ cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.4"
 core_affinity = "0.8"
-criterion = "0.6"
+criterion = "0.7"
 csv = "1"
 equivalent = "1"
 fastant = "0.1"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.12"
+fastrace-opentelemetry = "0.13"
 flume = "0.11"
 foyer = { version = "0.21.0-dev", path = "foyer" }
 foyer-common = { version = "0.21.0-dev", path = "foyer-common" }
@@ -55,7 +54,7 @@ foyer-storage = { version = "0.21.0-dev", path = "foyer-storage" }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-hashbrown = "0.15"
+hashbrown = "0.16"
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
@@ -72,7 +71,6 @@ opentelemetry = "0.30"
 opentelemetry-otlp = "0.30"
 opentelemetry-semantic-conventions = "0.30"
 opentelemetry_sdk = "0.30"
-ordered_hash_map = "0.4"
 parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
