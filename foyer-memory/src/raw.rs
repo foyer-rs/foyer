@@ -343,53 +343,56 @@ where
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop"))]
-    fn fetch_noop(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    fn fetch_noop<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
     where
-        E::Key: Clone,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_noop(hash, key) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")
     )]
-    fn fetch_immutable(&self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    fn fetch_immutable<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
     where
-        E::Key: Clone,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_immutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")
     )]
-    fn fetch_mutable(&mut self, hash: u64, key: &E::Key) -> RawShardFetch<E, S, I>
+    fn fetch_mutable<Q>(&mut self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
     where
-        E::Key: Clone,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_mutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
 
-        self.fetch_queue(key.clone())
+        self.fetch_queue(key)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")
     )]
-    fn fetch_queue(&self, key: E::Key) -> RawShardFetch<E, S, I> {
-        match self.waiters.lock().entry(key) {
+    fn fetch_queue<Q>(&self, key: &Q) -> RawShardFetch<E, S, I>
+    where
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+    {
+        match self.waiters.lock().entry(key.to_owned()) {
             HashMapEntry::Occupied(mut o) => {
                 let (tx, rx) = oneshot::channel();
                 o.get_mut().push(tx);
@@ -1064,12 +1067,12 @@ where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    E::Key: Clone,
 {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: E::Key, fetch: F) -> RawFetch<E, ER, S, I>
+    pub fn fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> RawFetch<E, ER, S, I>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
@@ -1085,14 +1088,15 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
     )]
-    pub fn fetch_with_properties<F, FU, ER, ID>(
+    pub fn fetch_with_properties<Q, F, FU, ER, ID>(
         &self,
-        key: E::Key,
+        key: &Q,
         properties: E::Properties,
         fetch: F,
     ) -> RawFetch<E, ER, S, I>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
@@ -1105,26 +1109,27 @@ where
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<F, FU, ER, ID, IT>(
+    pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
         &self,
-        key: E::Key,
+        key: &Q,
         mut properties: E::Properties,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> RawFetch<E, ER, S, I>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
     {
-        let hash = self.inner.hash_builder.hash_one(&key);
+        let hash = self.inner.hash_builder.hash_one(key);
 
         let raw = match E::acquire() {
-            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, &key),
-            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, &key),
-            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, &key),
+            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, key),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, key),
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, key),
         };
 
         match raw {
@@ -1145,7 +1150,8 @@ where
         }
 
         let cache = self.clone();
-        let future = fetch();
+        let future = fetch(key);
+        let key = key.to_owned();
         let join = runtime.spawn({
             tracing::trace!(hash, "fetch => join !!!");
             let task = async move {

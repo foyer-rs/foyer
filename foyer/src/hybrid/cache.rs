@@ -576,91 +576,11 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
+    ///
+    /// This function deduplicates the disk cache queries.
     pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
     where
-        Q: Hash + Equivalent<K> + Send + Sync + 'static + Clone,
-    {
-        root_span!(self, span, "foyer::hybrid::cache::get");
-
-        let now = Instant::now();
-
-        let record_hit = || {
-            self.inner.metrics.hybrid_hit.increase(1);
-            self.inner
-                .metrics
-                .hybrid_hit_duration
-                .record(now.elapsed().as_secs_f64());
-        };
-        let record_miss = || {
-            self.inner.metrics.hybrid_miss.increase(1);
-            self.inner
-                .metrics
-                .hybrid_miss_duration
-                .record(now.elapsed().as_secs_f64());
-        };
-        let record_throttled = || {
-            self.inner.metrics.hybrid_throttled.increase(1);
-            self.inner
-                .metrics
-                .hybrid_throttled_duration
-                .record(now.elapsed().as_secs_f64());
-        };
-
-        #[cfg(feature = "tracing")]
-        let guard = span.set_local_parent();
-        if let Some(entry) = self.inner.memory.get(key) {
-            record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold);
-            return Ok(Some(entry));
-        }
-        #[cfg(feature = "tracing")]
-        drop(guard);
-
-        #[cfg(feature = "tracing")]
-        let load = self
-            .inner
-            .storage
-            .load(key)
-            .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
-        #[cfg(not(feature = "tracing"))]
-        let load = self.inner.storage.load(key);
-
-        let entry = match load.await? {
-            Load::Entry { key, value, populated } => {
-                record_hit();
-                Some(self.inner.memory.insert_with_properties(
-                    key,
-                    value,
-                    HybridCacheProperties::default().with_source(Source::Populated(populated)),
-                ))
-            }
-            Load::Piece { piece, .. } => {
-                record_hit();
-                Some(self.inner.memory.insert_piece(piece))
-            }
-            Load::Throttled => {
-                record_throttled();
-                None
-            }
-            Load::Miss => {
-                record_miss();
-                None
-            }
-        };
-
-        try_cancel!(self, span, record_hybrid_get_threshold);
-
-        Ok(entry)
-    }
-
-    /// Get cached entry with the given key from the hybrid cache.
-    ///
-    /// Different from `get`, `obtain` deduplicates the disk cache queries.
-    ///
-    /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
-    /// key is acceptable.
-    pub async fn obtain(&self, key: K) -> Result<Option<HybridCacheEntry<K, V, S>>>
-    where
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + ToOwned<Owned = K>,
         K: Clone,
     {
         root_span!(self, span, "foyer::hybrid::cache::obtain");
@@ -671,12 +591,14 @@ where
         let guard = span.set_local_parent();
 
         let fetch = self.inner.memory.fetch_inner(
-            key.clone(),
+            key,
             HybridCacheProperties::default(),
-            || {
+            |k| {
                 let store = self.inner.storage.clone();
+                // TODO(MrCroxx): Can we remove dedicated and no longer require `'static` lifetime to avoid copy here?
+                let k = k.to_owned();
                 async move {
-                    match store.load(&key).await.map_err(Error::from) {
+                    match store.load(&k).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -909,9 +831,10 @@ where
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
+    pub fn fetch<Q, F, FU>(&self, key: &Q, fetch: F) -> HybridFetch<K, V, S>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = Result<V>> + Send + 'static,
     {
         self.fetch_inner(key, HybridCacheProperties::default(), fetch)
@@ -921,22 +844,24 @@ where
     ///
     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
     /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_properties<F, FU>(
+    pub fn fetch_with_properties<Q, F, FU>(
         &self,
-        key: K,
+        key: &Q,
         properties: HybridCacheProperties,
         fetch: F,
     ) -> HybridFetch<K, V, S>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = Result<V>> + Send + 'static,
     {
         self.fetch_inner(key, properties, fetch)
     }
 
-    fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
+    fn fetch_inner<Q, F, FU>(&self, key: &Q, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = Result<V>> + Send + 'static,
     {
         root_span!(self, span, "foyer::hybrid::cache::fetch");
@@ -948,16 +873,16 @@ where
 
         let store = self.inner.storage.clone();
 
-        let future = fetch();
+        let future = fetch(key);
         let inner = self.inner.memory.fetch_inner(
-            key.clone(),
+            key,
             properties,
-            || {
+            |k| {
                 let metrics = self.inner.metrics.clone();
                 let runtime = self.storage().runtime().clone();
-
+                let k = k.to_owned();
                 async move {
-                    let throttled = match store.load(&key).await.map_err(Error::from) {
+                    let throttled = match store.load(&k).await.map_err(Error::from) {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -1172,12 +1097,12 @@ mod tests {
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
 
-        let e5 = hybrid.fetch(5, || async move { Ok(vec![5; 7 * KB]) }).await.unwrap();
+        let e5 = hybrid.fetch(&5, |_| async move { Ok(vec![5; 7 * KB]) }).await.unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
 
         let e1g = hybrid.get(&1).await.unwrap().unwrap();
         assert_eq!(e1g.value(), &vec![1; 7 * KB]);
-        let e2g = hybrid.obtain(2).await.unwrap().unwrap();
+        let e2g = hybrid.get(&2).await.unwrap().unwrap();
         assert_eq!(e2g.value(), &vec![2; 7 * KB]);
 
         assert!(hybrid.contains(&1));
@@ -1223,9 +1148,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                1,
+                &1,
                 HybridCacheProperties::default().with_location(Location::Default),
-                || async move { Ok(vec![1; 7 * KB]) },
+                |_| async move { Ok(vec![1; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1239,9 +1164,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                2,
+                &2,
                 HybridCacheProperties::default().with_location(Location::InMem),
-                || async move { Ok(vec![2; 7 * KB]) },
+                |_| async move { Ok(vec![2; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1252,9 +1177,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                3,
+                &3,
                 HybridCacheProperties::default().with_location(Location::OnDisk),
-                || async move { Ok(vec![3; 7 * KB]) },
+                |_| async move { Ok(vec![3; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1272,9 +1197,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                1,
+                &1,
                 HybridCacheProperties::default().with_location(Location::Default),
-                || async move { Ok(vec![1; 7 * KB]) },
+                |_| async move { Ok(vec![1; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1287,9 +1212,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                2,
+                &2,
                 HybridCacheProperties::default().with_location(Location::InMem),
-                || async move { Ok(vec![2; 7 * KB]) },
+                |_| async move { Ok(vec![2; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1299,9 +1224,9 @@ mod tests {
 
         hybrid
             .fetch_with_properties(
-                3,
+                &3,
                 HybridCacheProperties::default().with_location(Location::OnDisk),
-                || async move { Ok(vec![3; 7 * KB]) },
+                |_| async move { Ok(vec![3; 7 * KB]) },
             )
             .await
             .unwrap();
@@ -1420,7 +1345,7 @@ mod tests {
         assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
 
         // 4. assert fetch will not reinsert throttled but existed e1
-        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        hybrid.fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
@@ -1450,7 +1375,7 @@ mod tests {
         assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
 
         // 4. assert fetch will not reinsert throttled but existed e1
-        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        hybrid.fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;

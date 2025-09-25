@@ -168,7 +168,7 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
             None => continue,
         };
         let e = hybrid
-            .fetch(key, || async move {
+            .fetch(&key, |_| async move {
                 tokio::time::sleep(MISS_WAIT).await;
                 Ok(value(key))
             })

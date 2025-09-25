@@ -914,7 +914,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let time = Instant::now();
 
-        let fetch = hybrid.fetch(idx, || {
+        let fetch = hybrid.fetch(&idx, |_| {
             let context = context.clone();
             let entry_size = osrng.random_range(context.entry_size_range.clone());
             let latency = context.latency;
