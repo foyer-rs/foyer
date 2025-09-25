@@ -1026,7 +1026,7 @@ where
 
 impl<K, V, S, P> Cache<K, V, S, P>
 where
-    K: Key + Clone,
+    K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
@@ -1037,9 +1037,10 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S, P>
+    pub fn fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> Fetch<K, V, ER, S, P>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
@@ -1058,9 +1059,10 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch_with_properties<F, FU, ER>(&self, key: K, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
+    pub fn fetch_with_properties<Q, F, FU, ER>(&self, key: &Q, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
     {
@@ -1081,15 +1083,16 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, ID, IT>(
+    pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
         &self,
-        key: K,
+        key: &Q,
         properties: P,
         fetch: F,
         runtime: &SingletonHandle,
     ) -> Fetch<K, V, ER, S, P>
     where
-        F: FnOnce() -> FU,
+        Q: Hash + Equivalent<K> + Send + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
@@ -1195,7 +1198,7 @@ mod tests {
             }
             3 => {
                 let entry = cache
-                    .fetch(i, || async move {
+                    .fetch(&i, |_| async move {
                         tokio::time::sleep(Duration::from_micros(10)).await;
                         Ok::<_, Error>(i)
                     })
