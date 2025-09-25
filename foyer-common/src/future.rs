@@ -42,6 +42,16 @@ impl<T, S> From<T> for Diversion<T, S> {
     }
 }
 
+impl<T, S> Diversion<T, S> {
+    /// Map the `target` of the [`Diversion`] to another type, while keeping the `store` unchanged.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Diversion<U, S> {
+        Diversion {
+            target: f(self.target),
+            store: self.store,
+        }
+    }
+}
+
 /// [`DiversionFuture`] is a future wrapper that partially store and partially return the future result.
 #[must_use]
 #[pin_project]

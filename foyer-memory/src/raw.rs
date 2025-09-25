@@ -27,7 +27,7 @@ use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::{
-    future::{FutureExt, InSpan},
+    future::{FutureExt as _, InSpan},
     Span,
 };
 use foyer_common::{
@@ -40,6 +40,7 @@ use foyer_common::{
     strict_assert,
     utils::scope::Scope,
 };
+use futures_util::FutureExt as _;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
@@ -989,7 +990,8 @@ type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
 type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
 #[cfg(not(feature = "tracing"))]
 type RawFetchWait<E, S, I> = oneshot::Receiver<RawCacheEntry<E, S, I>>;
-type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
+type RawFetchMiss<E, I, S, ER, DFS> =
+    JoinHandle<Diversion<std::result::Result<Option<RawCacheEntry<E, S, I>>, ER>, DFS>>;
 
 /// The target of a fetch operation.
 pub enum FetchTarget<K, V, P> {
@@ -1051,12 +1053,16 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
+    type Output = Diversion<std::result::Result<Option<RawCacheEntry<E, S, I>>, ER>, FetchContext>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
-            RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|e| Error::wait(e).into()).map(Diversion::from),
+            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(Some(opt.take().unwrap())).into()),
+            RawFetchInnerProj::Wait(waiter) => waiter
+                .poll(cx)
+                .map(|r| r.map(|e| Some(e)))
+                .map_err(|e| Error::wait(e).into())
+                .map(Diversion::from),
             RawFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }
@@ -1079,7 +1085,7 @@ where
         self.fetch_inner(
             key,
             Default::default(),
-            fetch,
+            |k| fetch(k).map(|r| r.map(|e| Some(e))),
             &tokio::runtime::Handle::current().into(),
         )
     }
@@ -1088,7 +1094,7 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
     )]
-    pub fn fetch_with_properties<Q, F, FU, ER, ID>(
+    pub fn fetch_with_properties<Q, F, FU, ER>(
         &self,
         key: &Q,
         properties: E::Properties,
@@ -1097,11 +1103,15 @@ where
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
         F: FnOnce(&Q) -> FU,
-        FU: Future<Output = ID> + Send + 'static,
+        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
     {
-        self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
+        self.fetch_inner(
+            key,
+            properties,
+            |k| fetch(k).map(|r| r.map(|e| Some(e))),
+            &tokio::runtime::Handle::current().into(),
+        )
     }
 
     /// Advanced fetch with specified runtime.
@@ -1121,7 +1131,7 @@ where
         F: FnOnce(&Q) -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
+        ID: Into<Diversion<std::result::Result<Option<IT>, ER>, FetchContext>>,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
     {
         let hash = self.inner.hash_builder.hash_one(key);
@@ -1164,7 +1174,7 @@ where
                 let Diversion { target, store } = future.await.into();
 
                 let target = match target {
-                    Ok(value) => value,
+                    Ok(target) => target,
                     Err(e) => {
                         cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
                         tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
@@ -1180,12 +1190,21 @@ where
                     properties = properties.with_source(ctx.source)
                 };
                 tracing::trace!(hash, "fetch => insert !!!");
-                let entry = match target.into() {
-                    FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
-                    FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
+                let entry = match target {
+                    Some(t) => match t.into() {
+                        FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
+                        FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
+                    },
+                    None => {
+                        cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
+                        return Diversion {
+                            target: Ok(None),
+                            store,
+                        };
+                    }
                 };
                 Diversion {
-                    target: Ok(entry),
+                    target: Ok(Some(entry)),
                     store,
                 }
             };
