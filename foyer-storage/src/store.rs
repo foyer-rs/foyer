@@ -161,7 +161,7 @@ where
     /// Load a cache entry from the disk cache.
     pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V, P>>
     where
-        Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let now = Instant::now();
 
