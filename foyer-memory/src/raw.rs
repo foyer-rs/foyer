@@ -40,6 +40,7 @@ use foyer_common::{
     strict_assert,
     utils::scope::Scope,
 };
+use futures_util::future::BoxFuture;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
@@ -88,6 +89,117 @@ where
     pub metrics: Arc<Metrics>,
 }
 
+type BoxOptionalFetchFuture<E>
+where
+    E: Eviction,
+= BoxFuture<'static, Result<Option<FetchTarget<E::Key, E::Value, E::Properties>>>>;
+type BoxRequiredFetchFuture<E>
+where
+    E: Eviction,
+= BoxFuture<'static, Result<FetchTarget<E::Key, E::Value, E::Properties>>>;
+
+enum BoxFetchFuture<E>
+where
+    E: Eviction,
+{
+    Optional(BoxOptionalFetchFuture<E>),
+    Required(BoxRequiredFetchFuture<E>),
+}
+
+impl<E> From<BoxOptionalFetchFuture<E>> for BoxFetchFuture<E>
+where
+    E: Eviction,
+{
+    fn from(future: BoxOptionalFetchFuture<E>) -> Self {
+        Self::Optional(future)
+    }
+}
+
+impl<E> From<BoxRequiredFetchFuture<E>> for BoxFetchFuture<E>
+where
+    E: Eviction,
+{
+    fn from(future: BoxRequiredFetchFuture<E>) -> Self {
+        Self::Required(future)
+    }
+}
+
+type Waiter<E, S, I> = oneshot::Sender<Option<RawCacheEntry<E, S, I>>>;
+
+enum Inflight<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    Optional {
+        waiters: Vec<Waiter<E, S, I>>,
+        required: Option<BoxFuture<'static, Result<FetchTarget<E::Key, E::Value, E::Properties>>>>,
+    },
+    Required {
+        waiters: Vec<Waiter<E, S, I>>,
+    },
+}
+
+impl<E, S, I> Debug for Inflight<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Optional { waiters, required } => f
+                .debug_struct("Disk")
+                .field("waiters", &waiters.len())
+                .field("required", &required.is_some())
+                .finish(),
+            Self::Required { waiters } => f.debug_struct("Fetch").field("waiters", &waiters.len()).finish(),
+        }
+    }
+}
+
+impl<E, S, I> Inflight<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn new<F>(f: Option<F>) -> Self
+    where
+        F: FnOnce() -> BoxFuture<'static, Result<FetchTarget<E::Key, E::Value, E::Properties>>>,
+    {
+        match f {
+            None => Self::Required { waiters: vec![] },
+            Some(f) => Self::Optional {
+                waiters: vec![],
+                fetch: Some(f()),
+            },
+        }
+    }
+
+    fn wait<F>(&mut self, f: Option<F>) -> oneshot::Receiver<Option<RawCacheEntry<E, S, I>>>
+    where
+        F: FnOnce() -> BoxFuture<'static, Result<FetchTarget<E::Key, E::Value, E::Properties>>>,
+    {
+        let (tx, rx) = oneshot::channel();
+        match self {
+            Inflight::Optional { waiters, fetch } => {
+                waiters.push(tx);
+                if let Some(f) = f {
+                    if fetch.is_none() {
+                        *fetch = Some(f());
+                    }
+                }
+            }
+            Inflight::Required { waiters } => {
+                waiters.push(tx);
+            }
+        }
+        rx
+    }
+}
+
 struct RawCacheShard<E, S, I>
 where
     E: Eviction,
@@ -100,8 +212,7 @@ where
     usage: usize,
     capacity: usize,
 
-    #[expect(clippy::type_complexity)]
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
+    inflights: Mutex<HashMap<E::Key, Inflight<E, S, I>>>,
 
     metrics: Arc<Metrics>,
     _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -139,9 +250,15 @@ where
         &mut self,
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
+        waiters: &mut Vec<Waiter<E, S, I>>,
     ) {
-        *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
+        if let Some(inflight) = self.inflights.lock().remove(record.key()) {
+            match inflight {
+                Inflight::Optional { waiters: ws, .. } | Inflight::Required { waiters: ws } => {
+                    *waiters = ws;
+                }
+            }
+        }
 
         if record.properties().phantom().unwrap_or_default() {
             if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
@@ -343,70 +460,67 @@ where
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop"))]
-    fn fetch_noop<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_noop<Q, F>(&self, hash: u64, key: &Q, f: F) -> RawShardFetch<E, S, I>
     where
+        F: FnOnce(&Q) -> BoxFuture<'static, Result<Option<FetchTarget<E::Key, E::Value, E::Properties>>>>,
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_noop(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, f)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")
     )]
-    fn fetch_immutable<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_immutable<Q, F>(&self, hash: u64, key: &Q, f: F) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce(&Q) -> BoxFuture<'static, Result<Option<FetchTarget<E::Key, E::Value, E::Properties>>>>,
     {
         if let Some(record) = self.get_immutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, f)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")
     )]
-    fn fetch_mutable<Q>(&mut self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_mutable<Q, F>(&mut self, hash: u64, key: &Q, f: F) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce(&Q) -> BoxFuture<'static, Result<Option<FetchTarget<E::Key, E::Value, E::Properties>>>>,
     {
         if let Some(record) = self.get_mutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, f)
     }
 
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")
-    )]
-    fn fetch_queue<Q>(&self, key: &Q) -> RawShardFetch<E, S, I>
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_wait"))]
+    fn fetch_wait<Q, F>(&self, key: &Q, f: F) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+        F: FnOnce() -> BoxFuture<'static, Result<Option<FetchTarget<E::Key, E::Value, E::Properties>>>>,
     {
-        match self.waiters.lock().entry(key.to_owned()) {
+        match self.inflights.lock().entry(key.to_owned()) {
             HashMapEntry::Occupied(mut o) => {
-                let (tx, rx) = oneshot::channel();
-                o.get_mut().push(tx);
+                let wait = o.get_mut().wait(f);
                 self.metrics.memory_queue.increase(1);
                 #[cfg(feature = "tracing")]
-                let wait = rx.in_span(Span::enter_with_local_parent(
+                let wait = wait.in_span(Span::enter_with_local_parent(
                     "foyer::memory::raw::fetch_with_runtime::wait",
                 ));
-                #[cfg(not(feature = "tracing"))]
-                let wait = rx;
+                // #[cfg(not(feature = "tracing"))]
+                // let wait = tx;
                 RawShardFetch::Wait(wait)
             }
             HashMapEntry::Vacant(v) => {
-                v.insert(vec![]);
+                v.insert(Inflight::new(f));
                 self.metrics.memory_fetch.increase(1);
                 RawShardFetch::Miss
             }
@@ -506,7 +620,7 @@ where
                 indexer: Sentry::default(),
                 usage: 0,
                 capacity: shard_capacity,
-                waiters: Mutex::default(),
+                inflights: Mutex::default(),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
@@ -629,10 +743,10 @@ where
 
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
-            let _ = waiter.send(RawCacheEntry {
+            let _ = waiter.send(Some(RawCacheEntry {
                 record: record.clone(),
                 inner: self.inner.clone(),
-            });
+            }));
         }
 
         // Deallocate data out of the lock critical section.
@@ -986,10 +1100,11 @@ pub type RawFetch<E, ER, S, I = HashTableIndexer<E>> =
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
 #[cfg(feature = "tracing")]
-type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
+type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<Option<RawCacheEntry<E, S, I>>>>;
 #[cfg(not(feature = "tracing"))]
-type RawFetchWait<E, S, I> = oneshot::Receiver<RawCacheEntry<E, S, I>>;
-type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
+type RawFetchWait<E, S, I> = oneshot::Receiver<Option<RawCacheEntry<E, S, I>>>;
+type RawFetchMiss<E, I, S, ER, DFS> =
+    JoinHandle<Diversion<std::result::Result<Option<RawCacheEntry<E, S, I>>, ER>, DFS>>;
 
 /// The target of a fetch operation.
 pub enum FetchTarget<K, V, P> {
@@ -1051,11 +1166,11 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
+    type Output = Diversion<std::result::Result<Option<RawCacheEntry<E, S, I>>, ER>, FetchContext>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
+            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(Some(opt.take().unwrap())).into()),
             RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|e| Error::wait(e).into()).map(Diversion::from),
             RawFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
@@ -1109,7 +1224,7 @@ where
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
+    pub fn fetch_inner<Q, F, FU, ER, ID>(
         &self,
         key: &Q,
         mut properties: E::Properties,
@@ -1121,8 +1236,7 @@ where
         F: FnOnce(&Q) -> FU,
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
-        IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
+        ID: Into<Diversion<Result<E::Value>, FetchContext>>,
     {
         let hash = self.inner.hash_builder.hash_one(key);
 

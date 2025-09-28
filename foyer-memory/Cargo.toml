@@ -26,6 +26,7 @@ cmsketch = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
+futures-util = { workspace = true }
 hashbrown = { workspace = true }
 intrusive-collections = { workspace = true }
 itertools = { workspace = true }
