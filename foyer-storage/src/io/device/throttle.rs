@@ -15,10 +15,11 @@
 use std::{fmt::Display, num::NonZeroUsize, str::FromStr};
 
 /// Device iops counter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IopsCounter {
     /// Count 1 iops for each read/write.
+    #[default]
     PerIo,
     /// Count 1 iops for each read/write with the size of the i/o.
     PerIoSize(NonZeroUsize),
@@ -59,7 +60,8 @@ impl FromStr for IopsCounter {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s.trim() {
+        let s = s.trim();
+        match s {
             "PerIo" => Ok(IopsCounter::PerIo),
             _ if s.starts_with("PerIoSize(") && s.ends_with(')') => {
                 let num = &s[10..s.len() - 1];
@@ -72,7 +74,7 @@ impl FromStr for IopsCounter {
 }
 
 /// Throttle config for the device.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct Throttle {
@@ -93,22 +95,10 @@ pub struct Throttle {
     pub iops_counter: IopsCounter,
 }
 
-impl Default for Throttle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Throttle {
     /// Create a new unlimited throttle config.
     pub fn new() -> Self {
-        Self {
-            write_iops: None,
-            read_iops: None,
-            write_throughput: None,
-            read_throughput: None,
-            iops_counter: IopsCounter::PerIo,
-        }
+        Self::default()
     }
 
     /// Set the maximum write iops for the device.
@@ -139,5 +129,41 @@ impl Throttle {
     pub fn with_iops_counter(mut self, counter: IopsCounter) -> Self {
         self.iops_counter = counter;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_throttle_default() {
+        assert!(matches!(Throttle::new(), Throttle {
+            write_iops: None,
+            read_iops: None,
+            write_throughput: None,
+            read_throughput: None,
+            iops_counter: IopsCounter::PerIo,
+        }));
+    }
+
+    #[test]
+    fn test_iops_counter_from_str() {
+        assert!(matches!(IopsCounter::from_str("PerIo"), Ok(IopsCounter::PerIo)));
+        assert!(matches!(IopsCounter::from_str(" PerIo "), Ok(IopsCounter::PerIo)));
+        assert!(matches!(IopsCounter::from_str("PerIo "), Ok(IopsCounter::PerIo)));
+        assert!(matches!(IopsCounter::from_str(" PerIo"), Ok(IopsCounter::PerIo)));
+
+        let _num = NonZeroUsize::new(1024).unwrap();
+
+        assert!(matches!(IopsCounter::from_str("PerIoSize(1024)"), Ok(IopsCounter::PerIoSize(_num))));
+        assert!(matches!(IopsCounter::from_str(" PerIoSize(1024) "), Ok(IopsCounter::PerIoSize(_num))));
+        assert!(matches!(IopsCounter::from_str("PerIoSize(1024) "), Ok(IopsCounter::PerIoSize(_num))));
+        assert!(matches!(IopsCounter::from_str(" PerIoSize(1024)"), Ok(IopsCounter::PerIoSize(_num))));
+
+        assert!(IopsCounter::from_str("PerIoSize(0)").is_err());
+        assert!(IopsCounter::from_str("PerIoSize(1024a)").is_err());
+
+        assert!(IopsCounter::from_str("invalid_string").is_err());
     }
 }
