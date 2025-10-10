@@ -26,6 +26,9 @@ pub enum Error {
     /// Wait error.
     #[error("wait for concurrent fetch result error: {0}")]
     Wait(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Other error.
+    #[error("other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl Error {
@@ -37,6 +40,35 @@ impl Error {
     /// Error on waiting for concurrrent fetch result.
     pub fn wait(err: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Wait(Box::new(err))
+    }
+
+    /// Create customized error.
+    pub fn other<E>(e: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    {
+        Self::Other(e.into())
+    }
+
+    /// Downcast error to a specific type.
+    ///
+    /// Only `Other` variant can be downcasted.
+    /// If the error is not `Other`, it will return an error indicating that downcasting is not possible.
+    pub fn downcast<T>(self) -> std::result::Result<T, Self>
+    where
+        T: std::error::Error + 'static,
+    {
+        match self {
+            Self::Other(e) => e.downcast::<T>().map(|e| *e).map_err(|e| {
+                let e: Box<dyn std::error::Error + Send + Sync + 'static> =
+                    format!("cannot downcast error: {e}").into();
+                Self::Other(e)
+            }),
+            _ => {
+                let e: Box<dyn std::error::Error + Send + Sync + 'static> = "only other error can be downcast".into();
+                Err(e.into())
+            }
+        }
     }
 }
 

@@ -36,11 +36,12 @@ use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     future::Diversion,
     metrics::Metrics,
-    properties::{Hint, Location, Properties, Source},
+    properties::{self, Hint, Location, Properties, Source},
     rate::RateLimiter,
 };
 use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, FetchTarget, Piece, Pipe};
 use foyer_storage::{Load, Statistics, Store};
+use futures_util::FutureExt as _;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
@@ -953,6 +954,179 @@ where
         #[cfg(feature = "tracing")]
         let f = InRootSpan::new(f, span).with_threshold(self.inner.tracing_config.record_hybrid_fetch_threshold());
         f
+    }
+}
+
+impl<K, V, S> HybridCache<K, V, S>
+where
+    K: StorageKey + Clone,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fetch_inner_v2<Q, F, FU>(&self, key: &Q, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
+    where
+        Q: Hash + Equivalent<K> + Send + Sync + 'static + ToOwned<Owned = K>,
+        F: FnOnce(&Q) -> FU,
+        FU: Future<Output = Result<V>> + Send + 'static,
+    {
+        root_span!(self, span, "foyer::hybrid::cache::fetch");
+
+        #[cfg(feature = "tracing")]
+        let _guard = span.set_local_parent();
+
+        let now = Instant::now();
+
+        let store = self.inner.storage.clone();
+        let fo = {
+            let properties = properties.clone();
+            |key: &Q| {
+                let key = key.to_owned();
+                async move {
+                    match store.load(&key).await {
+                        Ok(Load::Entry { key, value, populated }) => {
+                            let properties = properties.with_source(Source::Populated(populated));
+                            let target = FetchTarget::Entry { key, value, properties };
+                            Ok(Some(target))
+                        }
+                        Ok(Load::Piece { piece, .. }) => {
+                            let target = FetchTarget::Piece(piece);
+                            Ok(Some(target))
+                        }
+                        Ok(Load::Throttled) => {
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            todo!();
+                            Ok(None)
+                        }
+                        Ok(Load::Miss) => Ok(None),
+                        Err(e) => return Err(foyer_memory::Error::other(e)),
+                    }
+                }
+                .boxed()
+            }
+        };
+
+        let fetch = fetch(key);
+        let fr = {
+            let properties = properties.clone();
+            |key: &Q| {
+                let key = key.to_owned();
+                async move {
+                    let value = fetch.await.map_err(foyer_memory::Error::other)?;
+                    let key = key.to_owned();
+                    let properties = properties.with_source(Source::Outer);
+                    let target = FetchTarget::Entry { key, value, properties };
+                    Ok(target)
+                }
+                .boxed()
+            }
+        };
+
+        self.inner.memory.fetch_inner(
+            key,
+            Some(Box::new(fo)),
+            Some(Box::new(fr)),
+            self.storage().runtime().read(),
+        );
+
+        todo!();
+
+        todo!()
+        //     root_span!(self, span, "foyer::hybrid::cache::fetch");
+
+        //     #[cfg(feature = "tracing")]
+        //     let _guard = span.set_local_parent();
+
+        //     let now = Instant::now();
+
+        //     let store = self.inner.storage.clone();
+
+        //     let future = fetch(key);
+        //     let inner = self.inner.memory.fetch_inner(
+        //         key,
+        //         properties,
+        //         |k| {
+        //             let metrics = self.inner.metrics.clone();
+        //             let runtime = self.storage().runtime().clone();
+        //             let k = k.to_owned();
+        //             async move {
+        //                 let throttled = match store.load(&k).await.map_err(Error::from) {
+        //                     Ok(Load::Entry {
+        //                         key: _,
+        //                         value,
+        //                         populated,
+        //                     }) => {
+        //                         metrics.hybrid_hit.increase(1);
+        //                         metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+        //                         return Diversion {
+        //                             target: Ok(FetchTarget::Value(value)),
+        //                             store: Some(FetchContext {
+        //                                 throttled: false,
+        //                                 source: Source::Populated(populated),
+        //                             }),
+        //                         };
+        //                     }
+        //                     Ok(Load::Piece { piece, populated }) => {
+        //                         metrics.hybrid_hit.increase(1);
+        //                         metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+        //                         return Diversion {
+        //                             target: Ok(FetchTarget::Piece(piece)),
+        //                             store: Some(FetchContext {
+        //                                 throttled: false,
+        //                                 source: Source::Populated(populated),
+        //                             }),
+        //                         };
+        //                     }
+        //                     Ok(Load::Throttled) => true,
+        //                     Ok(Load::Miss) => false,
+        //                     Err(e) => return Err(e).into(),
+        //                 };
+
+        //                 metrics.hybrid_miss.increase(1);
+        //                 metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
+
+        //                 let fut = async move {
+        //                     Diversion {
+        //                         target: future.await.map(|v| FetchTarget::Value(v)),
+        //                         store: Some(FetchContext {
+        //                             throttled,
+        //                             source: Source::Outer,
+        //                         }),
+        //                     }
+        //                 };
+        //                 #[cfg(feature = "tracing")]
+        //                 let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+
+        //                 runtime.user().spawn(fut).await.unwrap()
+        //             }
+        //         },
+        //         self.storage().runtime().read(),
+        //     );
+
+        //     if inner.state() == FetchState::Hit {
+        //         self.inner.metrics.hybrid_hit.increase(1);
+        //         self.inner
+        //             .metrics
+        //             .hybrid_hit_duration
+        //             .record(now.elapsed().as_secs_f64());
+        //     }
+
+        //     let inner = HybridFetchInner {
+        //         inner,
+        //         policy: self.inner.policy,
+        //         storage: self.inner.storage.clone(),
+        //     };
+
+        //     let f = inner;
+        //     #[cfg(feature = "tracing")]
+        //     let f = InRootSpan::new(f, span).with_threshold(self.inner.tracing_config.record_hybrid_fetch_threshold());
+        //     f
     }
 }
 

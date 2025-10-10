@@ -46,6 +46,7 @@ pin-project = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+futures-util = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [

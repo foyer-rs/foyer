@@ -17,6 +17,7 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
+    marker::PhantomData,
     ops::Deref,
     pin::Pin,
     sync::Arc,
@@ -45,10 +46,15 @@ use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
 
+#[cfg(feature = "tracing")]
+use crate::inflight::Waiter;
 use crate::{
     error::{Error, Result},
     eviction::{Eviction, Op},
     indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
+    inflight::{
+        BoxOptionalFetchFuture, BoxRequiredFetchFuture, FetchTarget, InflightMap, Notifier, TakeOrUpgrade, Wait,
+    },
     pipe::NoopPipe,
     record::{Data, Record},
     Piece, Pipe,
@@ -100,8 +106,7 @@ where
     usage: usize,
     capacity: usize,
 
-    #[expect(clippy::type_complexity)]
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
+    inflight: Arc<Mutex<InflightMap<E, S, I>>>,
 
     metrics: Arc<Metrics>,
     _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -139,9 +144,9 @@ where
         &mut self,
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
+        waiters: &mut Vec<Notifier<E, S, I>>,
     ) {
-        *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
+        *waiters = self.inflight.lock().take(record.key());
 
         if record.properties().phantom().unwrap_or_default() {
             if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
@@ -343,73 +348,82 @@ where
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_noop"))]
-    fn fetch_noop<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_noop<Q>(
+        &self,
+        hash: u64,
+        key: &Q,
+        fo: Option<Box<dyn FnOnce(&Q) -> BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>>>,
+        fr: Option<Box<dyn FnOnce(&Q) -> BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>>>,
+    ) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_noop(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, fo, fr)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_immutable")
     )]
-    fn fetch_immutable<Q>(&self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_immutable<Q>(
+        &self,
+        hash: u64,
+        key: &Q,
+        fo: Option<Box<dyn FnOnce(&Q) -> BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>>>,
+        fr: Option<Box<dyn FnOnce(&Q) -> BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>>>,
+    ) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_immutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, fo, fr)
     }
 
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::shard::fetch_mutable")
     )]
-    fn fetch_mutable<Q>(&mut self, hash: u64, key: &Q) -> RawShardFetch<E, S, I>
+    fn fetch_mutable<Q>(
+        &mut self,
+        hash: u64,
+        key: &Q,
+        fo: Option<Box<dyn FnOnce(&Q) -> BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>>>,
+        fr: Option<Box<dyn FnOnce(&Q) -> BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>>>,
+    ) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
         if let Some(record) = self.get_mutable(hash, key) {
             return RawShardFetch::Hit(record);
         }
-
-        self.fetch_queue(key)
+        self.fetch_wait(key, fo, fr)
     }
 
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::memory::raw::shard::fetch_queue")
-    )]
-    fn fetch_queue<Q>(&self, key: &Q) -> RawShardFetch<E, S, I>
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::fetch_wait"))]
+    fn fetch_wait<Q>(
+        &self,
+        key: &Q,
+        fo: Option<Box<dyn FnOnce(&Q) -> BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>>>,
+        fr: Option<Box<dyn FnOnce(&Q) -> BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>>>,
+    ) -> RawShardFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
     {
-        match self.waiters.lock().entry(key.to_owned()) {
-            HashMapEntry::Occupied(mut o) => {
-                let (tx, rx) = oneshot::channel();
-                o.get_mut().push(tx);
-                self.metrics.memory_queue.increase(1);
+        match self.inflight.lock().wait(key, fo, fr) {
+            Wait::Waiter(waiter) => {
                 #[cfg(feature = "tracing")]
-                let wait = rx.in_span(Span::enter_with_local_parent(
+                let waiter = waiter.in_span(Span::enter_with_local_parent(
                     "foyer::memory::raw::fetch_with_runtime::wait",
                 ));
-                #[cfg(not(feature = "tracing"))]
-                let wait = rx;
-                RawShardFetch::Wait(wait)
+                RawShardFetch::Wait(waiter)
             }
-            HashMapEntry::Vacant(v) => {
-                v.insert(vec![]);
-                self.metrics.memory_fetch.increase(1);
-                RawShardFetch::Miss
-            }
+            Wait::Optional(fo) => RawShardFetch::Optional(fo),
+            Wait::Required(fr) => RawShardFetch::Required(fr),
         }
     }
 }
@@ -422,6 +436,7 @@ where
     I: Indexer<Eviction = E>,
 {
     shards: Vec<RwLock<RawCacheShard<E, S, I>>>,
+    inflights: Vec<Arc<Mutex<InflightMap<E, S, I>>>>,
 
     capacity: usize,
 
@@ -500,13 +515,18 @@ where
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
         let shard_capacity = config.capacity / config.shards;
 
-        let shards = (0..config.shards)
-            .map(|_| RawCacheShard {
+        let inflights = (0..config.shards)
+            .map(|_| Arc::new(Mutex::new(InflightMap::default())))
+            .collect_vec();
+
+        let shards = inflights
+            .iter()
+            .map(|inflight| RawCacheShard {
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
                 capacity: shard_capacity,
-                waiters: Mutex::default(),
+                inflight: inflight.clone(),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
@@ -521,6 +541,7 @@ where
             capacity: config.capacity,
             hash_builder: Arc::new(config.hash_builder),
             weighter: config.weighter,
+            inflights,
             filter: config.filter,
             metrics: config.metrics,
             event_listener: config.event_listener,
@@ -629,10 +650,10 @@ where
 
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
-            let _ = waiter.send(RawCacheEntry {
+            let _ = waiter.send(Some(RawCacheEntry {
                 record: record.clone(),
                 inner: self.inner.clone(),
-            });
+            }));
         }
 
         // Deallocate data out of the lock critical section.
@@ -966,8 +987,6 @@ pub enum FetchState {
 pub struct FetchContext {
     /// If this fetch is caused by disk cache throttled.
     pub throttled: bool,
-    /// Fetched entry source.
-    pub source: Source,
 }
 
 enum RawShardFetch<E, S, I>
@@ -978,47 +997,22 @@ where
 {
     Hit(Arc<Record<E>>),
     Wait(RawFetchWait<E, S, I>),
-    Miss,
+    Optional(BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>),
+    Required(BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>),
 }
 
-pub type RawFetch<E, ER, S, I = HashTableIndexer<E>> =
-    DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
+// TODO(MrCroxx): Remove the wrapper?
+pub type RawFetch<E, S, I = HashTableIndexer<E>> = RawFetchInner<E, S, I>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
 #[cfg(feature = "tracing")]
-type RawFetchWait<E, S, I> = InSpan<oneshot::Receiver<RawCacheEntry<E, S, I>>>;
+type RawFetchWait<E, S, I> = InSpan<Waiter<E, S, I>>;
 #[cfg(not(feature = "tracing"))]
-type RawFetchWait<E, S, I> = oneshot::Receiver<RawCacheEntry<E, S, I>>;
-type RawFetchMiss<E, I, S, ER, DFS> = JoinHandle<Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, DFS>>;
-
-/// The target of a fetch operation.
-pub enum FetchTarget<K, V, P> {
-    /// Fetched value.
-    Value(V),
-    /// Fetched piece from disk cache write queue.
-    Piece(Piece<K, V, P>),
-}
-
-impl<K, V, P> Debug for FetchTarget<K, V, P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FetchTarget").finish()
-    }
-}
-
-impl<K, V, P> From<V> for FetchTarget<K, V, P> {
-    fn from(value: V) -> Self {
-        Self::Value(value)
-    }
-}
-
-impl<K, V, P> From<Piece<K, V, P>> for FetchTarget<K, V, P> {
-    fn from(piece: Piece<K, V, P>) -> Self {
-        Self::Piece(piece)
-    }
-}
+type RawFetchWait<E, S, I> = Waiter<E, S, I>;
+type RawFetchMiss<E, S, I> = JoinHandle<Result<Option<RawCacheEntry<E, S, I>>>>;
 
 #[pin_project(project = RawFetchInnerProj)]
-pub enum RawFetchInner<E, ER, S, I>
+pub enum RawFetchInner<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -1026,10 +1020,10 @@ where
 {
     Hit(RawFetchHit<E, S, I>),
     Wait(#[pin] RawFetchWait<E, S, I>),
-    Miss(#[pin] RawFetchMiss<E, I, S, ER, FetchContext>),
+    Miss(#[pin] RawFetchMiss<E, S, I>),
 }
 
-impl<E, ER, S, I> RawFetchInner<E, ER, S, I>
+impl<E, S, I> RawFetchInner<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -1044,23 +1038,160 @@ where
     }
 }
 
-impl<E, ER, S, I> Future for RawFetchInner<E, ER, S, I>
+impl<E, S, I> Future for RawFetchInner<E, S, I>
 where
     E: Eviction,
-    ER: From<Error>,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = Diversion<std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
+    type Output = Result<Option<RawCacheEntry<E, S, I>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take().unwrap()).into()),
-            RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|e| Error::wait(e).into()).map(Diversion::from),
+            RawFetchInnerProj::Hit(opt) => Poll::Ready(Ok(opt.take()).into()),
+            RawFetchInnerProj::Wait(waiter) => waiter.poll(cx).map_err(|e| Error::wait(e).into()),
             RawFetchInnerProj::Miss(handle) => handle.poll(cx).map(|join| join.unwrap()),
         }
     }
 }
+
+// impl<E, S, I> RawCache<E, S, I>
+// where
+//     E: Eviction,
+//     S: HashBuilder,
+//     I: Indexer<Eviction = E>,
+// {
+//     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
+//     pub fn fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> RawFetch<E, ER, S, I>
+//     where
+//         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+//         F: FnOnce(&Q) -> FU,
+//         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
+//         ER: Send + 'static + Debug,
+//     {
+//         self.fetch_inner(
+//             key,
+//             Default::default(),
+//             fetch,
+//             &tokio::runtime::Handle::current().into(),
+//         )
+//     }
+
+//     #[cfg_attr(
+//         feature = "tracing",
+//         fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
+//     )]
+//     pub fn fetch_with_properties<Q, F, FU, ER, ID>(
+//         &self,
+//         key: &Q,
+//         properties: E::Properties,
+//         fetch: F,
+//     ) -> RawFetch<E, ER, S, I>
+//     where
+//         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+//         F: FnOnce(&Q) -> FU,
+//         FU: Future<Output = ID> + Send + 'static,
+//         ER: Send + 'static + Debug,
+//         ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
+//     {
+//         self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
+//     }
+
+//     /// Advanced fetch with specified runtime.
+//     ///
+//     /// This function is for internal usage and the doc is hidden.
+//     #[doc(hidden)]
+//     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
+//     pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
+//         &self,
+//         key: &Q,
+//         mut properties: E::Properties,
+//         fetch: F,
+//         runtime: &SingletonHandle,
+//     ) -> RawFetch<E, ER, S, I>
+//     where
+//         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
+//         F: FnOnce(&Q) -> FU,
+//         FU: Future<Output = ID> + Send + 'static,
+//         ER: Send + 'static + Debug,
+//         ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
+//         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
+//     {
+//         let hash = self.inner.hash_builder.hash_one(key);
+
+//         let raw = match E::acquire() {
+//             Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, key),
+//             Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, key),
+//             Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, key),
+//         };
+
+//         match raw {
+//             RawShardFetch::Hit(record) => {
+//                 tracing::trace!(hash, "fetch => Hit");
+//                 return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
+//                     record,
+//                     inner: self.inner.clone(),
+//                 })));
+//             }
+//             RawShardFetch::Waiter(future) => {
+//                 tracing::trace!(hash, "fetch => Wait");
+//                 return RawFetch::new(RawFetchInner::Wait(future));
+//             }
+//             RawShardFetch::Miss => {
+//                 tracing::trace!(hash, "fetch => Miss");
+//             }
+//         }
+
+//         let cache = self.clone();
+//         let future = fetch(key);
+//         let key = key.to_owned();
+//         let join = runtime.spawn({
+//             tracing::trace!(hash, "fetch => join !!!");
+//             let task = async move {
+//                 #[cfg(feature = "tracing")]
+//                 let Diversion { target, store } = future
+//                     .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
+//                     .await
+//                     .into();
+//                 #[cfg(not(feature = "tracing"))]
+//                 let Diversion { target, store } = future.await.into();
+
+//                 let target = match target {
+//                     Ok(value) => value,
+//                     Err(e) => {
+//                         cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
+//                         tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
+//                         return Diversion { target: Err(e), store };
+//                     }
+//                 };
+//                 if let Some(ctx) = store.as_ref() {
+//                     if ctx.throttled {
+//                         // TODO(MrCroxx): Make sure foyer doesn't issue tombstone to the disk cache.
+//                         // TODO(MrCroxx): Also make sure the disk cache will write tombstone instead of this case.
+//                         properties = properties.with_location(Location::InMem)
+//                     }
+//                     properties = properties.with_source(ctx.source)
+//                 };
+//                 tracing::trace!(hash, "fetch => insert !!!");
+//                 let entry = match target.into() {
+//                     FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
+//                     FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
+//                 };
+//                 Diversion {
+//                     target: Ok(entry),
+//                     store,
+//                 }
+//             };
+//             #[cfg(feature = "tracing")]
+//             let task = task.in_span(Span::enter_with_local_parent(
+//                 "foyer::memory::generic::fetch_with_runtime::spawn",
+//             ));
+//             task
+//         });
+
+//         RawFetch::new(RawFetchInner::Miss(join))
+//     }
+// }
 
 impl<E, S, I> RawCache<E, S, I>
 where
@@ -1068,135 +1199,148 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch"))]
-    pub fn fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> RawFetch<E, ER, S, I>
-    where
-        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
-        F: FnOnce(&Q) -> FU,
-        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
-        ER: Send + 'static + Debug,
-    {
-        self.fetch_inner(
-            key,
-            Default::default(),
-            fetch,
-            &tokio::runtime::Handle::current().into(),
-        )
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::memory::raw::fetch_with_properties")
-    )]
-    pub fn fetch_with_properties<Q, F, FU, ER, ID>(
-        &self,
-        key: &Q,
-        properties: E::Properties,
-        fetch: F,
-    ) -> RawFetch<E, ER, S, I>
-    where
-        Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
-        F: FnOnce(&Q) -> FU,
-        FU: Future<Output = ID> + Send + 'static,
-        ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<E::Value, ER>, FetchContext>>,
-    {
-        self.fetch_inner(key, properties, fetch, &tokio::runtime::Handle::current().into())
-    }
-
     /// Advanced fetch with specified runtime.
     ///
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::fetch_inner"))]
-    pub fn fetch_inner<Q, F, FU, ER, ID, IT>(
+    pub fn fetch_inner<Q>(
         &self,
         key: &Q,
-        mut properties: E::Properties,
-        fetch: F,
+        fo: Option<Box<dyn FnOnce(&Q) -> BoxOptionalFetchFuture<E::Key, E::Value, E::Properties>>>,
+        fr: Option<Box<dyn FnOnce(&Q) -> BoxRequiredFetchFuture<E::Key, E::Value, E::Properties>>>,
         runtime: &SingletonHandle,
-    ) -> RawFetch<E, ER, S, I>
+    ) -> RawFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + Send + 'static + ToOwned<Owned = E::Key>,
-        F: FnOnce(&Q) -> FU,
-        FU: Future<Output = ID> + Send + 'static,
-        ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
-        IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
+        E::Key: Clone,
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
         let raw = match E::acquire() {
-            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, key),
-            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().fetch_immutable(hash, key),
-            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().fetch_mutable(hash, key),
+            Op::Noop => self.inner.shards[self.shard(hash)].read().fetch_noop(hash, key, fo, fr),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)]
+                .read()
+                .fetch_immutable(hash, key, fo, fr),
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)]
+                .write()
+                .fetch_mutable(hash, key, fo, fr),
         };
 
         match raw {
             RawShardFetch::Hit(record) => {
                 tracing::trace!(hash, "fetch => Hit");
-                return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
+                return RawFetchInner::Hit(Some(RawCacheEntry {
                     record,
                     inner: self.inner.clone(),
-                })));
+                }));
             }
             RawShardFetch::Wait(future) => {
                 tracing::trace!(hash, "fetch => Wait");
-                return RawFetch::new(RawFetchInner::Wait(future));
+                return RawFetchInner::Wait(future);
             }
-            RawShardFetch::Miss => {
-                tracing::trace!(hash, "fetch => Miss");
+            RawShardFetch::Optional(fo) => {
+                tracing::trace!(hash, "fetch => Fetch (optional)");
+                let key = key.to_owned();
+                let cache = self.clone();
+                let join = runtime.spawn({
+                    tracing::trace!(hash, "fetch => join !!!");
+                    let task = async move {
+                        match fo.await {
+                            Ok(Some(target)) => {
+                                let entry = match target {
+                                    FetchTarget::Entry { key, value, properties } => {
+                                        cache.insert_with_properties(key, value, properties)
+                                    }
+                                    FetchTarget::Piece(piece) => cache.insert_inner(piece.into_record::<E>()),
+                                };
+                                Ok(Some(entry))
+                            }
+                            Ok(None) => {
+                                let tou = cache.inner.inflights[cache.shard(hash)].lock().take_or_upgrade(&key);
+                                match tou {
+                                    TakeOrUpgrade::Notifiers(txs) => {
+                                        for tx in txs {
+                                            let _ = tx.send(None);
+                                        }
+                                        Ok(None)
+                                    }
+                                    TakeOrUpgrade::Required(fr) => match fr.await {
+                                        Ok(target) => {
+                                            let entry = match target {
+                                                FetchTarget::Entry { key, value, properties } => {
+                                                    cache.insert_with_properties(key, value, properties)
+                                                }
+                                                FetchTarget::Piece(piece) => {
+                                                    cache.insert_inner(piece.into_record::<E>())
+                                                }
+                                            };
+                                            Ok(Some(entry))
+                                        }
+                                        Err(e) => {
+                                            let _ = cache.inner.inflights[cache.shard(hash)].lock().take(&key);
+                                            tracing::debug!(
+                                            "[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}"
+                                        );
+                                            Err(e)
+                                        }
+                                    },
+                                }
+                            }
+                            Err(e) => {
+                                // TODO(MrCroxx): Fallback to required fetch if exists and optional fetch fails.
+                                let _ = cache.inner.inflights[cache.shard(hash)].lock().take(&key);
+                                tracing::debug!(
+                                    "[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}"
+                                );
+                                Err(e)
+                            }
+                        }
+                    };
+                    #[cfg(feature = "tracing")]
+                    let task = task.in_span(Span::enter_with_local_parent(
+                        "foyer::memory::generic::fetch_with_runtime::spawn",
+                    ));
+                    task
+                });
+                RawFetchInner::Miss(join)
+            }
+            RawShardFetch::Required(fr) => {
+                tracing::trace!(hash, "fetch => Fetch (required)");
+                let key = key.to_owned();
+                let cache = self.clone();
+                let join = runtime.spawn({
+                    tracing::trace!(hash, "fetch => join !!!");
+                    let task = async move {
+                        match fr.await {
+                            Ok(target) => {
+                                let entry = match target {
+                                    FetchTarget::Entry { key, value, properties } => {
+                                        cache.insert_with_properties(key, value, properties)
+                                    }
+                                    FetchTarget::Piece(piece) => cache.insert_inner(piece.into_record::<E>()),
+                                };
+                                Ok(Some(entry))
+                            }
+                            Err(e) => {
+                                // TODO(MrCroxx): Fallback to required fetch if exists and optional fetch fails.
+                                let _ = cache.inner.inflights[cache.shard(hash)].lock().take(&key);
+                                tracing::debug!(
+                                    "[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}"
+                                );
+                                Err(e)
+                            }
+                        }
+                    };
+                    #[cfg(feature = "tracing")]
+                    let task = task.in_span(Span::enter_with_local_parent(
+                        "foyer::memory::generic::fetch_with_runtime::spawn",
+                    ));
+                    task
+                });
+                RawFetchInner::Miss(join)
             }
         }
-
-        let cache = self.clone();
-        let future = fetch(key);
-        let key = key.to_owned();
-        let join = runtime.spawn({
-            tracing::trace!(hash, "fetch => join !!!");
-            let task = async move {
-                #[cfg(feature = "tracing")]
-                let Diversion { target, store } = future
-                    .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
-                    .await
-                    .into();
-                #[cfg(not(feature = "tracing"))]
-                let Diversion { target, store } = future.await.into();
-
-                let target = match target {
-                    Ok(value) => value,
-                    Err(e) => {
-                        cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
-                        tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
-                        return Diversion { target: Err(e), store };
-                    }
-                };
-                if let Some(ctx) = store.as_ref() {
-                    if ctx.throttled {
-                        // TODO(MrCroxx): Make sure foyer doesn't issue tombstone to the disk cache.
-                        // TODO(MrCroxx): Also make sure the disk cache will write tombstone instead of this case.
-                        properties = properties.with_location(Location::InMem)
-                    }
-                    properties = properties.with_source(ctx.source)
-                };
-                tracing::trace!(hash, "fetch => insert !!!");
-                let entry = match target.into() {
-                    FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
-                    FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
-                };
-                Diversion {
-                    target: Ok(entry),
-                    store,
-                }
-            };
-            #[cfg(feature = "tracing")]
-            let task = task.in_span(Span::enter_with_local_parent(
-                "foyer::memory::generic::fetch_with_runtime::spawn",
-            ));
-            task
-        });
-
-        RawFetch::new(RawFetchInner::Miss(join))
     }
 }
 

@@ -21,8 +21,8 @@ pub enum Error {
     /// foyer disk cache error.
     #[error("foyer storage error: {0}")]
     Storage(#[from] foyer_storage::Error),
-    #[error("other error: {0}")]
     /// Other error.
+    #[error("other error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
