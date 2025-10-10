@@ -138,13 +138,16 @@ mod tests {
 
     #[test]
     fn test_throttle_default() {
-        assert!(matches!(Throttle::new(), Throttle {
-            write_iops: None,
-            read_iops: None,
-            write_throughput: None,
-            read_throughput: None,
-            iops_counter: IopsCounter::PerIo,
-        }));
+        assert!(matches!(
+            Throttle::new(),
+            Throttle {
+                write_iops: None,
+                read_iops: None,
+                write_throughput: None,
+                read_throughput: None,
+                iops_counter: IopsCounter::PerIo,
+            }
+        ));
     }
 
     #[test]
@@ -156,10 +159,22 @@ mod tests {
 
         let _num = NonZeroUsize::new(1024).unwrap();
 
-        assert!(matches!(IopsCounter::from_str("PerIoSize(1024)"), Ok(IopsCounter::PerIoSize(_num))));
-        assert!(matches!(IopsCounter::from_str(" PerIoSize(1024) "), Ok(IopsCounter::PerIoSize(_num))));
-        assert!(matches!(IopsCounter::from_str("PerIoSize(1024) "), Ok(IopsCounter::PerIoSize(_num))));
-        assert!(matches!(IopsCounter::from_str(" PerIoSize(1024)"), Ok(IopsCounter::PerIoSize(_num))));
+        assert!(matches!(
+            IopsCounter::from_str("PerIoSize(1024)"),
+            Ok(IopsCounter::PerIoSize(_num))
+        ));
+        assert!(matches!(
+            IopsCounter::from_str(" PerIoSize(1024) "),
+            Ok(IopsCounter::PerIoSize(_num))
+        ));
+        assert!(matches!(
+            IopsCounter::from_str("PerIoSize(1024) "),
+            Ok(IopsCounter::PerIoSize(_num))
+        ));
+        assert!(matches!(
+            IopsCounter::from_str(" PerIoSize(1024)"),
+            Ok(IopsCounter::PerIoSize(_num))
+        ));
 
         assert!(IopsCounter::from_str("PerIoSize(0)").is_err());
         assert!(IopsCounter::from_str("PerIoSize(1024a)").is_err());
