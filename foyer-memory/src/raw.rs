@@ -495,10 +495,15 @@ where
     I: Indexer<Eviction = E>,
 {
     pub fn new(config: RawCacheConfig<E, S>) -> Self {
-        let shard_capacity = config.capacity / config.shards;
+        assert!(config.shards > 0, "shards must be greater than zero.");
 
-        let shards = (0..config.shards)
-            .map(|_| RawCacheShard {
+        let shard_capacities = (0..config.shards)
+            .map(|index| Self::shard_capacity_for(config.capacity, config.shards, index))
+            .collect_vec();
+
+        let shards = shard_capacities
+            .into_iter()
+            .map(|shard_capacity| RawCacheShard {
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
@@ -530,10 +535,16 @@ where
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::resize"))]
     pub fn resize(&self, capacity: usize) -> Result<()> {
         let shards = self.inner.shards.len();
-        let shard_capacity = capacity / shards;
+        assert!(shards > 0, "shards must be greater than zero.");
 
-        let handles = (0..shards)
-            .map(|i| {
+        let shard_capacities = (0..shards)
+            .map(|index| Self::shard_capacity_for(capacity, shards, index))
+            .collect_vec();
+
+        let handles = shard_capacities
+            .into_iter()
+            .enumerate()
+            .map(|(i, shard_capacity)| {
                 let inner = self.inner.clone();
                 std::thread::spawn(move || {
                     let mut garbages = vec![];
@@ -809,6 +820,12 @@ where
 
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.inner.shards.len()
+    }
+
+    fn shard_capacity_for(total: usize, shards: usize, index: usize) -> usize {
+        let base = total / shards;
+        let remainder = total % shards;
+        base + usize::from(index < remainder)
     }
 }
 
@@ -1393,6 +1410,62 @@ mod tests {
         cache.insert(key.clone(), value.clone());
         assert_eq!(cache.usage(), 6 * 1024);
         assert_eq!(cache.get(&key).unwrap().value(), &value);
+    }
+
+    #[test]
+    fn test_capacity_distribution_without_loss() {
+        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
+            capacity: 3,
+            shards: 2,
+            eviction_config: FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        });
+
+        for key in 0..3 {
+            let entry = cache.insert(key, key);
+            drop(entry);
+        }
+
+        assert_eq!(cache.usage(), 3);
+
+        for key in 0..3 {
+            let entry = cache.get(&key).expect("entry should exist");
+            assert_eq!(*entry, key);
+            drop(entry);
+        }
+    }
+
+    #[test]
+    fn test_capacity_distribution_with_more_shards_than_capacity() {
+        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
+            capacity: 2,
+            shards: 4,
+            eviction_config: FifoConfig::default(),
+            hash_builder: Default::default(),
+            weighter: Arc::new(|_, _| 1),
+            filter: Arc::new(|_, _| true),
+            event_listener: None,
+            metrics: Arc::new(Metrics::noop()),
+        });
+
+        for key in 0..2 {
+            let entry = cache.insert(key, key);
+            drop(entry);
+        }
+
+        assert_eq!(cache.usage(), 2);
+
+        for key in 0..2 {
+            let entry = cache.get(&key).expect("entry should exist");
+            assert_eq!(*entry, key);
+            drop(entry);
+        }
+
+        assert!(cache.get(&2).is_none());
     }
 
     fn test_resize<E>(cache: &RawCache<E, ModHasher, HashTableIndexer<E>>)
