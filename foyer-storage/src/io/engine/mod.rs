@@ -41,6 +41,7 @@ use crate::io::{
 pub struct IoHandle {
     #[pin]
     inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>,
+    callback: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl Debug for IoHandle {
@@ -51,7 +52,18 @@ impl Debug for IoHandle {
 
 impl From<BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>> for IoHandle {
     fn from(inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>) -> Self {
-        Self { inner }
+        Self { inner, callback: None }
+    }
+}
+
+impl IoHandle {
+    pub(crate) fn with_callback<F>(mut self, callback: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        assert!(self.callback.is_none(), "io handle callback can only be set once");
+        self.callback = Some(Box::new(callback));
+        self
     }
 }
 
