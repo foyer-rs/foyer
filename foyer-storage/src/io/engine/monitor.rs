@@ -53,33 +53,31 @@ impl IoEngine for MonitoredIoEngine {
         let now = Instant::now();
         let bytes = buf.len();
 
+        let statistics = partition.statistics().clone();
+        let metrics = self.inner.metrics.clone();
         let handle = self.inner.io_engine.read(buf, partition, offset);
 
-        partition.statistics().record_disk_read(bytes);
-        self.inner.metrics.storage_disk_read.increase(1);
-        self.inner.metrics.storage_disk_read_bytes.increase(bytes as u64);
-        self.inner
-            .metrics
-            .storage_disk_read_duration
-            .record(now.elapsed().as_secs_f64());
-
-        handle
+        handle.with_callback(move || {
+            statistics.record_disk_read(bytes);
+            metrics.storage_disk_read.increase(1);
+            metrics.storage_disk_read_bytes.increase(bytes as u64);
+            metrics.storage_disk_read_duration.record(now.elapsed().as_secs_f64());
+        })
     }
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();
 
+        let statistics = partition.statistics().clone();
+        let metrics = self.inner.metrics.clone();
         let handle = self.inner.io_engine.write(buf, partition, offset);
 
-        partition.statistics().record_disk_write(bytes);
-        self.inner.metrics.storage_disk_write.increase(1);
-        self.inner.metrics.storage_disk_write_bytes.increase(bytes as u64);
-        self.inner
-            .metrics
-            .storage_disk_write_duration
-            .record(now.elapsed().as_secs_f64());
-
-        handle
+        handle.with_callback(move || {
+            statistics.record_disk_write(bytes);
+            metrics.storage_disk_write.increase(1);
+            metrics.storage_disk_write_bytes.increase(bytes as u64);
+            metrics.storage_disk_write_duration.record(now.elapsed().as_secs_f64());
+        })
     }
 }
