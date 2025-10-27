@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-10-27
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.20.1 |
+| foyer-common | 0.20.1 |
+| foyer-memory | 0.20.1 |
+| foyer-storage | 0.20.1 |
+| foyer-bench | 0.20.1 |
+
+### Changes
+
+- Fix metrics "Disk Op Duration".
+
 ## 2025-09-23
 
 ### Release
