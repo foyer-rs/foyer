@@ -98,8 +98,8 @@ impl UringIoEngineBuilder {
     ///
     /// NOTE:
     ///
-    /// - If this feature is enabeld, the underlying device MUST be opened with the `O_DIRECT` flag.
-    /// - If this feature is enabeld, the underlying device MUST support io polling.
+    /// - If this feature is enabled, the underlying device MUST be opened with the `O_DIRECT` flag.
+    /// - If this feature is enabled, the underlying device MUST support io polling.
     ///
     /// Default: `false`.
     pub fn with_iopoll(mut self, iopoll: bool) -> Self {
@@ -124,7 +124,7 @@ impl UringIoEngineBuilder {
     ///
     /// Related syscall flag: `IORING_SETUP_IOPOLL`.
     ///
-    /// NOTE: If this feature is enabeld, the underlying device must be opened with the `O_DIRECT` flag.
+    /// NOTE: If this feature is enabled, the underlying device must be opened with the `O_DIRECT` flag.
     ///
     /// Default: `false`.
     pub fn with_sqpoll(mut self, sqpoll: bool) -> Self {
