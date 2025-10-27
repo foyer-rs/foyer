@@ -24,7 +24,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use futures_core::future::BoxFuture;
@@ -41,6 +41,7 @@ use crate::io::{
 pub struct IoHandle {
     #[pin]
     inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>,
+    callback: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl Debug for IoHandle {
@@ -51,7 +52,18 @@ impl Debug for IoHandle {
 
 impl From<BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>> for IoHandle {
     fn from(inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>) -> Self {
-        Self { inner }
+        Self { inner, callback: None }
+    }
+}
+
+impl IoHandle {
+    pub(crate) fn with_callback<F>(mut self, callback: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        assert!(self.callback.is_none(), "io handle callback can only be set once");
+        self.callback = Some(Box::new(callback));
+        self
     }
 }
 
@@ -60,7 +72,11 @@ impl Future for IoHandle {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        this.inner.poll(cx)
+        let res = ready!(this.inner.poll(cx));
+        if let Some(callback) = this.callback.take() {
+            callback();
+        }
+        Poll::Ready(res)
     }
 }
 
