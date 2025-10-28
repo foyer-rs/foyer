@@ -376,7 +376,7 @@ where
             self.recover_concurrency,
             recover_mode,
             self.blob_index_size,
-            &(0..blocks as BlockId).collect_vec(),
+            (0..blocks as BlockId).collect_vec(),
             &sequence,
             &indexer,
             &block_manager,

@@ -56,17 +56,12 @@ impl Default for S3FifoConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 enum Queue {
+    #[default]
     None,
     Main,
     Small,
-}
-
-impl Default for Queue {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// S3Fifo eviction algorithm hint.
