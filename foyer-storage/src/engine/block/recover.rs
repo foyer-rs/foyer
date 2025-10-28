@@ -20,9 +20,8 @@ use std::{
 };
 
 use foyer_common::metrics::Metrics;
-use futures_util::future::try_join_all;
+use futures_util::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use tokio::sync::Semaphore;
 
 use super::indexer::{EntryAddress, Indexer};
 use crate::{
@@ -49,7 +48,7 @@ impl RecoverRunner {
         recover_concurrency: usize,
         recover_mode: RecoverMode,
         blob_index_size: usize,
-        blocks: &[BlockId],
+        blocks: Vec<BlockId>,
         sequence: &AtomicSequence,
         indexer: &Indexer,
         block_manager: &BlockManager,
@@ -60,19 +59,17 @@ impl RecoverRunner {
         let now = Instant::now();
 
         // Recover blocks concurrently.
-        let semaphore = Arc::new(Semaphore::new(recover_concurrency));
         let mode = recover_mode;
-        let handles = blocks.iter().map(|id| {
-            let semaphore = semaphore.clone();
-            let block = block_manager.block(*id).clone();
-            runtime.user().spawn(async move {
-                let permit = semaphore.acquire().await;
-                let res = BlockRecoverRunner::run(mode, block, blob_index_size).await;
-                drop(permit);
-                res
-            })
-        });
-        let total = try_join_all(handles).await.unwrap();
+        let total = stream::iter(blocks.into_iter().map(|id| {
+            let block = block_manager.block(id).clone();
+            runtime
+                .user()
+                .spawn(async move { BlockRecoverRunner::run(mode, block, blob_index_size).await })
+        }))
+        .buffered(recover_concurrency)
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
 
         // Return error is there is.
         let (total, errs): (Vec<_>, Vec<_>) = total.into_iter().partition(|res| res.is_ok());

@@ -25,19 +25,15 @@ use std::fmt::Debug;
 /// For more details, please refer to the document of each enum options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub enum Hint {
     /// The default hint shared by all cache eviction algorithms.
+    #[default]
     Normal,
     /// Suggest the priority of the entry is low.
     ///
     /// Used by LRU.
     Low,
-}
-
-impl Default for Hint {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 // TODO(MrCroxx): Is it necessary to make popluated entry still follow the cache location advice?
@@ -83,17 +79,13 @@ pub struct Populated {
 /// Entry source used by hybrid cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub enum Source {
     /// Comes from outer system of foyer.
+    #[default]
     Outer,
     /// Populated from the disk cache.
     Populated(Populated),
-}
-
-impl Default for Source {
-    fn default() -> Self {
-        Self::Outer
-    }
 }
 
 /// Entry level properties trait.

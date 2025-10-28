@@ -173,18 +173,13 @@ impl Properties for HybridCacheProperties {
 }
 
 /// Control the cache policy of the hybrid cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum HybridCachePolicy {
     /// Write disk cache on entry eviction. (Default)
+    #[default]
     WriteOnEviction,
     /// Write disk cache on entry insertion.
     WriteOnInsertion,
-}
-
-impl Default for HybridCachePolicy {
-    fn default() -> Self {
-        Self::WriteOnEviction
-    }
 }
 
 pub struct HybridCachePipe<K, V, S>

@@ -67,18 +67,13 @@ impl Default for LfuConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 enum Queue {
+    #[default]
     None,
     Window,
     Probation,
     Protected,
-}
-
-impl Default for Queue {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// w-TinyLFU eviction algorithm hint.
