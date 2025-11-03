@@ -26,6 +26,8 @@ bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 fastrace = { workspace = true, optional = true }
+futures-core = { workspace = true }
+hashbrown = { workspace = true }
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }

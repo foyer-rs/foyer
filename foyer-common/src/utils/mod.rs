@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Either type.
+pub mod either;
 /// Extensions for [`std::option::Option`].
 pub mod option;
 /// The range extensions.

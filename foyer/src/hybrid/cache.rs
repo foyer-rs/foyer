@@ -38,15 +38,20 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
     rate::RateLimiter,
+    utils::{either::Either, scope::Scope},
 };
 use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, FetchTarget, Piece, Pipe};
 use foyer_storage::{Load, Statistics, Store};
+use futures_core::future::BoxFuture;
+use futures_util::FutureExt;
+use parking_lot::Mutex;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::hybrid::{
     builder::HybridCacheBuilder,
     error::{Error, Result},
+    inflight::{InflightMap, Waiter},
     writer::{HybridCacheStorageWriter, HybridCacheWriter},
 };
 
@@ -76,9 +81,9 @@ macro_rules! root_span {
 
 #[cfg(feature = "tracing")]
 macro_rules! try_cancel {
-    ($self:ident, $span:ident, $threshold:ident) => {
+    ($span:expr, $threshold:expr) => {
         if let Some(elapsed) = $span.elapsed() {
-            if elapsed < $self.inner.tracing_config.$threshold() {
+            if elapsed < $threshold {
                 $span.cancel();
             }
         }
@@ -87,7 +92,7 @@ macro_rules! try_cancel {
 
 #[cfg(not(feature = "tracing"))]
 macro_rules! try_cancel {
-    ($self:ident, $span:ident, $threshold:ident) => {};
+    ($span:expr, $threshold:ident) => {};
 }
 
 /// Entry properties for in-memory only cache.
@@ -297,6 +302,7 @@ where
     closed: Arc<AtomicBool>,
     memory: Cache<K, V, S, HybridCacheProperties>,
     storage: Store<K, V, S, HybridCacheProperties>,
+    inflights: Vec<Mutex<InflightMap<K, V, S>>>,
     #[cfg(feature = "tracing")]
     tracing: std::sync::atomic::AtomicBool,
     #[cfg(feature = "tracing")]
@@ -453,6 +459,7 @@ where
         #[cfg(feature = "tracing")]
         let tracing = std::sync::atomic::AtomicBool::new(false);
         let closed = Arc::new(AtomicBool::new(false));
+        let inflights = todo!();
         let inner = Inner {
             name,
             policy,
@@ -460,6 +467,7 @@ where
             closed,
             memory,
             storage,
+            inflights,
             metrics,
             #[cfg(feature = "tracing")]
             tracing,
@@ -534,7 +542,7 @@ where
             .hybrid_insert_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_insert_threshold());
 
         entry
     }
@@ -565,7 +573,7 @@ where
             .hybrid_insert_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_insert_threshold());
 
         entry
     }
@@ -605,7 +613,7 @@ where
         let guard = span.set_local_parent();
         if let Some(entry) = self.inner.memory.get(key) {
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold);
+            try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
             return Ok(Some(entry));
         }
         #[cfg(feature = "tracing")]
@@ -643,7 +651,7 @@ where
             }
         };
 
-        try_cancel!(self, span, record_hybrid_get_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
 
         Ok(entry)
     }
@@ -701,16 +709,15 @@ where
         #[cfg(feature = "tracing")]
         drop(guard);
 
-        let res = fetch.await;
+        let r = fetch.await;
 
-        match res {
+        let res = match r {
             Ok(entry) => {
                 self.inner.metrics.hybrid_hit.increase(1);
                 self.inner
                     .metrics
                     .hybrid_hit_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::Throttled) => {
@@ -719,7 +726,6 @@ where
                     .metrics
                     .hybrid_throttled_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
             Err(ObtainFetchError::NotExist) => {
@@ -728,14 +734,14 @@ where
                     .metrics
                     .hybrid_miss_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
                 Ok(None)
             }
-            Err(ObtainFetchError::Other(e)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
-                Err(e)
-            }
-        }
+            Err(ObtainFetchError::Other(e)) => Err(e),
+        };
+
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
+
+        res
     }
 
     /// Remove a cached entry with the given key from the hybrid cache.
@@ -759,7 +765,7 @@ where
             .hybrid_remove_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_remove_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_remove_threshold());
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -815,6 +821,509 @@ where
 
     pub(crate) fn metrics(&self) -> &Arc<Metrics> {
         &self.inner.metrics
+    }
+
+    /// Get cached entry with the given key from the hybrid cache.
+    pub fn get_v2<'a, 'b, Q>(&'a self, key: &'b Q) -> HybridGet<K, V, S>
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+        &'b Q: Into<K>,
+    {
+        root_span!(self, span, "foyer::hybrid::cache::get");
+
+        let now = Instant::now();
+
+        let inner = match self.inner.memory.get_or(key, |hash| {
+            let either = self.inner.inflights[hash as usize % self.inner.inflights.len()]
+                .lock()
+                .enqueue(key, None);
+            (hash, either)
+        }) {
+            Either::Left(entry) => HybridGetInner::Hit(Some(entry)),
+            Either::Right((hash, either)) => match either {
+                Either::Left((id, waiter)) => {
+                    let flight = Some(Flight {
+                        id,
+                        cache: self.clone(),
+                        key: key.into(),
+                        hash,
+                    });
+                    HybridGetInner::FlightAndWait { flight, waiter }
+                }
+                Either::Right(waiter) => HybridGetInner::Wait(waiter),
+            },
+        };
+
+        HybridGet {
+            cache: self.inner.clone(),
+            inner,
+            start: now,
+            #[cfg(feature = "tracing")]
+            span,
+        }
+    }
+}
+
+pub struct Flight<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    id: usize,
+    cache: HybridCache<K, V, S>,
+    key: K,
+    hash: u64,
+}
+
+impl<K, V, S> Flight<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn run(self) {
+        let Flight { id, cache, key, hash } = self;
+        let rt = cache.inner.storage.runtime().clone();
+        rt.read().spawn(async move {
+            // 1. lookup disk cache
+
+            let extract_either = || {
+                cache.inner.inflights[hash as usize % cache.inner.inflights.len()]
+                    .lock()
+                    .with(|mut inflight| match inflight.remote(&key, id) {
+                        Some(remote) => Either::Left(remote),
+                        None => Either::Right(inflight.take(&key, Some(id))),
+                    })
+            };
+
+            let (either, e) = match cache.inner.storage.load(&key).await {
+                Ok(Load::Entry { key, value, populated }) => {
+                    let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
+                    let (entry, notifiers) =
+                        cache
+                            .inner
+                            .memory
+                            .insert_with_properties_with(key, value, properties, |hash, k, _v| {
+                                cache.inner.inflights[hash as usize % cache.inner.inflights.len()]
+                                    .lock()
+                                    .take(k, Some(id))
+                            });
+                    for notifier in notifiers {
+                        let _ = notifier.send(Ok(Some(entry.clone())));
+                    }
+                    return;
+                }
+                Ok(Load::Piece { piece, populated: _ }) => {
+                    let (entry, notifiers) = cache.inner.memory.insert_piece_with(piece, |hash, k, _v| {
+                        cache.inner.inflights[hash as usize % cache.inner.inflights.len()]
+                            .lock()
+                            .take(k, Some(id))
+                    });
+                    for notifier in notifiers {
+                        let _ = notifier.send(Ok(Some(entry.clone())));
+                    }
+                    return;
+                }
+                Ok(Load::Throttled | Load::Miss) => {
+                    let either = extract_either();
+                    (either, None)
+                }
+                Err(e) => {
+                    let either = extract_either();
+                    (either, Some(e))
+                }
+            };
+
+            let remote = match either {
+                Either::Left(remote) => remote,
+                Either::Right(notifier) => {
+                    if let Some(e) = e {
+                        let e = Arc::new(e);
+                        for notifier in notifier {
+                            let _ = notifier.send(Err(Error::other(e.clone())));
+                        }
+                    } else {
+                        for notifier in notifier {
+                            let _ = notifier.send(Ok(None));
+                        }
+                    }
+                    return;
+                }
+            };
+
+            let rt = cache.inner.storage.runtime().clone();
+            // TODO(MrCroxx): Remove dedicated runtime, don't need to spawn here.
+            rt.user()
+                .spawn(async move {
+                    match remote.await {
+                        Ok((key, value, properties)) => {
+                            let properties = properties.with_source(Source::Outer);
+                            let (entry, notifiers) = cache.inner.memory.insert_with_properties_with(
+                                key,
+                                value,
+                                properties,
+                                |hash, k, _v| {
+                                    cache.inner.inflights[hash as usize % cache.inner.inflights.len()]
+                                        .lock()
+                                        .take(k, Some(id))
+                                },
+                            );
+                            for notifier in notifiers {
+                                let _ = notifier.send(Ok(Some(entry.clone())));
+                            }
+                        }
+                        Err(e) => {
+                            let e = Arc::new(e);
+                            for notifier in cache.inner.inflights[hash as usize % cache.inner.inflights.len()]
+                                .lock()
+                                .take(&key, Some(id))
+                            {
+                                let _ = notifier.send(Err(Error::other(e.clone())));
+                            }
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+        });
+    }
+}
+
+#[pin_project(project = GetProj)]
+pub struct HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    cache: Arc<Inner<K, V, S>>,
+    #[pin]
+    inner: HybridGetInner<K, V, S>,
+    start: Instant,
+    #[cfg(feature = "tracing")]
+    span: Span,
+}
+
+impl<K, V, S> Debug for HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Get")
+            .field("inner", &self.inner)
+            .field("start", &self.start)
+            .finish()
+    }
+}
+
+#[pin_project(project = HybridGetInnerProj)]
+enum HybridGetInner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    Hit(Option<HybridCacheEntry<K, V, S>>),
+    // Load {
+    //     #[pin]
+    //     waiter: Waiter<Option<HybridCacheEntry<K, V, S>>>,
+    //     #[pin]
+    //     load: BoxFuture<'static, Result<Load<K, V, HybridCacheProperties>>>,
+    //     skip_waiter: bool,
+    // },
+    FlightAndWait {
+        flight: Option<Flight<K, V, S>>,
+        #[pin]
+        waiter: Waiter<Option<HybridCacheEntry<K, V, S>>>,
+    },
+    Wait(#[pin] Waiter<Option<HybridCacheEntry<K, V, S>>>),
+}
+
+impl<K, V, S> Debug for HybridGetInner<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hit(_) => f.debug_tuple("Hit").finish(),
+            Self::FlightAndWait { .. } => f.debug_tuple("FlightAndWait").finish(),
+            Self::Wait(_) => f.debug_tuple("Wait").finish(),
+        }
+    }
+}
+
+impl<K, V, S> Future for HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        let poll = match this.inner.as_mut().project() {
+            HybridGetInnerProj::Hit(entry) => {
+                assert!(entry.is_some(), "entry is already taken");
+                Poll::Ready(Ok(entry.take()))
+            }
+            HybridGetInnerProj::FlightAndWait { flight, waiter } => {
+                if let Some(flight) = flight.take() {
+
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                }
+                waiter.poll(cx).map(|res| res.map_err(Error::other).flatten())
+            }
+            // GetInnerProj::Load {
+            //     waiter,
+            //     load,
+            //     skip_waiter,
+            // } => {
+            //     // FIXME(MrCroxx): This branch is responsible for reclaiming waiters before return error.
+
+            //     if !*skip_waiter {
+            //         if let Poll::Ready(e) = waiter.poll(cx) {
+            //             *skip_waiter = true;
+
+            //             match e {
+            //                 Ok(Some(e))
+            //                 // Since there it is guaranteed that there is only one successful load for each key,
+            //                 //
+            //                 _=>unreachable!(),
+            //             }
+            //         }
+            //     }
+            //     match ready!(load.poll(cx)) {
+            //         Err(e) => Poll::Ready(Err(e)),
+            //         Ok(Load::Entry { key, value, populated }) => todo!(),
+            //         Ok(Load::Piece { piece, populated }) => todo!(),
+            //         Ok(Load::Throttled) => todo!(),
+            //         Ok(Load::Miss) => todo!(),
+            //     }
+            // }
+            HybridGetInnerProj::Wait(waiter) => waiter.poll(cx).map(|res| res.map_err(Error::other).flatten()),
+        };
+        match &poll {
+            Poll::Ready(Ok(Some(_))) => {
+                this.cache.metrics.hybrid_hit.increase(1);
+                this.cache
+                    .metrics
+                    .hybrid_hit_duration
+                    .record(this.start.elapsed().as_secs_f64());
+                try_cancel!(this.span, this.cache.tracing_config.record_hybrid_get_threshold());
+            }
+            Poll::Ready(Ok(None)) => {
+                this.cache.metrics.hybrid_miss.increase(1);
+                this.cache
+                    .metrics
+                    .hybrid_miss_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+            _ => {}
+        }
+        poll
+    }
+}
+
+impl<K, V, S> HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    pub fn fetch_on_miss<F, FU>(self, f: F) -> HybridFetchV2<K, V, S>
+    where
+        F: FnOnce() -> FU,
+        FU: Future<Output = Result<V>> + Send + 'static,
+    {
+        root_span!(self, span, "foyer::hybrid::cache::fetch");
+
+        let now = Instant::now();
+
+        let inner = match self.inner {
+            HybridGetInner::Hit(e) => HybridFetchInnerV2::Hit(e),
+            HybridGetInner::FlightAndWait { flight, waiter } => {
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!()
+            }
+            HybridGetInner::Wait(waiter) => HybridFetchInnerV2::Wait(waiter),
+        };
+
+        // let inner = match self.inner.memory.get_or(key, |hash| {
+        //     let either = self.inner.inflights[hash as usize % self.inner.inflights.len()]
+        //         .lock()
+        //         .enqueue(key, None);
+        //     (hash, either)
+        // }) {
+        //     Either::Left(entry) => HybridGetInner::Hit(Some(entry)),
+        //     Either::Right((hash, either)) => match either {
+        //         Either::Left((id, waiter)) => {
+        //             let flight = Some(Flight {
+        //                 id,
+        //                 cache: self.clone(),
+        //                 key: key.into(),
+        //                 hash,
+        //             });
+        //             HybridGetInner::FlightAndWait { flight, waiter }
+        //         }
+        //         Either::Right(waiter) => HybridGetInner::Wait(waiter),
+        //     },
+        // };
+
+        // HybridGet {
+        //     cache: self.inner.clone(),
+        //     inner,
+        //     start: now,
+        //     #[cfg(feature = "tracing")]
+        //     span,
+        // }
+        HybridFetchV2 {
+            cache: self.cache,
+            inner: todo!(),
+            start: todo!(),
+            span: todo!(),
+        }
+    }
+}
+
+#[pin_project(project = FetchProj)]
+pub struct HybridFetchV2<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    cache: Arc<Inner<K, V, S>>,
+    #[pin]
+    inner: HybridFetchInnerV2<K, V, S>,
+    start: Instant,
+    #[cfg(feature = "tracing")]
+    span: Span,
+}
+
+#[pin_project(project = HybridFetchInnerProj)]
+enum HybridFetchInnerV2<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    Hit(Option<HybridCacheEntry<K, V, S>>),
+    // Load {
+    //     #[pin]
+    //     waiter: Waiter<Option<HybridCacheEntry<K, V, S>>>,
+    //     #[pin]
+    //     load: BoxFuture<'static, Result<Load<K, V, HybridCacheProperties>>>,
+    //     skip_waiter: bool,
+    // },
+    FlightAndWait {
+        flight: Option<Flight<K, V, S>>,
+        #[pin]
+        waiter: Waiter<Option<HybridCacheEntry<K, V, S>>>,
+    },
+    Wait(#[pin] Waiter<Option<HybridCacheEntry<K, V, S>>>),
+}
+
+impl<K, V, S> Future for HybridFetchV2<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        let poll = match this.inner.as_mut().project() {
+            HybridFetchInnerProj::Hit(entry) => {
+                assert!(entry.is_some(), "entry is already taken");
+                Poll::Ready(Ok(entry.take()))
+            }
+            HybridFetchInnerProj::FlightAndWait { flight, waiter } => {
+                if let Some(flight) = flight.take() {
+
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                    // FIXME(MrCroxx): Start flight!!!!!!!!!
+                }
+                waiter.poll(cx).map(|res| res.map_err(Error::other).flatten())
+            }
+            // GetInnerProj::Load {
+            //     waiter,
+            //     load,
+            //     skip_waiter,
+            // } => {
+            //     // FIXME(MrCroxx): This branch is responsible for reclaiming waiters before return error.
+
+            //     if !*skip_waiter {
+            //         if let Poll::Ready(e) = waiter.poll(cx) {
+            //             *skip_waiter = true;
+
+            //             match e {
+            //                 Ok(Some(e))
+            //                 // Since there it is guaranteed that there is only one successful load for each key,
+            //                 //
+            //                 _=>unreachable!(),
+            //             }
+            //         }
+            //     }
+            //     match ready!(load.poll(cx)) {
+            //         Err(e) => Poll::Ready(Err(e)),
+            //         Ok(Load::Entry { key, value, populated }) => todo!(),
+            //         Ok(Load::Piece { piece, populated }) => todo!(),
+            //         Ok(Load::Throttled) => todo!(),
+            //         Ok(Load::Miss) => todo!(),
+            //     }
+            // }
+            HybridFetchInnerProj::Wait(waiter) => waiter.poll(cx).map(|res| res.map_err(Error::other).flatten()),
+        };
+        match &poll {
+            Poll::Ready(Ok(Some(_))) => {
+                this.cache.metrics.hybrid_hit.increase(1);
+                this.cache
+                    .metrics
+                    .hybrid_hit_duration
+                    .record(this.start.elapsed().as_secs_f64());
+                try_cancel!(this.span, this.cache.tracing_config.record_hybrid_get_threshold());
+            }
+            Poll::Ready(Ok(None)) => {
+                this.cache.metrics.hybrid_miss.increase(1);
+                this.cache
+                    .metrics
+                    .hybrid_miss_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+            _ => {}
+        }
+        poll
     }
 }
 

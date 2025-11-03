@@ -16,6 +16,7 @@ use std::{
     any::{Any, TypeId},
     borrow::Cow,
     fmt::Debug,
+    future::Future,
     hash::Hash,
     sync::Arc,
     time::Instant,
@@ -29,6 +30,7 @@ use foyer_common::{
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
+use futures_util::{future::ready, FutureExt};
 use tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
@@ -233,6 +235,83 @@ where
             }
         }
     }
+
+    // pub fn load_v2<Q>(&self, key: &Q) -> impl Future<Output = Result<Load<K, V, P>>> + Send + use<'_, Q, K, V, S, P>
+    // where
+    //     Q: Hash + Equivalent<K> + ?Sized + Send,
+    // {
+    //     async {
+    //         let now = Instant::now();
+
+    //         let hash = self.inner.hasher.hash_one(key);
+
+    //         if let Some(piece) = self.inner.keeper.get(hash, key) {
+    //             tracing::trace!(hash, "[store]: load from keeper");
+    //             return Ok(Load::Piece {
+    //                 piece,
+    //                 populated: Populated { age: Age::Young },
+    //             });
+    //         }
+
+    //         #[cfg(feature = "test_utils")]
+    //         if self.inner.load_throttle_switch.is_throttled() {
+    //             self.inner.metrics.storage_throttled.increase(1);
+    //             self.inner
+    //                 .metrics
+    //                 .storage_throttled_duration
+    //                 .record(now.elapsed().as_secs_f64());
+    //             return Ok(Load::Throttled);
+    //         }
+
+    //         let future = self.inner.engine.load(hash);
+    //         match self.inner.runtime.read().spawn(future).await.unwrap() {
+    //             Ok(Load::Entry {
+    //                 key: k,
+    //                 value: v,
+    //                 populated: p,
+    //             }) if key.equivalent(&k) => {
+    //                 self.inner.metrics.storage_hit.increase(1);
+    //                 self.inner
+    //                     .metrics
+    //                     .storage_hit_duration
+    //                     .record(now.elapsed().as_secs_f64());
+    //                 Ok(Load::Entry {
+    //                     key: k,
+    //                     value: v,
+    //                     populated: p,
+    //                 })
+    //             }
+    //             Ok(Load::Piece { piece, populated }) if key.equivalent(piece.key()) => {
+    //                 self.inner.metrics.storage_hit.increase(1);
+    //                 self.inner
+    //                     .metrics
+    //                     .storage_hit_duration
+    //                     .record(now.elapsed().as_secs_f64());
+    //                 Ok(Load::Piece { piece, populated })
+    //             }
+    //             Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) | Ok(Load::Miss) => {
+    //                 self.inner.metrics.storage_miss.increase(1);
+    //                 self.inner
+    //                     .metrics
+    //                     .storage_miss_duration
+    //                     .record(now.elapsed().as_secs_f64());
+    //                 Ok(Load::Miss)
+    //             }
+    //             Ok(Load::Throttled) => {
+    //                 self.inner.metrics.storage_throttled.increase(1);
+    //                 self.inner
+    //                     .metrics
+    //                     .storage_throttled_duration
+    //                     .record(now.elapsed().as_secs_f64());
+    //                 Ok(Load::Throttled)
+    //             }
+    //             Err(e) => {
+    //                 self.inner.metrics.storage_error.increase(1);
+    //                 Err(e)
+    //             }
+    //         }
+    //     }
+    // }
 
     /// Delete the cache entry with the given key from the disk cache.
     pub fn delete<'a, Q>(&'a self, key: &'a Q)

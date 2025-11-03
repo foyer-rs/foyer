@@ -15,4 +15,5 @@
 pub mod builder;
 pub mod cache;
 pub mod error;
+pub mod inflight;
 pub mod writer;

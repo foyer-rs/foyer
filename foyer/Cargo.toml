@@ -41,7 +41,11 @@ fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+hashbrown = { workspace = true }
 mixtrics = { workspace = true }
+parking_lot = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

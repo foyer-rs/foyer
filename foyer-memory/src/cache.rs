@@ -22,6 +22,7 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
     runtime::SingletonHandle,
+    utils::either::Either,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -723,6 +724,88 @@ where
         }
     }
 
+    #[doc(hidden)]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::insert_with_properties_with")
+    )]
+    pub fn insert_with_properties_with<F, U>(
+        &self,
+        key: K,
+        value: V,
+        properties: P,
+        f: F,
+    ) -> (CacheEntry<K, V, S, P>, U)
+    where
+        F: FnOnce(u64, &K, &V) -> U,
+    {
+        match self {
+            Cache::Fifo(cache) => {
+                let (e, u) = cache.insert_with_properties_with(key, value, properties, f);
+                (e.into(), u)
+            }
+            Cache::S3Fifo(cache) => {
+                let (e, u) = cache.insert_with_properties_with(key, value, properties, f);
+                (e.into(), u)
+            }
+            Cache::Lru(cache) => {
+                let (e, u) = cache.insert_with_properties_with(key, value, properties, f);
+                (e.into(), u)
+            }
+            Cache::Lfu(cache) => {
+                let (e, u) = cache.insert_with_properties_with(key, value, properties, f);
+                (e.into(), u)
+            }
+            Cache::Sieve(cache) => {
+                let (e, u) = cache.insert_with_properties_with(key, value, properties, f);
+                (e.into(), u)
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::insert_piece_with"))]
+    pub fn insert_piece_with<F, U>(&self, piece: Piece<K, V, P>, f: F) -> (CacheEntry<K, V, S, P>, U)
+    where
+        F: FnOnce(u64, &K, &V) -> U,
+    {
+        match self {
+            Cache::Fifo(cache) => {
+                let (e, u) = cache.insert_piece_with(piece, f);
+                (e.into(), u)
+            }
+            Cache::S3Fifo(cache) => {
+                let (e, u) = cache.insert_piece_with(piece, f);
+                (e.into(), u)
+            }
+            Cache::Lru(cache) => {
+                let (e, u) = cache.insert_piece_with(piece, f);
+                (e.into(), u)
+            }
+            Cache::Lfu(cache) => {
+                let (e, u) = cache.insert_piece_with(piece, f);
+                (e.into(), u)
+            }
+            Cache::Sieve(cache) => {
+                let (e, u) = cache.insert_piece_with(piece, f);
+                (e.into(), u)
+            }
+        }
+    }
+
+    // /// Insert cache entry to the in-memory cache.
+    // #[doc(hidden)]
+    // #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::insert"))]
+    // pub fn insert_with(&self, key: K, value: V) -> CacheEntry<K, V, S, P> {
+    //     match self {
+    //         Cache::Fifo(cache) => cache.insert_with(key, value).into(),
+    //         Cache::S3Fifo(cache) => cache.insert_with(key, value).into(),
+    //         Cache::Lru(cache) => cache.insert_with(key, value).into(),
+    //         Cache::Lfu(cache) => cache.insert_with(key, value).into(),
+    //         Cache::Sieve(cache) => cache.insert_with(key, value).into(),
+    //     }
+    // }
+
     /// Remove a cached entry with the given key from the in-memory cache.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::remove"))]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>
@@ -750,6 +833,22 @@ where
             Cache::Lru(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Lfu(cache) => cache.get(key).map(CacheEntry::from),
             Cache::Sieve(cache) => cache.get(key).map(CacheEntry::from),
+        }
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get_or"))]
+    pub fn get_or<Q, F, U>(&self, key: &Q, f: F) -> Either<CacheEntry<K, V, S, P>, U>
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+        F: FnOnce(u64) -> U,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.get_or(key, f).map_left(CacheEntry::from),
+            Cache::S3Fifo(cache) => cache.get_or(key, f).map_left(CacheEntry::from),
+            Cache::Lru(cache) => cache.get_or(key, f).map_left(CacheEntry::from),
+            Cache::Lfu(cache) => cache.get_or(key, f).map_left(CacheEntry::from),
+            Cache::Sieve(cache) => cache.get_or(key, f).map_left(CacheEntry::from),
         }
     }
 

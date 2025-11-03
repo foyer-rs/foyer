@@ -38,7 +38,7 @@ use foyer_common::{
     properties::{Location, Properties, Source},
     runtime::SingletonHandle,
     strict_assert,
-    utils::scope::Scope,
+    utils::{either::Either, scope::Scope},
 };
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
@@ -195,6 +195,65 @@ where
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
         record.inc_refs(waiters.len() + 1);
+
+        match self.usage.cmp(&old_usage) {
+            std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
+            std::cmp::Ordering::Less => self.metrics.memory_usage.decrease((old_usage - self.usage) as _),
+            std::cmp::Ordering::Equal => {}
+        }
+    }
+
+    fn emplace_v2(&mut self, record: Arc<Record<E>>, garbages: &mut Vec<(Event, Arc<Record<E>>)>) {
+        if record.properties().phantom().unwrap_or_default() {
+            if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
+                strict_assert!(!old.is_in_indexer());
+
+                if old.is_in_eviction() {
+                    self.eviction.remove(&old);
+                }
+                strict_assert!(!old.is_in_eviction());
+
+                self.usage -= old.weight();
+
+                garbages.push((Event::Replace, old));
+            }
+            record.inc_refs(1);
+            garbages.push((Event::Remove, record));
+            self.metrics.memory_insert.increase(1);
+            return;
+        }
+
+        let weight = record.weight();
+        let old_usage = self.usage;
+
+        // Evict overflow records.
+        self.evict(self.capacity.saturating_sub(weight), garbages);
+
+        // Insert new record
+        if let Some(old) = self.indexer.insert(record.clone()) {
+            self.metrics.memory_replace.increase(1);
+
+            strict_assert!(!old.is_in_indexer());
+
+            if old.is_in_eviction() {
+                self.eviction.remove(&old);
+            }
+            strict_assert!(!old.is_in_eviction());
+
+            self.usage -= old.weight();
+
+            garbages.push((Event::Replace, old));
+        } else {
+            self.metrics.memory_insert.increase(1);
+        }
+        strict_assert!(record.is_in_indexer());
+
+        strict_assert!(!record.is_in_eviction());
+        self.eviction.push(record.clone());
+        strict_assert!(record.is_in_eviction());
+
+        self.usage += weight;
+        record.inc_refs(1);
 
         match self.usage.cmp(&old_usage) {
             std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
@@ -663,6 +722,88 @@ where
         }
     }
 
+    #[doc(hidden)]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::insert_with_properties_with")
+    )]
+    pub fn insert_with_properties_with<F, U>(
+        &self,
+        key: E::Key,
+        value: E::Value,
+        mut properties: E::Properties,
+        f: F,
+    ) -> (RawCacheEntry<E, S, I>, U)
+    where
+        F: FnOnce(u64, &E::Key, &E::Value) -> U,
+    {
+        let hash = self.inner.hash_builder.hash_one(&key);
+        let weight = (self.inner.weighter)(&key, &value);
+        if !(self.inner.filter)(&key, &value) {
+            properties = properties.with_phantom(true);
+        }
+        if let Some(location) = properties.location() {
+            if location == Location::OnDisk {
+                properties = properties.with_phantom(true);
+            }
+        }
+        let record = Arc::new(Record::new(Data {
+            key,
+            value,
+            properties,
+            hash,
+            weight,
+        }));
+        self.insert_with(record, f)
+    }
+
+    #[doc(hidden)]
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_piece_with"))]
+    pub fn insert_piece_with<F, U>(
+        &self,
+        piece: Piece<E::Key, E::Value, E::Properties>,
+        f: F,
+    ) -> (RawCacheEntry<E, S, I>, U)
+    where
+        F: FnOnce(u64, &E::Key, &E::Value) -> U,
+    {
+        self.insert_with(piece.into_record(), f)
+    }
+
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_with"))]
+    fn insert_with<F, U>(&self, record: Arc<Record<E>>, f: F) -> (RawCacheEntry<E, S, I>, U)
+    where
+        F: FnOnce(u64, &E::Key, &E::Value) -> U,
+    {
+        let mut garbages = vec![];
+
+        let u = self.inner.shards[self.shard(record.hash())].write().with(|mut shard| {
+            shard.emplace_v2(record.clone(), &mut garbages);
+            f(record.hash(), record.key(), record.value())
+        });
+
+        // Deallocate data out of the lock critical section.
+        let pipe = self.inner.pipe.load();
+        let piped = pipe.is_enabled();
+        if self.inner.event_listener.is_some() || piped {
+            for (event, record) in garbages {
+                if let Some(listener) = self.inner.event_listener.as_ref() {
+                    listener.on_leave(event, record.key(), record.value())
+                }
+                if piped && event == Event::Evict {
+                    pipe.send(Piece::new(record));
+                }
+            }
+        }
+
+        let entry = RawCacheEntry {
+            record,
+            inner: self.inner.clone(),
+        };
+
+        (entry, u)
+    }
+
     /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::evict_all"))]
     pub fn evict_all(&self) {
@@ -756,6 +897,51 @@ where
             inner: self.inner.clone(),
             record,
         })
+    }
+
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get_or"))]
+    pub fn get_or<Q, F, U>(&self, key: &Q, f: F) -> Either<RawCacheEntry<E, S, I>, U>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+        F: FnOnce(u64) -> U,
+    {
+        let hash = self.inner.hash_builder.hash_one(key);
+
+        match E::acquire() {
+            Op::Noop => self.inner.shards[self.shard(hash)].read().with_ref(|shard| {
+                shard
+                    .get_noop(hash, key)
+                    .map(|record| {
+                        Either::Left(RawCacheEntry {
+                            inner: self.inner.clone(),
+                            record,
+                        })
+                    })
+                    .unwrap_or_else(|| Either::Right(f(hash)))
+            }),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)].read().with_ref(|shard| {
+                shard
+                    .get_immutable(hash, key)
+                    .map(|record| {
+                        Either::Left(RawCacheEntry {
+                            inner: self.inner.clone(),
+                            record,
+                        })
+                    })
+                    .unwrap_or_else(|| Either::Right(f(hash)))
+            }),
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)].write().with_mut(|shard| {
+                shard
+                    .get_mutable(hash, key)
+                    .map(|record| {
+                        Either::Left(RawCacheEntry {
+                            inner: self.inner.clone(),
+                            record,
+                        })
+                    })
+                    .unwrap_or_else(|| Either::Right(f(hash)))
+            }),
+        }
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::contains"))]
