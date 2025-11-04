@@ -1047,9 +1047,10 @@ where
 
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            |k| {
+            |throttled, k| {
                 let store = self.inner.storage.clone();
                 let key = k.into();
+                let throttled = throttled.clone();
                 let load = async move {
                     match store.load(&key).await {
                         Ok(Load::Entry { key, value, populated }) => {
@@ -1058,15 +1059,19 @@ where
                         }
                         // TODO(MrCroxx): Remove populated with piece?
                         Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
-                        Ok(Load::Throttled) => todo!(),
+                        Ok(Load::Throttled) => {
+                            throttled.store(true, Ordering::Relaxed);
+                            Ok(None)
+                        }
                         Ok(Load::Miss) => Ok(None),
-                        Err(e) => todo!(),
+                        Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
                 }
                 .boxed();
                 Some(load)
             },
-            |k| todo!(),
+            |throttled, k| todo!(),
+            AtomicBool::new(false),
         );
 
         todo!()

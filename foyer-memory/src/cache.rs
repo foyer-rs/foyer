@@ -1315,19 +1315,19 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR>(&self, key: &'b Q, fo: FO, fr: FR) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR, C>(&self, key: &'b Q, fo: FO, fr: FR, ctx: C) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized,
         &'b Q: Into<K>,
-        FO: FnOnce(&'b Q) -> Option<OptionalFetch<FetchTargetV2<K, V, P>>>,
-        FR: FnOnce(&'b Q) -> Option<RequiredFetch<FetchTargetV2<K, V, P>>>,
+        FO: FnOnce(&Arc<C>, &'b Q) -> Option<OptionalFetch<FetchTargetV2<K, V, P>>>,
+        FR: FnOnce(&Arc<C>, &'b Q) -> Option<RequiredFetch<FetchTargetV2<K, V, P>>>,
     {
         match self {
-            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
+            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
         }
     }
 }

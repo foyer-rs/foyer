@@ -1247,8 +1247,8 @@ where
     {
         self.get_or_fetch_inner(
             key,
-            move |_| None,
-            move |k| {
+            move |_, _| None,
+            move |_, k| {
                 let key = k.into();
                 Some(
                     async move {
@@ -1264,6 +1264,7 @@ where
                     .boxed(),
                 )
             },
+            (),
         )
     }
     #[cfg_attr(
@@ -1280,8 +1281,8 @@ where
     {
         self.get_or_fetch_inner(
             key,
-            move |_| None,
-            move |k| {
+            move |_, _| None,
+            move |_, k| {
                 let key = k.into();
                 Some(
                     async move {
@@ -1293,8 +1294,13 @@ where
                     .boxed(),
                 )
             },
+            (),
         )
     }
+
+    // TODO(MrCroxx): Refine the future. The `ctx: C` should be part of the future,
+    //                and the `fo` and `fr` future builders should delay building when polling.
+    //                However, the types are already way too complicated. Maybe refine it later.
 
     /// Advanced fetch with specified runtime.
     ///
@@ -1304,14 +1310,16 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR>(&self, key: &'b Q, fo: FO, fr: FR) -> RawGetOrFetch<E, S, I>
+    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR, C>(&self, key: &'b Q, fo: FO, fr: FR, ctx: C) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
         &'b Q: Into<E::Key>,
-        FO: FnOnce(&'b Q) -> Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
-        FR: FnOnce(&'b Q) -> Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        FO: FnOnce(&Arc<C>, &'b Q) -> Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        FR: FnOnce(&Arc<C>, &'b Q) -> Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
     {
         let hash = self.inner.hash_builder.hash_one(key);
+
+        let ctx = Arc::new(ctx);
 
         let extract = |key: &'b Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManager<E, S, I>>>| {
             opt.map(|record| {
@@ -1320,12 +1328,12 @@ where
                     record,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr(key)) {
+            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr(&ctx, key)) {
                 Enqueue::Lead { id, waiter } => RawGetOrFetchInner::Lead {
                     id,
                     key: key.into(),
                     waiter: Some(waiter),
-                    optional: fo(key),
+                    optional: fo(&ctx, key),
                     required: None,
                     cache: self.clone(),
                     inflights: inflights.clone(),
