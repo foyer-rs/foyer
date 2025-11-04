@@ -34,7 +34,14 @@ pub type Notifier<T> = oneshot::Sender<FetchResult<T>>;
 /// The target of a fetch operation.
 pub enum FetchTargetV2<K, V, P> {
     /// Fetched entry.
-    Entry { key: K, value: V, properties: P },
+    Entry {
+        /// Entry key.
+        key: K,
+        /// Entry value.
+        value: V,
+        /// Entry properties.
+        properties: P,
+    },
     /// Fetched piece from disk cache write queue.
     Piece(Piece<K, V, P>),
 }
@@ -48,15 +55,6 @@ impl<K, V, P> Debug for FetchTargetV2<K, V, P> {
 impl<K, V, P> From<Piece<K, V, P>> for FetchTargetV2<K, V, P> {
     fn from(piece: Piece<K, V, P>) -> Self {
         Self::Piece(piece)
-    }
-}
-
-impl<K, V, P> FetchTargetV2<K, V, P> {
-    pub fn key(&self) -> &K {
-        match self {
-            FetchTargetV2::Entry { key, .. } => key,
-            FetchTargetV2::Piece(piece) => piece.key(),
-        }
     }
 }
 
