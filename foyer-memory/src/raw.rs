@@ -204,7 +204,7 @@ where
         self.usage += weight;
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
-        record.inc_refs(waiters.len() + 1);
+        record.inc_refs(waiters.len() + notifiers.len() + 1);
 
         match self.usage.cmp(&old_usage) {
             std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
@@ -1635,7 +1635,7 @@ where
                     }
                 }
 
-                unreachable!();
+                Poll::Pending
             }
             RawGetOrFetchInnerProj::Wait(waiter) => waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten()),
         }
