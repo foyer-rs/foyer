@@ -26,11 +26,14 @@ cmsketch = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
 hashbrown = { workspace = true }
 intrusive-collections = { workspace = true }
 itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
+paste = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

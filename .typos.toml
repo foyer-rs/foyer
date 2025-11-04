@@ -1,6 +1,7 @@
 [default.extend-words]
 # "ot" short for "OpenTelemetry"
 ot = "ot"
+fo = "fo"
 
 [files]
 extend-exclude = ["foyer-workspace-hack/Cargo.toml", "*.svg"]

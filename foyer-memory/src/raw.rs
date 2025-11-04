@@ -13,21 +13,20 @@
 // limitations under the License.
 
 use std::{
-    collections::hash_map::{Entry as HashMapEntry, HashMap},
     fmt::Debug,
     future::Future,
     hash::Hash,
     ops::Deref,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::{
-    future::{FutureExt, InSpan},
+    future::{FutureExt as _, InSpan},
     Span,
 };
 use foyer_common::{
@@ -40,6 +39,8 @@ use foyer_common::{
     strict_assert,
     utils::scope::Scope,
 };
+use futures_util::FutureExt as _;
+use hashbrown::hash_map::{Entry as HashMapEntry, HashMap};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
@@ -48,7 +49,11 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use crate::{
     error::{Error, Result},
     eviction::{Eviction, Op},
-    indexer::{hash_table::HashTableIndexer, sentry::Sentry, Indexer},
+    indexer::{sentry::Sentry, Indexer},
+    inflight::{
+        Enqueue, FetchOrTake, FetchResult, FetchTargetV2, InflightManager, Notifier, OptionalFetch, RequiredFetch,
+        Waiter,
+    },
     pipe::NoopPipe,
     record::{Data, Record},
     Piece, Pipe,
@@ -103,6 +108,8 @@ where
     #[expect(clippy::type_complexity)]
     waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
+    inflights: Arc<Mutex<InflightManager<E, S, I>>>,
+
     metrics: Arc<Metrics>,
     _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
 }
@@ -140,8 +147,10 @@ where
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
+        notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     ) {
         *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
+        *notifiers = self.inflights.lock().take(record.key(), None).unwrap_or_default();
 
         if record.properties().phantom().unwrap_or_default() {
             if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
@@ -156,7 +165,7 @@ where
 
                 garbages.push((Event::Replace, old));
             }
-            record.inc_refs(waiters.len() + 1);
+            record.inc_refs(waiters.len() + notifiers.len() + 1);
             garbages.push((Event::Remove, record));
             self.metrics.memory_insert.increase(1);
             return;
@@ -455,7 +464,7 @@ where
     }
 }
 
-pub struct RawCache<E, S, I = HashTableIndexer<E>>
+pub struct RawCache<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -509,6 +518,7 @@ where
                 usage: 0,
                 capacity: shard_capacity,
                 waiters: Mutex::default(),
+                inflights: Arc::new(Mutex::new(InflightManager::new())),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
@@ -630,10 +640,11 @@ where
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
         let mut garbages = vec![];
         let mut waiters = vec![];
+        let mut notifiers = vec![];
 
         self.inner.shards[self.shard(record.hash())]
             .write()
-            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut waiters));
+            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut waiters, &mut notifiers));
 
         // Notify waiters out of the lock critical section.
         for waiter in waiters {
@@ -641,6 +652,14 @@ where
                 record: record.clone(),
                 inner: self.inner.clone(),
             });
+        }
+
+        // Notify waiters out of the lock critical section.
+        for notifier in notifiers {
+            let _ = notifier.send(Ok(Some(RawCacheEntry {
+                record: record.clone(),
+                inner: self.inner.clone(),
+            })));
         }
 
         // Deallocate data out of the lock critical section.
@@ -829,7 +848,7 @@ where
     }
 }
 
-pub struct RawCacheEntry<E, S, I = HashTableIndexer<E>>
+pub struct RawCacheEntry<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -995,7 +1014,7 @@ where
     Miss,
 }
 
-pub type RawFetch<E, ER, S, I = HashTableIndexer<E>> =
+pub type RawFetch<E, ER, S, I> =
     DiversionFuture<RawFetchInner<E, ER, S, I>, std::result::Result<RawCacheEntry<E, S, I>, ER>, FetchContext>;
 
 type RawFetchHit<E, S, I> = Option<RawCacheEntry<E, S, I>>;
@@ -1211,6 +1230,380 @@ where
     }
 }
 
+impl<E, S, I> RawCache<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get_or_fetch"))]
+    pub fn get_or_fetch<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> RawGetOrFetch<E, S, I>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+        &'b Q: Into<E::Key>,
+        F: FnOnce() -> FU + Send + 'static,
+        FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
+        ER: std::error::Error + Send + Sync + 'static,
+    {
+        self.get_or_fetch_inner(
+            key,
+            move |_| None,
+            move |k| {
+                let key = k.into();
+                Some(
+                    async move {
+                        match fetch().await {
+                            Ok(value) => Ok(FetchTargetV2::Entry {
+                                key,
+                                value,
+                                properties: E::Properties::default(),
+                            }),
+                            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        }
+                    }
+                    .boxed(),
+                )
+            },
+        )
+    }
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::get_or_fetch_with_properties")
+    )]
+    pub fn get_or_fetch_with_properties<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> RawGetOrFetch<E, S, I>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+        &'b Q: Into<E::Key>,
+        F: FnOnce() -> FU + Send + 'static,
+        FU: Future<Output = std::result::Result<(E::Value, E::Properties), ER>> + Send + 'static,
+        ER: std::error::Error + Send + Sync + 'static,
+    {
+        self.get_or_fetch_inner(
+            key,
+            move |_| None,
+            move |k| {
+                let key = k.into();
+                Some(
+                    async move {
+                        match fetch().await {
+                            Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
+                            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        }
+                    }
+                    .boxed(),
+                )
+            },
+        )
+    }
+
+    /// Advanced fetch with specified runtime.
+    ///
+    /// This function is for internal usage and the doc is hidden.
+    #[doc(hidden)]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
+    )]
+    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR>(&self, key: &'b Q, fo: FO, fr: FR) -> RawGetOrFetch<E, S, I>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+        &'b Q: Into<E::Key>,
+        FO: FnOnce(&'b Q) -> Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        FR: FnOnce(&'b Q) -> Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+    {
+        let hash = self.inner.hash_builder.hash_one(key);
+
+        let extract = |key: &'b Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManager<E, S, I>>>| {
+            opt.map(|record| {
+                RawGetOrFetchInner::Hit(Some(RawCacheEntry {
+                    inner: self.inner.clone(),
+                    record,
+                }))
+            })
+            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr(key)) {
+                Enqueue::Lead { id, waiter } => RawGetOrFetchInner::Lead {
+                    id,
+                    key: key.into(),
+                    waiter: Some(waiter),
+                    optional: fo(key),
+                    required: None,
+                    cache: self.clone(),
+                    inflights: inflights.clone(),
+                },
+                Enqueue::Wait(waiter) => RawGetOrFetchInner::Wait(waiter),
+            })
+        };
+
+        let inner = match E::acquire() {
+            Op::Noop => self.inner.shards[self.shard(hash)]
+                .read()
+                .with(|shard| extract(key, shard.get_noop(hash, key), &shard.inflights)),
+            Op::Immutable(_) => self.inner.shards[self.shard(hash)]
+                .read()
+                .with(|shard| extract(key, shard.get_immutable(hash, key), &shard.inflights)),
+            Op::Mutable(_) => self.inner.shards[self.shard(hash)]
+                .write()
+                .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
+        };
+
+        match &inner {
+            RawGetOrFetchInner::Hit(..) => tracing::trace!(hash, "fetch => Hit"),
+            RawGetOrFetchInner::Lead { .. } => tracing::trace!(hash, "fetch => Lead"),
+            RawGetOrFetchInner::Wait(..) => tracing::trace!(hash, "fetch => Wait"),
+        }
+
+        RawGetOrFetch { inner }
+
+        // match raw {
+        //     RawShardFetch::Hit(record) => {
+        //         tracing::trace!(hash, "fetch => Hit");
+        //         return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
+        //             record,
+        //             inner: self.inner.clone(),
+        //         })));
+        //     }
+        //     RawShardFetch::Wait(future) => {
+        //         tracing::trace!(hash, "fetch => Wait");
+        //         return RawFetch::new(RawFetchInner::Wait(future));
+        //     }
+        //     RawShardFetch::Miss => {
+        //         tracing::trace!(hash, "fetch => Miss");
+        //     }
+        // }
+
+        // let cache = self.clone();
+        // let future = fetch();
+        // let join = runtime.spawn({
+        //     tracing::trace!(hash, "fetch => join !!!");
+        //     let task = async move {
+        //         #[cfg(feature = "tracing")]
+        //         let Diversion { target, store } = future
+        //             .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
+        //             .await
+        //             .into();
+        //         #[cfg(not(feature = "tracing"))]
+        //         let Diversion { target, store } = future.await.into();
+
+        //         let target = match target {
+        //             Ok(value) => value,
+        //             Err(e) => {
+        //                 cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
+        //                 tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
+        //                 return Diversion { target: Err(e), store };
+        //             }
+        //         };
+        //         if let Some(ctx) = store.as_ref() {
+        //             if ctx.throttled {
+        //                 // TODO(MrCroxx): Make sure foyer doesn't issue tombstone to the disk cache.
+        //                 // TODO(MrCroxx): Also make sure the disk cache will write tombstone instead of this case.
+        //                 properties = properties.with_location(Location::InMem)
+        //             }
+        //             properties = properties.with_source(ctx.source)
+        //         };
+        //         tracing::trace!(hash, "fetch => insert !!!");
+        //         let entry = match target.into() {
+        //             FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
+        //             FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
+        //         };
+        //         Diversion {
+        //             target: Ok(entry),
+        //             store,
+        //         }
+        //     };
+        //     #[cfg(feature = "tracing")]
+        //     let task = task.in_span(Span::enter_with_local_parent(
+        //         "foyer::memory::generic::fetch_with_runtime::spawn",
+        //     ));
+        //     task
+        // });
+
+        // RawFetch::new(RawFetchInner::Miss(join))
+    }
+}
+
+#[pin_project(project = RawGetOrFetchProj)]
+pub struct RawGetOrFetch<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    #[pin]
+    inner: RawGetOrFetchInner<E, S, I>,
+}
+
+impl<E, S, I> Debug for RawGetOrFetch<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawGetOrFetch").field("inner", &self.inner).finish()
+    }
+}
+
+#[pin_project(project = RawGetOrFetchInnerProj)]
+enum RawGetOrFetchInner<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    Hit(Option<RawCacheEntry<E, S, I>>),
+    Lead {
+        id: usize,
+        key: E::Key,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+        #[pin]
+        optional: Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        #[pin]
+        required: Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        cache: RawCache<E, S, I>,
+        inflights: Arc<Mutex<InflightManager<E, S, I>>>,
+    },
+    Wait(Waiter<Option<RawCacheEntry<E, S, I>>>),
+}
+
+impl<E, S, I> Debug for RawGetOrFetchInner<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hit(opt) => f.debug_tuple("Hit").field(opt).finish(),
+            Self::Lead {
+                id,
+                waiter,
+                optional,
+                required,
+                ..
+            } => f
+                .debug_struct("Lead")
+                .field("id", id)
+                .field("waiter", waiter)
+                .field("optional", &optional.is_some())
+                .field("required", &required.is_some())
+                .finish(),
+            Self::Wait(..) => f.debug_tuple("Wait").finish(),
+        }
+    }
+}
+
+impl<E, S, I> Future for RawGetOrFetch<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.project() {
+            RawGetOrFetchInnerProj::Hit(opt) => {
+                assert!(opt.is_some(), "entry is already taken");
+                Poll::Ready(Ok(opt.take()))
+            }
+            RawGetOrFetchInnerProj::Lead {
+                id,
+                key,
+                waiter,
+                mut optional,
+                mut required,
+                cache,
+                inflights,
+            } => {
+                if let Some(w) = waiter {
+                    if let Poll::Ready(res) = w.poll_unpin(cx) {
+                        match res {
+                            Ok(r) => return Poll::Ready(r),
+                            Err(_) => unreachable!(),
+                            // FIXME(MrCroxx): Is this right???
+                            // Lead sender drop, maybe caused by task cancellation or error.
+                            // Continue poll the other path.
+                            // Err(_) => *waiter = None,
+                        }
+                    }
+                }
+
+                let fopt = optional.as_mut().as_pin_mut();
+                if let Some(mut f) = fopt {
+                    let res = ready!(f.as_mut().poll(cx));
+                    optional.set(None);
+                    match res {
+                        Ok(Some(e)) => match e {
+                            FetchTargetV2::Entry { key, value, properties } => {
+                                // FIXME(MrCroxx): Is this right???
+                                // No need to return since this future waits for waiter in case of early insertion.
+                                cache.insert_with_properties(key, value, properties);
+                            }
+                            FetchTargetV2::Piece(piece) => {
+                                // FIXME(MrCroxx): Is this right???
+                                // No need to return since this future waits for waiter in case of early insertion.
+                                cache.insert_piece(piece);
+                            }
+                        },
+                        Ok(None) => match inflights.lock().fetch_or_take(key, *id) {
+                            Some(FetchOrTake::Fetch(f)) => required.set(Some(f)),
+                            Some(FetchOrTake::Notifiers(notifiers)) => {
+                                for notifier in notifiers {
+                                    let _ = notifier.send(Ok(None));
+                                }
+                            }
+                            None => {}
+                        },
+                        Err(e) => match inflights.lock().fetch_or_take(key, *id) {
+                            // Fallback to required fetch if possible.
+                            Some(FetchOrTake::Fetch(f)) => required.set(Some(f)),
+                            Some(FetchOrTake::Notifiers(notifiers)) => {
+                                let e: Arc<dyn std::error::Error + Send + Sync> = Arc::from(e);
+                                for notifier in notifiers {
+                                    let _ = notifier.send(Err(Box::new(e.clone())));
+                                }
+                            }
+                            None => {}
+                        },
+                    }
+                }
+
+                let fopt = required.as_mut().as_pin_mut();
+                if let Some(mut f) = fopt {
+                    let res = ready!(f.as_mut().poll(cx));
+                    required.set(None);
+                    match res {
+                        Ok(e) => match e {
+                            FetchTargetV2::Entry { key, value, properties } => {
+                                // FIXME(MrCroxx): Is this right???
+                                // No need to return since this future waits for waiter in case of early insertion.
+                                cache.insert_with_properties(key, value, properties);
+                            }
+                            FetchTargetV2::Piece(piece) => {
+                                // FIXME(MrCroxx): Is this right???
+                                // No need to return since this future waits for waiter in case of early insertion.
+                                cache.insert_piece(piece);
+                            }
+                        },
+                        Err(e) => {
+                            if let Some(notifiers) = inflights.lock().take(key, Some(*id)) {
+                                let e: Arc<dyn std::error::Error + Send + Sync> = Arc::from(e);
+                                for notifier in notifiers {
+                                    let _ = notifier.send(Err(Box::new(e.clone())));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                unreachable!();
+            }
+            RawGetOrFetchInnerProj::Wait(waiter) => waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModHasher;
@@ -1226,6 +1619,7 @@ mod tests {
             sieve::{Sieve, SieveConfig},
             test_utils::TestProperties,
         },
+        indexer::hash_table::HashTableIndexer,
         test_utils::PiecePipe,
     };
 
@@ -1233,11 +1627,11 @@ mod tests {
 
     #[test]
     fn test_send_sync_static() {
-        is_send_sync_static::<RawCache<Fifo<(), (), TestProperties>, ModHasher>>();
-        is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>, ModHasher>>();
-        is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>, ModHasher>>();
-        is_send_sync_static::<RawCache<Lru<(), (), TestProperties>, ModHasher>>();
-        is_send_sync_static::<RawCache<Sieve<(), (), TestProperties>, ModHasher>>();
+        is_send_sync_static::<RawCache<Fifo<(), (), TestProperties>, ModHasher, HashTableIndexer<_>>>();
+        is_send_sync_static::<RawCache<S3Fifo<(), (), TestProperties>, ModHasher, HashTableIndexer<_>>>();
+        is_send_sync_static::<RawCache<Lfu<(), (), TestProperties>, ModHasher, HashTableIndexer<_>>>();
+        is_send_sync_static::<RawCache<Lru<(), (), TestProperties>, ModHasher, HashTableIndexer<_>>>();
+        is_send_sync_static::<RawCache<Sieve<(), (), TestProperties>, ModHasher, HashTableIndexer<_>>>();
     }
 
     #[expect(clippy::type_complexity)]
@@ -1393,16 +1787,17 @@ mod tests {
 
     #[test]
     fn test_insert_size_over_capacity() {
-        let cache: RawCache<Fifo<Vec<u8>, Vec<u8>, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-            capacity: 4 * 1024, // 4KB
-            shards: 1,
-            eviction_config: FifoConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|k, v| k.len() + v.len()),
-            filter: Arc::new(|_, _| true),
-            event_listener: None,
-            metrics: Arc::new(Metrics::noop()),
-        });
+        let cache: RawCache<Fifo<Vec<u8>, Vec<u8>, TestProperties>, ModHasher, HashTableIndexer<_>> =
+            RawCache::new(RawCacheConfig {
+                capacity: 4 * 1024, // 4KB
+                shards: 1,
+                eviction_config: FifoConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|k, v| k.len() + v.len()),
+                filter: Arc::new(|_, _| true),
+                event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
+            });
 
         let key = vec![b'k'; 1024]; // 1KB
         let value = vec![b'v'; 5 * 1024]; // 5KB
@@ -1414,16 +1809,17 @@ mod tests {
 
     #[test]
     fn test_capacity_distribution_without_loss() {
-        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-            capacity: 3,
-            shards: 2,
-            eviction_config: FifoConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            filter: Arc::new(|_, _| true),
-            event_listener: None,
-            metrics: Arc::new(Metrics::noop()),
-        });
+        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+            RawCache::new(RawCacheConfig {
+                capacity: 3,
+                shards: 2,
+                eviction_config: FifoConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
+                event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
+            });
 
         for key in 0..3 {
             let entry = cache.insert(key, key);
@@ -1441,16 +1837,17 @@ mod tests {
 
     #[test]
     fn test_capacity_distribution_with_more_shards_than_capacity() {
-        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-            capacity: 2,
-            shards: 4,
-            eviction_config: FifoConfig::default(),
-            hash_builder: Default::default(),
-            weighter: Arc::new(|_, _| 1),
-            filter: Arc::new(|_, _| true),
-            event_listener: None,
-            metrics: Arc::new(Metrics::noop()),
-        });
+        let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+            RawCache::new(RawCacheConfig {
+                capacity: 2,
+                shards: 4,
+                eviction_config: FifoConfig::default(),
+                hash_builder: Default::default(),
+                weighter: Arc::new(|_, _| 1),
+                filter: Arc::new(|_, _| true),
+                event_listener: None,
+                metrics: Arc::new(Metrics::noop()),
+            });
 
         for key in 0..2 {
             let entry = cache.insert(key, key);
@@ -1520,7 +1917,7 @@ mod tests {
 
         use super::*;
 
-        fn fuzzy<E, S>(cache: RawCache<E, S>, hints: Vec<Hint>)
+        fn fuzzy<E, S>(cache: RawCache<E, S, HashTableIndexer<E>>, hints: Vec<Hint>)
         where
             E: Eviction<Key = u64, Value = u64, Properties = TestProperties>,
             S: HashBuilder,
@@ -1552,80 +1949,85 @@ mod tests {
 
         #[test_log::test]
         fn test_fifo_cache_fuzzy() {
-            let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-                capacity: 256,
-                shards: 4,
-                eviction_config: FifoConfig::default(),
-                hash_builder: Default::default(),
-                weighter: Arc::new(|_, _| 1),
-                filter: Arc::new(|_, _| true),
-                event_listener: None,
-                metrics: Arc::new(Metrics::noop()),
-            });
+            let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+                RawCache::new(RawCacheConfig {
+                    capacity: 256,
+                    shards: 4,
+                    eviction_config: FifoConfig::default(),
+                    hash_builder: Default::default(),
+                    weighter: Arc::new(|_, _| 1),
+                    filter: Arc::new(|_, _| true),
+                    event_listener: None,
+                    metrics: Arc::new(Metrics::noop()),
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_s3fifo_cache_fuzzy() {
-            let cache: RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-                capacity: 256,
-                shards: 4,
-                eviction_config: S3FifoConfig::default(),
-                hash_builder: Default::default(),
-                weighter: Arc::new(|_, _| 1),
-                filter: Arc::new(|_, _| true),
-                event_listener: None,
-                metrics: Arc::new(Metrics::noop()),
-            });
+            let cache: RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+                RawCache::new(RawCacheConfig {
+                    capacity: 256,
+                    shards: 4,
+                    eviction_config: S3FifoConfig::default(),
+                    hash_builder: Default::default(),
+                    weighter: Arc::new(|_, _| 1),
+                    filter: Arc::new(|_, _| true),
+                    event_listener: None,
+                    metrics: Arc::new(Metrics::noop()),
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_lru_cache_fuzzy() {
-            let cache: RawCache<Lru<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-                capacity: 256,
-                shards: 4,
-                eviction_config: LruConfig::default(),
-                hash_builder: Default::default(),
-                weighter: Arc::new(|_, _| 1),
-                filter: Arc::new(|_, _| true),
-                event_listener: None,
-                metrics: Arc::new(Metrics::noop()),
-            });
+            let cache: RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+                RawCache::new(RawCacheConfig {
+                    capacity: 256,
+                    shards: 4,
+                    eviction_config: LruConfig::default(),
+                    hash_builder: Default::default(),
+                    weighter: Arc::new(|_, _| 1),
+                    filter: Arc::new(|_, _| true),
+                    event_listener: None,
+                    metrics: Arc::new(Metrics::noop()),
+                });
             let hints = vec![Hint::Normal, Hint::Low];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_lfu_cache_fuzzy() {
-            let cache: RawCache<Lfu<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-                capacity: 256,
-                shards: 4,
-                eviction_config: LfuConfig::default(),
-                hash_builder: Default::default(),
-                weighter: Arc::new(|_, _| 1),
-                filter: Arc::new(|_, _| true),
-                event_listener: None,
-                metrics: Arc::new(Metrics::noop()),
-            });
+            let cache: RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+                RawCache::new(RawCacheConfig {
+                    capacity: 256,
+                    shards: 4,
+                    eviction_config: LfuConfig::default(),
+                    hash_builder: Default::default(),
+                    weighter: Arc::new(|_, _| 1),
+                    filter: Arc::new(|_, _| true),
+                    event_listener: None,
+                    metrics: Arc::new(Metrics::noop()),
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
 
         #[test_log::test]
         fn test_sieve_cache_fuzzy() {
-            let cache: RawCache<Sieve<u64, u64, TestProperties>, ModHasher> = RawCache::new(RawCacheConfig {
-                capacity: 256,
-                shards: 4,
-                eviction_config: SieveConfig {},
-                hash_builder: Default::default(),
-                weighter: Arc::new(|_, _| 1),
-                filter: Arc::new(|_, _| true),
-                event_listener: None,
-                metrics: Arc::new(Metrics::noop()),
-            });
+            let cache: RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
+                RawCache::new(RawCacheConfig {
+                    capacity: 256,
+                    shards: 4,
+                    eviction_config: SieveConfig {},
+                    hash_builder: Default::default(),
+                    weighter: Arc::new(|_, _| 1),
+                    filter: Arc::new(|_, _| true),
+                    event_listener: None,
+                    metrics: Arc::new(Metrics::noop()),
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }

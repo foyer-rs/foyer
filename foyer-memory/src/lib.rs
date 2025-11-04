@@ -39,6 +39,7 @@ mod cache;
 mod error;
 mod eviction;
 mod indexer;
+mod inflight;
 mod pipe;
 mod raw;
 mod record;

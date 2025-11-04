@@ -39,8 +39,11 @@ use foyer_common::{
     properties::{Hint, Location, Properties, Source},
     rate::RateLimiter,
 };
-use foyer_memory::{Cache, CacheEntry, Fetch, FetchContext, FetchState, FetchTarget, Piece, Pipe};
+use foyer_memory::{
+    Cache, CacheEntry, Fetch, FetchContext, FetchState, FetchTarget, FetchTargetV2, GetOrFetch, Piece, Pipe,
+};
 use foyer_storage::{Load, Statistics, Store};
+use futures_util::FutureExt as _;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
@@ -76,9 +79,9 @@ macro_rules! root_span {
 
 #[cfg(feature = "tracing")]
 macro_rules! try_cancel {
-    ($self:ident, $span:ident, $threshold:ident) => {
+    ($span:expr, $threshold:expr) => {
         if let Some(elapsed) = $span.elapsed() {
-            if elapsed < $self.inner.tracing_config.$threshold() {
+            if elapsed < $threshold {
                 $span.cancel();
             }
         }
@@ -87,7 +90,7 @@ macro_rules! try_cancel {
 
 #[cfg(not(feature = "tracing"))]
 macro_rules! try_cancel {
-    ($self:ident, $span:ident, $threshold:ident) => {};
+    ($span:expr, $threshold:ident) => {};
 }
 
 /// Entry properties for in-memory only cache.
@@ -534,7 +537,7 @@ where
             .hybrid_insert_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_insert_threshold());
 
         entry
     }
@@ -565,7 +568,7 @@ where
             .hybrid_insert_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_insert_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_insert_threshold());
 
         entry
     }
@@ -605,7 +608,7 @@ where
         let guard = span.set_local_parent();
         if let Some(entry) = self.inner.memory.get(key) {
             record_hit();
-            try_cancel!(self, span, record_hybrid_get_threshold);
+            try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
             return Ok(Some(entry));
         }
         #[cfg(feature = "tracing")]
@@ -643,7 +646,7 @@ where
             }
         };
 
-        try_cancel!(self, span, record_hybrid_get_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
 
         Ok(entry)
     }
@@ -710,7 +713,7 @@ where
                     .metrics
                     .hybrid_hit_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
                 Ok(Some(entry))
             }
             Err(ObtainFetchError::Throttled) => {
@@ -719,7 +722,7 @@ where
                     .metrics
                     .hybrid_throttled_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
                 Ok(None)
             }
             Err(ObtainFetchError::NotExist) => {
@@ -728,11 +731,11 @@ where
                     .metrics
                     .hybrid_miss_duration
                     .record(now.elapsed().as_secs_f64());
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
                 Ok(None)
             }
             Err(ObtainFetchError::Other(e)) => {
-                try_cancel!(self, span, record_hybrid_obtain_threshold);
+                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
                 Err(e)
             }
         }
@@ -759,7 +762,7 @@ where
             .hybrid_remove_duration
             .record(now.elapsed().as_secs_f64());
 
-        try_cancel!(self, span, record_hybrid_remove_threshold);
+        try_cancel!(span, self.inner.tracing_config.record_hybrid_remove_threshold());
     }
 
     /// Check if the hybrid cache contains a cached entry with the given key.
@@ -1023,6 +1026,191 @@ where
         #[cfg(feature = "tracing")]
         let f = InRootSpan::new(f, span).with_threshold(self.inner.tracing_config.record_hybrid_fetch_threshold());
         f
+    }
+}
+
+impl<K, V, S> HybridCache<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Get cached entry with the given key from the hybrid cache.
+    pub fn get_v2<'a, 'b, Q>(&'a self, key: &'b Q) -> HybridGet<K, V, S>
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+        &'b Q: Into<K>,
+    {
+        root_span!(self, span, "foyer::hybrid::cache::get");
+
+        let now = Instant::now();
+
+        let inner = self.inner.memory.get_or_fetch_inner(
+            key,
+            |k| {
+                let store = self.inner.storage.clone();
+                let key = k.into();
+                let load = async move {
+                    match store.load(&key).await {
+                        Ok(Load::Entry { key, value, populated }) => {
+                            let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
+                            Ok(Some(FetchTargetV2::Entry { key, value, properties }))
+                        }
+                        // TODO(MrCroxx): Remove populated with piece?
+                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
+                        Ok(Load::Throttled) => todo!(),
+                        Ok(Load::Miss) => Ok(None),
+                        Err(e) => todo!(),
+                    }
+                }
+                .boxed();
+                Some(load)
+            },
+            |k| todo!(),
+        );
+
+        todo!()
+
+        // let now = Instant::now();
+
+        // let record_hit = || {
+        //     self.inner.metrics.hybrid_hit.increase(1);
+        //     self.inner
+        //         .metrics
+        //         .hybrid_hit_duration
+        //         .record(now.elapsed().as_secs_f64());
+        // };
+        // let record_miss = || {
+        //     self.inner.metrics.hybrid_miss.increase(1);
+        //     self.inner
+        //         .metrics
+        //         .hybrid_miss_duration
+        //         .record(now.elapsed().as_secs_f64());
+        // };
+        // let record_throttled = || {
+        //     self.inner.metrics.hybrid_throttled.increase(1);
+        //     self.inner
+        //         .metrics
+        //         .hybrid_throttled_duration
+        //         .record(now.elapsed().as_secs_f64());
+        // };
+
+        // #[cfg(feature = "tracing")]
+        // let guard = span.set_local_parent();
+        // if let Some(entry) = self.inner.memory.get(key) {
+        //     record_hit();
+        //     try_cancel!(self, span, record_hybrid_get_threshold);
+        //     return Ok(Some(entry));
+        // }
+        // #[cfg(feature = "tracing")]
+        // drop(guard);
+
+        // #[cfg(feature = "tracing")]
+        // let load = self
+        //     .inner
+        //     .storage
+        //     .load(key)
+        //     .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
+        // #[cfg(not(feature = "tracing"))]
+        // let load = self.inner.storage.load(key);
+
+        // let entry = match load.await? {
+        //     Load::Entry { key, value, populated } => {
+        //         record_hit();
+        //         Some(self.inner.memory.insert_with_properties(
+        //             key,
+        //             value,
+        //             HybridCacheProperties::default().with_source(Source::Populated(populated)),
+        //         ))
+        //     }
+        //     Load::Piece { piece, .. } => {
+        //         record_hit();
+        //         Some(self.inner.memory.insert_piece(piece))
+        //     }
+        //     Load::Throttled => {
+        //         record_throttled();
+        //         None
+        //     }
+        //     Load::Miss => {
+        //         record_miss();
+        //         None
+        //     }
+        // };
+
+        // try_cancel!(self, span, record_hybrid_get_threshold);
+
+        // Ok(entry)
+    }
+}
+
+#[pin_project]
+pub struct HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    #[pin]
+    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
+}
+
+impl<K, V, S> Debug for HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridGet").field("inner", &self.inner).finish()
+    }
+}
+
+impl<K, V, S> Future for HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        this.inner.poll_inner(cx).map_err(Error::other)
+    }
+}
+
+#[pin_project]
+pub struct HybridGetOrFetch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    #[pin]
+    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
+}
+
+impl<K, V, S> Debug for HybridGetOrFetch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridGetOrFetch").field("inner", &self.inner).finish()
+    }
+}
+
+impl<K, V, S> Future for HybridGetOrFetch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    type Output = Result<HybridCacheEntry<K, V, S>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        this.inner.poll(cx).map_err(Error::other)
     }
 }
 
