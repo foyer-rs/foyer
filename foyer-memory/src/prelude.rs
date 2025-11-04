@@ -18,7 +18,10 @@ pub use crate::{
     cache::{Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, Fetch, GetOrFetch},
     error::{Error, Result},
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
-    inflight::FetchTargetV2,
+    inflight::{
+        FetchError, FetchResult, FetchTargetV2, Notifier, OptionalFetch, OptionalFetchBuilder, RequiredFetch,
+        RequiredFetchBuilder, Waiter,
+    },
     pipe::{Piece, Pipe},
     raw::{FetchContext, FetchState, FetchTarget, Filter, Weighter},
 };

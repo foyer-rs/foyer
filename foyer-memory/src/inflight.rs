@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, hash::Hash};
+use std::{any::Any, fmt::Debug, hash::Hash, sync::Arc};
 
 use equivalent::Equivalent;
 use foyer_common::code::{HashBuilder, Key};
@@ -27,6 +27,11 @@ pub type FetchResult<T> = std::result::Result<T, FetchError>;
 
 pub type OptionalFetch<T> = BoxFuture<'static, FetchResult<Option<T>>>;
 pub type RequiredFetch<T> = BoxFuture<'static, FetchResult<T>>;
+
+pub type OptionalFetchBuilder<K, V, P> =
+    Box<dyn FnOnce(&Arc<dyn Any + Send + Sync + 'static>, K) -> OptionalFetch<FetchTargetV2<K, V, P>> + Send + 'static>;
+pub type RequiredFetchBuilder<K, V, P> =
+    Box<dyn FnOnce(&Arc<dyn Any + Send + Sync + 'static>, K) -> RequiredFetch<FetchTargetV2<K, V, P>> + Send + 'static>;
 
 pub type Waiter<T> = oneshot::Receiver<FetchResult<T>>;
 pub type Notifier<T> = oneshot::Sender<FetchResult<T>>;
@@ -66,7 +71,7 @@ where
 {
     id: usize,
     notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
-    required_fetch: Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+    f: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties>>,
 }
 
 pub struct InflightManager<E, S, I>
@@ -96,7 +101,7 @@ where
     pub fn enqueue<'a, 'b, Q>(
         &'a mut self,
         key: &'b Q,
-        fetch: Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        f: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties>>,
     ) -> Enqueue<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
@@ -105,8 +110,8 @@ where
         match self.inflights.entry_ref(key) {
             HashMapEntryRef::Occupied(mut o) => {
                 let inflight = o.get_mut();
-                if inflight.required_fetch.is_none() && fetch.is_some() {
-                    inflight.required_fetch = fetch;
+                if inflight.f.is_none() && f.is_some() {
+                    inflight.f = f;
                 }
                 let (tx, rx) = oneshot::channel();
                 inflight.notifiers.push(tx);
@@ -119,7 +124,7 @@ where
                 let inflight = Inflight {
                     id,
                     notifiers: vec![tx],
-                    required_fetch: fetch,
+                    f,
                 };
                 v.insert(inflight);
                 Enqueue::Lead { id, waiter: rx }
@@ -151,7 +156,7 @@ where
         if inflight.id != id {
             return None;
         }
-        let fetch = inflight.required_fetch.take();
+        let fetch = inflight.f.take();
         if let Some(fetch) = fetch {
             return Some(FetchOrTake::Fetch(fetch));
         }
@@ -179,6 +184,6 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    Fetch(RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>),
+    Fetch(RequiredFetchBuilder<E::Key, E::Value, E::Properties>),
     Notifiers(Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>),
 }

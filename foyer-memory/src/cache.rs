@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{borrow::Cow, fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
+use std::{any::Any, borrow::Cow, fmt::Debug, future::Future, hash::Hash, ops::Deref, sync::Arc};
 
 use equivalent::Equivalent;
 use foyer_common::{
@@ -37,7 +37,7 @@ use crate::{
         sieve::{Sieve, SieveConfig},
     },
     indexer::hash_table::HashTableIndexer,
-    inflight::{FetchTargetV2, OptionalFetch, RequiredFetch},
+    inflight::{FetchTargetV2, OptionalFetch, OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder},
     raw::{
         FetchContext, FetchState, FetchTarget, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch,
         RawGetOrFetch, Weighter,
@@ -1138,7 +1138,7 @@ where
 
 impl<K, V, S, P> Future for GetOrFetch<K, V, S, P>
 where
-    K: Key,
+    K: Key + Clone,
     V: Value,
     S: HashBuilder,
     P: Properties,
@@ -1152,7 +1152,7 @@ where
 
 impl<K, V, S, P> GetOrFetch<K, V, S, P>
 where
-    K: Key,
+    K: Key + Clone,
     V: Value,
     S: HashBuilder,
     P: Properties,
@@ -1315,19 +1315,24 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR>(&self, key: &'b Q, fo: FO, fr: FR) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch_inner<'a, 'b, Q, C>(
+        &self,
+        key: &'b Q,
+        fo: Option<OptionalFetchBuilder<K, V, P>>,
+        fr: Option<RequiredFetchBuilder<K, V, P>>,
+        ctx: C,
+    ) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized,
         &'b Q: Into<K>,
-        FO: FnOnce(&'b Q) -> Option<OptionalFetch<FetchTargetV2<K, V, P>>>,
-        FR: FnOnce(&'b Q) -> Option<RequiredFetch<FetchTargetV2<K, V, P>>>,
+        C: Any + Send + Sync + 'static,
     {
         match self {
-            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
-            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr)),
+            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
         }
     }
 }

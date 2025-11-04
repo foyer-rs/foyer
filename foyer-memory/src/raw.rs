@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    any::Any,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -51,8 +52,8 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{sentry::Sentry, Indexer},
     inflight::{
-        Enqueue, FetchOrTake, FetchResult, FetchTargetV2, InflightManager, Notifier, OptionalFetch, RequiredFetch,
-        Waiter,
+        Enqueue, FetchOrTake, FetchResult, FetchTargetV2, InflightManager, Notifier, OptionalFetch,
+        OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::NoopPipe,
     record::{Data, Record},
@@ -1247,25 +1248,24 @@ where
     {
         self.get_or_fetch_inner(
             key,
-            move |_| None,
-            move |k| {
-                let key = k.into();
-                Some(
-                    async move {
-                        match fetch().await {
-                            Ok(value) => Ok(FetchTargetV2::Entry {
-                                key,
-                                value,
-                                properties: E::Properties::default(),
-                            }),
-                            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-                        }
+            None,
+            Some(Box::new(|_, key| {
+                async {
+                    match fetch().await {
+                        Ok(value) => Ok(FetchTargetV2::Entry {
+                            key,
+                            value,
+                            properties: E::Properties::default(),
+                        }),
+                        Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
-                    .boxed(),
-                )
-            },
+                }
+                .boxed()
+            })),
+            (),
         )
     }
+
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_with_properties")
@@ -1280,20 +1280,35 @@ where
     {
         self.get_or_fetch_inner(
             key,
-            move |_| None,
-            move |k| {
-                let key = k.into();
-                Some(
-                    async move {
-                        match fetch().await {
-                            Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
-                            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-                        }
+            None,
+            Some(Box::new(|_, key| {
+                async {
+                    match fetch().await {
+                        Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
+                        Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
-                    .boxed(),
-                )
-            },
+                }
+                .boxed()
+            })),
+            (),
         )
+
+        // self.get_or_fetch_inner(
+        //     key,
+        //     move |_| None,
+        //     move |k| {
+        //         let key = k.into();
+        //         Some(
+        //             async move {
+        //                 match fetch().await {
+        //                     Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
+        //                     Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+        //                 }
+        //             }
+        //             .boxed(),
+        //         )
+        //     },
+        // )
     }
 
     /// Advanced fetch with specified runtime.
@@ -1304,12 +1319,17 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, FO, FR>(&self, key: &'b Q, fo: FO, fr: FR) -> RawGetOrFetch<E, S, I>
+    pub fn get_or_fetch_inner<'a, 'b, Q, C>(
+        &self,
+        key: &'b Q,
+        fo: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties>>,
+        fr: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties>>,
+        ctx: C,
+    ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
         &'b Q: Into<E::Key>,
-        FO: FnOnce(&'b Q) -> Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
-        FR: FnOnce(&'b Q) -> Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
+        C: Any + Send + Sync + 'static,
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
@@ -1320,12 +1340,14 @@ where
                     record,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr(key)) {
+            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr) {
                 Enqueue::Lead { id, waiter } => RawGetOrFetchInner::Lead {
                     id,
+                    ctx: Arc::new(ctx),
                     key: key.into(),
                     waiter: Some(waiter),
-                    optional: fo(key),
+                    fo,
+                    optional: None,
                     required: None,
                     cache: self.clone(),
                     inflights: inflights.clone(),
@@ -1453,8 +1475,10 @@ where
     Hit(Option<RawCacheEntry<E, S, I>>),
     Lead {
         id: usize,
+        ctx: Arc<dyn Any + Send + Sync + 'static>,
         key: E::Key,
         waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+        fo: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties>>,
         #[pin]
         optional: Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
         #[pin]
@@ -1497,6 +1521,7 @@ where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
+    E::Key: Clone,
 {
     type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
 
@@ -1509,8 +1534,10 @@ where
             }
             RawGetOrFetchInnerProj::Lead {
                 id,
+                ctx,
                 key,
                 waiter,
+                fo,
                 mut optional,
                 mut required,
                 cache,
@@ -1527,6 +1554,11 @@ where
                             // Err(_) => *waiter = None,
                         }
                     }
+                }
+
+                if let Some(fo) = fo.take() {
+                    let fopt = fo(&ctx, key.clone());
+                    optional.set(Some(fopt));
                 }
 
                 let fopt = optional.as_mut().as_pin_mut();
@@ -1547,7 +1579,10 @@ where
                             }
                         },
                         Ok(None) => match inflights.lock().fetch_or_take(key, *id) {
-                            Some(FetchOrTake::Fetch(f)) => required.set(Some(f)),
+                            Some(FetchOrTake::Fetch(f)) => {
+                                let fopt = f(&ctx, key.clone());
+                                required.set(Some(fopt));
+                            }
                             Some(FetchOrTake::Notifiers(notifiers)) => {
                                 for notifier in notifiers {
                                     let _ = notifier.send(Ok(None));
@@ -1557,7 +1592,10 @@ where
                         },
                         Err(e) => match inflights.lock().fetch_or_take(key, *id) {
                             // Fallback to required fetch if possible.
-                            Some(FetchOrTake::Fetch(f)) => required.set(Some(f)),
+                            Some(FetchOrTake::Fetch(f)) => {
+                                let fopt = f(&ctx, key.clone());
+                                required.set(Some(fopt));
+                            }
                             Some(FetchOrTake::Notifiers(notifiers)) => {
                                 let e: Arc<dyn std::error::Error + Send + Sync> = Arc::from(e);
                                 for notifier in notifiers {

@@ -41,7 +41,7 @@ fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 foyer-storage = { workspace = true }
-futures-util ={ workspace = true }
+futures-util = { workspace = true }
 mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
@@ -82,4 +82,8 @@ workspace = true
 
 [[test]]
 name = "hybrid_cache_fuzzy_test"
+required-features = ["test_utils"]
+
+[[test]]
+name = "hybrid_cache_fuzzy_test_v2"
 required-features = ["test_utils"]
