@@ -23,8 +23,9 @@ use std::{
     time::Duration,
 };
 
+use equivalent::Equivalent;
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    BlockEngineBuilder, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, IoEngineBuilder, Location, PsyncIoEngineBuilder,
 };
 use rand::{rng, Rng};
@@ -33,25 +34,38 @@ const KB: usize = 1024;
 const MB: usize = 1024 * KB;
 
 const WRITERS: usize = 8;
-const READERS: usize = 8;
-const OBTAINERS: usize = 8;
 const FETCHERS: usize = 16;
+const READERS: usize = 8;
 
 const WRITES: usize = 1000;
-const READS: usize = 1000;
-const OBTAINS: usize = 1000;
 const FETCHES: usize = 1000;
+const READS: usize = 1000;
 
 const DUPLICATES: usize = 10;
 
 const MISS_WAIT: Duration = Duration::from_millis(10);
 
 const WRITE_WAIT: Duration = Duration::from_millis(1);
-const READ_WAIT: Duration = Duration::from_millis(1);
-const OBTAIN_WAIT: Duration = Duration::from_millis(1);
 const FETCH_WAIT: Duration = Duration::from_millis(1);
+const READ_WAIT: Duration = Duration::from_millis(1);
 
 const INTERVAL: usize = 100;
+
+// FIXME(MrCroxx): Remove me after fixing the key trait bounds.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct TmpK(u64);
+
+impl From<&TmpK> for u64 {
+    fn from(value: &TmpK) -> Self {
+        value.0
+    }
+}
+
+impl Equivalent<u64> for TmpK {
+    fn equivalent(&self, key: &u64) -> bool {
+        &self.0 == key
+    }
+}
 
 #[derive(Debug)]
 struct RecentEvictionQueue {
@@ -123,20 +137,15 @@ async fn test_concurrent_insert_disk_cache_and_fetch() {
         let i = idx.clone();
         handles.push(tokio::spawn(async move { write(h, r, i).await }));
     }
-    for _ in 0..READERS {
-        let h = hybrid.clone();
-        let r = recent.clone();
-        handles.push(tokio::spawn(async move { read(h, r).await }));
-    }
-    for _ in 0..OBTAINERS {
-        let h = hybrid.clone();
-        let r = recent.clone();
-        handles.push(tokio::spawn(async move { obtain(h, r).await }));
-    }
     for _ in 0..FETCHERS {
         let h = hybrid.clone();
         let r = recent.clone();
         handles.push(tokio::spawn(async move { fetch(h, r).await }));
+    }
+    for _ in 0..READERS {
+        let h = hybrid.clone();
+        let r = recent.clone();
+        handles.push(tokio::spawn(async move { read(h, r).await }));
     }
     for h in handles {
         h.await.unwrap();
@@ -176,9 +185,9 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
             None => continue,
         };
         let e = hybrid
-            .fetch(key, || async move {
+            .get_or_fetch(&TmpK(key), move || async move {
                 tokio::time::sleep(MISS_WAIT).await;
-                Ok(value(key))
+                Ok::<_, Error>(value(key))
             })
             .await
             .unwrap();
@@ -202,7 +211,7 @@ async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue
             Some(v) => v,
             None => continue,
         };
-        let e = hybrid.get(&key).await.unwrap();
+        let e = hybrid.get_v2(&TmpK(key)).await.unwrap();
 
         if let Some(e) = e {
             assert_eq!(e.value(), &value(key));
@@ -212,29 +221,6 @@ async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue
             tracing::info!("Read {cnt} items");
         }
         if cnt >= READS as u64 {
-            break;
-        }
-    }
-}
-
-async fn obtain(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue>) {
-    let mut cnt = 0;
-    loop {
-        tokio::time::sleep(OBTAIN_WAIT).await;
-        let key = match recent.pick() {
-            Some(v) => v,
-            None => continue,
-        };
-        let e = hybrid.obtain(key).await.unwrap();
-
-        if let Some(e) = e {
-            assert_eq!(e.value(), &value(key));
-        }
-        cnt += 1;
-        if cnt % INTERVAL as u64 == 0 {
-            tracing::info!("Obtain {cnt} items");
-        }
-        if cnt >= OBTAINS as u64 {
             break;
         }
     }
