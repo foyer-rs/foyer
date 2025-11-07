@@ -1031,15 +1031,14 @@ where
 
 impl<K, V, S> HybridCache<K, V, S>
 where
-    K: StorageKey,
+    K: StorageKey + Clone,
     V: StorageValue,
     S: HashBuilder + Debug,
 {
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_v2<'a, 'b, Q>(&'a self, key: &'b Q) -> HybridGet<K, V, S>
+    pub fn get_v2<Q>(&self, key: &Q) -> HybridGet<K, V, S>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
-        &'b Q: Into<K>,
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
     {
         root_span!(self, span, "foyer::hybrid::cache::get");
 
@@ -1048,18 +1047,23 @@ where
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx, key| {
-                let any = ctx.clone();
+            Some(Box::new(|ctx: &mut Arc<AtomicBool>, key: &K| {
+                let ctx = ctx.clone();
+                let key = key.clone();
                 async move {
                     match store.load(&key).await {
-                        Ok(Load::Entry { key, value, populated }) => {
+                        Ok(Load::Entry {
+                            key: _,
+                            value,
+                            populated,
+                        }) => {
                             let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
-                            Ok(Some(FetchTargetV2::Entry { key, value, properties }))
+                            Ok(Some(FetchTargetV2::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
                         Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
                         Ok(Load::Throttled) => {
-                            any.downcast_ref::<AtomicBool>().unwrap().store(true, Ordering::Relaxed);
+                            ctx.store(true, Ordering::Relaxed);
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
@@ -1069,7 +1073,7 @@ where
                 .boxed()
             })),
             None,
-            AtomicBool::new(false),
+            Arc::new(AtomicBool::new(false)),
         );
 
         HybridGet { inner }
@@ -1146,10 +1150,9 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_or_fetch<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> HybridGetOrFetch<K, V, S>
+    pub fn get_or_fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
-        &'b Q: Into<K>,
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
@@ -1161,18 +1164,23 @@ where
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx, key| {
+            Some(Box::new(|ctx: &mut Arc<AtomicBool>, key| {
                 let ctx = ctx.clone();
+                let key = key.clone();
                 async move {
                     match store.load(&key).await {
-                        Ok(Load::Entry { key, value, populated }) => {
+                        Ok(Load::Entry {
+                            key: _,
+                            value,
+                            populated,
+                        }) => {
                             let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
-                            Ok(Some(FetchTargetV2::Entry { key, value, properties }))
+                            Ok(Some(FetchTargetV2::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
                         Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
                         Ok(Load::Throttled) => {
-                            ctx.downcast_ref::<AtomicBool>().unwrap().store(true, Ordering::Relaxed);
+                            ctx.store(true, Ordering::Relaxed);
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
@@ -1187,17 +1195,17 @@ where
                     match fetch().await {
                         Ok(value) => {
                             let mut properties = HybridCacheProperties::default().with_source(Source::Outer);
-                            if ctx.downcast_ref::<AtomicBool>().unwrap().load(Ordering::Relaxed) {
+                            if ctx.load(Ordering::Relaxed) {
                                 properties = properties.with_location(Location::InMem);
                             }
-                            Ok(FetchTargetV2::Entry { key, value, properties })
+                            Ok(FetchTargetV2::Entry { value, properties })
                         }
                         Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
                 }
                 .boxed()
             })),
-            AtomicBool::new(false),
+            Arc::new(AtomicBool::new(false)),
         );
 
         HybridGetOrFetch { inner }
@@ -1282,7 +1290,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
 }
 
 impl<K, V, S> Debug for HybridGet<K, V, S>
@@ -1317,7 +1325,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
 }
 
 impl<K, V, S> Debug for HybridGetOrFetch<K, V, S>

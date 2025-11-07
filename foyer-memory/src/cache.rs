@@ -37,7 +37,7 @@ use crate::{
         sieve::{Sieve, SieveConfig},
     },
     indexer::hash_table::HashTableIndexer,
-    inflight::{FetchTargetV2, OptionalFetch, OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder},
+    inflight::{OptionalFetchBuilderV3, RequiredFetchBuilderV3},
     raw::{
         FetchContext, FetchState, FetchTarget, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch,
         RawGetOrFetch, Weighter,
@@ -118,8 +118,8 @@ macro_rules! define_cache {
                 RawCacheEntry<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>>;
             pub type [<$algo Fetch>]<K, V, ER, S = DefaultHasher, P = CacheProperties> =
                 RawFetch<$algo<K, V, P>, ER, S, HashTableIndexer<$algo<K, V, P>>>;
-            pub type [<$algo GetOrFetch>]<K, V, S = DefaultHasher, P = CacheProperties> =
-                RawGetOrFetch<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>>;
+            pub type [<$algo GetOrFetch>]<K, V, S = DefaultHasher, P = CacheProperties, C = ()> =
+                RawGetOrFetch<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>, C>;
         }
     };
 }
@@ -1039,7 +1039,7 @@ where
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
 #[pin_project(project = GetOrFetchProj)]
-pub enum GetOrFetch<K, V, S = DefaultHasher, P = CacheProperties>
+pub enum GetOrFetch<K, V, S = DefaultHasher, P = CacheProperties, C = ()>
 where
     K: Key,
     V: Value,
@@ -1047,18 +1047,18 @@ where
     P: Properties,
 {
     /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
-    Fifo(#[pin] FifoGetOrFetch<K, V, S, P>),
+    Fifo(#[pin] FifoGetOrFetch<K, V, S, P, C>),
     /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(#[pin] S3FifoGetOrFetch<K, V, S, P>),
+    S3Fifo(#[pin] S3FifoGetOrFetch<K, V, S, P, C>),
     /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
-    Lru(#[pin] LruGetOrFetch<K, V, S, P>),
+    Lru(#[pin] LruGetOrFetch<K, V, S, P, C>),
     /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
-    Lfu(#[pin] LfuGetOrFetch<K, V, S, P>),
+    Lfu(#[pin] LfuGetOrFetch<K, V, S, P, C>),
     /// A future that is used to get entry value from the remote storage for the in-memory sieve cache.
-    Sieve(#[pin] SieveGetOrFetch<K, V, S, P>),
+    Sieve(#[pin] SieveGetOrFetch<K, V, S, P, C>),
 }
 
-impl<K, V, S, P> Debug for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> Debug for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
@@ -1076,72 +1076,73 @@ where
     }
 }
 
-impl<K, V, S, P> From<FifoGetOrFetch<K, V, S, P>> for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> From<FifoGetOrFetch<K, V, S, P, C>> for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
 {
-    fn from(entry: FifoGetOrFetch<K, V, S, P>) -> Self {
+    fn from(entry: FifoGetOrFetch<K, V, S, P, C>) -> Self {
         Self::Fifo(entry)
     }
 }
 
-impl<K, V, S, P> From<S3FifoGetOrFetch<K, V, S, P>> for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> From<S3FifoGetOrFetch<K, V, S, P, C>> for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
 {
-    fn from(entry: S3FifoGetOrFetch<K, V, S, P>) -> Self {
+    fn from(entry: S3FifoGetOrFetch<K, V, S, P, C>) -> Self {
         Self::S3Fifo(entry)
     }
 }
 
-impl<K, V, S, P> From<LruGetOrFetch<K, V, S, P>> for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> From<LruGetOrFetch<K, V, S, P, C>> for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
 {
-    fn from(entry: LruGetOrFetch<K, V, S, P>) -> Self {
+    fn from(entry: LruGetOrFetch<K, V, S, P, C>) -> Self {
         Self::Lru(entry)
     }
 }
 
-impl<K, V, S, P> From<LfuGetOrFetch<K, V, S, P>> for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> From<LfuGetOrFetch<K, V, S, P, C>> for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
 {
-    fn from(entry: LfuGetOrFetch<K, V, S, P>) -> Self {
+    fn from(entry: LfuGetOrFetch<K, V, S, P, C>) -> Self {
         Self::Lfu(entry)
     }
 }
 
-impl<K, V, S, P> From<SieveGetOrFetch<K, V, S, P>> for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> From<SieveGetOrFetch<K, V, S, P, C>> for GetOrFetch<K, V, S, P, C>
 where
     K: Key,
     V: Value,
     S: HashBuilder,
     P: Properties,
 {
-    fn from(entry: SieveGetOrFetch<K, V, S, P>) -> Self {
+    fn from(entry: SieveGetOrFetch<K, V, S, P, C>) -> Self {
         Self::Sieve(entry)
     }
 }
 
-impl<K, V, S, P> Future for GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> Future for GetOrFetch<K, V, S, P, C>
 where
     K: Key + Clone,
     V: Value,
     S: HashBuilder,
     P: Properties,
+    C: Any + Send + Sync + 'static,
 {
     type Output = std::result::Result<CacheEntry<K, V, S, P>, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -1150,12 +1151,13 @@ where
     }
 }
 
-impl<K, V, S, P> GetOrFetch<K, V, S, P>
+impl<K, V, S, P, C> GetOrFetch<K, V, S, P, C>
 where
     K: Key + Clone,
     V: Value,
     S: HashBuilder,
     P: Properties,
+    C: Any + Send + Sync + 'static,
 {
     #[doc(hidden)]
     pub fn poll_inner(
@@ -1267,10 +1269,9 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get_or_fetch"))]
-    pub fn get_or_fetch<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
-        &'b Q: Into<K>,
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
@@ -1293,10 +1294,9 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_with_properties")
     )]
-    pub fn get_or_fetch_with_properties<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch_with_properties<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
-        &'b Q: Into<K>,
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = std::result::Result<(V, P), ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
@@ -1315,24 +1315,33 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, C>(
+    pub fn get_or_fetch_inner<Q, C>(
         &self,
-        key: &'b Q,
-        fo: Option<OptionalFetchBuilder<K, V, P>>,
-        fr: Option<RequiredFetchBuilder<K, V, P>>,
+        key: &Q,
+        optional_fetch_builder: Option<OptionalFetchBuilderV3<K, V, P, C>>,
+        required_fetch_builder: Option<RequiredFetchBuilderV3<K, V, P, C>>,
         ctx: C,
-    ) -> GetOrFetch<K, V, S, P>
+    ) -> GetOrFetch<K, V, S, P, C>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
-        &'b Q: Into<K>,
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         C: Any + Send + Sync + 'static,
     {
         match self {
-            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
-            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
-            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
-            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
-            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_inner(key, fo, fr, ctx)),
+            Cache::Fifo(cache) => {
+                GetOrFetch::from(cache.get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx))
+            }
+            Cache::Lru(cache) => {
+                GetOrFetch::from(cache.get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx))
+            }
+            Cache::Lfu(cache) => {
+                GetOrFetch::from(cache.get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx))
+            }
+            Cache::S3Fifo(cache) => {
+                GetOrFetch::from(cache.get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx))
+            }
+            Cache::Sieve(cache) => {
+                GetOrFetch::from(cache.get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx))
+            }
         }
     }
 }

@@ -23,7 +23,6 @@ use std::{
     time::Duration,
 };
 
-use equivalent::Equivalent;
 use foyer::{
     BlockEngineBuilder, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, IoEngineBuilder, Location, PsyncIoEngineBuilder,
@@ -50,22 +49,6 @@ const FETCH_WAIT: Duration = Duration::from_millis(1);
 const READ_WAIT: Duration = Duration::from_millis(1);
 
 const INTERVAL: usize = 100;
-
-// FIXME(MrCroxx): Remove me after fixing the key trait bounds.
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct TmpK(u64);
-
-impl From<&TmpK> for u64 {
-    fn from(value: &TmpK) -> Self {
-        value.0
-    }
-}
-
-impl Equivalent<u64> for TmpK {
-    fn equivalent(&self, key: &u64) -> bool {
-        &self.0 == key
-    }
-}
 
 #[derive(Debug)]
 struct RecentEvictionQueue {
@@ -185,7 +168,7 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
             None => continue,
         };
         let e = hybrid
-            .get_or_fetch(&TmpK(key), move || async move {
+            .get_or_fetch(&key, move || async move {
                 tokio::time::sleep(MISS_WAIT).await;
                 Ok::<_, Error>(value(key))
             })
@@ -211,7 +194,7 @@ async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue
             Some(v) => v,
             None => continue,
         };
-        let e = hybrid.get_v2(&TmpK(key)).await.unwrap();
+        let e = hybrid.get_v2(&key).await.unwrap();
 
         if let Some(e) = e {
             assert_eq!(e.value(), &value(key));

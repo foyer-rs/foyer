@@ -20,7 +20,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use arc_swap::ArcSwap;
@@ -52,12 +52,12 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{sentry::Sentry, Indexer},
     inflight::{
-        Enqueue, FetchOrTake, FetchResult, FetchTargetV2, InflightManager, Notifier, OptionalFetch,
-        OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder, Waiter,
+        Enqueue, FetchOrTakeV2, FetchResult, FetchTargetV2, InflightManagerV2, Notifier, OptionalFetch,
+        OptionalFetchBuilderV3, RequiredFetch, RequiredFetchBuilderV3, Waiter,
     },
     pipe::NoopPipe,
     record::{Data, Record},
-    Piece, Pipe,
+    FetchError, Piece, Pipe,
 };
 
 /// The weighter for the in-memory cache.
@@ -109,7 +109,7 @@ where
     #[expect(clippy::type_complexity)]
     waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
 
-    inflights: Arc<Mutex<InflightManager<E, S, I>>>,
+    inflights: Arc<Mutex<InflightManagerV2<E, S, I>>>,
 
     metrics: Arc<Metrics>,
     _event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
@@ -151,7 +151,11 @@ where
         notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     ) {
         *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
-        *notifiers = self.inflights.lock().take(record.key(), None).unwrap_or_default();
+        *notifiers = self
+            .inflights
+            .lock()
+            .take(record.hash(), record.key(), None)
+            .unwrap_or_default();
 
         if record.properties().phantom().unwrap_or_default() {
             if let Some(old) = self.indexer.remove(record.hash(), record.key()) {
@@ -519,7 +523,7 @@ where
                 usage: 0,
                 capacity: shard_capacity,
                 waiters: Mutex::default(),
-                inflights: Arc::new(Mutex::new(InflightManager::new())),
+                inflights: Arc::new(Mutex::new(InflightManagerV2::new())),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
             })
@@ -1238,10 +1242,9 @@ where
     I: Indexer<Eviction = E>,
 {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get_or_fetch"))]
-    pub fn get_or_fetch<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> RawGetOrFetch<E, S, I>
+    pub fn get_or_fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I, ()>
     where
-        Q: Hash + Equivalent<E::Key> + ?Sized,
-        &'b Q: Into<E::Key>,
+        Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = std::result::Result<E::Value, ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
@@ -1249,15 +1252,14 @@ where
         self.get_or_fetch_inner(
             key,
             None,
-            Some(Box::new(|_, key| {
+            Some(Box::new(|_, _| {
                 async {
                     match fetch().await {
                         Ok(value) => Ok(FetchTargetV2::Entry {
-                            key,
                             value,
                             properties: E::Properties::default(),
                         }),
-                        Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        Err(e) => Err(Box::new(e) as FetchError),
                     }
                 }
                 .boxed()
@@ -1270,10 +1272,9 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_with_properties")
     )]
-    pub fn get_or_fetch_with_properties<'a, 'b, Q, F, FU, ER>(&'a self, key: &'b Q, fetch: F) -> RawGetOrFetch<E, S, I>
+    pub fn get_or_fetch_with_properties<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I, ()>
     where
-        Q: Hash + Equivalent<E::Key> + ?Sized,
-        &'b Q: Into<E::Key>,
+        Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         F: FnOnce() -> FU + Send + 'static,
         FU: Future<Output = std::result::Result<(E::Value, E::Properties), ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
@@ -1281,10 +1282,10 @@ where
         self.get_or_fetch_inner(
             key,
             None,
-            Some(Box::new(|_, key| {
+            Some(Box::new(|_, _| {
                 async {
                     match fetch().await {
-                        Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
+                        Ok((value, properties)) => Ok(FetchTargetV2::Entry { value, properties }),
                         Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
                 }
@@ -1292,23 +1293,6 @@ where
             })),
             (),
         )
-
-        // self.get_or_fetch_inner(
-        //     key,
-        //     move |_| None,
-        //     move |k| {
-        //         let key = k.into();
-        //         Some(
-        //             async move {
-        //                 match fetch().await {
-        //                     Ok((value, properties)) => Ok(FetchTargetV2::Entry { key, value, properties }),
-        //                     Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-        //                 }
-        //             }
-        //             .boxed(),
-        //         )
-        //     },
-        // )
     }
 
     /// Advanced fetch with specified runtime.
@@ -1319,44 +1303,48 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<'a, 'b, Q, C>(
+    pub fn get_or_fetch_inner<Q, C>(
         &self,
-        key: &'b Q,
-        fo: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties>>,
-        fr: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties>>,
+        key: &Q,
+        optional_fetch_builder: Option<OptionalFetchBuilderV3<E::Key, E::Value, E::Properties, C>>,
+        required_fetch_builder: Option<RequiredFetchBuilderV3<E::Key, E::Value, E::Properties, C>>,
         ctx: C,
-    ) -> RawGetOrFetch<E, S, I>
+    ) -> RawGetOrFetch<E, S, I, C>
     where
-        Q: Hash + Equivalent<E::Key> + ?Sized,
-        &'b Q: Into<E::Key>,
+        Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         C: Any + Send + Sync + 'static,
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
-        let extract = |key: &'b Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManager<E, S, I>>>| {
+        // Make sure cache query and inflight query are in the same lock critical section.
+        let extract = |key: &Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManagerV2<E, S, I>>>| {
             opt.map(|record| {
-                RawGetOrFetchInner::Hit(Some(RawCacheEntry {
+                RawGetOrFetch::Hit(Some(RawCacheEntry {
                     inner: self.inner.clone(),
                     record,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(key, fr) {
-                Enqueue::Lead { id, waiter } => RawGetOrFetchInner::Lead {
+            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
+                Enqueue::Lead {
                     id,
-                    ctx: Arc::new(ctx),
-                    key: key.into(),
-                    waiter: Some(waiter),
-                    fo,
-                    optional: None,
-                    required: None,
+                    waiter,
+                    required_fetch_builder,
+                } => RawGetOrFetch::Miss(RawGetOrFetchMiss::Init {
+                    ctx: Some(ctx),
+                    id,
+                    hash,
+                    key: Some(key.to_owned()),
+                    optional_fetch_builder,
+                    required_fetch_builder,
                     cache: self.clone(),
                     inflights: inflights.clone(),
-                },
-                Enqueue::Wait(waiter) => RawGetOrFetchInner::Wait(waiter),
+                    waiter: Some(waiter),
+                }),
+                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawGetOrFetchMiss::Wait { waiter }),
             })
         };
 
-        let inner = match E::acquire() {
+        let res = match E::acquire() {
             Op::Noop => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| extract(key, shard.get_noop(hash, key), &shard.inflights)),
@@ -1368,13 +1356,13 @@ where
                 .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
         };
 
-        match &inner {
-            RawGetOrFetchInner::Hit(..) => tracing::trace!(hash, "fetch => Hit"),
-            RawGetOrFetchInner::Lead { .. } => tracing::trace!(hash, "fetch => Lead"),
-            RawGetOrFetchInner::Wait(..) => tracing::trace!(hash, "fetch => Wait"),
+        match &res {
+            RawGetOrFetch::Hit(..) => tracing::trace!(hash, "fetch => Hit"),
+            RawGetOrFetch::Miss(RawGetOrFetchMiss::Init { .. }) => tracing::trace!(hash, "fetch => Miss (Lead)"),
+            RawGetOrFetch::Miss(..) => tracing::trace!(hash, "fetch => Miss (Wait)"),
         }
 
-        RawGetOrFetch { inner }
+        res
 
         // match raw {
         //     RawShardFetch::Hit(record) => {
@@ -1443,53 +1431,18 @@ where
     }
 }
 
-#[pin_project(project = RawGetOrFetchProj)]
-pub struct RawGetOrFetch<E, S, I>
-where
-    E: Eviction,
-    S: HashBuilder,
-    I: Indexer<Eviction = E>,
-{
-    #[pin]
-    inner: RawGetOrFetchInner<E, S, I>,
-}
-
-impl<E, S, I> Debug for RawGetOrFetch<E, S, I>
-where
-    E: Eviction,
-    S: HashBuilder,
-    I: Indexer<Eviction = E>,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RawGetOrFetch").field("inner", &self.inner).finish()
-    }
-}
-
-#[pin_project(project = RawGetOrFetchInnerProj)]
-enum RawGetOrFetchInner<E, S, I>
+#[pin_project(project = RawGetOrFetchV3Proj)]
+pub enum RawGetOrFetch<E, S, I, C>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     Hit(Option<RawCacheEntry<E, S, I>>),
-    Lead {
-        id: usize,
-        ctx: Arc<dyn Any + Send + Sync + 'static>,
-        key: E::Key,
-        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
-        fo: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties>>,
-        #[pin]
-        optional: Option<OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
-        #[pin]
-        required: Option<RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>>,
-        cache: RawCache<E, S, I>,
-        inflights: Arc<Mutex<InflightManager<E, S, I>>>,
-    },
-    Wait(Waiter<Option<RawCacheEntry<E, S, I>>>),
+    Miss(#[pin] RawGetOrFetchMiss<E, S, I, C>),
 }
 
-impl<E, S, I> Debug for RawGetOrFetchInner<E, S, I>
+impl<E, S, I, C> Debug for RawGetOrFetch<E, S, I, C>
 where
     E: Eviction,
     S: HashBuilder,
@@ -1497,147 +1450,405 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Hit(opt) => f.debug_tuple("Hit").field(opt).finish(),
-            Self::Lead {
-                id,
-                waiter,
-                optional,
-                required,
-                ..
-            } => f
-                .debug_struct("Lead")
-                .field("id", id)
-                .field("waiter", waiter)
-                .field("optional", &optional.is_some())
-                .field("required", &required.is_some())
-                .finish(),
-            Self::Wait(..) => f.debug_tuple("Wait").finish(),
+            Self::Hit(e) => f.debug_tuple("Hit").field(e).finish(),
+            Self::Miss(fut) => f.debug_tuple("Miss").field(fut).finish(),
         }
     }
 }
 
-impl<E, S, I> Future for RawGetOrFetch<E, S, I>
+impl<E, S, I, C> Future for RawGetOrFetch<E, S, I, C>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    E::Key: Clone,
+    C: Any + Send + 'static,
 {
     type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        match this.inner.project() {
-            RawGetOrFetchInnerProj::Hit(opt) => {
+        match this {
+            RawGetOrFetchV3Proj::Hit(opt) => {
                 assert!(opt.is_some(), "entry is already taken");
                 Poll::Ready(Ok(opt.take()))
             }
-            RawGetOrFetchInnerProj::Lead {
-                id,
-                ctx,
-                key,
-                waiter,
-                fo,
-                mut optional,
-                mut required,
-                cache,
-                inflights,
-            } => {
-                if let Some(w) = waiter {
-                    if let Poll::Ready(res) = w.poll_unpin(cx) {
-                        match res {
-                            Ok(r) => return Poll::Ready(r),
-                            Err(_) => unreachable!(),
-                            // FIXME(MrCroxx): Is this right???
-                            // Lead sender drop, maybe caused by task cancellation or error.
-                            // Continue poll the other path.
-                            // Err(_) => *waiter = None,
+            RawGetOrFetchV3Proj::Miss(fut) => fut.poll(cx),
+        }
+    }
+}
+
+#[pin_project(project = RawGetOrFetchLeadV3Proj)]
+pub enum RawGetOrFetchMiss<E, S, I, C>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    Init {
+        ctx: Option<C>,
+        id: usize,
+        hash: u64,
+        key: Option<E::Key>,
+        optional_fetch_builder: Option<OptionalFetchBuilderV3<E::Key, E::Value, E::Properties, C>>,
+        required_fetch_builder: Option<RequiredFetchBuilderV3<E::Key, E::Value, E::Properties, C>>,
+        cache: RawCache<E, S, I>,
+        inflights: Arc<Mutex<InflightManagerV2<E, S, I>>>,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+    },
+    Optional {
+        ctx: Option<C>,
+        id: usize,
+        hash: u64,
+        key: Option<E::Key>,
+        optional_fetch: OptionalFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>,
+        required_fetch_builder: Option<RequiredFetchBuilderV3<E::Key, E::Value, E::Properties, C>>,
+        cache: RawCache<E, S, I>,
+        inflights: Arc<Mutex<InflightManagerV2<E, S, I>>>,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+    },
+    Required {
+        id: usize,
+        hash: u64,
+        key: Option<E::Key>,
+        required_fetch: RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>,
+        cache: RawCache<E, S, I>,
+        inflights: Arc<Mutex<InflightManagerV2<E, S, I>>>,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+    },
+    Notify {
+        res: Option<FetchResult<Option<RawCacheEntry<E, S, I>>>>,
+        notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+    },
+    Wait {
+        waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
+    },
+}
+
+impl<E, S, I, C> Debug for RawGetOrFetchMiss<E, S, I, C>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Init { id, hash, .. } => f.debug_struct("Init").field("id", id).field("hash", hash).finish(),
+            Self::Optional { id, hash, .. } => f.debug_struct("Optional").field("id", id).field("hash", hash).finish(),
+            Self::Required { id, hash, .. } => f.debug_struct("Required").field("id", id).field("hash", hash).finish(),
+            Self::Notify { res, .. } => f.debug_struct("Notify").field("res", res).finish(),
+            Self::Wait { .. } => f.debug_struct("Wait").finish(),
+        }
+    }
+}
+
+impl<E, S, I, C> Future for RawGetOrFetchMiss<E, S, I, C>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    C: Any + Send + 'static,
+{
+    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            let this = self.as_mut().project();
+            match this {
+                RawGetOrFetchLeadV3Proj::Init {
+                    ctx,
+                    id,
+                    hash,
+                    key,
+                    optional_fetch_builder,
+                    required_fetch_builder,
+                    cache,
+                    inflights,
+                    waiter,
+                } => {
+                    let mut ctx = ctx.take().unwrap();
+                    let key = key.take().unwrap();
+                    if let Some(optional_fetch_builder) = optional_fetch_builder.take() {
+                        let optional_fetch = optional_fetch_builder(&mut ctx, &key);
+                        let required_fetch_builder = required_fetch_builder.take();
+                        let id = *id;
+                        let hash = *hash;
+                        let cache = cache.clone();
+                        let inflights = inflights.clone();
+                        let waiter = waiter.take();
+                        self.set(RawGetOrFetchMiss::Optional {
+                            ctx: Some(ctx),
+                            id,
+                            hash,
+                            key: Some(key),
+                            optional_fetch,
+                            required_fetch_builder,
+                            cache,
+                            inflights,
+                            waiter,
+                        });
+                        continue;
+                    }
+                    // Fast path if the leader has no optional fetch, but has required fetch.
+                    if let Some(required_fetch_builder) = required_fetch_builder.take() {
+                        let required_fetch = required_fetch_builder(&mut ctx, &key);
+                        let id = *id;
+                        let hash = *hash;
+                        let cache = cache.clone();
+                        let inflights = inflights.clone();
+                        let waiter = waiter.take();
+                        self.set(RawGetOrFetchMiss::Required {
+                            id,
+                            hash,
+                            key: Some(key),
+                            required_fetch,
+                            cache,
+                            inflights,
+                            waiter,
+                        });
+                        continue;
+                    }
+                    // Slow path if the leader has no optional fetch.
+                    let fetch_or_take = match inflights.lock().fetch_or_take(*hash, &key, *id) {
+                        Some(fetch_or_take) => fetch_or_take,
+                        None => return Poll::Ready(Ok(None)),
+                    };
+                    match fetch_or_take {
+                        FetchOrTakeV2::Fetch(required_fetch_builder) => {
+                            let required_fetch = required_fetch_builder(&mut ctx, &key);
+                            let id = *id;
+                            let hash = *hash;
+                            let cache = cache.clone();
+                            let inflights = inflights.clone();
+                            let waiter = waiter.take();
+                            self.set(RawGetOrFetchMiss::Required {
+                                id,
+                                hash,
+                                key: Some(key),
+                                required_fetch,
+                                cache,
+                                inflights,
+                                waiter,
+                            });
+                        }
+                        FetchOrTakeV2::Notifiers(notifiers) => {
+                            let waiter = waiter.take();
+                            self.set(RawGetOrFetchMiss::Notify {
+                                res: Some(Ok(None)),
+                                notifiers,
+                                waiter,
+                            });
                         }
                     }
                 }
-
-                if let Some(fo) = fo.take() {
-                    let fopt = fo(&ctx, key.clone());
-                    optional.set(Some(fopt));
-                }
-
-                let fopt = optional.as_mut().as_pin_mut();
-                if let Some(mut f) = fopt {
-                    let res = ready!(f.as_mut().poll(cx));
-                    optional.set(None);
-                    match res {
-                        Ok(Some(e)) => match e {
-                            FetchTargetV2::Entry { key, value, properties } => {
-                                // FIXME(MrCroxx): Is this right???
-                                // No need to return since this future waits for waiter in case of early insertion.
-                                cache.insert_with_properties(key, value, properties);
-                            }
-                            FetchTargetV2::Piece(piece) => {
-                                // FIXME(MrCroxx): Is this right???
-                                // No need to return since this future waits for waiter in case of early insertion.
-                                cache.insert_piece(piece);
-                            }
-                        },
-                        Ok(None) => match inflights.lock().fetch_or_take(key, *id) {
-                            Some(FetchOrTake::Fetch(f)) => {
-                                let fopt = f(&ctx, key.clone());
-                                required.set(Some(fopt));
-                            }
-                            Some(FetchOrTake::Notifiers(notifiers)) => {
-                                for notifier in notifiers {
-                                    let _ = notifier.send(Ok(None));
+                RawGetOrFetchLeadV3Proj::Optional {
+                    ctx,
+                    id,
+                    hash,
+                    key,
+                    optional_fetch,
+                    required_fetch_builder,
+                    cache,
+                    inflights,
+                    waiter,
+                } => {
+                    if let Some(waiter) = waiter.as_mut() {
+                        if let Poll::Ready(res) = waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten()) {
+                            return Poll::Ready(res);
+                        }
+                    }
+                    match optional_fetch.poll_unpin(cx) {
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Ok(Some(target))) => {
+                            match target {
+                                FetchTargetV2::Entry { value, properties } => {
+                                    let key = key.take().unwrap();
+                                    cache.insert_with_properties(key, value, properties);
+                                }
+                                FetchTargetV2::Piece(piece) => {
+                                    cache.insert_piece(piece);
                                 }
                             }
-                            None => {}
-                        },
-                        Err(e) => match inflights.lock().fetch_or_take(key, *id) {
-                            // Fallback to required fetch if possible.
-                            Some(FetchOrTake::Fetch(f)) => {
-                                let fopt = f(&ctx, key.clone());
-                                required.set(Some(fopt));
+                            let waiter = waiter.take().unwrap();
+                            self.set(RawGetOrFetchMiss::Wait { waiter });
+                        }
+                        Poll::Ready(Ok(None)) => {
+                            let key = key.take().unwrap();
+                            // Fast path if the leader has required fetch.
+                            if let Some(required_fetch_builder) = required_fetch_builder.take() {
+                                let mut ctx = ctx.take().unwrap();
+                                let id = *id;
+                                let hash = *hash;
+                                let cache = cache.clone();
+                                let inflights = inflights.clone();
+                                let waiter = waiter.take();
+                                let required_fetch = required_fetch_builder(&mut ctx, &key);
+                                self.set(RawGetOrFetchMiss::Required {
+                                    id,
+                                    hash,
+                                    key: Some(key),
+                                    required_fetch,
+                                    cache,
+                                    inflights,
+                                    waiter,
+                                });
+                                continue;
                             }
-                            Some(FetchOrTake::Notifiers(notifiers)) => {
-                                let e: Arc<dyn std::error::Error + Send + Sync> = Arc::from(e);
-                                for notifier in notifiers {
-                                    let _ = notifier.send(Err(Box::new(e.clone())));
+                            let fetch_or_take = match inflights.lock().fetch_or_take(*hash, &key, *id) {
+                                Some(fetch_or_take) => fetch_or_take,
+                                None => return Poll::Ready(Ok(None)),
+                            };
+                            match fetch_or_take {
+                                FetchOrTakeV2::Fetch(fr) => {
+                                    let mut ctx = ctx.take().unwrap();
+                                    let id = *id;
+                                    let hash = *hash;
+                                    let cache = cache.clone();
+                                    let inflights = inflights.clone();
+                                    let waiter = waiter.take();
+                                    let required_fetch = fr(&mut ctx, &key);
+                                    self.set(RawGetOrFetchMiss::Required {
+                                        id,
+                                        hash,
+                                        key: Some(key),
+                                        required_fetch,
+                                        cache,
+                                        inflights,
+                                        waiter,
+                                    })
+                                }
+                                FetchOrTakeV2::Notifiers(notifiers) => {
+                                    let waiter = waiter.take();
+                                    self.set(RawGetOrFetchMiss::Notify {
+                                        res: Some(Ok(None)),
+                                        notifiers,
+                                        waiter,
+                                    });
                                 }
                             }
-                            None => {}
-                        },
+                        }
+                        Poll::Ready(Err(e)) => {
+                            let key = key.take().unwrap();
+                            // Fast path if the leader has required fetch.
+                            if let Some(required_fetch_builder) = required_fetch_builder.take() {
+                                let mut ctx = ctx.take().unwrap();
+                                let id = *id;
+                                let hash = *hash;
+                                let cache = cache.clone();
+                                let inflights = inflights.clone();
+                                let waiter = waiter.take();
+                                let required_fetch = required_fetch_builder(&mut ctx, &key);
+                                self.set(RawGetOrFetchMiss::Required {
+                                    id,
+                                    hash,
+                                    key: Some(key),
+                                    required_fetch,
+                                    cache,
+                                    inflights,
+                                    waiter,
+                                });
+                                continue;
+                            }
+                            let fetch_or_take = match inflights.lock().fetch_or_take(*hash, &key, *id) {
+                                Some(fetch_or_take) => fetch_or_take,
+                                None => return Poll::Ready(Ok(None)),
+                            };
+                            match fetch_or_take {
+                                FetchOrTakeV2::Fetch(fr) => {
+                                    let mut ctx = ctx.take().unwrap();
+                                    let id = *id;
+                                    let hash = *hash;
+                                    let cache = cache.clone();
+                                    let inflights = inflights.clone();
+                                    let waiter = waiter.take();
+                                    let required_fetch = fr(&mut ctx, &key);
+                                    self.set(RawGetOrFetchMiss::Required {
+                                        id,
+                                        hash,
+                                        key: Some(key),
+                                        required_fetch,
+                                        cache,
+                                        inflights,
+                                        waiter,
+                                    })
+                                }
+                                FetchOrTakeV2::Notifiers(notifiers) => {
+                                    let waiter = waiter.take();
+                                    self.set(RawGetOrFetchMiss::Notify {
+                                        res: Some(Err(e)),
+                                        notifiers,
+                                        waiter,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
-
-                let fopt = required.as_mut().as_pin_mut();
-                if let Some(mut f) = fopt {
-                    let res = ready!(f.as_mut().poll(cx));
-                    required.set(None);
-                    match res {
-                        Ok(e) => match e {
-                            FetchTargetV2::Entry { key, value, properties } => {
-                                // FIXME(MrCroxx): Is this right???
-                                // No need to return since this future waits for waiter in case of early insertion.
-                                cache.insert_with_properties(key, value, properties);
+                RawGetOrFetchLeadV3Proj::Required {
+                    id,
+                    hash,
+                    key,
+                    required_fetch,
+                    cache,
+                    inflights,
+                    waiter,
+                } => {
+                    if let Some(waiter) = waiter.as_mut() {
+                        if let Poll::Ready(res) = waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten()) {
+                            return Poll::Ready(res);
+                        }
+                    }
+                    match required_fetch.poll_unpin(cx) {
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Ok(target)) => {
+                            match target {
+                                FetchTargetV2::Entry { value, properties } => {
+                                    let key = key.take().unwrap();
+                                    cache.insert_with_properties(key, value, properties);
+                                }
+                                FetchTargetV2::Piece(piece) => {
+                                    cache.insert_piece(piece);
+                                }
                             }
-                            FetchTargetV2::Piece(piece) => {
-                                // FIXME(MrCroxx): Is this right???
-                                // No need to return since this future waits for waiter in case of early insertion.
-                                cache.insert_piece(piece);
+                            let waiter = waiter.take().unwrap();
+                            self.set(RawGetOrFetchMiss::Wait { waiter });
+                        }
+                        Poll::Ready(Err(e)) => {
+                            let key = key.take().unwrap();
+                            let notifiers = match inflights.lock().take(*hash, &key, Some(*id)) {
+                                Some(notifiers) => notifiers,
+                                None => return Poll::Ready(Ok(None)),
+                            };
+                            let waiter = waiter.take();
+                            self.set(RawGetOrFetchMiss::Notify {
+                                res: Some(Err(e)),
+                                notifiers,
+                                waiter,
+                            });
+                        }
+                    }
+                }
+                RawGetOrFetchLeadV3Proj::Notify { res, notifiers, waiter } => {
+                    match res.take().unwrap() {
+                        Ok(e) => {
+                            for notifier in notifiers.drain(..) {
+                                let _ = notifier.send(Ok(e.clone()));
                             }
-                        },
+                        }
                         Err(e) => {
-                            if let Some(notifiers) = inflights.lock().take(key, Some(*id)) {
-                                let e: Arc<dyn std::error::Error + Send + Sync> = Arc::from(e);
-                                for notifier in notifiers {
-                                    let _ = notifier.send(Err(Box::new(e.clone())));
-                                }
+                            let e = Arc::from(e) as Arc<dyn std::error::Error + Send + Sync>;
+                            for notifier in notifiers.drain(..) {
+                                let _ = notifier.send(Err(Box::new(e.clone())));
                             }
                         }
-                    }
+                    };
+                    let waiter = waiter.take().unwrap();
+                    self.set(RawGetOrFetchMiss::Wait { waiter });
                 }
-
-                Poll::Pending
+                RawGetOrFetchLeadV3Proj::Wait { waiter } => {
+                    return waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten());
+                }
             }
-            RawGetOrFetchInnerProj::Wait(waiter) => waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten()),
         }
     }
 }
