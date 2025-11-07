@@ -1525,6 +1525,61 @@ where
     },
 }
 
+impl<E, S, I, C> RawGetOrFetchMiss<E, S, I, C>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    C: Any + Send + 'static,
+{
+    fn required_from_builder(
+        ctx: &mut Option<C>,
+        key: E::Key,
+        id: usize,
+        hash: u64,
+        cache: &RawCache<E, S, I>,
+        inflights: &Arc<Mutex<InflightManagerV2<E, S, I>>>,
+        waiter: &mut Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+        builder: RequiredFetchBuilderV3<E::Key, E::Value, E::Properties, C>,
+    ) -> Self {
+        let mut ctx = ctx.take().unwrap();
+        let required_fetch = builder(&mut ctx, &key);
+        Self::required_from_fetch(key, id, hash, cache, inflights, waiter.take(), required_fetch)
+    }
+
+    fn required_from_fetch(
+        key: E::Key,
+        id: usize,
+        hash: u64,
+        cache: &RawCache<E, S, I>,
+        inflights: &Arc<Mutex<InflightManagerV2<E, S, I>>>,
+        waiter: Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+        required_fetch: RequiredFetch<FetchTargetV2<E::Key, E::Value, E::Properties>>,
+    ) -> Self {
+        Self::Required {
+            id,
+            hash,
+            key: Some(key),
+            required_fetch,
+            cache: cache.clone(),
+            inflights: inflights.clone(),
+            waiter,
+        }
+    }
+
+    fn notify_from_result(
+        res: FetchResult<Option<RawCacheEntry<E, S, I>>>,
+        notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+        waiter: &mut Option<Waiter<Option<RawCacheEntry<E, S, I>>>>,
+    ) -> Self {
+        Self::Notify {
+            res: Some(res),
+            notifiers,
+            waiter: waiter.take(),
+        }
+    }
+}
+
 impl<E, S, I, C> Debug for RawGetOrFetchMiss<E, S, I, C>
 where
     E: Eviction,
@@ -1566,10 +1621,10 @@ where
                     inflights,
                     waiter,
                 } => {
-                    let mut ctx = ctx.take().unwrap();
                     let key = key.take().unwrap();
                     if let Some(optional_fetch_builder) = optional_fetch_builder.take() {
-                        let optional_fetch = optional_fetch_builder(&mut ctx, &key);
+                        let mut ctx_value = ctx.take().unwrap();
+                        let optional_fetch = optional_fetch_builder(&mut ctx_value, &key);
                         let required_fetch_builder = required_fetch_builder.take();
                         let id = *id;
                         let hash = *hash;
@@ -1577,7 +1632,7 @@ where
                         let inflights = inflights.clone();
                         let waiter = waiter.take();
                         self.set(RawGetOrFetchMiss::Optional {
-                            ctx: Some(ctx),
+                            ctx: Some(ctx_value),
                             id,
                             hash,
                             key: Some(key),
@@ -1591,21 +1646,18 @@ where
                     }
                     // Fast path if the leader has no optional fetch, but has required fetch.
                     if let Some(required_fetch_builder) = required_fetch_builder.take() {
-                        let required_fetch = required_fetch_builder(&mut ctx, &key);
                         let id = *id;
                         let hash = *hash;
-                        let cache = cache.clone();
-                        let inflights = inflights.clone();
-                        let waiter = waiter.take();
-                        self.set(RawGetOrFetchMiss::Required {
+                        self.set(RawGetOrFetchMiss::required_from_builder(
+                            ctx,
+                            key,
                             id,
                             hash,
-                            key: Some(key),
-                            required_fetch,
                             cache,
                             inflights,
                             waiter,
-                        });
+                            required_fetch_builder,
+                        ));
                         continue;
                     }
                     // Slow path if the leader has no optional fetch.
@@ -1615,29 +1667,21 @@ where
                     };
                     match fetch_or_take {
                         FetchOrTakeV2::Fetch(required_fetch_builder) => {
-                            let required_fetch = required_fetch_builder(&mut ctx, &key);
                             let id = *id;
                             let hash = *hash;
-                            let cache = cache.clone();
-                            let inflights = inflights.clone();
-                            let waiter = waiter.take();
-                            self.set(RawGetOrFetchMiss::Required {
+                            self.set(RawGetOrFetchMiss::required_from_builder(
+                                ctx,
+                                key,
                                 id,
                                 hash,
-                                key: Some(key),
-                                required_fetch,
                                 cache,
                                 inflights,
                                 waiter,
-                            });
+                                required_fetch_builder,
+                            ));
                         }
                         FetchOrTakeV2::Notifiers(notifiers) => {
-                            let waiter = waiter.take();
-                            self.set(RawGetOrFetchMiss::Notify {
-                                res: Some(Ok(None)),
-                                notifiers,
-                                waiter,
-                            });
+                            self.set(RawGetOrFetchMiss::notify_from_result(Ok(None), notifiers, waiter));
                         }
                     }
                 }
@@ -1676,22 +1720,18 @@ where
                             let key = key.take().unwrap();
                             // Fast path if the leader has required fetch.
                             if let Some(required_fetch_builder) = required_fetch_builder.take() {
-                                let mut ctx = ctx.take().unwrap();
                                 let id = *id;
                                 let hash = *hash;
-                                let cache = cache.clone();
-                                let inflights = inflights.clone();
-                                let waiter = waiter.take();
-                                let required_fetch = required_fetch_builder(&mut ctx, &key);
-                                self.set(RawGetOrFetchMiss::Required {
+                                self.set(RawGetOrFetchMiss::required_from_builder(
+                                    ctx,
+                                    key,
                                     id,
                                     hash,
-                                    key: Some(key),
-                                    required_fetch,
                                     cache,
                                     inflights,
                                     waiter,
-                                });
+                                    required_fetch_builder,
+                                ));
                                 continue;
                             }
                             let fetch_or_take = match inflights.lock().fetch_or_take(*hash, &key, *id) {
@@ -1700,30 +1740,14 @@ where
                             };
                             match fetch_or_take {
                                 FetchOrTakeV2::Fetch(fr) => {
-                                    let mut ctx = ctx.take().unwrap();
                                     let id = *id;
                                     let hash = *hash;
-                                    let cache = cache.clone();
-                                    let inflights = inflights.clone();
-                                    let waiter = waiter.take();
-                                    let required_fetch = fr(&mut ctx, &key);
-                                    self.set(RawGetOrFetchMiss::Required {
-                                        id,
-                                        hash,
-                                        key: Some(key),
-                                        required_fetch,
-                                        cache,
-                                        inflights,
-                                        waiter,
-                                    })
+                                    self.set(RawGetOrFetchMiss::required_from_builder(
+                                        ctx, key, id, hash, cache, inflights, waiter, fr,
+                                    ))
                                 }
                                 FetchOrTakeV2::Notifiers(notifiers) => {
-                                    let waiter = waiter.take();
-                                    self.set(RawGetOrFetchMiss::Notify {
-                                        res: Some(Ok(None)),
-                                        notifiers,
-                                        waiter,
-                                    });
+                                    self.set(RawGetOrFetchMiss::notify_from_result(Ok(None), notifiers, waiter));
                                 }
                             }
                         }
@@ -1731,22 +1755,18 @@ where
                             let key = key.take().unwrap();
                             // Fast path if the leader has required fetch.
                             if let Some(required_fetch_builder) = required_fetch_builder.take() {
-                                let mut ctx = ctx.take().unwrap();
                                 let id = *id;
                                 let hash = *hash;
-                                let cache = cache.clone();
-                                let inflights = inflights.clone();
-                                let waiter = waiter.take();
-                                let required_fetch = required_fetch_builder(&mut ctx, &key);
-                                self.set(RawGetOrFetchMiss::Required {
+                                self.set(RawGetOrFetchMiss::required_from_builder(
+                                    ctx,
+                                    key,
                                     id,
                                     hash,
-                                    key: Some(key),
-                                    required_fetch,
                                     cache,
                                     inflights,
                                     waiter,
-                                });
+                                    required_fetch_builder,
+                                ));
                                 continue;
                             }
                             let fetch_or_take = match inflights.lock().fetch_or_take(*hash, &key, *id) {
@@ -1755,30 +1775,14 @@ where
                             };
                             match fetch_or_take {
                                 FetchOrTakeV2::Fetch(fr) => {
-                                    let mut ctx = ctx.take().unwrap();
                                     let id = *id;
                                     let hash = *hash;
-                                    let cache = cache.clone();
-                                    let inflights = inflights.clone();
-                                    let waiter = waiter.take();
-                                    let required_fetch = fr(&mut ctx, &key);
-                                    self.set(RawGetOrFetchMiss::Required {
-                                        id,
-                                        hash,
-                                        key: Some(key),
-                                        required_fetch,
-                                        cache,
-                                        inflights,
-                                        waiter,
-                                    })
+                                    self.set(RawGetOrFetchMiss::required_from_builder(
+                                        ctx, key, id, hash, cache, inflights, waiter, fr,
+                                    ))
                                 }
                                 FetchOrTakeV2::Notifiers(notifiers) => {
-                                    let waiter = waiter.take();
-                                    self.set(RawGetOrFetchMiss::Notify {
-                                        res: Some(Err(e)),
-                                        notifiers,
-                                        waiter,
-                                    });
+                                    self.set(RawGetOrFetchMiss::notify_from_result(Err(e), notifiers, waiter));
                                 }
                             }
                         }
@@ -1819,12 +1823,7 @@ where
                                 Some(notifiers) => notifiers,
                                 None => return Poll::Ready(Ok(None)),
                             };
-                            let waiter = waiter.take();
-                            self.set(RawGetOrFetchMiss::Notify {
-                                res: Some(Err(e)),
-                                notifiers,
-                                waiter,
-                            });
+                            self.set(RawGetOrFetchMiss::notify_from_result(Err(e), notifiers, waiter));
                         }
                     }
                 }
