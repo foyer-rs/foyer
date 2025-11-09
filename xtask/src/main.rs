@@ -231,14 +231,14 @@ fn madsim() {
 }
 
 fn msrv() {
-    run("cargo +1.82.0 fmt --all");
-    run("cargo +1.82.0 clippy --all-targets --features deadlock");
-    run("cargo +1.82.0 clippy --all-targets --features tokio-console");
-    run("cargo +1.82.0 clippy --all-targets");
-    run_with_env("cargo +1.82.0 nextest run --all", [("RUST_BACKTRACE", "1")]);
-    run_with_env("cargo +1.82.0 test --doc", [("RUST_BACKTRACE", "1")]);
+    run("cargo +1.85.0 fmt --all");
+    run("cargo +1.85.0 clippy --all-targets --features deadlock");
+    run("cargo +1.85.0 clippy --all-targets --features tokio-console");
+    run("cargo +1.85.0 clippy --all-targets");
+    run_with_env("cargo +1.85.0 nextest run --all", [("RUST_BACKTRACE", "1")]);
+    run_with_env("cargo +1.85.0 test --doc", [("RUST_BACKTRACE", "1")]);
     run_with_env(
-        "cargo +1.82.0 nextest run --run-ignored ignored-only --no-capture --workspace",
+        "cargo +1.85.0 nextest run --run-ignored ignored-only --no-capture --workspace",
         [("RUST_BACKTRACE", "1")],
     );
 }
