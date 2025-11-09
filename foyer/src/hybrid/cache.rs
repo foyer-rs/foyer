@@ -40,7 +40,8 @@ use foyer_common::{
     rate::RateLimiter,
 };
 use foyer_memory::{
-    Cache, CacheEntry, Fetch, FetchContext, FetchError, FetchState, FetchTarget, FetchTargetV2, GetOrFetch, Piece, Pipe,
+    Cache, CacheEntry, Fetch, FetchContext, FetchError, FetchState, FetchTarget, FetchTargetOld, GetOrFetch, Piece,
+    Pipe,
 };
 use foyer_storage::{Load, Statistics, Store};
 use futures_util::FutureExt as _;
@@ -680,14 +681,14 @@ where
                             value,
                             populated,
                         }) => Diversion {
-                            target: Ok(FetchTarget::Value(value)),
+                            target: Ok(FetchTargetOld::Value(value)),
                             store: Some(FetchContext {
                                 throttled: false,
                                 source: Source::Populated(populated),
                             }),
                         },
                         Ok(Load::Piece { piece, populated }) => Diversion {
-                            target: Ok(FetchTarget::Piece(piece)),
+                            target: Ok(FetchTargetOld::Piece(piece)),
                             store: Some(FetchContext {
                                 throttled: false,
                                 source: Source::Populated(populated),
@@ -964,7 +965,7 @@ where
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                             return Diversion {
-                                target: Ok(FetchTarget::Value(value)),
+                                target: Ok(FetchTargetOld::Value(value)),
                                 store: Some(FetchContext {
                                     throttled: false,
                                     source: Source::Populated(populated),
@@ -975,7 +976,7 @@ where
                             metrics.hybrid_hit.increase(1);
                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
                             return Diversion {
-                                target: Ok(FetchTarget::Piece(piece)),
+                                target: Ok(FetchTargetOld::Piece(piece)),
                                 store: Some(FetchContext {
                                     throttled: false,
                                     source: Source::Populated(populated),
@@ -992,7 +993,7 @@ where
 
                     let fut = async move {
                         Diversion {
-                            target: future.await.map(|v| FetchTarget::Value(v)),
+                            target: future.await.map(|v| FetchTargetOld::Value(v)),
                             store: Some(FetchContext {
                                 throttled,
                                 source: Source::Outer,
@@ -1040,9 +1041,10 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
     {
-        root_span!(self, span, "foyer::hybrid::cache::get");
+        // FIXME(MrCroxx): Restore tracing span.
+        // root_span!(self, span, "foyer::hybrid::cache::get");
 
-        let now = Instant::now();
+        // let now = Instant::now();
 
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
@@ -1058,10 +1060,10 @@ where
                             populated,
                         }) => {
                             let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
-                            Ok(Some(FetchTargetV2::Entry { value, properties }))
+                            Ok(Some(FetchTarget::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
-                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
+                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
                         Ok(Load::Throttled) => {
                             ctx.store(true, Ordering::Relaxed);
                             Ok(None)
@@ -1157,9 +1159,10 @@ where
         FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
         ER: std::error::Error + Send + Sync + 'static,
     {
-        root_span!(self, span, "foyer::hybrid::cache::get");
+        // FIXME(MrCroxx): Restore tracing span.
+        // root_span!(self, span, "foyer::hybrid::cache::get");
 
-        let now = Instant::now();
+        // let now = Instant::now();
 
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
@@ -1175,10 +1178,10 @@ where
                             populated,
                         }) => {
                             let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
-                            Ok(Some(FetchTargetV2::Entry { value, properties }))
+                            Ok(Some(FetchTarget::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
-                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTargetV2::Piece(piece))),
+                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
                         Ok(Load::Throttled) => {
                             ctx.store(true, Ordering::Relaxed);
                             Ok(None)
@@ -1189,7 +1192,7 @@ where
                 }
                 .boxed()
             })),
-            Some(Box::new(|ctx, key| {
+            Some(Box::new(|ctx, _| {
                 let ctx = ctx.clone();
                 async move {
                     match fetch().await {
@@ -1198,7 +1201,7 @@ where
                             if ctx.load(Ordering::Relaxed) {
                                 properties = properties.with_location(Location::InMem);
                             }
-                            Ok(FetchTargetV2::Entry { value, properties })
+                            Ok(FetchTarget::Entry { value, properties })
                         }
                         Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
@@ -1282,6 +1285,8 @@ where
     }
 }
 
+/// Future for [`HybridCache::get`].
+#[must_use]
 #[pin_project]
 pub struct HybridGet<K, V, S>
 where
@@ -1317,6 +1322,8 @@ where
     }
 }
 
+/// Future for [`HybridCache::get_or_fetch`].
+#[must_use]
 #[pin_project]
 pub struct HybridGetOrFetch<K, V, S>
 where

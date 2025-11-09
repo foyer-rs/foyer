@@ -37,9 +37,9 @@ use crate::{
         sieve::{Sieve, SieveConfig},
     },
     indexer::hash_table::HashTableIndexer,
-    inflight::{OptionalFetchBuilderV3, RequiredFetchBuilderV3},
+    inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
     raw::{
-        FetchContext, FetchState, FetchTarget, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch,
+        FetchContext, FetchState, FetchTargetOld, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch,
         RawGetOrFetch, Weighter,
     },
     Piece, Pipe, Result,
@@ -1160,6 +1160,7 @@ where
     C: Any + Send + Sync + 'static,
 {
     #[doc(hidden)]
+    #[expect(clippy::type_complexity)]
     pub fn poll_inner(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -1244,7 +1245,7 @@ where
         FU: Future<Output = ID> + Send + 'static,
         ER: Send + 'static + Debug,
         ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
-        IT: Into<FetchTarget<K, V, P>>,
+        IT: Into<FetchTargetOld<K, V, P>>,
     {
         match self {
             Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
@@ -1318,8 +1319,8 @@ where
     pub fn get_or_fetch_inner<Q, C>(
         &self,
         key: &Q,
-        optional_fetch_builder: Option<OptionalFetchBuilderV3<K, V, P, C>>,
-        required_fetch_builder: Option<RequiredFetchBuilderV3<K, V, P, C>>,
+        optional_fetch_builder: Option<OptionalFetchBuilder<K, V, P, C>>,
+        required_fetch_builder: Option<RequiredFetchBuilder<K, V, P, C>>,
         ctx: C,
     ) -> GetOrFetch<K, V, S, P, C>
     where
