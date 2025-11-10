@@ -20,6 +20,8 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "tracing")]
+use fastrace::prelude::*;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
@@ -158,10 +160,18 @@ impl Debug for PsyncIoEngine {
 }
 
 impl IoEngine for PsyncIoEngine {
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::psync::read")
+    )]
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
+
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::psync::read::io");
+
         #[cfg(any(test, feature = "test_utils"))]
         let read_io_latency = self.read_io_latency.clone();
         async move {
@@ -189,7 +199,11 @@ impl IoEngine for PsyncIoEngine {
                 })
                 .await
             {
-                Ok((buf, res)) => (buf, res),
+                Ok((buf, res)) => {
+                    #[cfg(feature = "tracing")]
+                    drop(span);
+                    (buf, res)
+                }
                 Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
@@ -199,10 +213,18 @@ impl IoEngine for PsyncIoEngine {
         .into()
     }
 
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::psync::write")
+    )]
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
         let runtime = self.handle.clone();
+
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::psync::write::io");
+
         #[cfg(any(test, feature = "test_utils"))]
         let write_io_latency = self.write_io_latency.clone();
         async move {
@@ -230,7 +252,11 @@ impl IoEngine for PsyncIoEngine {
                 })
                 .await
             {
-                Ok((buf, res)) => (buf, res),
+                Ok((buf, res)) => {
+                    #[cfg(feature = "tracing")]
+                    drop(span);
+                    (buf, res)
+                }
                 Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();

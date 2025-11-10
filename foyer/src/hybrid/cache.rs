@@ -1096,7 +1096,7 @@ where
         FU: Future<Output = Result<IT>> + Send + 'static,
         IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
     {
-        root_span!(self, span, "foyer::hybrid::cache::get");
+        root_span!(self, span, "foyer::hybrid::cache::get_or_fetch");
 
         let start = Instant::now();
 
