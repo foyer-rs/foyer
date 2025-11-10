@@ -83,7 +83,3 @@ workspace = true
 [[test]]
 name = "hybrid_cache_fuzzy_test"
 required-features = ["test_utils"]
-
-[[test]]
-name = "hybrid_cache_fuzzy_test_v2"
-required-features = ["test_utils"]

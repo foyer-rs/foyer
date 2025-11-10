@@ -25,7 +25,6 @@ use futures_core::future::BoxFuture;
 use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
 
 /// Load result.
-#[derive(Debug)]
 pub enum Load<K, V, P> {
     /// Load entry success.
     Entry {
@@ -47,6 +46,21 @@ pub enum Load<K, V, P> {
     Throttled,
     /// Disk cache miss.
     Miss,
+}
+
+impl<K, V, P> Debug for Load<K, V, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Load::Entry { populated, .. } => f.debug_struct("Load::Entry").field("populated", populated).finish(),
+            Load::Piece { piece, populated } => f
+                .debug_struct("Load::Piece")
+                .field("piece", piece)
+                .field("populated", populated)
+                .finish(),
+            Load::Throttled => f.debug_struct("Load::Throttled").finish(),
+            Load::Miss => f.debug_struct("Load::Miss").finish(),
+        }
+    }
 }
 
 impl<K, V, P> Load<K, V, P> {

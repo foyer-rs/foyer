@@ -26,15 +26,12 @@ pub use crate::{
     },
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
-        cache::{
-            HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties, HybridFetch, HybridGet,
-            HybridGetOrFetch,
-        },
+        cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties, HybridGet, HybridGetOrFetch},
         error::{Error, Result},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
-        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FetchState, FifoConfig, Filter, LfuConfig,
+        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FifoConfig, Filter, GetOrFetch, LfuConfig,
         LruConfig, S3FifoConfig, Weighter,
     },
     storage::{

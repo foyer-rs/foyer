@@ -15,7 +15,10 @@
 use std::{any::Any, fmt::Debug, hash::Hash};
 
 use equivalent::Equivalent;
-use foyer_common::code::{HashBuilder, Key};
+use foyer_common::{
+    code::{HashBuilder, Key},
+    properties::Properties,
+};
 use futures_util::future::BoxFuture;
 use hashbrown::hash_table::{Entry, HashTable};
 use tokio::sync::oneshot;
@@ -86,6 +89,24 @@ pub enum FetchTarget<K, V, P> {
 impl<K, V, P> Debug for FetchTarget<K, V, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchTarget").finish()
+    }
+}
+
+impl<K, V, P> From<V> for FetchTarget<K, V, P>
+where
+    P: Properties,
+{
+    fn from(value: V) -> Self {
+        Self::Entry {
+            value,
+            properties: P::default(),
+        }
+    }
+}
+
+impl<K, V, P> From<(V, P)> for FetchTarget<K, V, P> {
+    fn from((value, properties): (V, P)) -> Self {
+        Self::Entry { value, properties }
     }
 }
 

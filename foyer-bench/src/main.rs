@@ -914,10 +914,10 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let time = Instant::now();
 
-        let fetch = hybrid.fetch(idx, || {
-            let context = context.clone();
-            let entry_size = osrng.random_range(context.entry_size_range.clone());
-            let latency = context.latency;
+        let entry_size = osrng.random_range(context.entry_size_range.clone());
+        let latency = context.latency;
+        let fetch = hybrid.get_or_fetch(&idx, move |idx| {
+            let idx = *idx;
             async move {
                 if latency != Duration::ZERO {
                     tokio::time::sleep(latency).await;

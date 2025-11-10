@@ -17,7 +17,6 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
-    ops::Deref,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,19 +29,18 @@ use std::{
 use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
+// FIXME: Restore tracing.
+// #[cfg(feature = "tracing")]
+// use foyer_common::tracing::{InRootSpan, TracingConfig, TracingOptions};
 #[cfg(feature = "tracing")]
-use foyer_common::tracing::{InRootSpan, TracingConfig, TracingOptions};
+use foyer_common::tracing::{TracingConfig, TracingOptions};
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
-    future::Diversion,
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
     rate::RateLimiter,
 };
-use foyer_memory::{
-    Cache, CacheEntry, Fetch, FetchContext, FetchError, FetchState, FetchTarget, FetchTargetOld, GetOrFetch, Piece,
-    Pipe,
-};
+use foyer_memory::{Cache, CacheEntry, FetchError, FetchTarget, GetOrFetch, Piece, Pipe};
 use foyer_storage::{Load, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
@@ -574,173 +572,173 @@ where
         entry
     }
 
-    /// Get cached entry with the given key from the hybrid cache.
-    pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
-    where
-        Q: Hash + Equivalent<K>,
-    {
-        root_span!(self, span, "foyer::hybrid::cache::get");
+    // /// Get cached entry with the given key from the hybrid cache.
+    // pub async fn get<Q>(&self, key: &Q) -> Result<Option<HybridCacheEntry<K, V, S>>>
+    // where
+    //     Q: Hash + Equivalent<K>,
+    // {
+    //     root_span!(self, span, "foyer::hybrid::cache::get");
 
-        let now = Instant::now();
+    //     let now = Instant::now();
 
-        let record_hit = || {
-            self.inner.metrics.hybrid_hit.increase(1);
-            self.inner
-                .metrics
-                .hybrid_hit_duration
-                .record(now.elapsed().as_secs_f64());
-        };
-        let record_miss = || {
-            self.inner.metrics.hybrid_miss.increase(1);
-            self.inner
-                .metrics
-                .hybrid_miss_duration
-                .record(now.elapsed().as_secs_f64());
-        };
-        let record_throttled = || {
-            self.inner.metrics.hybrid_throttled.increase(1);
-            self.inner
-                .metrics
-                .hybrid_throttled_duration
-                .record(now.elapsed().as_secs_f64());
-        };
+    //     let record_hit = || {
+    //         self.inner.metrics.hybrid_hit.increase(1);
+    //         self.inner
+    //             .metrics
+    //             .hybrid_hit_duration
+    //             .record(now.elapsed().as_secs_f64());
+    //     };
+    //     let record_miss = || {
+    //         self.inner.metrics.hybrid_miss.increase(1);
+    //         self.inner
+    //             .metrics
+    //             .hybrid_miss_duration
+    //             .record(now.elapsed().as_secs_f64());
+    //     };
+    //     let record_throttled = || {
+    //         self.inner.metrics.hybrid_throttled.increase(1);
+    //         self.inner
+    //             .metrics
+    //             .hybrid_throttled_duration
+    //             .record(now.elapsed().as_secs_f64());
+    //     };
 
-        #[cfg(feature = "tracing")]
-        let guard = span.set_local_parent();
-        if let Some(entry) = self.inner.memory.get(key) {
-            record_hit();
-            try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
-            return Ok(Some(entry));
-        }
-        #[cfg(feature = "tracing")]
-        drop(guard);
+    //     #[cfg(feature = "tracing")]
+    //     let guard = span.set_local_parent();
+    //     if let Some(entry) = self.inner.memory.get(key) {
+    //         record_hit();
+    //         try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
+    //         return Ok(Some(entry));
+    //     }
+    //     #[cfg(feature = "tracing")]
+    //     drop(guard);
 
-        #[cfg(feature = "tracing")]
-        let load = self
-            .inner
-            .storage
-            .load(key)
-            .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
-        #[cfg(not(feature = "tracing"))]
-        let load = self.inner.storage.load(key);
+    //     #[cfg(feature = "tracing")]
+    //     let load = self
+    //         .inner
+    //         .storage
+    //         .load(key)
+    //         .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
+    //     #[cfg(not(feature = "tracing"))]
+    //     let load = self.inner.storage.load(key);
 
-        let entry = match load.await? {
-            Load::Entry { key, value, populated } => {
-                record_hit();
-                Some(self.inner.memory.insert_with_properties(
-                    key,
-                    value,
-                    HybridCacheProperties::default().with_source(Source::Populated(populated)),
-                ))
-            }
-            Load::Piece { piece, .. } => {
-                record_hit();
-                Some(self.inner.memory.insert_piece(piece))
-            }
-            Load::Throttled => {
-                record_throttled();
-                None
-            }
-            Load::Miss => {
-                record_miss();
-                None
-            }
-        };
+    //     let entry = match load.await? {
+    //         Load::Entry { key, value, populated } => {
+    //             record_hit();
+    //             Some(self.inner.memory.insert_with_properties(
+    //                 key,
+    //                 value,
+    //                 HybridCacheProperties::default().with_source(Source::Populated(populated)),
+    //             ))
+    //         }
+    //         Load::Piece { piece, .. } => {
+    //             record_hit();
+    //             Some(self.inner.memory.insert_piece(piece))
+    //         }
+    //         Load::Throttled => {
+    //             record_throttled();
+    //             None
+    //         }
+    //         Load::Miss => {
+    //             record_miss();
+    //             None
+    //         }
+    //     };
 
-        try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
+    //     try_cancel!(span, self.inner.tracing_config.record_hybrid_get_threshold());
 
-        Ok(entry)
-    }
+    //     Ok(entry)
+    // }
 
-    /// Get cached entry with the given key from the hybrid cache.
-    ///
-    /// Different from `get`, `obtain` deduplicates the disk cache queries.
-    ///
-    /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
-    /// key is acceptable.
-    pub async fn obtain(&self, key: K) -> Result<Option<HybridCacheEntry<K, V, S>>>
-    where
-        K: Clone,
-    {
-        root_span!(self, span, "foyer::hybrid::cache::obtain");
+    // /// Get cached entry with the given key from the hybrid cache.
+    // ///
+    // /// Different from `get`, `obtain` deduplicates the disk cache queries.
+    // ///
+    // /// `obtain` is always supposed to be used instead of `get` if the overhead of getting the ownership of the given
+    // /// key is acceptable.
+    // pub async fn obtain(&self, key: K) -> Result<Option<HybridCacheEntry<K, V, S>>>
+    // where
+    //     K: Clone,
+    // {
+    //     root_span!(self, span, "foyer::hybrid::cache::obtain");
 
-        let now = Instant::now();
+    //     let now = Instant::now();
 
-        #[cfg(feature = "tracing")]
-        let guard = span.set_local_parent();
+    //     #[cfg(feature = "tracing")]
+    //     let guard = span.set_local_parent();
 
-        let fetch = self.inner.memory.fetch_inner(
-            key.clone(),
-            HybridCacheProperties::default(),
-            || {
-                let store = self.inner.storage.clone();
-                async move {
-                    match store.load(&key).await.map_err(Error::from) {
-                        Ok(Load::Entry {
-                            key: _,
-                            value,
-                            populated,
-                        }) => Diversion {
-                            target: Ok(FetchTargetOld::Value(value)),
-                            store: Some(FetchContext {
-                                throttled: false,
-                                source: Source::Populated(populated),
-                            }),
-                        },
-                        Ok(Load::Piece { piece, populated }) => Diversion {
-                            target: Ok(FetchTargetOld::Piece(piece)),
-                            store: Some(FetchContext {
-                                throttled: false,
-                                source: Source::Populated(populated),
-                            }),
-                        },
-                        Ok(Load::Throttled) => Err(ObtainFetchError::Throttled).into(),
-                        Ok(Load::Miss) => Err(ObtainFetchError::NotExist).into(),
-                        Err(e) => Err(ObtainFetchError::Other(e)).into(),
-                    }
-                }
-            },
-            &tokio::runtime::Handle::current().into(),
-        );
-        #[cfg(feature = "tracing")]
-        drop(guard);
+    //     let fetch = self.inner.memory.fetch_inner(
+    //         key.clone(),
+    //         HybridCacheProperties::default(),
+    //         || {
+    //             let store = self.inner.storage.clone();
+    //             async move {
+    //                 match store.load(&key).await.map_err(Error::from) {
+    //                     Ok(Load::Entry {
+    //                         key: _,
+    //                         value,
+    //                         populated,
+    //                     }) => Diversion {
+    //                         target: Ok(FetchTargetOld::Value(value)),
+    //                         store: Some(FetchContext {
+    //                             throttled: false,
+    //                             source: Source::Populated(populated),
+    //                         }),
+    //                     },
+    //                     Ok(Load::Piece { piece, populated }) => Diversion {
+    //                         target: Ok(FetchTargetOld::Piece(piece)),
+    //                         store: Some(FetchContext {
+    //                             throttled: false,
+    //                             source: Source::Populated(populated),
+    //                         }),
+    //                     },
+    //                     Ok(Load::Throttled) => Err(ObtainFetchError::Throttled).into(),
+    //                     Ok(Load::Miss) => Err(ObtainFetchError::NotExist).into(),
+    //                     Err(e) => Err(ObtainFetchError::Other(e)).into(),
+    //                 }
+    //             }
+    //         },
+    //         &tokio::runtime::Handle::current().into(),
+    //     );
+    //     #[cfg(feature = "tracing")]
+    //     drop(guard);
 
-        let res = fetch.await;
+    //     let res = fetch.await;
 
-        match res {
-            Ok(entry) => {
-                self.inner.metrics.hybrid_hit.increase(1);
-                self.inner
-                    .metrics
-                    .hybrid_hit_duration
-                    .record(now.elapsed().as_secs_f64());
-                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
-                Ok(Some(entry))
-            }
-            Err(ObtainFetchError::Throttled) => {
-                self.inner.metrics.hybrid_throttled.increase(1);
-                self.inner
-                    .metrics
-                    .hybrid_throttled_duration
-                    .record(now.elapsed().as_secs_f64());
-                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
-                Ok(None)
-            }
-            Err(ObtainFetchError::NotExist) => {
-                self.inner.metrics.hybrid_miss.increase(1);
-                self.inner
-                    .metrics
-                    .hybrid_miss_duration
-                    .record(now.elapsed().as_secs_f64());
-                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
-                Ok(None)
-            }
-            Err(ObtainFetchError::Other(e)) => {
-                try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
-                Err(e)
-            }
-        }
-    }
+    //     match res {
+    //         Ok(entry) => {
+    //             self.inner.metrics.hybrid_hit.increase(1);
+    //             self.inner
+    //                 .metrics
+    //                 .hybrid_hit_duration
+    //                 .record(now.elapsed().as_secs_f64());
+    //             try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
+    //             Ok(Some(entry))
+    //         }
+    //         Err(ObtainFetchError::Throttled) => {
+    //             self.inner.metrics.hybrid_throttled.increase(1);
+    //             self.inner
+    //                 .metrics
+    //                 .hybrid_throttled_duration
+    //                 .record(now.elapsed().as_secs_f64());
+    //             try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
+    //             Ok(None)
+    //         }
+    //         Err(ObtainFetchError::NotExist) => {
+    //             self.inner.metrics.hybrid_miss.increase(1);
+    //             self.inner
+    //                 .metrics
+    //                 .hybrid_miss_duration
+    //                 .record(now.elapsed().as_secs_f64());
+    //             try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
+    //             Ok(None)
+    //         }
+    //         Err(ObtainFetchError::Other(e)) => {
+    //             try_cancel!(span, self.inner.tracing_config.record_hybrid_obtain_threshold());
+    //             Err(e)
+    //         }
+    //     }
+    // }
 
     /// Remove a cached entry with the given key from the hybrid cache.
     pub fn remove<Q>(&self, key: &Q)
@@ -822,213 +820,213 @@ where
     }
 }
 
-#[derive(Debug)]
-enum ObtainFetchError {
-    Throttled,
-    NotExist,
-    Other(Error),
-}
+// #[derive(Debug)]
+// enum ObtainFetchError {
+//     Throttled,
+//     NotExist,
+//     Other(Error),
+// }
 
-impl From<foyer_memory::Error> for ObtainFetchError {
-    fn from(e: foyer_memory::Error) -> Self {
-        Self::Other(e.into())
-    }
-}
+// impl From<foyer_memory::Error> for ObtainFetchError {
+//     fn from(e: foyer_memory::Error) -> Self {
+//         Self::Other(e.into())
+//     }
+// }
 
-/// The future generated by [`HybridCache::fetch`].
-#[cfg(feature = "tracing")]
-pub type HybridFetch<K, V, S = DefaultHasher> = InRootSpan<HybridFetchInner<K, V, S>>;
+// /// The future generated by [`HybridCache::fetch`].
+// #[cfg(feature = "tracing")]
+// pub type HybridFetch<K, V, S = DefaultHasher> = InRootSpan<HybridFetchInner<K, V, S>>;
 
-/// The future generated by [`HybridCache::fetch`].
-#[cfg(not(feature = "tracing"))]
-pub type HybridFetch<K, V, S = DefaultHasher> = HybridFetchInner<K, V, S>;
+// /// The future generated by [`HybridCache::fetch`].
+// #[cfg(not(feature = "tracing"))]
+// pub type HybridFetch<K, V, S = DefaultHasher> = HybridFetchInner<K, V, S>;
 
-/// A future that is used to get entry value from the remote storage for the hybrid cache.
-#[pin_project]
-pub struct HybridFetchInner<K, V, S = DefaultHasher>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    #[pin]
-    inner: Fetch<K, V, Error, S, HybridCacheProperties>,
-    policy: HybridCachePolicy,
-    storage: Store<K, V, S, HybridCacheProperties>,
-}
+// /// A future that is used to get entry value from the remote storage for the hybrid cache.
+// #[pin_project]
+// pub struct HybridFetchInner<K, V, S = DefaultHasher>
+// where
+//     K: StorageKey,
+//     V: StorageValue,
+//     S: HashBuilder + Debug,
+// {
+//     #[pin]
+//     inner: Fetch<K, V, Error, S, HybridCacheProperties>,
+//     policy: HybridCachePolicy,
+//     storage: Store<K, V, S, HybridCacheProperties>,
+// }
 
-impl<K, V, S> Future for HybridFetchInner<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    type Output = Result<CacheEntry<K, V, S, HybridCacheProperties>>;
+// impl<K, V, S> Future for HybridFetchInner<K, V, S>
+// where
+//     K: StorageKey,
+//     V: StorageValue,
+//     S: HashBuilder + Debug,
+// {
+//     type Output = Result<CacheEntry<K, V, S, HybridCacheProperties>>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        let res = ready!(this.inner.as_mut().poll(cx));
+//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+//         let mut this = self.project();
+//         let res = ready!(this.inner.as_mut().poll(cx));
 
-        if let Ok(entry) = res.as_ref() {
-            if entry.properties().location() != Location::InMem
-                && *this.policy == HybridCachePolicy::WriteOnInsertion
-                && this.inner.store().is_some()
-            {
-                let throttled = this.inner.store().as_ref().unwrap().throttled;
-                if !throttled {
-                    this.storage.enqueue(entry.piece(), false);
-                }
-            }
-        }
+//         if let Ok(entry) = res.as_ref() {
+//             if entry.properties().location() != Location::InMem
+//                 && *this.policy == HybridCachePolicy::WriteOnInsertion
+//                 && this.inner.store().is_some()
+//             {
+//                 let throttled = this.inner.store().as_ref().unwrap().throttled;
+//                 if !throttled {
+//                     this.storage.enqueue(entry.piece(), false);
+//                 }
+//             }
+//         }
 
-        Poll::Ready(res)
-    }
-}
+//         Poll::Ready(res)
+//     }
+// }
 
-impl<K, V, S> Deref for HybridFetchInner<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    type Target = Fetch<K, V, Error, S, HybridCacheProperties>;
+// impl<K, V, S> Deref for HybridFetchInner<K, V, S>
+// where
+//     K: StorageKey,
+//     V: StorageValue,
+//     S: HashBuilder + Debug,
+// {
+//     type Target = Fetch<K, V, Error, S, HybridCacheProperties>;
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         &self.inner
+//     }
+// }
 
-impl<K, V, S> HybridCache<K, V, S>
-where
-    K: StorageKey + Clone,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    /// Fetch and insert a cache entry with the given key and method if there is a cache miss.
-    ///
-    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
-    /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = Result<V>> + Send + 'static,
-    {
-        self.fetch_inner(key, HybridCacheProperties::default(), fetch)
-    }
+// impl<K, V, S> HybridCache<K, V, S>
+// where
+//     K: StorageKey + Clone,
+//     V: StorageValue,
+//     S: HashBuilder + Debug,
+// {
+//     /// Fetch and insert a cache entry with the given key and method if there is a cache miss.
+//     ///
+//     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+//     /// runtime. Otherwise, the user's runtime will be used.
+//     pub fn fetch<F, FU>(&self, key: K, fetch: F) -> HybridFetch<K, V, S>
+//     where
+//         F: FnOnce() -> FU,
+//         FU: Future<Output = Result<V>> + Send + 'static,
+//     {
+//         self.fetch_inner(key, HybridCacheProperties::default(), fetch)
+//     }
 
-    /// Fetch and insert a cache entry with the given key, properties, and method if there is a cache miss.
-    ///
-    /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
-    /// runtime. Otherwise, the user's runtime will be used.
-    pub fn fetch_with_properties<F, FU>(
-        &self,
-        key: K,
-        properties: HybridCacheProperties,
-        fetch: F,
-    ) -> HybridFetch<K, V, S>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = Result<V>> + Send + 'static,
-    {
-        self.fetch_inner(key, properties, fetch)
-    }
+//     /// Fetch and insert a cache entry with the given key, properties, and method if there is a cache miss.
+//     ///
+//     /// If the dedicated runtime of the foyer storage engine is enabled, `fetch` will spawn task with the dedicated
+//     /// runtime. Otherwise, the user's runtime will be used.
+//     pub fn fetch_with_properties<F, FU>(
+//         &self,
+//         key: K,
+//         properties: HybridCacheProperties,
+//         fetch: F,
+//     ) -> HybridFetch<K, V, S>
+//     where
+//         F: FnOnce() -> FU,
+//         FU: Future<Output = Result<V>> + Send + 'static,
+//     {
+//         self.fetch_inner(key, properties, fetch)
+//     }
 
-    fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = Result<V>> + Send + 'static,
-    {
-        root_span!(self, span, "foyer::hybrid::cache::fetch");
+//     fn fetch_inner<F, FU>(&self, key: K, properties: HybridCacheProperties, fetch: F) -> HybridFetch<K, V, S>
+//     where
+//         F: FnOnce() -> FU,
+//         FU: Future<Output = Result<V>> + Send + 'static,
+//     {
+//         root_span!(self, span, "foyer::hybrid::cache::fetch");
 
-        #[cfg(feature = "tracing")]
-        let _guard = span.set_local_parent();
+//         #[cfg(feature = "tracing")]
+//         let _guard = span.set_local_parent();
 
-        let now = Instant::now();
+//         let now = Instant::now();
 
-        let store = self.inner.storage.clone();
+//         let store = self.inner.storage.clone();
 
-        let future = fetch();
-        let inner = self.inner.memory.fetch_inner(
-            key.clone(),
-            properties,
-            || {
-                let metrics = self.inner.metrics.clone();
-                let runtime = self.storage().runtime().clone();
+//         let future = fetch();
+//         let inner = self.inner.memory.fetch_inner(
+//             key.clone(),
+//             properties,
+//             || {
+//                 let metrics = self.inner.metrics.clone();
+//                 let runtime = self.storage().runtime().clone();
 
-                async move {
-                    let throttled = match store.load(&key).await.map_err(Error::from) {
-                        Ok(Load::Entry {
-                            key: _,
-                            value,
-                            populated,
-                        }) => {
-                            metrics.hybrid_hit.increase(1);
-                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-                            return Diversion {
-                                target: Ok(FetchTargetOld::Value(value)),
-                                store: Some(FetchContext {
-                                    throttled: false,
-                                    source: Source::Populated(populated),
-                                }),
-                            };
-                        }
-                        Ok(Load::Piece { piece, populated }) => {
-                            metrics.hybrid_hit.increase(1);
-                            metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
-                            return Diversion {
-                                target: Ok(FetchTargetOld::Piece(piece)),
-                                store: Some(FetchContext {
-                                    throttled: false,
-                                    source: Source::Populated(populated),
-                                }),
-                            };
-                        }
-                        Ok(Load::Throttled) => true,
-                        Ok(Load::Miss) => false,
-                        Err(e) => return Err(e).into(),
-                    };
+//                 async move {
+//                     let throttled = match store.load(&key).await.map_err(Error::from) {
+//                         Ok(Load::Entry {
+//                             key: _,
+//                             value,
+//                             populated,
+//                         }) => {
+//                             metrics.hybrid_hit.increase(1);
+//                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+//                             return Diversion {
+//                                 target: Ok(FetchTargetOld::Value(value)),
+//                                 store: Some(FetchContext {
+//                                     throttled: false,
+//                                     source: Source::Populated(populated),
+//                                 }),
+//                             };
+//                         }
+//                         Ok(Load::Piece { piece, populated }) => {
+//                             metrics.hybrid_hit.increase(1);
+//                             metrics.hybrid_hit_duration.record(now.elapsed().as_secs_f64());
+//                             return Diversion {
+//                                 target: Ok(FetchTargetOld::Piece(piece)),
+//                                 store: Some(FetchContext {
+//                                     throttled: false,
+//                                     source: Source::Populated(populated),
+//                                 }),
+//                             };
+//                         }
+//                         Ok(Load::Throttled) => true,
+//                         Ok(Load::Miss) => false,
+//                         Err(e) => return Err(e).into(),
+//                     };
 
-                    metrics.hybrid_miss.increase(1);
-                    metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
+//                     metrics.hybrid_miss.increase(1);
+//                     metrics.hybrid_miss_duration.record(now.elapsed().as_secs_f64());
 
-                    let fut = async move {
-                        Diversion {
-                            target: future.await.map(|v| FetchTargetOld::Value(v)),
-                            store: Some(FetchContext {
-                                throttled,
-                                source: Source::Outer,
-                            }),
-                        }
-                    };
-                    #[cfg(feature = "tracing")]
-                    let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
+//                     let fut = async move {
+//                         Diversion {
+//                             target: future.await.map(|v| FetchTargetOld::Value(v)),
+//                             store: Some(FetchContext {
+//                                 throttled,
+//                                 source: Source::Outer,
+//                             }),
+//                         }
+//                     };
+//                     #[cfg(feature = "tracing")]
+//                     let fut = fut.in_span(Span::enter_with_local_parent("foyer::hybrid::fetch::fn"));
 
-                    runtime.user().spawn(fut).await.unwrap()
-                }
-            },
-            self.storage().runtime().read(),
-        );
+//                     runtime.user().spawn(fut).await.unwrap()
+//                 }
+//             },
+//             self.storage().runtime().read(),
+//         );
 
-        if inner.state() == FetchState::Hit {
-            self.inner.metrics.hybrid_hit.increase(1);
-            self.inner
-                .metrics
-                .hybrid_hit_duration
-                .record(now.elapsed().as_secs_f64());
-        }
+//         if inner.state() == FetchState::Hit {
+//             self.inner.metrics.hybrid_hit.increase(1);
+//             self.inner
+//                 .metrics
+//                 .hybrid_hit_duration
+//                 .record(now.elapsed().as_secs_f64());
+//         }
 
-        let inner = HybridFetchInner {
-            inner,
-            policy: self.inner.policy,
-            storage: self.inner.storage.clone(),
-        };
+//         let inner = HybridFetchInner {
+//             inner,
+//             policy: self.inner.policy,
+//             storage: self.inner.storage.clone(),
+//         };
 
-        let f = inner;
-        #[cfg(feature = "tracing")]
-        let f = InRootSpan::new(f, span).with_threshold(self.inner.tracing_config.record_hybrid_fetch_threshold());
-        f
-    }
-}
+//         let f = inner;
+//         #[cfg(feature = "tracing")]
+//         let f = InRootSpan::new(f, span).with_threshold(self.inner.tracing_config.record_hybrid_fetch_threshold());
+//         f
+//     }
+// }
 
 impl<K, V, S> HybridCache<K, V, S>
 where
@@ -1037,7 +1035,7 @@ where
     S: HashBuilder + Debug,
 {
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_v2<Q>(&self, key: &Q) -> HybridGet<K, V, S>
+    pub fn get<Q>(&self, key: &Q) -> HybridGet<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
     {
@@ -1152,26 +1150,30 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_or_fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
+    pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce() -> FU + Send + 'static,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
-        ER: std::error::Error + Send + Sync + 'static,
+        F: FnOnce(&K) -> FU + Send + 'static,
+        FU: Future<Output = Result<IT>> + Send + 'static,
+        IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
     {
         // FIXME(MrCroxx): Restore tracing span.
         // root_span!(self, span, "foyer::hybrid::cache::get");
 
         // let now = Instant::now();
 
+        let ctx = Arc::new(HybridGetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx: &mut Arc<AtomicBool>, key| {
+            Some(Box::new(|ctx: &mut Arc<HybridGetOrFetchCtx>, key| {
                 let ctx = ctx.clone();
                 let key = key.clone();
                 async move {
-                    match store.load(&key).await {
+                    let load = store.load(&key).await;
+                    tracing::trace!(load = ?load, "[hybrid]: loaded from disk cache");
+                    match load {
+                        // match store.load(&key).await {
                         Ok(Load::Entry {
                             key: _,
                             value,
@@ -1183,7 +1185,7 @@ where
                         // TODO(MrCroxx): Remove populated with piece?
                         Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
                         Ok(Load::Throttled) => {
-                            ctx.store(true, Ordering::Relaxed);
+                            ctx.throttled.store(true, Ordering::Relaxed);
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
@@ -1192,26 +1194,41 @@ where
                 }
                 .boxed()
             })),
-            Some(Box::new(|ctx, _| {
+            Some(Box::new(|ctx, k| {
                 let ctx = ctx.clone();
+                let fut = fetch(k);
                 async move {
-                    match fetch().await {
-                        Ok(value) => {
-                            let mut properties = HybridCacheProperties::default().with_source(Source::Outer);
-                            if ctx.load(Ordering::Relaxed) {
-                                properties = properties.with_location(Location::InMem);
-                            }
-                            Ok(FetchTarget::Entry { value, properties })
+                    match fut.await {
+                        Ok(it) => {
+                            let target = it.into();
+                            let target = match target {
+                                FetchTarget::Entry { value, mut properties } => {
+                                    properties = properties.with_source(Source::Outer);
+                                    if ctx.throttled.load(Ordering::Relaxed) {
+                                        properties = properties.with_location(Location::InMem);
+                                    }
+                                    FetchTarget::Entry { value, properties }
+                                }
+                                _ => target,
+                            };
+                            Ok(target)
                         }
                         Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                     }
                 }
                 .boxed()
             })),
-            Arc::new(AtomicBool::new(false)),
+            ctx.clone(),
         );
 
-        HybridGetOrFetch { inner }
+        let policy = self.inner.policy;
+        let store = self.inner.storage.clone();
+        HybridGetOrFetch {
+            inner,
+            policy,
+            store,
+            ctx,
+        }
 
         // let now = Instant::now();
 
@@ -1322,6 +1339,11 @@ where
     }
 }
 
+#[derive(Debug, Default)]
+struct HybridGetOrFetchCtx {
+    throttled: AtomicBool,
+}
+
 /// Future for [`HybridCache::get_or_fetch`].
 #[must_use]
 #[pin_project]
@@ -1332,7 +1354,10 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<HybridGetOrFetchCtx>>,
+    policy: HybridCachePolicy,
+    store: Store<K, V, S, HybridCacheProperties>,
+    ctx: Arc<HybridGetOrFetchCtx>,
 }
 
 impl<K, V, S> Debug for HybridGetOrFetch<K, V, S>
@@ -1356,7 +1381,19 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        this.inner.poll(cx).map_err(Error::other)
+        let res = ready!(this.inner.poll(cx).map_err(Error::other));
+
+        if let Ok(entry) = res.as_ref() {
+            if entry.properties().location() != Location::InMem
+                && *this.policy == HybridCachePolicy::WriteOnInsertion
+                && this.store.is_enabled()
+                && !this.ctx.throttled.load(Ordering::Relaxed)
+            {
+                this.store.enqueue(entry.piece(), false);
+            }
+        }
+
+        Poll::Ready(res)
     }
 }
 
@@ -1501,12 +1538,15 @@ mod tests {
         assert_eq!(e3.value(), &vec![3; 7 * KB]);
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
 
-        let e5 = hybrid.fetch(5, || async move { Ok(vec![5; 7 * KB]) }).await.unwrap();
+        let e5 = hybrid
+            .get_or_fetch(&5, |_| async move { Ok(vec![5; 7 * KB]) })
+            .await
+            .unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
 
         let e1g = hybrid.get(&1).await.unwrap().unwrap();
         assert_eq!(e1g.value(), &vec![1; 7 * KB]);
-        let e2g = hybrid.obtain(2).await.unwrap().unwrap();
+        let e2g = hybrid.get(&2).await.unwrap().unwrap();
         assert_eq!(e2g.value(), &vec![2; 7 * KB]);
 
         assert!(hybrid.contains(&1));
@@ -1551,11 +1591,12 @@ mod tests {
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
 
         hybrid
-            .fetch_with_properties(
-                1,
-                HybridCacheProperties::default().with_location(Location::Default),
-                || async move { Ok(vec![1; 7 * KB]) },
-            )
+            .get_or_fetch(&1, |_| async move {
+                Ok((
+                    vec![1; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::Default),
+                ))
+            })
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
@@ -1567,11 +1608,12 @@ mod tests {
         );
 
         hybrid
-            .fetch_with_properties(
-                2,
-                HybridCacheProperties::default().with_location(Location::InMem),
-                || async move { Ok(vec![2; 7 * KB]) },
-            )
+            .get_or_fetch(&2, |_| async move {
+                Ok((
+                    vec![2; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::InMem),
+                ))
+            })
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&2).unwrap().value(), &vec![2; 7 * KB]);
@@ -1580,11 +1622,12 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .fetch_with_properties(
-                3,
-                HybridCacheProperties::default().with_location(Location::OnDisk),
-                || async move { Ok(vec![3; 7 * KB]) },
-            )
+            .get_or_fetch(&3, |_| async move {
+                Ok((
+                    vec![3; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::OnDisk),
+                ))
+            })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1600,11 +1643,12 @@ mod tests {
         let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
 
         hybrid
-            .fetch_with_properties(
-                1,
-                HybridCacheProperties::default().with_location(Location::Default),
-                || async move { Ok(vec![1; 7 * KB]) },
-            )
+            .get_or_fetch(&1, |_| async move {
+                Ok((
+                    vec![1; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::Default),
+                ))
+            })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1615,11 +1659,12 @@ mod tests {
         );
 
         hybrid
-            .fetch_with_properties(
-                2,
-                HybridCacheProperties::default().with_location(Location::InMem),
-                || async move { Ok(vec![2; 7 * KB]) },
-            )
+            .get_or_fetch(&2, |_| async move {
+                Ok((
+                    vec![2; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::InMem),
+                ))
+            })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1627,11 +1672,12 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .fetch_with_properties(
-                3,
-                HybridCacheProperties::default().with_location(Location::OnDisk),
-                || async move { Ok(vec![3; 7 * KB]) },
-            )
+            .get_or_fetch(&3, |_| async move {
+                Ok((
+                    vec![3; 7 * KB],
+                    HybridCacheProperties::default().with_location(Location::OnDisk),
+                ))
+            })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1744,12 +1790,17 @@ mod tests {
             vec![1; 7 * KB]
         );
 
-        // 3. throttle all reads
+        // 3. remove e1 from memory, throttle all reads
+        let r = hybrid.memory().remove(&1);
+        assert!(r.is_some());
         hybrid.storage().load_throttle_switch().throttle();
         assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
 
         // 4. assert fetch will not reinsert throttled but existed e1
-        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        hybrid
+            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .await
+            .unwrap();
         hybrid.storage().wait().await;
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
@@ -1779,7 +1830,10 @@ mod tests {
         assert!(matches! {hybrid.storage().load(&1).await.unwrap(), Load::Throttled });
 
         // 4. assert fetch will not reinsert throttled but existed e1
-        hybrid.fetch(1, || async move { Ok(vec![1; 7 * KB]) }).await.unwrap();
+        hybrid
+            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .await
+            .unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
         hybrid.memory().evict_all();
         hybrid.storage().wait().await;

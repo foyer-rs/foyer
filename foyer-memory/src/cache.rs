@@ -18,17 +18,14 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, Key, Value},
     event::EventListener,
-    future::Diversion,
     metrics::Metrics,
     properties::{Hint, Location, Properties, Source},
-    runtime::SingletonHandle,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::Error,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -38,11 +35,8 @@ use crate::{
     },
     indexer::hash_table::HashTableIndexer,
     inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
-    raw::{
-        FetchContext, FetchState, FetchTargetOld, Filter, RawCache, RawCacheConfig, RawCacheEntry, RawFetch,
-        RawGetOrFetch, Weighter,
-    },
-    Piece, Pipe, Result,
+    raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
+    FetchTarget, Piece, Pipe, Result,
 };
 
 /// Entry properties for in-memory only cache.
@@ -116,8 +110,6 @@ macro_rules! define_cache {
                 RawCache<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>>;
             pub type [<$algo CacheEntry>]<K, V, S = DefaultHasher, P = CacheProperties> =
                 RawCacheEntry<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>>;
-            pub type [<$algo Fetch>]<K, V, ER, S = DefaultHasher, P = CacheProperties> =
-                RawFetch<$algo<K, V, P>, ER, S, HashTableIndexer<$algo<K, V, P>>>;
             pub type [<$algo GetOrFetch>]<K, V, S = DefaultHasher, P = CacheProperties, C = ()> =
                 RawGetOrFetch<$algo<K, V, P>, S, HashTableIndexer<$algo<K, V, P>>, C>;
         }
@@ -905,139 +897,6 @@ where
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
-#[pin_project(project = FetchProj)]
-pub enum Fetch<K, V, ER, S = DefaultHasher, P = CacheProperties>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    /// A future that is used to get entry value from the remote storage for the in-memory FIFO cache.
-    Fifo(#[pin] FifoFetch<K, V, ER, S, P>),
-    /// A future that is used to get entry value from the remote storage for the in-memory S3FIFO cache.
-    S3Fifo(#[pin] S3FifoFetch<K, V, ER, S, P>),
-    /// A future that is used to get entry value from the remote storage for the in-memory LRU cache.
-    Lru(#[pin] LruFetch<K, V, ER, S, P>),
-    /// A future that is used to get entry value from the remote storage for the in-memory LFU cache.
-    Lfu(#[pin] LfuFetch<K, V, ER, S, P>),
-    /// A future that is used to get entry value from the remote storage for the in-memory sieve cache.
-    Sieve(#[pin] SieveFetch<K, V, ER, S, P>),
-}
-
-impl<K, V, ER, S, P> From<FifoFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn from(entry: FifoFetch<K, V, ER, S, P>) -> Self {
-        Self::Fifo(entry)
-    }
-}
-
-impl<K, V, ER, S, P> From<S3FifoFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn from(entry: S3FifoFetch<K, V, ER, S, P>) -> Self {
-        Self::S3Fifo(entry)
-    }
-}
-
-impl<K, V, ER, S, P> From<LruFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn from(entry: LruFetch<K, V, ER, S, P>) -> Self {
-        Self::Lru(entry)
-    }
-}
-
-impl<K, V, ER, S, P> From<LfuFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn from(entry: LfuFetch<K, V, ER, S, P>) -> Self {
-        Self::Lfu(entry)
-    }
-}
-
-impl<K, V, ER, S, P> From<SieveFetch<K, V, ER, S, P>> for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn from(entry: SieveFetch<K, V, ER, S, P>) -> Self {
-        Self::Sieve(entry)
-    }
-}
-
-impl<K, V, ER, S, P> Future for Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    ER: From<Error>,
-    S: HashBuilder,
-    P: Properties,
-{
-    type Output = std::result::Result<CacheEntry<K, V, S, P>, ER>;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        match self.project() {
-            FetchProj::Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-            FetchProj::S3Fifo(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-            FetchProj::Lru(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-            FetchProj::Lfu(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-            FetchProj::Sieve(entry) => entry.poll(cx).map(|res| res.map(CacheEntry::from)),
-        }
-    }
-}
-
-impl<K, V, ER, S, P> Fetch<K, V, ER, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    /// Get the fetch state.
-    pub fn state(&self) -> FetchState {
-        match self {
-            Fetch::Fifo(fetch) => fetch.state(),
-            Fetch::S3Fifo(fetch) => fetch.state(),
-            Fetch::Lru(fetch) => fetch.state(),
-            Fetch::Lfu(fetch) => fetch.state(),
-            Fetch::Sieve(fetch) => fetch.state(),
-        }
-    }
-
-    /// Get the ext of the fetch.
-    #[doc(hidden)]
-    pub fn store(&self) -> &Option<FetchContext> {
-        match self {
-            Fetch::Fifo(fetch) => fetch.store(),
-            Fetch::S3Fifo(fetch) => fetch.store(),
-            Fetch::Lru(fetch) => fetch.store(),
-            Fetch::Lfu(fetch) => fetch.store(),
-            Fetch::Sieve(fetch) => fetch.store(),
-        }
-    }
-}
-
-/// A future that is used to get entry value from the remote storage for the in-memory cache.
 #[pin_project(project = GetOrFetchProj)]
 pub enum GetOrFetch<K, V, S = DefaultHasher, P = CacheProperties, C = ()>
 where
@@ -1178,87 +1037,6 @@ where
 
 impl<K, V, S, P> Cache<K, V, S, P>
 where
-    K: Key + Clone,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    /// Get the cached entry with the given key from the in-memory cache.
-    ///
-    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
-    ///
-    /// The concurrent fetch requests will be deduplicated.
-    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch<F, FU, ER>(&self, key: K, fetch: F) -> Fetch<K, V, ER, S, P>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
-        ER: Send + 'static + Debug,
-    {
-        match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch(key, fetch)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch(key, fetch)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch(key, fetch)),
-            Cache::Sieve(cache) => Fetch::from(cache.fetch(key, fetch)),
-        }
-    }
-
-    /// Get the cached entry with the given key and properties from the in-memory cache.
-    ///
-    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
-    ///
-    /// The concurrent fetch requests will be deduplicated.
-    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::fetch"))]
-    pub fn fetch_with_properties<F, FU, ER>(&self, key: K, properties: P, fetch: F) -> Fetch<K, V, ER, S, P>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
-        ER: Send + 'static + Debug,
-    {
-        match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
-            Cache::Sieve(cache) => Fetch::from(cache.fetch_with_properties(key, properties, fetch)),
-        }
-    }
-
-    /// Get the cached entry with the given key from the in-memory cache.
-    ///
-    /// The fetch task will be spawned in the give `runtime`.
-    ///
-    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
-    ///
-    /// The concurrent fetch requests will be deduplicated.
-    #[doc(hidden)]
-    pub fn fetch_inner<F, FU, ER, ID, IT>(
-        &self,
-        key: K,
-        properties: P,
-        fetch: F,
-        runtime: &SingletonHandle,
-    ) -> Fetch<K, V, ER, S, P>
-    where
-        F: FnOnce() -> FU,
-        FU: Future<Output = ID> + Send + 'static,
-        ER: Send + 'static + Debug,
-        ID: Into<Diversion<std::result::Result<IT, ER>, FetchContext>>,
-        IT: Into<FetchTargetOld<K, V, P>>,
-    {
-        match self {
-            Cache::Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Lru(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Lfu(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::S3Fifo(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-            Cache::Sieve(cache) => Fetch::from(cache.fetch_inner(key, properties, fetch, runtime)),
-        }
-    }
-}
-
-impl<K, V, S, P> Cache<K, V, S, P>
-where
     K: Key,
     V: Value,
     S: HashBuilder,
@@ -1270,11 +1048,12 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get_or_fetch"))]
-    pub fn get_or_fetch<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce() -> FU + Send + 'static,
-        FU: Future<Output = std::result::Result<V, ER>> + Send + 'static,
+        F: FnOnce(&K) -> FU + Send + 'static,
+        FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
+        IT: Into<FetchTarget<K, V, P>>,
         ER: std::error::Error + Send + Sync + 'static,
     {
         match self {
@@ -1283,31 +1062,6 @@ where
             Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch(key, fetch)),
             Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch(key, fetch)),
             Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch(key, fetch)),
-        }
-    }
-
-    /// Get the cached entry with properties with the given key from the in-memory cache.
-    ///
-    /// Use `fetch` to fetch the cache value from the remote storage on cache miss.
-    ///
-    /// The concurrent fetch requests will be deduplicated.
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::memory::cache::get_or_fetch_with_properties")
-    )]
-    pub fn get_or_fetch_with_properties<Q, F, FU, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
-    where
-        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce() -> FU + Send + 'static,
-        FU: Future<Output = std::result::Result<(V, P), ER>> + Send + 'static,
-        ER: std::error::Error + Send + Sync + 'static,
-    {
-        match self {
-            Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_with_properties(key, fetch)),
-            Cache::Lru(cache) => GetOrFetch::from(cache.get_or_fetch_with_properties(key, fetch)),
-            Cache::Lfu(cache) => GetOrFetch::from(cache.get_or_fetch_with_properties(key, fetch)),
-            Cache::S3Fifo(cache) => GetOrFetch::from(cache.get_or_fetch_with_properties(key, fetch)),
-            Cache::Sieve(cache) => GetOrFetch::from(cache.get_or_fetch_with_properties(key, fetch)),
         }
     }
 
@@ -1356,7 +1110,10 @@ mod tests {
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     use super::*;
-    use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};
+    use crate::{
+        error::Error,
+        eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
+    };
 
     const CAPACITY: usize = 100;
     const SHARDS: usize = 4;
@@ -1437,9 +1194,12 @@ mod tests {
             }
             3 => {
                 let entry = cache
-                    .fetch(i, || async move {
-                        tokio::time::sleep(Duration::from_micros(10)).await;
-                        Ok::<_, Error>(i)
+                    .get_or_fetch(&i, |i| {
+                        let i = *i;
+                        async move {
+                            tokio::time::sleep(Duration::from_micros(10)).await;
+                            Ok::<_, Error>(i)
+                        }
                     })
                     .await
                     .unwrap();

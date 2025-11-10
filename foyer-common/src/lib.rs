@@ -26,8 +26,6 @@ pub mod buf;
 pub mod code;
 /// Components for monitoring internal events.
 pub mod event;
-/// Future extensions.
-pub mod future;
 /// Provisioned hashers.
 pub mod hasher;
 /// The shared metrics for foyer.
