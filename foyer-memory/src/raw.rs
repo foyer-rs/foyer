@@ -34,11 +34,9 @@ use foyer_common::{
     utils::scope::Scope,
 };
 use futures_util::FutureExt as _;
-use hashbrown::hash_map::HashMap;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use pin_project::pin_project;
-use tokio::sync::oneshot;
 
 use crate::{
     error::{Error, Result},
@@ -99,9 +97,6 @@ where
     usage: usize,
     capacity: usize,
 
-    #[expect(clippy::type_complexity)]
-    waiters: Mutex<HashMap<E::Key, Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>>>,
-
     inflights: Arc<Mutex<InflightManager<E, S, I>>>,
 
     metrics: Arc<Metrics>,
@@ -141,10 +136,8 @@ where
         &mut self,
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
-        waiters: &mut Vec<oneshot::Sender<RawCacheEntry<E, S, I>>>,
         notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     ) {
-        *waiters = self.waiters.lock().remove(record.key()).unwrap_or_default();
         *notifiers = self
             .inflights
             .lock()
@@ -164,7 +157,7 @@ where
 
                 garbages.push((Event::Replace, old));
             }
-            record.inc_refs(waiters.len() + notifiers.len() + 1);
+            record.inc_refs(notifiers.len() + 1);
             garbages.push((Event::Remove, record));
             self.metrics.memory_insert.increase(1);
             return;
@@ -202,7 +195,7 @@ where
         self.usage += weight;
         // Increase the reference count within the lock section.
         // The reference count of the new record must be at the moment.
-        record.inc_refs(waiters.len() + notifiers.len() + 1);
+        record.inc_refs(notifiers.len() + 1);
 
         match self.usage.cmp(&old_usage) {
             std::cmp::Ordering::Greater => self.metrics.memory_usage.increase((self.usage - old_usage) as _),
@@ -448,7 +441,6 @@ where
                 indexer: Sentry::default(),
                 usage: 0,
                 capacity: shard_capacity,
-                waiters: Mutex::default(),
                 inflights: Arc::new(Mutex::new(InflightManager::new())),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
@@ -570,20 +562,11 @@ where
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
     fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
         let mut garbages = vec![];
-        let mut waiters = vec![];
         let mut notifiers = vec![];
 
         self.inner.shards[self.shard(record.hash())]
             .write()
-            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut waiters, &mut notifiers));
-
-        // Notify waiters out of the lock critical section.
-        for waiter in waiters {
-            let _ = waiter.send(RawCacheEntry {
-                record: record.clone(),
-                inner: self.inner.clone(),
-            });
-        }
+            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut notifiers));
 
         // Notify waiters out of the lock critical section.
         for notifier in notifiers {
