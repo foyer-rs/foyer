@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "tracing")]
+use std::time::Duration;
 use std::{
     borrow::Cow,
     fmt::Debug,
@@ -23,7 +25,7 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use equivalent::Equivalent;
@@ -1076,12 +1078,15 @@ where
         );
 
         let metrics = self.inner.metrics.clone();
+        #[cfg(feature = "tracing")]
         let span_cancel_threshold = self.inner.tracing_config.record_hybrid_get_threshold();
         HybridGet {
             inner,
             metrics,
             start,
+            #[cfg(feature = "tracing")]
             span,
+            #[cfg(feature = "tracing")]
             span_cancel_threshold,
         }
 
@@ -1322,7 +1327,9 @@ where
     inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
     metrics: Arc<Metrics>,
     start: Instant,
+    #[cfg(feature = "tracing")]
     span: Span,
+    #[cfg(feature = "tracing")]
     span_cancel_threshold: Duration,
 }
 

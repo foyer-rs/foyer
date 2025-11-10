@@ -148,6 +148,7 @@ fn check(fast: bool) {
     run("cargo +nightly-2024-08-30 fmt --all -- --config-path rustfmt.nightly.toml");
 
     if !fast {
+        run("cargo clippy -p foyer");
         run("cargo clippy --all-targets --features deadlock");
         run(r#"cargo clippy --all-targets --features tokio-console -- -A "clippy::large_enum_variant""#);
         run("cargo clippy --all-targets --features tracing");
