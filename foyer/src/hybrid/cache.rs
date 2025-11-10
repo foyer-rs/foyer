@@ -31,9 +31,6 @@ use std::{
 use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
-// FIXME: Restore tracing.
-// #[cfg(feature = "tracing")]
-// use foyer_common::tracing::{InRootSpan, TracingConfig, TracingOptions};
 #[cfg(feature = "tracing")]
 use foyer_common::tracing::{TracingConfig, TracingOptions};
 use foyer_common::{
@@ -1089,76 +1086,6 @@ where
             #[cfg(feature = "tracing")]
             span_cancel_threshold,
         }
-
-        // let now = Instant::now();
-
-        // let record_hit = || {
-        //     self.inner.metrics.hybrid_hit.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_hit_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-        // let record_miss = || {
-        //     self.inner.metrics.hybrid_miss.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_miss_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-        // let record_throttled = || {
-        //     self.inner.metrics.hybrid_throttled.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_throttled_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-
-        // #[cfg(feature = "tracing")]
-        // let guard = span.set_local_parent();
-        // if let Some(entry) = self.inner.memory.get(key) {
-        //     record_hit();
-        //     try_cancel!(self, span, record_hybrid_get_threshold);
-        //     return Ok(Some(entry));
-        // }
-        // #[cfg(feature = "tracing")]
-        // drop(guard);
-
-        // #[cfg(feature = "tracing")]
-        // let load = self
-        //     .inner
-        //     .storage
-        //     .load(key)
-        //     .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
-        // #[cfg(not(feature = "tracing"))]
-        // let load = self.inner.storage.load(key);
-
-        // let entry = match load.await? {
-        //     Load::Entry { key, value, populated } => {
-        //         record_hit();
-        //         Some(self.inner.memory.insert_with_properties(
-        //             key,
-        //             value,
-        //             HybridCacheProperties::default().with_source(Source::Populated(populated)),
-        //         ))
-        //     }
-        //     Load::Piece { piece, .. } => {
-        //         record_hit();
-        //         Some(self.inner.memory.insert_piece(piece))
-        //     }
-        //     Load::Throttled => {
-        //         record_throttled();
-        //         None
-        //     }
-        //     Load::Miss => {
-        //         record_miss();
-        //         None
-        //     }
-        // };
-
-        // try_cancel!(self, span, record_hybrid_get_threshold);
-
-        // Ok(entry)
     }
 
     /// Get cached entry with the given key from the hybrid cache.
@@ -1169,10 +1096,9 @@ where
         FU: Future<Output = Result<IT>> + Send + 'static,
         IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
     {
-        // FIXME(MrCroxx): Restore tracing span.
-        // root_span!(self, span, "foyer::hybrid::cache::get");
+        root_span!(self, span, "foyer::hybrid::cache::get");
 
-        // let now = Instant::now();
+        let start = Instant::now();
 
         let ctx = Arc::new(HybridGetOrFetchCtx::default());
         let store = self.inner.storage.clone();
@@ -1235,82 +1161,21 @@ where
 
         let policy = self.inner.policy;
         let store = self.inner.storage.clone();
+        let metrics = self.inner.metrics.clone();
+        #[cfg(feature = "tracing")]
+        let span_cancel_threshold = self.inner.tracing_config.record_hybrid_get_or_fetch_threshold();
         HybridGetOrFetch {
             inner,
             policy,
             store,
             ctx,
+            metrics,
+            start,
+            #[cfg(feature = "tracing")]
+            span,
+            #[cfg(feature = "tracing")]
+            span_cancel_threshold,
         }
-
-        // let now = Instant::now();
-
-        // let record_hit = || {
-        //     self.inner.metrics.hybrid_hit.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_hit_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-        // let record_miss = || {
-        //     self.inner.metrics.hybrid_miss.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_miss_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-        // let record_throttled = || {
-        //     self.inner.metrics.hybrid_throttled.increase(1);
-        //     self.inner
-        //         .metrics
-        //         .hybrid_throttled_duration
-        //         .record(now.elapsed().as_secs_f64());
-        // };
-
-        // #[cfg(feature = "tracing")]
-        // let guard = span.set_local_parent();
-        // if let Some(entry) = self.inner.memory.get(key) {
-        //     record_hit();
-        //     try_cancel!(self, span, record_hybrid_get_threshold);
-        //     return Ok(Some(entry));
-        // }
-        // #[cfg(feature = "tracing")]
-        // drop(guard);
-
-        // #[cfg(feature = "tracing")]
-        // let load = self
-        //     .inner
-        //     .storage
-        //     .load(key)
-        //     .in_span(Span::enter_with_parent("foyer::hybrid::cache::get::poll", &span));
-        // #[cfg(not(feature = "tracing"))]
-        // let load = self.inner.storage.load(key);
-
-        // let entry = match load.await? {
-        //     Load::Entry { key, value, populated } => {
-        //         record_hit();
-        //         Some(self.inner.memory.insert_with_properties(
-        //             key,
-        //             value,
-        //             HybridCacheProperties::default().with_source(Source::Populated(populated)),
-        //         ))
-        //     }
-        //     Load::Piece { piece, .. } => {
-        //         record_hit();
-        //         Some(self.inner.memory.insert_piece(piece))
-        //     }
-        //     Load::Throttled => {
-        //         record_throttled();
-        //         None
-        //     }
-        //     Load::Miss => {
-        //         record_miss();
-        //         None
-        //     }
-        // };
-
-        // try_cancel!(self, span, record_hybrid_get_threshold);
-
-        // Ok(entry)
     }
 }
 
@@ -1353,6 +1218,9 @@ where
     type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
+
+        #[cfg(feature = "tracing")]
+        let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll_inner(cx).map_err(Error::other));
 
         match res.as_ref() {
@@ -1401,6 +1269,12 @@ where
     policy: HybridCachePolicy,
     store: Store<K, V, S, HybridCacheProperties>,
     ctx: Arc<HybridGetOrFetchCtx>,
+    metrics: Arc<Metrics>,
+    start: Instant,
+    #[cfg(feature = "tracing")]
+    span: Span,
+    #[cfg(feature = "tracing")]
+    span_cancel_threshold: Duration,
 }
 
 impl<K, V, S> Debug for HybridGetOrFetch<K, V, S>
@@ -1424,6 +1298,9 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
+
+        #[cfg(feature = "tracing")]
+        let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll(cx).map_err(Error::other));
 
         if let Ok(entry) = res.as_ref() {
@@ -1435,6 +1312,31 @@ where
                 this.store.enqueue(entry.piece(), false);
             }
         }
+
+        match res.as_ref() {
+            Ok(e) => match e.properties().source() {
+                Source::Populated(..) => {
+                    this.metrics.hybrid_hit.increase(1);
+                    this.metrics
+                        .hybrid_hit_duration
+                        .record(this.start.elapsed().as_secs_f64());
+                }
+                Source::Outer => {
+                    this.metrics.hybrid_miss.increase(1);
+                    this.metrics
+                        .hybrid_miss_duration
+                        .record(this.start.elapsed().as_secs_f64());
+                }
+            },
+            Err(_) => {
+                this.metrics.hybrid_error.increase(1);
+                this.metrics
+                    .hybrid_error_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+        }
+
+        try_cancel!(this.span, *this.span_cancel_threshold);
 
         Poll::Ready(res)
     }

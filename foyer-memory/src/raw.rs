@@ -25,12 +25,6 @@ use std::{
 
 use arc_swap::ArcSwap;
 use equivalent::Equivalent;
-// FIXME(MrCroxx): Restore tracing support.
-// #[cfg(feature = "tracing")]
-// use fastrace::{
-//     future::{FutureExt as _, InSpan},
-//     Span,
-// };
 use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
@@ -1021,71 +1015,6 @@ where
         }
 
         res
-
-        // match raw {
-        //     RawShardFetch::Hit(record) => {
-        //         tracing::trace!(hash, "fetch => Hit");
-        //         return RawFetch::new(RawFetchInner::Hit(Some(RawCacheEntry {
-        //             record,
-        //             inner: self.inner.clone(),
-        //         })));
-        //     }
-        //     RawShardFetch::Wait(future) => {
-        //         tracing::trace!(hash, "fetch => Wait");
-        //         return RawFetch::new(RawFetchInner::Wait(future));
-        //     }
-        //     RawShardFetch::Miss => {
-        //         tracing::trace!(hash, "fetch => Miss");
-        //     }
-        // }
-
-        // let cache = self.clone();
-        // let future = fetch();
-        // let join = runtime.spawn({
-        //     tracing::trace!(hash, "fetch => join !!!");
-        //     let task = async move {
-        //         #[cfg(feature = "tracing")]
-        //         let Diversion { target, store } = future
-        //             .in_span(Span::enter_with_local_parent("foyer::memory::raw::fetch_inner::fn"))
-        //             .await
-        //             .into();
-        //         #[cfg(not(feature = "tracing"))]
-        //         let Diversion { target, store } = future.await.into();
-
-        //         let target = match target {
-        //             Ok(value) => value,
-        //             Err(e) => {
-        //                 cache.inner.shards[cache.shard(hash)].read().waiters.lock().remove(&key);
-        //                 tracing::debug!("[fetch]: error raise while fetching, all waiter are dropped, err: {e:?}");
-        //                 return Diversion { target: Err(e), store };
-        //             }
-        //         };
-        //         if let Some(ctx) = store.as_ref() {
-        //             if ctx.throttled {
-        //                 // TODO(MrCroxx): Make sure foyer doesn't issue tombstone to the disk cache.
-        //                 // TODO(MrCroxx): Also make sure the disk cache will write tombstone instead of this case.
-        //                 properties = properties.with_location(Location::InMem)
-        //             }
-        //             properties = properties.with_source(ctx.source)
-        //         };
-        //         tracing::trace!(hash, "fetch => insert !!!");
-        //         let entry = match target.into() {
-        //             FetchTarget::Value(value) => cache.insert_with_properties(key, value, properties),
-        //             FetchTarget::Piece(p) => cache.insert_inner(p.into_record::<E>()),
-        //         };
-        //         Diversion {
-        //             target: Ok(entry),
-        //             store,
-        //         }
-        //     };
-        //     #[cfg(feature = "tracing")]
-        //     let task = task.in_span(Span::enter_with_local_parent(
-        //         "foyer::memory::generic::fetch_with_runtime::spawn",
-        //     ));
-        //     task
-        // });
-
-        // RawFetch::new(RawFetchInner::Miss(join))
     }
 }
 

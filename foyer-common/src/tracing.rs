@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    fmt::Debug,
     future::Future,
     ops::Deref,
     pin::Pin,
@@ -31,12 +32,10 @@ pub struct TracingConfig {
     record_hybrid_insert_threshold_us: AtomicU64,
     /// Threshold for recording the hybrid cache `get` operation in us.
     record_hybrid_get_threshold_us: AtomicU64,
-    /// Threshold for recording the hybrid cache `obtain` operation in us.
-    record_hybrid_obtain_threshold_us: AtomicU64,
     /// Threshold for recording the hybrid cache `remove` operation in us.
     record_hybrid_remove_threshold_us: AtomicU64,
-    /// Threshold for recording the hybrid cache `fetch` operation in us.
-    record_hybrid_fetch_threshold_us: AtomicU64,
+    /// Threshold for recording the hybrid cache `get_or_fetch` operation in us.
+    record_hybrid_get_or_fetch_threshold_us: AtomicU64,
 }
 
 impl TracingConfig {
@@ -58,7 +57,7 @@ impl TracingConfig {
         }
 
         if let Some(threshold) = options.record_hybrid_get_or_fetch_threshold {
-            self.record_hybrid_fetch_threshold_us
+            self.record_hybrid_get_or_fetch_threshold_us
                 .store(threshold.as_micros() as _, Ordering::Relaxed);
         }
     }
@@ -73,19 +72,14 @@ impl TracingConfig {
         Duration::from_micros(self.record_hybrid_get_threshold_us.load(Ordering::Relaxed))
     }
 
-    /// Threshold for recording the hybrid cache `obtain` operation.
-    pub fn record_hybrid_obtain_threshold(&self) -> Duration {
-        Duration::from_micros(self.record_hybrid_obtain_threshold_us.load(Ordering::Relaxed))
-    }
-
     /// Threshold for recording the hybrid cache `remove` operation.
     pub fn record_hybrid_remove_threshold(&self) -> Duration {
         Duration::from_micros(self.record_hybrid_remove_threshold_us.load(Ordering::Relaxed))
     }
 
-    /// Threshold for recording the hybrid cache `fetch` operation.
-    pub fn record_hybrid_fetch_threshold(&self) -> Duration {
-        Duration::from_micros(self.record_hybrid_fetch_threshold_us.load(Ordering::Relaxed))
+    /// Threshold for recording the hybrid cache `get_or_fetch` operation.
+    pub fn record_hybrid_get_or_fetch_threshold(&self) -> Duration {
+        Duration::from_micros(self.record_hybrid_get_or_fetch_threshold_us.load(Ordering::Relaxed))
     }
 }
 
@@ -151,8 +145,20 @@ pub struct InRootSpan<F> {
     #[pin]
     inner: F,
 
-    root: Option<Span>,
+    root: Span,
     threshold: Option<Duration>,
+}
+
+impl<F> Debug for InRootSpan<F>
+where
+    F: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InRootSpan")
+            .field("inner", &self.inner)
+            .field("threshold", &self.threshold)
+            .finish()
+    }
 }
 
 impl<F> InRootSpan<F> {
@@ -163,7 +169,7 @@ impl<F> InRootSpan<F> {
     {
         Self {
             inner,
-            root: Some(root),
+            root,
             threshold: None,
         }
     }
@@ -186,17 +192,15 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        let _guard = this.root.as_ref().map(|s| s.set_local_parent());
+        let _guard = this.root.set_local_parent();
         let res = match this.inner.poll(cx) {
             Poll::Ready(res) => res,
             Poll::Pending => return Poll::Pending,
         };
 
-        let root = this.root.take().unwrap();
-
-        if let (Some(elapsed), Some(threshold)) = (root.elapsed(), this.threshold.as_ref()) {
+        if let (Some(elapsed), Some(threshold)) = (this.root.elapsed(), this.threshold.as_ref()) {
             if &elapsed < threshold {
-                root.cancel();
+                this.root.cancel();
             }
         }
 
