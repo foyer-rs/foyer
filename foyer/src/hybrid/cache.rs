@@ -666,10 +666,11 @@ where
 
         let start = Instant::now();
 
+        let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx: &mut Arc<AtomicBool>, key: &K| {
+            Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key: &K| {
                 let ctx = ctx.clone();
                 let key = key.clone();
                 async move {
@@ -685,7 +686,7 @@ where
                         // TODO(MrCroxx): Remove populated with piece?
                         Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
                         Ok(Load::Throttled) => {
-                            ctx.store(true, Ordering::Relaxed);
+                            ctx.throttled.store(true, Ordering::Relaxed);
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
@@ -695,7 +696,7 @@ where
                 .boxed()
             })),
             None,
-            Arc::new(AtomicBool::new(false)),
+            ctx,
         );
 
         let metrics = self.inner.metrics.clone();
@@ -724,11 +725,11 @@ where
 
         let start = Instant::now();
 
-        let ctx = Arc::new(HybridGetOrFetchCtx::default());
+        let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx: &mut Arc<HybridGetOrFetchCtx>, key| {
+            Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key| {
                 let ctx = ctx.clone();
                 let key = key.clone();
                 async move {
@@ -813,7 +814,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<GetOrFetchCtx>>,
     metrics: Arc<Metrics>,
     start: Instant,
     #[cfg(feature = "tracing")]
@@ -875,7 +876,7 @@ where
 }
 
 #[derive(Debug, Default)]
-struct HybridGetOrFetchCtx {
+struct GetOrFetchCtx {
     throttled: AtomicBool,
 }
 
@@ -889,10 +890,10 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<HybridGetOrFetchCtx>>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<GetOrFetchCtx>>,
     policy: HybridCachePolicy,
     store: Store<K, V, S, HybridCacheProperties>,
-    ctx: Arc<HybridGetOrFetchCtx>,
+    ctx: Arc<GetOrFetchCtx>,
     metrics: Arc<Metrics>,
     start: Instant,
     #[cfg(feature = "tracing")]
