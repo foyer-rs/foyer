@@ -23,7 +23,7 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use equivalent::Equivalent;
@@ -1039,10 +1039,9 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
     {
-        // FIXME(MrCroxx): Restore tracing span.
-        // root_span!(self, span, "foyer::hybrid::cache::get");
+        root_span!(self, span, "foyer::hybrid::cache::get");
 
-        // let now = Instant::now();
+        let start = Instant::now();
 
         let store = self.inner.storage.clone();
         let inner = self.inner.memory.get_or_fetch_inner(
@@ -1076,7 +1075,15 @@ where
             Arc::new(AtomicBool::new(false)),
         );
 
-        HybridGet { inner }
+        let metrics = self.inner.metrics.clone();
+        let span_cancel_threshold = self.inner.tracing_config.record_hybrid_get_threshold();
+        HybridGet {
+            inner,
+            metrics,
+            start,
+            span,
+            span_cancel_threshold,
+        }
 
         // let now = Instant::now();
 
@@ -1313,6 +1320,10 @@ where
 {
     #[pin]
     inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<AtomicBool>>,
+    metrics: Arc<Metrics>,
+    start: Instant,
+    span: Span,
+    span_cancel_threshold: Duration,
 }
 
 impl<K, V, S> Debug for HybridGet<K, V, S>
@@ -1335,7 +1346,32 @@ where
     type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        this.inner.poll_inner(cx).map_err(Error::other)
+        let res = ready!(this.inner.poll_inner(cx).map_err(Error::other));
+
+        match res.as_ref() {
+            Ok(Some(_)) => {
+                this.metrics.hybrid_hit.increase(1);
+                this.metrics
+                    .hybrid_hit_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+            Ok(None) => {
+                this.metrics.hybrid_miss.increase(1);
+                this.metrics
+                    .hybrid_miss_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+            Err(_) => {
+                this.metrics.hybrid_error.increase(1);
+                this.metrics
+                    .hybrid_error_duration
+                    .record(this.start.elapsed().as_secs_f64());
+            }
+        }
+
+        try_cancel!(this.span, *this.span_cancel_threshold);
+
+        Poll::Ready(res)
     }
 }
 

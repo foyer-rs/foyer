@@ -281,9 +281,9 @@ struct Args {
     /// Record remove trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
     trace_remove: humantime::Duration,
-    /// Record fetch trace threshold. Only effective with "tracing" feature.
+    /// Record get_or_fetch trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
-    trace_fetch: humantime::Duration,
+    trace_get_or_fetch: humantime::Duration,
 
     #[arg(long, default_value_t = false)]
     flush_on_close: bool,
@@ -506,9 +506,8 @@ async fn benchmark(args: Args) {
     let tracing_options = TracingOptions::new()
         .with_record_hybrid_insert_threshold(args.trace_insert.into())
         .with_record_hybrid_get_threshold(args.trace_get.into())
-        .with_record_hybrid_obtain_threshold(args.trace_obtain.into())
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
-        .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
+        .with_record_hybrid_get_or_fetch_threshold(args.trace_get_or_fetch.into());
 
     let policy = match args.policy.as_str() {
         "eviction" => HybridCachePolicy::WriteOnEviction,

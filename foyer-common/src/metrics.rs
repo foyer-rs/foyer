@@ -83,13 +83,14 @@ pub struct Metrics {
     pub hybrid_miss: BoxedCounter,
     pub hybrid_throttled: BoxedCounter,
     pub hybrid_remove: BoxedCounter,
+    pub hybrid_error: BoxedCounter,
 
     pub hybrid_insert_duration: BoxedHistogram,
     pub hybrid_hit_duration: BoxedHistogram,
     pub hybrid_miss_duration: BoxedHistogram,
     pub hybrid_throttled_duration: BoxedHistogram,
     pub hybrid_remove_duration: BoxedHistogram,
-    pub hybrid_fetch_duration: BoxedHistogram,
+    pub hybrid_error_duration: BoxedHistogram,
 }
 
 impl Debug for Metrics {
@@ -292,13 +293,14 @@ impl Metrics {
         let hybrid_miss = foyer_hybrid_op_total.counter(&[name.clone(), "miss".into()]);
         let hybrid_throttled = foyer_hybrid_op_total.counter(&[name.clone(), "throttled".into()]);
         let hybrid_remove = foyer_hybrid_op_total.counter(&[name.clone(), "remove".into()]);
+        let hybrid_error = foyer_hybrid_op_total.counter(&[name.clone(), "error".into()]);
 
         let hybrid_insert_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "insert".into()]);
         let hybrid_hit_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "hit".into()]);
         let hybrid_miss_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "miss".into()]);
         let hybrid_throttled_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "throttled".into()]);
         let hybrid_remove_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "remove".into()]);
-        let hybrid_fetch_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "fetch".into()]);
+        let hybrid_error_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "error".into()]);
 
         Self {
             memory_insert,
@@ -354,11 +356,12 @@ impl Metrics {
             hybrid_throttled,
             hybrid_throttled_duration,
             hybrid_remove,
+            hybrid_error,
             hybrid_insert_duration,
             hybrid_hit_duration,
             hybrid_miss_duration,
             hybrid_remove_duration,
-            hybrid_fetch_duration,
+            hybrid_error_duration,
         }
     }
 

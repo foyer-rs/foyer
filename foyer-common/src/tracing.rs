@@ -52,17 +52,12 @@ impl TracingConfig {
                 .store(threshold.as_micros() as _, Ordering::Relaxed);
         }
 
-        if let Some(threshold) = options.record_hybrid_obtain_threshold {
-            self.record_hybrid_obtain_threshold_us
-                .store(threshold.as_micros() as _, Ordering::Relaxed);
-        }
-
         if let Some(threshold) = options.record_hybrid_remove_threshold {
             self.record_hybrid_remove_threshold_us
                 .store(threshold.as_micros() as _, Ordering::Relaxed);
         }
 
-        if let Some(threshold) = options.record_hybrid_fetch_threshold {
+        if let Some(threshold) = options.record_hybrid_get_or_fetch_threshold {
             self.record_hybrid_fetch_threshold_us
                 .store(threshold.as_micros() as _, Ordering::Relaxed);
         }
@@ -102,12 +97,10 @@ pub struct TracingOptions {
     record_hybrid_insert_threshold: Option<Duration>,
     /// Threshold for recording the hybrid cache `get` operation.
     record_hybrid_get_threshold: Option<Duration>,
-    /// Threshold for recording the hybrid cache `obtain` operation.
-    record_hybrid_obtain_threshold: Option<Duration>,
     /// Threshold for recording the hybrid cache `remove` operation.
     record_hybrid_remove_threshold: Option<Duration>,
-    /// Threshold for recording the hybrid cache `fetch` operation.
-    record_hybrid_fetch_threshold: Option<Duration>,
+    /// Threshold for recording the hybrid cache `get_or_fetch` operation.
+    record_hybrid_get_or_fetch_threshold: Option<Duration>,
 }
 
 impl Default for TracingOptions {
@@ -122,9 +115,8 @@ impl TracingOptions {
         Self {
             record_hybrid_insert_threshold: None,
             record_hybrid_get_threshold: None,
-            record_hybrid_obtain_threshold: None,
             record_hybrid_remove_threshold: None,
-            record_hybrid_fetch_threshold: None,
+            record_hybrid_get_or_fetch_threshold: None,
         }
     }
 
@@ -140,21 +132,15 @@ impl TracingOptions {
         self
     }
 
-    /// Set the threshold for recording the hybrid cache `obtain` operation.
-    pub fn with_record_hybrid_obtain_threshold(mut self, threshold: Duration) -> Self {
-        self.record_hybrid_obtain_threshold = Some(threshold);
-        self
-    }
-
     /// Set the threshold for recording the hybrid cache `remove` operation.
     pub fn with_record_hybrid_remove_threshold(mut self, threshold: Duration) -> Self {
         self.record_hybrid_remove_threshold = Some(threshold);
         self
     }
 
-    /// Set the threshold for recording the hybrid cache `fetch` operation.
-    pub fn with_record_hybrid_fetch_threshold(mut self, threshold: Duration) -> Self {
-        self.record_hybrid_fetch_threshold = Some(threshold);
+    /// Set the threshold for recording the hybrid cache `get_or_fetch` operation.
+    pub fn with_record_hybrid_get_or_fetch_threshold(mut self, threshold: Duration) -> Self {
+        self.record_hybrid_get_or_fetch_threshold = Some(threshold);
         self
     }
 }
