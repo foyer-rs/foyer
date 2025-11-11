@@ -807,7 +807,7 @@ where
 /// Future for [`HybridCache::get`].
 #[must_use]
 #[pin_project]
-pub struct HybridGet<K, V, S>
+pub struct HybridGet<K, V, S = DefaultHasher>
 where
     K: StorageKey,
     V: StorageValue,
@@ -883,7 +883,7 @@ struct GetOrFetchCtx {
 /// Future for [`HybridCache::get_or_fetch`].
 #[must_use]
 #[pin_project]
-pub struct HybridGetOrFetch<K, V, S>
+pub struct HybridGetOrFetch<K, V, S = DefaultHasher>
 where
     K: StorageKey,
     V: StorageValue,
