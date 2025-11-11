@@ -24,7 +24,7 @@ use std::{
 };
 
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    BlockEngineBuilder, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, IoEngineBuilder, Location, PsyncIoEngineBuilder,
 };
 use rand::{rng, Rng};
@@ -168,9 +168,9 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
             None => continue,
         };
         let e = hybrid
-            .fetch(key, || async move {
+            .get_or_fetch(&key, move |_| async move {
                 tokio::time::sleep(MISS_WAIT).await;
-                Ok(value(key))
+                Ok::<_, Error>(value(key))
             })
             .await
             .unwrap();

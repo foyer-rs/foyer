@@ -18,6 +18,8 @@ use std::{
 };
 
 use core_affinity::CoreId;
+#[cfg(feature = "tracing")]
+use fastrace::prelude::*;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
@@ -262,6 +264,8 @@ struct UringIoCtx {
     io_type: UringIoType,
     rbuf: RawBuf,
     addr: RawFileAddress,
+    #[cfg(feature = "tracing")]
+    span: fastrace::Span,
 }
 
 struct UringIoEngineShard {
@@ -351,6 +355,9 @@ impl UringIoEngineShard {
                 } else {
                     let _ = ctx.tx.send(Ok(()));
                 }
+
+                #[cfg(feature = "tracing")]
+                drop(ctx.span);
             }
         }
     }
@@ -369,6 +376,10 @@ impl Debug for UringIoEngine {
 }
 
 impl UringIoEngine {
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::uring::read")
+    )]
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.read_txs[partition.id() as usize % self.read_txs.len()];
@@ -376,11 +387,15 @@ impl UringIoEngine {
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::read::io");
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Read,
             rbuf,
             addr,
+            #[cfg(feature = "tracing")]
+            span,
         });
         async move {
             let res = match rx.await {
@@ -394,6 +409,10 @@ impl UringIoEngine {
         .into()
     }
 
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::uring::write")
+    )]
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.write_txs[partition.id() as usize % self.write_txs.len()];
@@ -401,11 +420,15 @@ impl UringIoEngine {
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::write::io");
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Write,
             rbuf,
             addr,
+            #[cfg(feature = "tracing")]
+            span,
         });
         async move {
             let res = match rx.await {

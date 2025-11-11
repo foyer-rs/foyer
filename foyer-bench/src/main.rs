@@ -281,9 +281,9 @@ struct Args {
     /// Record remove trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
     trace_remove: humantime::Duration,
-    /// Record fetch trace threshold. Only effective with "tracing" feature.
+    /// Record get_or_fetch trace threshold. Only effective with "tracing" feature.
     #[arg(long, default_value = "1s")]
-    trace_fetch: humantime::Duration,
+    trace_get_or_fetch: humantime::Duration,
 
     #[arg(long, default_value_t = false)]
     flush_on_close: bool,
@@ -434,7 +434,12 @@ fn setup() {
 fn setup() {
     use fastrace::collector::Config;
     let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
-    fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
+    fastrace::set_reporter(
+        reporter,
+        Config::default()
+            .report_interval(Duration::from_millis(1))
+            .tail_sampled(true),
+    );
 }
 
 #[cfg(not(any(feature = "tokio-console", feature = "tracing")))]
@@ -506,9 +511,8 @@ async fn benchmark(args: Args) {
     let tracing_options = TracingOptions::new()
         .with_record_hybrid_insert_threshold(args.trace_insert.into())
         .with_record_hybrid_get_threshold(args.trace_get.into())
-        .with_record_hybrid_obtain_threshold(args.trace_obtain.into())
         .with_record_hybrid_remove_threshold(args.trace_remove.into())
-        .with_record_hybrid_fetch_threshold(args.trace_fetch.into());
+        .with_record_hybrid_get_or_fetch_threshold(args.trace_get_or_fetch.into());
 
     let policy = match args.policy.as_str() {
         "eviction" => HybridCachePolicy::WriteOnEviction,
@@ -914,10 +918,10 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let time = Instant::now();
 
-        let fetch = hybrid.fetch(idx, || {
-            let context = context.clone();
-            let entry_size = osrng.random_range(context.entry_size_range.clone());
-            let latency = context.latency;
+        let entry_size = osrng.random_range(context.entry_size_range.clone());
+        let latency = context.latency;
+        let fetch = hybrid.get_or_fetch(&idx, move |idx| {
+            let idx = *idx;
             async move {
                 if latency != Duration::ZERO {
                     tokio::time::sleep(latency).await;

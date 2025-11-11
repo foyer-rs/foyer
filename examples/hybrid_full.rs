@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let e = hybrid
-        .fetch(20230512, || async {
+        .get_or_fetch(&20230512, |_| async {
             let value = mock().await?;
             Ok(value)
         })
