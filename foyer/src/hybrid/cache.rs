@@ -969,15 +969,17 @@ where
 
 #[cfg(test)]
 mod tests {
-
-    use std::path::Path;
+    use std::{future::poll_fn, path::Path, sync::Arc, task::Poll};
 
     use foyer_common::hasher::ModHasher;
+    use foyer_memory::FetchState;
     use foyer_storage::{
         test_utils::{Record, Recorder},
         StorageFilter,
     };
+    use futures_util::FutureExt as _;
     use storage::test_utils::Biased;
+    use tokio::sync::Barrier;
 
     use crate::*;
 
@@ -1464,5 +1466,44 @@ mod tests {
 
         let hybrid = open(&dir).await;
         assert_eq!(*hybrid.get(&1).await.unwrap().unwrap(), vec![1; 3 * KB]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_concurrent_get_and_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let hybrid = open(dir.path()).await;
+
+        // Test non-concurrent get returns none.
+        assert!(hybrid.get(&42).await.unwrap().is_none());
+
+        let barrier = Arc::new(Barrier::new(2));
+
+        let mut get = hybrid.get(&42);
+        let b = barrier.clone();
+        let fetch = hybrid.get_or_fetch(&42, |_| async move {
+            b.wait().await;
+            Ok(vec![b'x'; 42])
+        });
+
+        // Test get will fallback to fetch if there is concurrent fetch.
+        poll_fn(|cx| {
+            let poll = get.poll_unpin(cx);
+            tracing::trace!(?poll, state = ?get.inner.state(), "poll fn");
+            assert!(matches!(poll, Poll::Pending));
+            match get.inner.state() {
+                FetchState::FetchRequired => Poll::Ready(()),
+                _ => Poll::Pending,
+            }
+        })
+        .await;
+
+        // Release fetch to proceed.
+        barrier.wait().await;
+        // Poll get first.
+        let r_get = get.await.unwrap();
+        // Poll fetch later.
+        let r_fetch = fetch.await.unwrap();
+        assert_eq!(r_get.unwrap().value(), r_fetch.value());
     }
 }

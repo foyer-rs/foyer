@@ -36,7 +36,7 @@ use crate::{
     indexer::hash_table::HashTableIndexer,
     inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
     raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
-    FetchTarget, Piece, Pipe, Result,
+    FetchState, FetchTarget, Piece, Pipe, Result,
 };
 
 /// Entry properties for in-memory only cache.
@@ -897,6 +897,7 @@ where
 }
 
 /// A future that is used to get entry value from the remote storage for the in-memory cache.
+#[must_use]
 #[pin_project(project = GetOrFetchProj)]
 pub enum GetOrFetch<K, V, S = DefaultHasher, P = CacheProperties, C = ()>
 where
@@ -1031,6 +1032,17 @@ where
             GetOrFetchProj::Lru(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
             GetOrFetchProj::Lfu(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
             GetOrFetchProj::Sieve(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
+        }
+    }
+
+    /// Get the state of the fetch future.
+    pub fn state(&self) -> FetchState {
+        match self {
+            GetOrFetch::Fifo(fut) => fut.state(),
+            GetOrFetch::S3Fifo(fut) => fut.state(),
+            GetOrFetch::Lru(fut) => fut.state(),
+            GetOrFetch::Lfu(fut) => fut.state(),
+            GetOrFetch::Sieve(fut) => fut.state(),
         }
     }
 }

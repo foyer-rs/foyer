@@ -14,7 +14,7 @@
 
 use std::{
     any::Any,
-    fmt::Debug,
+    fmt::{Debug, Display},
     future::Future,
     hash::Hash,
     ops::Deref,
@@ -960,6 +960,7 @@ where
                 }))
             })
             .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
+                // TODO(MrCroxx): Is it better to spawn a new detached task here to prevent from leader cancelled?
                 Enqueue::Lead {
                     id,
                     waiter,
@@ -1014,6 +1015,7 @@ where
     }
 }
 
+#[must_use]
 #[pin_project(project = RawGetOrFetchProj)]
 pub enum RawGetOrFetch<E, S, I, C>
 where
@@ -1060,6 +1062,21 @@ where
     }
 }
 
+impl<E, S, I, C> RawGetOrFetch<E, S, I, C>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+    C: Any + Send + 'static,
+{
+    pub fn state(&self) -> FetchState {
+        match self {
+            RawGetOrFetch::Hit(_) => FetchState::Hit,
+            RawGetOrFetch::Miss(fetch) => FetchState::from(&fetch.state),
+        }
+    }
+}
+
 type Once<T> = Option<T>;
 
 #[must_use]
@@ -1095,6 +1112,40 @@ macro_rules! handle_try {
     };
 }
 
+/// The state of a fetch operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchState {
+    /// Memory cache hit.
+    Hit,
+    /// Preparing to init fetch for leader.
+    Init,
+    /// Fetching data (optional).
+    FetchOptional,
+    /// Fetching data (required).
+    FetchRequired,
+    /// Preparing to notify waiters.
+    Notify,
+    /// Waiting for the waiter to be notified.
+    Wait,
+}
+
+impl<E, S, I, C> From<&RawFetchState<E, S, I, C>> for FetchState
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn from(state: &RawFetchState<E, S, I, C>) -> Self {
+        match state {
+            RawFetchState::Init { .. } => FetchState::Init,
+            RawFetchState::FetchOptional { .. } => FetchState::FetchOptional,
+            RawFetchState::FetchRequired { .. } => FetchState::FetchRequired,
+            RawFetchState::Notify { .. } => FetchState::Notify,
+            RawFetchState::Wait => FetchState::Wait,
+        }
+    }
+}
+
 #[expect(clippy::type_complexity)]
 #[pin_project(project = RawFetchStateProj)]
 pub enum RawFetchState<E, S, I, C>
@@ -1107,11 +1158,11 @@ where
         optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
     },
-    Optional {
+    FetchOptional {
         optional_fetch: OptionalFetch<FetchTarget<E::Key, E::Value, E::Properties>>,
         required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
     },
-    Required {
+    FetchRequired {
         required_fetch: RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>,
     },
     Notify {
@@ -1130,8 +1181,8 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Init { .. } => f.debug_struct("Init").finish(),
-            Self::Optional { .. } => f.debug_struct("Optional").finish(),
-            Self::Required { .. } => f.debug_struct("Required").finish(),
+            Self::FetchOptional { .. } => f.debug_struct("Optional").finish(),
+            Self::FetchRequired { .. } => f.debug_struct("Required").finish(),
             Self::Notify { res, .. } => f.debug_struct("Notify").field("res", res).finish(),
             Self::Wait { .. } => f.debug_struct("Wait").finish(),
         }
@@ -1190,7 +1241,7 @@ where
                     handle_try! { *this.state, try_set_optional(optional_fetch_builder, required_fetch_builder, this.key.as_ref().unwrap(), this.ctx) }
                     handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), this.inflights, Ok(None)) }
                 }
-                RawFetchState::Optional {
+                RawFetchState::FetchOptional {
                     optional_fetch,
                     required_fetch_builder,
                 } => {
@@ -1208,7 +1259,7 @@ where
                         }
                     }
                 }
-                RawFetchState::Required { required_fetch } => {
+                RawFetchState::FetchRequired { required_fetch } => {
                     handle_try! { *this.state, try_poll_waiter(cx, this.waiter) }
                     match required_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
@@ -1254,7 +1305,7 @@ where
             None => Try::Noop,
             Some(optional_fetch_builder) => {
                 let optional_fetch = optional_fetch_builder(ctx, key);
-                Try::SetStateAndContinue(RawFetchState::Optional {
+                Try::SetStateAndContinue(RawFetchState::FetchOptional {
                     optional_fetch,
                     required_fetch_builder: required_fetch_builder.take(),
                 })
@@ -1277,7 +1328,7 @@ where
             None => {}
             Some(required_fetch_builder) => {
                 let required_fetch = required_fetch_builder(ctx, key);
-                return Try::SetStateAndContinue(RawFetchState::Required { required_fetch });
+                return Try::SetStateAndContinue(RawFetchState::FetchRequired { required_fetch });
             }
         }
         // Slow path if the leader has no optional fetch.
@@ -1288,7 +1339,7 @@ where
         match fetch_or_take {
             FetchOrTake::Fetch(required_fetch_builder) => {
                 let required_fetch = required_fetch_builder(ctx, key);
-                Try::SetStateAndContinue(RawFetchState::Required { required_fetch })
+                Try::SetStateAndContinue(RawFetchState::FetchRequired { required_fetch })
             }
             FetchOrTake::Notifiers(notifiers) => Try::SetStateAndContinue(RawFetchState::Notify {
                 res: Some(res_no_fetch),
@@ -1366,6 +1417,18 @@ where
     }
 }
 
+/// Error indicating that a fetch operation was cancelled.
+#[derive(Debug)]
+pub struct FetchCancelled;
+
+impl Display for FetchCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fetch cancelled")
+    }
+}
+
+impl std::error::Error for FetchCancelled {}
+
 #[pinned_drop]
 impl<E, S, I, C> PinnedDrop for RawFetch<E, S, I, C>
 where
@@ -1377,7 +1440,7 @@ where
         let this = self.project();
         match this.state {
             RawFetchState::Notify { .. } | RawFetchState::Wait => return,
-            RawFetchState::Init { .. } | RawFetchState::Optional { .. } | RawFetchState::Required { .. } => {}
+            RawFetchState::Init { .. } | RawFetchState::FetchOptional { .. } | RawFetchState::FetchRequired { .. } => {}
         }
         if let Some(notifiers) = this
             .inflights
@@ -1385,7 +1448,7 @@ where
             .take(*this.hash, this.key.as_ref().unwrap(), Some(*this.id))
         {
             for notifier in notifiers {
-                let _ = notifier.send(Err("cancelled".into()));
+                let _ = notifier.send(Err(Box::new(FetchCancelled) as FetchError));
             }
         }
     }
@@ -1494,6 +1557,33 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
+    }
+
+    #[test_log::test]
+    fn test_lead_cancel() {
+        let cache = fifo_cache_for_test();
+
+        let pending = |_: &u64| async { std::future::pending::<Result<u64>>().await };
+        let mut leader = cache.get_or_fetch(&42, pending);
+        let mut follower = cache.get_or_fetch(&42, pending);
+        assert!(matches!(leader, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
+        assert!(matches!(follower, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Wait)));
+
+        let waker = futures_util::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(leader.poll_unpin(&mut cx), Poll::Pending));
+        assert!(matches!(follower.poll_unpin(&mut cx), Poll::Pending));
+
+        drop(leader);
+        assert!(
+            matches!(follower.poll_unpin(&mut cx), Poll::Ready(Err(e)) if e.to_string() == FetchCancelled.to_string())
+        );
+
+        let leader2 = cache.get_or_fetch(&42, pending);
+        assert!(matches!(leader2, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
+
+        drop(follower);
     }
 
     #[test_log::test]

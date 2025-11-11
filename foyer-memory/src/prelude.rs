@@ -23,5 +23,5 @@ pub use crate::{
         RequiredFetchBuilder, RequiredFetchBuilderErased, Waiter,
     },
     pipe::{Piece, Pipe},
-    raw::{Filter, Weighter},
+    raw::{FetchState, Filter, Weighter},
 };
