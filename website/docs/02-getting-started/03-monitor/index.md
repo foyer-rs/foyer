@@ -1,119 +1,136 @@
 # Setup Monitor System
 
-This article will guide you through the process of setting up the monitor system for ***foyer***.
+This article walks through the three pillars of observability that ***foyer*** exposes out-of-the-box:
 
-***foyer*** provides observability for monitoring in 3 aspects:
-- **logging**: Provides logging in trace/debug/info/warn/error levels with [tracing](https://crates.io/crates/tracing) ecosystem.
-- **metrics**: Provides operation counters, operation duration histograms, information gauges with [metrics](https://crates.io/crates/metrics) ecosystem.
-- **tracing**: Provide tail-based tracing for slow operation diagnosis with [fastrace](https://crates.io/crates/fastrace).
-
-For each ecosystem, there are rich surrounding libraries available. The article will only introduce the example of the most basic configuration. For more details, please refer to the document of each ecosystem.
+- **logging** via the [`tracing`](https://crates.io/crates/tracing) ecosystem.
+- **metrics** via [`mixtrics`](https://crates.io/crates/mixtrics), which forwards counters/histograms to the backend of your choice.
+- **tail-based tracing** via [`fastrace`](https://crates.io/crates/fastrace) for slow-operation diagnosis.
 
 ## 1. Setup logging monitoring
 
-***foyer*** uses [tracing](https://crates.io/crates/tracing) ecosystem for logging monitoring. You can configure the filters and subscribers to control the format, content, and the target for logging.
-
-Here is an example to setup logging monitoring to the console, decorate each log entry with line number, and filter the logs with `RUST_LOG` syntax.
-
-Add the tracing-subscriber dependencies.
+Initialize a `tracing-subscriber` pipeline once at process start. This example logs to stdout, includes file/line numbers, and reads filters from `RUST_LOG`.
 
 ```toml
+# Cargo.toml
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ```
 
-Add the following lines at the start of your project.
-
 ```rust
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
 tracing_subscriber::registry()
     .with(tracing_subscriber::fmt::layer().with_line_number(true))
     .with(EnvFilter::from_default_env())
     .init();
 ```
 
-Then everything is set now! Now, you can run your project directly, or with a customized `RUST_LOG` arguments:
+Run your binary with a filter that keeps only the interesting modules:
 
 ```bash
-RUST_LOG=foyer_storage::large::generic=trace,info ./your-project-with-foyer
+RUST_LOG=foyer_storage::engine::block::recover=trace,info ./your-project-with-foyer
 ```
 
-Here is a sample of the outputs:
+Sample output:
 
 ```plain
-2024-10-27T08:50:08.631742Z  INFO foyer_bench: 414: [foyer bench]: jemalloc is enabled.
-2024-10-27T08:50:08.632902Z  WARN foyer_storage::store: 482: [store builder]: Setting up small object disk cache options, but only large object disk cache is enabled.
-2024-10-27T08:50:08.639524Z  INFO foyer_storage::large::recover: 162: Recovers 0 regions with data, 1600 clean regions, 0 total entries with max sequence as 0, initial reclaim permits is 0.
-2024-10-27T08:50:08.659042Z TRACE foyer_storage::large::generic: 344: EntryAddress {
-    region: 1,
-    offset: 8192,
-    len: 1420,
-    sequence: 19,
-}
-2024-10-27T08:50:08.660765Z TRACE foyer_storage::large::generic: 344: EntryAddress {
-    region: 0,
-    offset: 28672,
-    len: 638,
-    sequence: 41,
-}
+2025-01-05T12:00:08.631742Z  INFO foyer_bench:432: [builder]: jemalloc is enabled
+2025-01-05T12:00:08.639524Z  INFO foyer_storage::engine::block::recover:167: recovered 1_600 clean blocks in 182ms
+2025-01-05T12:00:08.659042Z TRACE foyer_storage::engine::block::generic:348: enqueue hash=0x4dd185 key=42 size=1420B
 ```
-
-For more details, please refer to the [document](https://docs.rs/tracing/0.1.40/tracing/) of `tracing`.
 
 ## 2. Setup metrics monitoring
 
-***foyer*** uses [metrics](https://crates.io/crates/metrics) ecosystem for metrics monitoring. [metrics](https://crates.io/crates/metrics) works like an adapter, ***foyer*** uses `metrics` to define what metrics to collect, and you can use the libraries from the metrics ecosystem to define how and where to collect them. (e.g. Prometheus, StatsD, NewRelic, etc.) Please refer to the [README](https://github.com/metrics-rs/metrics) and [document](https://github.com/metrics-rs/metrics) 
+`foyer` records detailed counters, gauges, and histograms through [`mixtrics`](https://docs.rs/mixtrics). You provide a registry implementation (Prometheus, StatsD, OTLP, …) and pass it into `CacheBuilder`/`HybridCacheBuilder`.
 
-This section will take integrating with *Prometheus* as an example.
-
-To integrate *Prometheus*，the trivial method is using the `metrics-exporter-prometheus` offered by `metrics`.
-
-First, add the dependency to your project:
+1. Add dependencies:
 
 ```toml
-metrics-exporter-prometheus = "0.15"
+mixtrics = { version = "0.2", features = ["prometheus"] }
+prometheus = "0.13"
+hyper = { version = "1", default-features = false, features = ["server", "http1"] } # optional exporter
 ```
 
-Then setup the prometheus exporter.
+2. Register a metrics backend and hand it to ***foyer***:
 
 ```rust
-let addr: SocketAddr = "0.0.0.0:19970".parse().unwrap();
-PrometheusBuilder::new()
-    .with_http_listener(addr)
-    .set_buckets(&[0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 1.0])
-    .unwrap()
-    .install()
-    .unwrap();
+use foyer::{CacheBuilder, HybridCacheBuilder};
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
+use prometheus::Registry;
+
+let prometheus = Registry::new();
+let registry = PrometheusMetricsRegistry::new(prometheus.clone());
+
+let _cache = CacheBuilder::new(100)
+    .with_metrics_registry(Box::new(registry))
+    .build::<_>();
+
+// Or for hybrid cache:
+let _hybrid_builder = HybridCacheBuilder::new().with_metrics_registry(Box::new(
+    PrometheusMetricsRegistry::new(prometheus.clone()),
+));
 ```
 
-However, some project may have already using lib [`prometheus`](https://crates.io/crates/prometheus) to export data. In this case, it is recommended to use [`metrics-prometheus`](https://crates.io/crates/metrics-prometheus) as an adapter between lib `metrics` and `prometheus`.
+3. Expose the Prometheus registry however you like. A minimal HTTP exporter is shown in `examples/export_metrics_prometheus_hyper.rs`; hook it up to Grafana once Prometheus starts scraping the endpoint.
 
-First, add `metrics-prometheus` as an dependency to your project:
+![hybrid cache](./assets/metrics.png)
 
-```toml
-metrics-prometheus = "0.7"
-```
-
-Then set the registry your project is using with `prometheus` as the target of `metrics` that ***foyer*** uses with `metrics-prometheus`.
-
-```rust
-// For example, `GLOBAL_METRICS_REGISTRY` is the registry your project is using with lib `prometheus`.
-
-metrics_prometheus::Recorder::builder()
-    .with_registry(GLOBAL_METRICS_REGISTRY.clone())
-    .build_and_install();
-```
-
-Then export the registry like your project does before.
-
-After collecting data with *Prometheus*, you can setup *Grafana* to display the metrics.
-
-Here is an example of some exported metrics.
-
-<div style="text-align: center;">
-
-  ![hybrid cache](./assets/metrics.png)
-  
-</div>
+`mixtrics` also ships registries for StatsD and OpenTelemetry, so changing backends only requires swapping the registry type you pass to `.with_metrics_registry()`.
 
 ## 3. Setup tracing monitoring
 
-***TBC ... ...***
+Tail-based tracing is optional and guarded by the `tracing` feature. Once enabled, the hybrid cache records spans only when operations exceed configurable thresholds.
+
+1. Enable the relevant features and exporters:
+
+```toml
+foyer = { version = "0.20", features = ["tracing"] }
+fastrace = "0.7"
+fastrace-jaeger = "0.7"          # or use fastrace-opentelemetry for OTLP
+```
+
+2. Initialize a reporter (Jaeger example shown); use `fastrace-opentelemetry` if you prefer OTLP/OTel collectors.
+
+```rust
+use std::time::Duration;
+
+fn init_tracing() {
+    let reporter =
+        fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-demo").unwrap();
+    fastrace::set_reporter(
+        reporter,
+        fastrace::collector::Config::default().report_interval(Duration::from_millis(50)),
+    );
+}
+```
+
+3. Enable tracing on the cache and tune the thresholds with `TracingOptions`.
+
+```rust
+use foyer::{BlockEngineBuilder, DeviceBuilder, FsDeviceBuilder, HybridCacheBuilder, TracingOptions};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    init_tracing();
+
+    let device = FsDeviceBuilder::new("/data/foyer").with_capacity(256 * 1024 * 1024).build()?;
+    let hybrid = HybridCacheBuilder::new()
+        .memory(64 * 1024 * 1024)
+        .storage()
+        .with_engine_config(BlockEngineBuilder::new(device))
+        .build()
+        .await?;
+
+    hybrid.enable_tracing();
+    hybrid.update_tracing_options(
+        TracingOptions::new()
+            .with_record_hybrid_get_threshold(Duration::from_millis(5))
+            .with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(20)),
+    );
+
+    let _ = hybrid.get(&42).await?;
+    Ok(())
+}
+```
+
+Each cache operation emits a root span once it exceeds the configured latency. Exporters such as Jaeger or OTLP can now display slow inserts, disk loads, and fetches with causal relationships, making it straightforward to locate bottlenecks.
