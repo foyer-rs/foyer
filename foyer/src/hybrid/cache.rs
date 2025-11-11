@@ -39,7 +39,7 @@ use foyer_common::{
     properties::{Hint, Location, Properties, Source},
     rate::RateLimiter,
 };
-use foyer_memory::{Cache, CacheEntry, FetchError, FetchTarget, GetOrFetch, Piece, Pipe};
+use foyer_memory::{Cache, CacheEntry, FetchError, FetchState, FetchTarget, GetOrFetch, Piece, Pipe};
 use foyer_storage::{Load, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
@@ -875,6 +875,28 @@ where
     }
 }
 
+impl<K, V, S> HybridGet<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Check if the fetch future is the leader.
+    pub fn is_leader(&self) -> bool {
+        self.inner.is_leader()
+    }
+
+    /// Check if the fetch future is the follower.
+    pub fn is_follower(&self) -> bool {
+        self.inner.is_follower()
+    }
+
+    /// Get the state of the fetch future.
+    pub fn state(&self) -> FetchState {
+        self.inner.state()
+    }
+}
+
 #[derive(Debug, Default)]
 struct GetOrFetchCtx {
     throttled: AtomicBool,
@@ -964,6 +986,28 @@ where
         try_cancel!(this.span, *this.span_cancel_threshold);
 
         Poll::Ready(res)
+    }
+}
+
+impl<K, V, S> HybridGetOrFetch<K, V, S>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Check if the fetch future is the leader.
+    pub fn is_leader(&self) -> bool {
+        self.inner.is_leader()
+    }
+
+    /// Check if the fetch future is the follower.
+    pub fn is_follower(&self) -> bool {
+        self.inner.is_follower()
+    }
+
+    /// Get the state of the fetch future.
+    pub fn state(&self) -> FetchState {
+        self.inner.state()
     }
 }
 

@@ -1034,6 +1034,36 @@ where
             GetOrFetchProj::Sieve(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
         }
     }
+}
+
+impl<K, V, S, P, C> GetOrFetch<K, V, S, P, C>
+where
+    K: Key,
+    V: Value,
+    S: HashBuilder,
+    P: Properties,
+{
+    /// Check if the fetch future is the leader.
+    pub fn is_leader(&self) -> bool {
+        match self {
+            GetOrFetch::Fifo(fut) => fut.is_leader(),
+            GetOrFetch::S3Fifo(fut) => fut.is_leader(),
+            GetOrFetch::Lru(fut) => fut.is_leader(),
+            GetOrFetch::Lfu(fut) => fut.is_leader(),
+            GetOrFetch::Sieve(fut) => fut.is_leader(),
+        }
+    }
+
+    /// Check if the fetch future is the follower.
+    pub fn is_follower(&self) -> bool {
+        match self {
+            GetOrFetch::Fifo(fut) => fut.is_follower(),
+            GetOrFetch::S3Fifo(fut) => fut.is_follower(),
+            GetOrFetch::Lru(fut) => fut.is_follower(),
+            GetOrFetch::Lfu(fut) => fut.is_follower(),
+            GetOrFetch::Sieve(fut) => fut.is_follower(),
+        }
+    }
 
     /// Get the state of the fetch future.
     pub fn state(&self) -> FetchState {
