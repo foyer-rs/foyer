@@ -980,7 +980,7 @@ where
                 }),
                 Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawFetch {
                     state: RawFetchState::Wait,
-                    id: usize::MAX,
+                    id: PHONY_FETCH_ID,
                     hash,
                     key: Some(key.to_owned()),
                     ctx,
@@ -1067,8 +1067,18 @@ where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    C: Any + Send + 'static,
 {
+    pub fn is_leader(&self) -> bool {
+        match self {
+            RawGetOrFetch::Hit(_) => true,
+            RawGetOrFetch::Miss(fetch) => fetch.id != PHONY_FETCH_ID,
+        }
+    }
+
+    pub fn is_follower(&self) -> bool {
+        !self.is_leader()
+    }
+
     pub fn state(&self) -> FetchState {
         match self {
             RawGetOrFetch::Hit(_) => FetchState::Hit,
@@ -1420,6 +1430,7 @@ where
 /// Error indicating that a fetch operation was cancelled.
 #[derive(Debug)]
 pub struct FetchCancelled;
+const PHONY_FETCH_ID: usize = usize::MAX;
 
 impl Display for FetchCancelled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
