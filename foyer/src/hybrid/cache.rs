@@ -841,6 +841,7 @@ where
     S: HashBuilder + Debug,
 {
     type Output = Result<Option<HybridCacheEntry<K, V, S>>>;
+
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
