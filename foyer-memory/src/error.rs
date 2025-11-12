@@ -23,9 +23,9 @@ pub enum Error {
     /// Config error.
     #[error("config error: {0}")]
     ConfigError(String),
-    /// Wait error.
-    #[error("wait for concurrent fetch result error: {0}")]
-    Wait(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Other error.
+    #[error("other error: {0}")]
+    Other(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl Error {
@@ -34,9 +34,9 @@ impl Error {
         Self::Multiple(MultipleError(errs))
     }
 
-    /// Error on waiting for concurrrent fetch result.
-    pub fn wait(err: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::Wait(Box::new(err))
+    /// Other error.
+    pub fn other(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Other(Box::new(err))
     }
 }
 

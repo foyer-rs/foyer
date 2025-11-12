@@ -1157,7 +1157,6 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-#[pin_project(project = RawFetchStateProj)]
 pub enum RawFetchState<E, S, I, C>
 where
     E: Eviction,
@@ -1199,7 +1198,7 @@ where
     }
 }
 
-#[pin_project(project = RawFetchProj, PinnedDrop)]
+#[pin_project(PinnedDrop)]
 pub struct RawFetch<E, S, I, C>
 where
     E: Eviction,
