@@ -26,7 +26,7 @@ use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::Result,
+    error::{Error, Result},
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -1005,10 +1005,11 @@ where
     P: Properties,
     C: Any + Send + Sync + 'static,
 {
-    type Output = std::result::Result<CacheEntry<K, V, S, P>, Box<dyn std::error::Error + Send + Sync>>;
+    type Output = Result<CacheEntry<K, V, S, P>>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        self.poll_inner(cx).map(|res| res.map(|opt| opt.unwrap()))
+        self.poll_inner(cx)
+            .map(|res| res.map(|opt| opt.unwrap()).map_err(Error::other))
     }
 }
 

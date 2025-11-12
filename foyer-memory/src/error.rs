@@ -35,8 +35,8 @@ impl Error {
     }
 
     /// Other error.
-    pub fn other(err: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::Other(Box::new(err))
+    pub fn other(e: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
+        Self::Other(e.into())
     }
 }
 
