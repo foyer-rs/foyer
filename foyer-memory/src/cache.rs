@@ -26,6 +26,7 @@ use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    error::Result,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -36,7 +37,7 @@ use crate::{
     indexer::hash_table::HashTableIndexer,
     inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
     raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
-    FetchState, FetchTarget, Piece, Pipe, Result,
+    FetchState, FetchTarget, Piece, Pipe,
 };
 
 /// Entry properties for in-memory only cache.
@@ -1090,13 +1091,12 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get_or_fetch"))]
-    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce(&K) -> FU + Send + 'static,
-        FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
+        FU: Future<Output = Result<IT>> + Send + 'static,
         IT: Into<FetchTarget<K, V, P>>,
-        ER: std::error::Error + Send + Sync + 'static,
     {
         match self {
             Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch(key, fetch)),
