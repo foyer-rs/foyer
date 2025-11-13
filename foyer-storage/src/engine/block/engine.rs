@@ -29,7 +29,7 @@ use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Age, Populated, Properties, Source},
+    properties::{Age, Properties},
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
@@ -55,7 +55,7 @@ use crate::{
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
         },
-        Engine, EngineBuildContext, EngineConfig,
+        Engine, EngineBuildContext, EngineConfig, Populated,
     },
     error::{Error, Result},
     filter::conditions::IoThrottle,
@@ -554,19 +554,16 @@ where
 
         tracing::trace!(
             hash = piece.hash(),
-            source = ?piece.properties().source().unwrap_or_default(),
+            age = ?piece.properties().age().unwrap_or_default(),
             "[block engine]: enqueue"
         );
-        match piece.properties().source().unwrap_or_default() {
-            Source::Populated(Populated { age }) => match age {
-                Age::Young => {
-                    // skip write block engine if the entry is still young
-                    self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
-                    return;
-                }
-                Age::Old => {}
-            },
-            Source::Outer => {}
+        match piece.properties().age().unwrap_or_default() {
+            Age::Fresh | Age::Old => {}
+            Age::Young => {
+                // skip write block engine if the entry is still young
+                self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
+                return;
+            }
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {

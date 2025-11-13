@@ -25,7 +25,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Age, Populated, Properties},
+    properties::{Age, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -37,7 +37,7 @@ use crate::{
     compress::Compression,
     engine::{
         noop::{NoopEngine, NoopEngineBuilder},
-        Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
+        Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
     error::{Error, Result},
     io::{
