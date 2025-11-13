@@ -29,7 +29,7 @@ use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
     metrics::Metrics,
-    properties::{Location, Properties},
+    properties::{Location, Properties, Source},
     strict_assert,
     utils::scope::Scope,
 };
@@ -531,7 +531,17 @@ where
         &self,
         key: E::Key,
         value: E::Value,
+        properties: E::Properties,
+    ) -> RawCacheEntry<E, S, I> {
+        self.insert_with_properties_inner(key, value, properties, Source::Outer)
+    }
+
+    fn insert_with_properties_inner(
+        &self,
+        key: E::Key,
+        value: E::Value,
         mut properties: E::Properties,
+        source: Source,
     ) -> RawCacheEntry<E, S, I> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
@@ -550,17 +560,17 @@ where
             hash,
             weight,
         }));
-        self.insert_inner(record)
+        self.insert_inner(record, source)
     }
 
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_piece"))]
     pub fn insert_piece(&self, piece: Piece<E::Key, E::Value, E::Properties>) -> RawCacheEntry<E, S, I> {
-        self.insert_inner(piece.into_record())
+        self.insert_inner(piece.into_record(), Source::Memory)
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
-    fn insert_inner(&self, record: Arc<Record<E>>) -> RawCacheEntry<E, S, I> {
+    fn insert_inner(&self, record: Arc<Record<E>>, source: Source) -> RawCacheEntry<E, S, I> {
         let mut garbages = vec![];
         let mut notifiers = vec![];
 
@@ -573,6 +583,7 @@ where
             let _ = notifier.send(Ok(Some(RawCacheEntry {
                 record: record.clone(),
                 inner: self.inner.clone(),
+                source,
             })));
         }
 
@@ -593,6 +604,7 @@ where
         RawCacheEntry {
             record,
             inner: self.inner.clone(),
+            source,
         }
     }
 
@@ -658,6 +670,7 @@ where
                 shard.remove(hash, key).map(|record| RawCacheEntry {
                     inner: self.inner.clone(),
                     record,
+                    source: Source::Memory,
                 })
             })
             .inspect(|record| {
@@ -688,6 +701,7 @@ where
         Some(RawCacheEntry {
             inner: self.inner.clone(),
             record,
+            source: Source::Memory,
         })
     }
 
@@ -770,6 +784,7 @@ where
 {
     inner: Arc<RawCacheInner<E, S, I>>,
     record: Arc<Record<E>>,
+    source: Source,
 }
 
 impl<E, S, I> Debug for RawCacheEntry<E, S, I>
@@ -825,6 +840,7 @@ where
         Self {
             inner: self.inner.clone(),
             record: self.record.clone(),
+            source: self.source,
         }
     }
 }
@@ -895,6 +911,10 @@ where
     pub fn piece(&self) -> Piece<E::Key, E::Value, E::Properties> {
         Piece::new(self.record.clone())
     }
+
+    pub fn source(&self) -> Source {
+        self.source
+    }
 }
 
 impl<E, S, I> RawCache<E, S, I>
@@ -957,6 +977,7 @@ where
                 RawGetOrFetch::Hit(Some(RawCacheEntry {
                     inner: self.inner.clone(),
                     record,
+                    source: Source::Memory,
                 }))
             })
             .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
@@ -1258,7 +1279,7 @@ where
                     match optional_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(Some(target))) => {
-                            handle_try! {*this.state, handle_target(target, this.key, this.cache) }
+                            handle_try! {*this.state, handle_target(target, this.key, this.cache, Source::Disk) }
                         }
                         Poll::Ready(Ok(None)) => {
                             handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Ok(None)) }
@@ -1273,7 +1294,7 @@ where
                     match required_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(target)) => {
-                            handle_try! { *this.state, handle_target(target, this.key, this.cache) }
+                            handle_try! { *this.state, handle_target(target, this.key, this.cache, Source::Outer) }
                         }
                         Poll::Ready(Err(e)) => {
                             handle_try! { *this.state, handle_error(e, *this.id, *this.hash, this.key.as_ref().unwrap(), this.inflights) }
@@ -1372,13 +1393,16 @@ where
         target: FetchTarget<E::Key, E::Value, E::Properties>,
         key: &mut Once<E::Key>,
         cache: &RawCache<E, S, I>,
+        source: Source,
     ) -> Try<E, S, I, C> {
         match target {
             FetchTarget::Entry { value, properties } => {
                 let key = key.take().unwrap();
-                cache.insert_with_properties(key, value, properties);
+                tracing::trace!("==========> handle target: {source:?}");
+                cache.insert_with_properties_inner(key, value, properties, source);
             }
             FetchTarget::Piece(piece) => {
+                tracing::trace!("==========> handle target (piece): {:?}", Source::Memory);
                 cache.insert_piece(piece);
             }
         }

@@ -105,3 +105,15 @@ pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
     /// Entry age.
     fn age(&self) -> Option<Age>;
 }
+
+/// Source of the cache entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Source {
+    /// The cache entry comes from outer source.
+    Outer,
+    /// The cache entry comes from memory cache.
+    Memory,
+    /// The cache entry comes from disk cache.
+    Disk,
+}

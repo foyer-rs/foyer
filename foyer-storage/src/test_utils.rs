@@ -25,6 +25,7 @@ use std::{
 
 use parking_lot::Mutex;
 
+pub use crate::engine::block::test_utils::*;
 use crate::{io::device::statistics::Statistics, StorageFilterCondition, StorageFilterResult};
 
 /// A picker that only admits hash from the given list.
