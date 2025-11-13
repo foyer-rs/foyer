@@ -1016,7 +1016,7 @@ where
 mod tests {
     use std::{future::poll_fn, path::Path, sync::Arc, task::Poll};
 
-    use foyer_common::hasher::ModHasher;
+    use foyer_common::{hasher::ModHasher, properties::Source};
     use foyer_memory::FetchState;
     use foyer_storage::{
         test_utils::{Record, Recorder},
@@ -1032,105 +1032,30 @@ mod tests {
     const MB: usize = 1024 * 1024;
 
     async fn open(dir: impl AsRef<Path>) -> HybridCache<u64, Vec<u8>, ModHasher> {
-        HybridCacheBuilder::new()
-            .with_name("test")
-            .memory(4 * MB)
-            .with_hash_builder(ModHasher::default())
-            // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_config(
-                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_block_size(MB),
-            )
-            .build()
-            .await
-            .unwrap()
+        open_with(dir, |b| b, |b| b).await
     }
 
-    async fn open_with_biased_admission_picker(
+    async fn open_with(
         dir: impl AsRef<Path>,
-        admits: impl IntoIterator<Item = u64>,
+        hybrid_cache_builder_mapper: impl FnOnce(HybridCacheBuilder<u64, Vec<u8>>) -> HybridCacheBuilder<u64, Vec<u8>>,
+        block_engine_builder_mapper: impl FnOnce(
+            BlockEngineBuilder<u64, Vec<u8>, HybridCacheProperties>,
+        ) -> BlockEngineBuilder<u64, Vec<u8>, HybridCacheProperties>,
     ) -> HybridCache<u64, Vec<u8>, ModHasher> {
-        HybridCacheBuilder::new()
-            .with_name("test")
-            .memory(4 * MB)
-            .with_hash_builder(ModHasher::default())
-            // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_config(
-                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_block_size(MB)
-                    .with_admission_filter(StorageFilter::new().with_condition(Biased::new(admits))),
-            )
-            .build()
-            .await
-            .unwrap()
-    }
+        let mut block_engine_builder =
+            BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                .with_block_size(MB);
+        block_engine_builder = block_engine_builder_mapper(block_engine_builder);
 
-    async fn open_with_policy(
-        dir: impl AsRef<Path>,
-        policy: HybridCachePolicy,
-    ) -> HybridCache<u64, Vec<u8>, ModHasher> {
-        HybridCacheBuilder::new()
-            .with_name("test")
-            .with_policy(policy)
+        let hybrid_cache_builder = HybridCacheBuilder::new().with_name("test");
+        let hybrid_cache_builder = hybrid_cache_builder_mapper(hybrid_cache_builder);
+        hybrid_cache_builder
             .memory(4 * MB)
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_config(
-                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_block_size(MB),
-            )
-            .build()
-            .await
-            .unwrap()
-    }
-
-    async fn open_with_policy_and_recorder(
-        dir: impl AsRef<Path>,
-        policy: HybridCachePolicy,
-    ) -> (HybridCache<u64, Vec<u8>, ModHasher>, Recorder) {
-        let recorder = Recorder::default();
-        let hybrid = HybridCacheBuilder::new()
-            .with_name("test")
-            .with_policy(policy)
-            .memory(4 * MB)
-            .with_hash_builder(ModHasher::default())
-            // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_config(
-                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_admission_filter(StorageFilter::new().with_condition(recorder.admission()))
-                    .with_reinsertion_filter(StorageFilter::new().with_condition(recorder.eviction()))
-                    .with_block_size(MB),
-            )
-            .build()
-            .await
-            .unwrap();
-        (hybrid, recorder)
-    }
-
-    async fn open_with_flush_on_close(
-        dir: impl AsRef<Path>,
-        flush_on_close: bool,
-    ) -> HybridCache<u64, Vec<u8>, ModHasher> {
-        HybridCacheBuilder::new()
-            .with_name("test")
-            .with_flush_on_close(flush_on_close)
-            .memory(4 * MB)
-            .with_hash_builder(ModHasher::default())
-            // TODO(MrCroxx): Test with `Engine::Mixed`.
-            .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
-            .with_engine_config(
-                BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
-                    .with_block_size(MB),
-            )
+            .with_engine_config(block_engine_builder)
             .build()
             .await
             .unwrap()
@@ -1175,7 +1100,12 @@ mod tests {
     async fn test_hybrid_cache_writer() {
         let dir = tempfile::tempdir().unwrap();
 
-        let hybrid = open_with_biased_admission_picker(dir.path(), [1, 2, 3, 4]).await;
+        let hybrid = open_with(
+            dir.path(),
+            |b| b,
+            |b| b.with_admission_filter(StorageFilter::new().with_condition(Biased::new([1, 2, 3, 4]))),
+        )
+        .await;
 
         let e1 = hybrid.writer(1).insert(vec![1; 7 * KB]);
         let e2 = hybrid
@@ -1205,7 +1135,7 @@ mod tests {
         // Test hybrid cache that write disk cache on eviction.
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
+        let hybrid = open_with(dir.path(), |b| b.with_policy(HybridCachePolicy::WriteOnEviction), |b| b).await;
 
         hybrid
             .get_or_fetch(&1, |_| async move {
@@ -1257,7 +1187,12 @@ mod tests {
         // Test hybrid cache that write disk cache on insertion.
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnInsertion),
+            |b| b,
+        )
+        .await;
 
         hybrid
             .get_or_fetch(&1, |_| async move {
@@ -1310,7 +1245,7 @@ mod tests {
         // Test hybrid cache that write disk cache on eviction.
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnEviction).await;
+        let hybrid = open_with(dir.path(), |b| b.with_policy(HybridCachePolicy::WriteOnEviction), |b| b).await;
 
         hybrid.insert_with_properties(
             1,
@@ -1350,7 +1285,12 @@ mod tests {
         // Test hybrid cache that write disk cache on insertion.
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_policy(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnInsertion),
+            |b| b,
+        )
+        .await;
 
         hybrid.insert_with_properties(
             1,
@@ -1392,7 +1332,16 @@ mod tests {
 
         // 1. open empty hybrid cache
         let dir = tempfile::tempdir().unwrap();
-        let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnInsertion).await;
+        let recorder = Recorder::default();
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnInsertion),
+            |b| {
+                b.with_admission_filter(StorageFilter::new().with_condition(recorder.admission()))
+                    .with_reinsertion_filter(StorageFilter::new().with_condition(recorder.eviction()))
+            },
+        )
+        .await;
 
         // 2. insert e1 and flush it to disk.
         hybrid.insert_with_properties(
@@ -1426,7 +1375,16 @@ mod tests {
 
         // 1. open empty hybrid cache
         let dir = tempfile::tempdir().unwrap();
-        let (hybrid, recorder) = open_with_policy_and_recorder(dir.path(), HybridCachePolicy::WriteOnEviction).await;
+        let recorder = Recorder::default();
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnEviction),
+            |b| {
+                b.with_admission_filter(StorageFilter::new().with_condition(recorder.admission()))
+                    .with_reinsertion_filter(StorageFilter::new().with_condition(recorder.eviction()))
+            },
+        )
+        .await;
 
         // 2. insert e1 and flush it to disk.
         hybrid.insert_with_properties(
@@ -1462,21 +1420,21 @@ mod tests {
         // check without flush on close
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_flush_on_close(dir.path(), false).await;
+        let hybrid = open_with(dir.path(), |b| b.with_flush_on_close(false), |b| b).await;
         hybrid.insert(1, vec![1; 7 * KB]);
         assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
         hybrid.close().await.unwrap();
-        let hybrid = open_with_flush_on_close(dir.path(), false).await;
+        let hybrid = open_with(dir.path(), |b| b.with_flush_on_close(false), |b| b).await;
         assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
 
         // check with flush on close
 
         let dir = tempfile::tempdir().unwrap();
-        let hybrid = open_with_flush_on_close(dir.path(), true).await;
+        let hybrid = open_with(dir.path(), |b| b.with_flush_on_close(true), |b| b).await;
         hybrid.insert(1, vec![1; 7 * KB]);
         assert!(hybrid.storage().load(&1).await.unwrap().is_miss());
         hybrid.close().await.unwrap();
-        let hybrid = open_with_flush_on_close(dir.path(), true).await;
+        let hybrid = open_with(dir.path(), |b| b.with_flush_on_close(true), |b| b).await;
         assert_eq!(
             hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
             (1, vec![1; 7 * KB])
@@ -1550,5 +1508,55 @@ mod tests {
         // Poll fetch later.
         let r_fetch = fetch.await.unwrap();
         assert_eq!(r_get.unwrap().value(), r_fetch.value());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_entry_location() {
+        // Test hybrid cache that write disk cache on eviction.
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let flush_holder = foyer_storage::test_utils::FlushHolder::default();
+
+        let hybrid = open_with(dir.path(), |b| b, |b| b.with_flush_holder(flush_holder.clone())).await;
+
+        let f1 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
+        let f2 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
+
+        let e1 = f1.await.unwrap();
+        let e2 = f2.await.unwrap();
+
+        assert_eq!(e1.source(), Source::Outer);
+        assert_eq!(e2.source(), Source::Outer);
+        drop(e1);
+        drop(e2);
+
+        let e3 = hybrid
+            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .await
+            .unwrap();
+        assert_eq!(e3.source(), Source::Memory);
+        drop(e3);
+
+        flush_holder.hold();
+        hybrid.memory().evict_all();
+        let e4 = hybrid
+            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .await
+            .unwrap();
+        assert_eq!(e4.source(), Source::Memory);
+        drop(e4);
+        flush_holder.unhold();
+
+        hybrid.memory().remove(&1);
+        assert!(hybrid.memory().get(&1).is_none());
+
+        hybrid.storage().wait().await;
+        let e5 = hybrid
+            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .await
+            .unwrap();
+        assert_eq!(e5.source(), Source::Disk);
+        drop(e5);
     }
 }

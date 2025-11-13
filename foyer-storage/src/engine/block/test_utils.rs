@@ -17,20 +17,24 @@ use std::sync::{
     Arc,
 };
 
+/// A holder that can hold flushes of the block engine.
 #[derive(Debug, Clone, Default)]
 pub struct FlushHolder {
     hold: Arc<AtomicBool>,
 }
 
 impl FlushHolder {
+    /// Check if the flushes are held.
     pub fn is_held(&self) -> bool {
         self.hold.load(Ordering::Relaxed)
     }
 
+    /// Hold the flushes.
     pub fn hold(&self) {
         self.hold.store(true, Ordering::Relaxed);
     }
 
+    /// Unhold the flushes.
     pub fn unhold(&self) {
         self.hold.store(false, Ordering::Relaxed);
     }

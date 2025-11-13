@@ -19,7 +19,7 @@ use foyer_common::{
     code::{DefaultHasher, HashBuilder, Key, Value},
     event::EventListener,
     metrics::Metrics,
-    properties::{Age, Hint, Location, Properties},
+    properties::{Age, Hint, Location, Properties, Source},
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -334,6 +334,7 @@ where
     }
 
     /// Get the piece of the entry record.
+    #[doc(hidden)]
     pub fn piece(&self) -> Piece<K, V, P> {
         match self {
             CacheEntry::Fifo(entry) => entry.piece(),
@@ -341,6 +342,17 @@ where
             CacheEntry::Lfu(entry) => entry.piece(),
             CacheEntry::S3Fifo(entry) => entry.piece(),
             CacheEntry::Sieve(entry) => entry.piece(),
+        }
+    }
+
+    /// Get the source of the entry.
+    pub fn source(&self) -> Source {
+        match self {
+            CacheEntry::Fifo(entry) => entry.source(),
+            CacheEntry::Lru(entry) => entry.source(),
+            CacheEntry::Lfu(entry) => entry.source(),
+            CacheEntry::S3Fifo(entry) => entry.source(),
+            CacheEntry::Sieve(entry) => entry.source(),
         }
     }
 }

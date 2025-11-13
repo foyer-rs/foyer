@@ -43,7 +43,7 @@ use super::{
     indexer::Indexer,
     recover::RecoverRunner,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::engine::block::test_utils::*;
 use crate::{
     compress::Compression,
@@ -95,6 +95,8 @@ where
     admission_filter: StorageFilter,
     reinsertion_filter: StorageFilter,
     enable_tombstone_log: bool,
+    #[cfg(any(test, feature = "test_utils"))]
+    flush_holder: FlushHolder,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -149,6 +151,8 @@ where
             admission_filter: StorageFilter::new(),
             reinsertion_filter: StorageFilter::new().with_condition(RejectAll),
             enable_tombstone_log: false,
+            #[cfg(any(test, feature = "test_utils"))]
+            flush_holder: FlushHolder::default(),
             marker: PhantomData,
         }
     }
@@ -297,6 +301,13 @@ where
         self
     }
 
+    /// Pass the flush holder for test.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_flush_holder(mut self, flush_holder: FlushHolder) -> Self {
+        self.flush_holder = flush_holder;
+        self
+    }
+
     /// Build the block-based disk cache engine with the given configurations.
     pub async fn build(
         self: Box<Self>,
@@ -386,9 +397,6 @@ where
         )
         .await?;
 
-        #[cfg(test)]
-        let flush_holder = FlushHolder::default();
-
         let io_buffer_size = self.buffer_pool_size / self.flushers;
         for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
             flusher.run(
@@ -402,8 +410,8 @@ where
                 tombstone_log.clone(),
                 metrics.clone(),
                 &runtime,
-                #[cfg(test)]
-                flush_holder.clone(),
+                #[cfg(any(test, feature = "test_utils"))]
+                self.flush_holder.clone(),
             )?;
         }
 
@@ -421,8 +429,8 @@ where
             runtime,
             active: AtomicBool::new(true),
             metrics,
-            #[cfg(test)]
-            flush_holder,
+            #[cfg(any(test, feature = "test_utils"))]
+            flush_holder: self.flush_holder,
         };
         let inner = Arc::new(inner);
         let engine = BlockEngine { inner };
@@ -500,7 +508,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     flush_holder: FlushHolder,
 }
 
@@ -759,12 +767,12 @@ where
         .boxed()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     pub fn hold_flush(&self) {
         self.inner.flush_holder.hold();
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     pub fn unhold_flush(&self) {
         self.inner.flush_holder.unhold();
     }
@@ -888,6 +896,7 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_holder: FlushHolder::default(),
             marker: PhantomData,
         };
 
@@ -929,6 +938,7 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_holder: FlushHolder::default(),
             marker: PhantomData,
         };
         let builder = Box::new(builder);

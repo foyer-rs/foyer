@@ -38,7 +38,7 @@ use futures_util::{
 use itertools::Itertools;
 use tokio::sync::oneshot;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::engine::block::test_utils::*;
 use crate::{
     engine::block::{
@@ -177,7 +177,7 @@ where
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
-        #[cfg(test)] flush_holder: FlushHolder,
+        #[cfg(any(test, feature = "test_utils"))] flush_holder: FlushHolder,
     ) -> Result<()> {
         let id = self.id;
         let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
@@ -218,7 +218,7 @@ where
             io_tasks: VecDeque::with_capacity(1),
             current_block_handle,
             max_entry_size,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test_utils"))]
             flush_holder,
         };
 
@@ -320,7 +320,7 @@ where
 
     max_entry_size: usize,
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     flush_holder: FlushHolder,
 }
 
@@ -345,9 +345,9 @@ where
         let rx = self.rx.take().unwrap();
 
         loop {
-            #[cfg(not(test))]
+            #[cfg(not(any(test, feature = "test_utils")))]
             let can_flush = true;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test_utils"))]
             let can_flush = !self.flush_holder.is_held() && rx.is_empty();
 
             let need_flush = !self.buffer.as_ref().unwrap().is_empty()
