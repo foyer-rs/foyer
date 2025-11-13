@@ -59,33 +59,16 @@ pub enum Location {
 }
 
 /// Entry age in the disk cache. Used by hybrid cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Age {
-    /// THe entry is still young and will be reserved in the disk cache for a while.
+    /// The entry is fresh and not yet or just inserted to disk cache.
+    #[default]
+    Fresh,
+    /// The entry is still young and will be reserved in the disk cache for a while.
     Young,
     /// The entry is old any will be eviction from the disk cache soon.
     Old,
-}
-
-/// Source context for populated entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Populated {
-    /// The age of the entry.
-    pub age: Age,
-}
-
-/// Entry source used by hybrid cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Default)]
-pub enum Source {
-    /// Comes from outer system of foyer.
-    #[default]
-    Outer,
-    /// Populated from the disk cache.
-    Populated(Populated),
 }
 
 /// Entry level properties trait.
@@ -116,9 +99,9 @@ pub trait Properties: Send + Sync + 'static + Clone + Default + Debug {
     /// Entry location.
     fn location(&self) -> Option<Location>;
 
-    /// Set entry source.
-    fn with_source(self, source: Source) -> Self;
+    /// Set entry age.
+    fn with_age(self, age: Age) -> Self;
 
-    /// Entry source.
-    fn source(&self) -> Option<Source>;
+    /// Entry age.
+    fn age(&self) -> Option<Age>;
 }

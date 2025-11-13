@@ -17,12 +17,20 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 use foyer_common::{
     code::{StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Populated, Properties},
+    properties::{Age, Properties},
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
 use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+
+/// Source context for populated entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Populated {
+    /// The age of the entry.
+    pub age: Age,
+}
 
 /// Load result.
 pub enum Load<K, V, P> {
@@ -32,14 +40,14 @@ pub enum Load<K, V, P> {
         key: K,
         /// The value of the entry.
         value: V,
-        /// The populated source context of the entry.
+        /// The populated context of the entry.
         populated: Populated,
     },
     /// Load entry success from disk cache write queue.
     Piece {
         /// The piece of the entry.
         piece: Piece<K, V, P>,
-        /// The populated source context of the entry.
+        /// The populated context of the entry.
         populated: Populated,
     },
     /// The entry may be in the disk cache, the read io is throttled.

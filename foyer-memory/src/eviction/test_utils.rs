@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use foyer_common::properties::{Hint, Location, Properties, Source};
+use foyer_common::properties::{Age, Hint, Location, Properties};
 use itertools::Itertools;
 
 use crate::{
@@ -84,7 +84,7 @@ pub struct TestProperties {
     phantom: bool,
     hint: Hint,
     location: Location,
-    source: Source,
+    age: Age,
 }
 
 impl Properties for TestProperties {
@@ -115,12 +115,12 @@ impl Properties for TestProperties {
         None
     }
 
-    fn with_source(mut self, source: Source) -> Self {
-        self.source = source;
+    fn with_age(mut self, age: Age) -> Self {
+        self.age = age;
         self
     }
 
-    fn source(&self) -> Option<Source> {
+    fn age(&self) -> Option<Age> {
         None
     }
 }

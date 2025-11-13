@@ -19,7 +19,7 @@ use foyer_common::{
     code::{DefaultHasher, HashBuilder, Key, Value},
     event::EventListener,
     metrics::Metrics,
-    properties::{Hint, Location, Properties, Source},
+    properties::{Age, Hint, Location, Properties},
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -95,11 +95,11 @@ impl Properties for CacheProperties {
         None
     }
 
-    fn with_source(self, _: Source) -> Self {
+    fn with_age(self, _: Age) -> Self {
         self
     }
 
-    fn source(&self) -> Option<Source> {
+    fn age(&self) -> Option<Age> {
         None
     }
 }

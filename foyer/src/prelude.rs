@@ -21,7 +21,7 @@ pub use crate::{
         buf::{BufExt, BufMutExt},
         code::{Code, CodeError, CodeResult, DefaultHasher, Key, StorageKey, StorageValue, Value},
         event::{Event, EventListener},
-        properties::{Age, Hint, Location, Source},
+        properties::{Age, Hint, Location},
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
     hybrid::{

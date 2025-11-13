@@ -36,11 +36,11 @@ use foyer_common::tracing::{TracingConfig, TracingOptions};
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     metrics::Metrics,
-    properties::{Hint, Location, Properties, Source},
+    properties::{Age, Hint, Location, Properties},
     rate::RateLimiter,
 };
 use foyer_memory::{Cache, CacheEntry, FetchError, FetchState, FetchTarget, GetOrFetch, Piece, Pipe};
-use foyer_storage::{Load, Statistics, Store};
+use foyer_storage::{Load, Populated, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
@@ -97,7 +97,7 @@ pub struct HybridCacheProperties {
     phantom: bool,
     hint: Hint,
     location: Location,
-    source: Source,
+    age: Age,
 }
 
 impl HybridCacheProperties {
@@ -132,9 +132,9 @@ impl HybridCacheProperties {
         self.location
     }
 
-    /// Get entry source.
-    pub fn source(&self) -> Source {
-        self.source
+    /// Get entry age.
+    pub fn age(&self) -> Age {
+        self.age
     }
 }
 
@@ -163,13 +163,13 @@ impl Properties for HybridCacheProperties {
         Some(self.location())
     }
 
-    fn with_source(mut self, source: Source) -> Self {
-        self.source = source;
+    fn with_age(mut self, age: Age) -> Self {
+        self.age = age;
         self
     }
 
-    fn source(&self) -> Option<Source> {
-        Some(self.source())
+    fn age(&self) -> Option<Age> {
+        Some(self.age())
     }
 }
 
@@ -678,9 +678,9 @@ where
                         Ok(Load::Entry {
                             key: _,
                             value,
-                            populated,
+                            populated: Populated { age },
                         }) => {
-                            let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
+                            let properties = HybridCacheProperties::default().with_age(age);
                             Ok(Some(FetchTarget::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
@@ -740,9 +740,9 @@ where
                         Ok(Load::Entry {
                             key: _,
                             value,
-                            populated,
+                            populated: Populated { age },
                         }) => {
-                            let properties = HybridCacheProperties::default().with_source(Source::Populated(populated));
+                            let properties = HybridCacheProperties::default().with_age(age);
                             Ok(Some(FetchTarget::Entry { value, properties }))
                         }
                         // TODO(MrCroxx): Remove populated with piece?
@@ -766,7 +766,7 @@ where
                             let target = it.into();
                             let target = match target {
                                 FetchTarget::Entry { value, mut properties } => {
-                                    properties = properties.with_source(Source::Outer);
+                                    properties = properties.with_age(Age::Fresh);
                                     if ctx.throttled.load(Ordering::Relaxed) {
                                         properties = properties.with_location(Location::InMem);
                                     }
@@ -962,17 +962,17 @@ where
         }
 
         match res.as_ref() {
-            Ok(e) => match e.properties().source() {
-                Source::Populated(..) => {
-                    this.metrics.hybrid_hit.increase(1);
-                    this.metrics
-                        .hybrid_hit_duration
-                        .record(this.start.elapsed().as_secs_f64());
-                }
-                Source::Outer => {
+            Ok(e) => match e.properties().age() {
+                Age::Fresh => {
                     this.metrics.hybrid_miss.increase(1);
                     this.metrics
                         .hybrid_miss_duration
+                        .record(this.start.elapsed().as_secs_f64());
+                }
+                Age::Young | Age::Old => {
+                    this.metrics.hybrid_hit.increase(1);
+                    this.metrics
+                        .hybrid_hit_duration
                         .record(this.start.elapsed().as_secs_f64());
                 }
             },
