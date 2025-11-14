@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 
 ### Fully Configured Hybrid Cache
 
-Here is an example of a hybrid cache setup with almost all configurations to show th possibilities of tuning.
+Here is an example of a hybrid cache setup with almost all configurations to show the possibilities of tuning.
 
 ```rust
 use std::{hash::BuildHasherDefault, num::NonZeroUsize};
