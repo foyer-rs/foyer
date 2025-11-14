@@ -987,7 +987,6 @@ where
                 }))
             })
             .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
-                // TODO(MrCroxx): Is it better to spawn a new detached task here to prevent from leader cancelled?
                 Enqueue::Lead {
                     id,
                     close,
