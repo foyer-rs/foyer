@@ -1138,7 +1138,10 @@ macro_rules! handle_try {
                 continue;
             },
             Try::Pending => return Poll::Pending,
-            Try::Ready(res) => return Poll::Ready(res),
+            Try::Ready(res) => {
+                $state = RawFetchState::Ready;
+                return Poll::Ready(res)
+            },
         }
     };
 }
@@ -1158,6 +1161,8 @@ pub enum FetchState {
     Notify,
     /// Waiting for the waiter to be notified.
     Wait,
+    /// Fetch is ready.
+    Ready,
 }
 
 impl<E, S, I, C> From<&RawFetchState<E, S, I, C>> for FetchState
@@ -1173,6 +1178,7 @@ where
             RawFetchState::FetchRequired { .. } => FetchState::FetchRequired,
             RawFetchState::Notify { .. } => FetchState::Notify,
             RawFetchState::Wait => FetchState::Wait,
+            RawFetchState::Ready => FetchState::Ready,
         }
     }
 }
@@ -1200,6 +1206,7 @@ where
         notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     },
     Wait,
+    Ready,
 }
 
 impl<E, S, I, C> Debug for RawFetchState<E, S, I, C>
@@ -1215,6 +1222,7 @@ where
             Self::FetchRequired { .. } => f.debug_struct("Required").finish(),
             Self::Notify { res, .. } => f.debug_struct("Notify").field("res", res).finish(),
             Self::Wait { .. } => f.debug_struct("Wait").finish(),
+            Self::Ready { .. } => f.debug_struct("Wait").finish(),
         }
     }
 }
@@ -1312,6 +1320,7 @@ where
                         Err(e) => Err(Box::new(e) as FetchError),
                     });
                 }
+                RawFetchState::Ready => return Poll::Ready(Err(Box::new(FetchPolledAfterReady) as FetchError)),
             }
         }
     }
@@ -1450,10 +1459,11 @@ where
     }
 }
 
+const PHONY_FETCH_ID: usize = usize::MAX;
+
 /// Error indicating that a fetch operation was cancelled.
 #[derive(Debug)]
 pub struct FetchCancelled;
-const PHONY_FETCH_ID: usize = usize::MAX;
 
 impl Display for FetchCancelled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1462,6 +1472,18 @@ impl Display for FetchCancelled {
 }
 
 impl std::error::Error for FetchCancelled {}
+
+/// Error indicating that a fetch operation was cancelled.
+#[derive(Debug)]
+pub struct FetchPolledAfterReady;
+
+impl Display for FetchPolledAfterReady {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fetch polled again after ready")
+    }
+}
+
+impl std::error::Error for FetchPolledAfterReady {}
 
 #[pinned_drop]
 impl<E, S, I, C> PinnedDrop for RawFetch<E, S, I, C>
@@ -1473,7 +1495,7 @@ where
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         match this.state {
-            RawFetchState::Notify { .. } | RawFetchState::Wait => return,
+            RawFetchState::Notify { .. } | RawFetchState::Wait | RawFetchState::Ready => return,
             RawFetchState::Init { .. } | RawFetchState::FetchOptional { .. } | RawFetchState::FetchRequired { .. } => {}
         }
         if let Some(notifiers) = this
@@ -1490,6 +1512,9 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    use std::future::poll_fn;
+
     use foyer_common::hasher::ModHasher;
     use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
 
@@ -1618,6 +1643,27 @@ mod tests {
         assert!(matches!(leader2, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
 
         drop(follower);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lead_finish_with_waiter() {
+        let cache = fifo_cache_for_test();
+
+        let pending = |_: &u64| async { std::future::pending::<Result<u64>>().await };
+        let mut leader = cache.get_or_fetch(&42, pending);
+        assert!(matches!(leader, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
+
+        let state = poll_fn(|cx| match leader.poll_unpin(cx) {
+            Poll::Ready(_) => unreachable!(),
+            Poll::Pending => Poll::Ready(leader.state()),
+        })
+        .await;
+        assert!(matches!(state, FetchState::FetchRequired));
+
+        cache.insert(42, 100);
+
+        let e = leader.await.unwrap().unwrap();
+        assert_eq!(e.value(), &100);
     }
 
     #[test_log::test]
