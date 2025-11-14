@@ -840,7 +840,6 @@ mod tests {
     use crate::{
         engine::RecoverMode,
         io::{
-            self,
             device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
             engine::{IoEngine, IoEngineBuilder},
         },
@@ -861,7 +860,7 @@ mod tests {
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        io::engine::psync::PsyncIoEngineBuilder::new().build().await.unwrap()
+        PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
