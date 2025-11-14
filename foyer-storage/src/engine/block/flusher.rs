@@ -39,7 +39,7 @@ use itertools::Itertools;
 use tokio::sync::oneshot;
 
 #[cfg(any(test, feature = "test_utils"))]
-use crate::engine::block::test_utils::*;
+use crate::test_utils::*;
 use crate::{
     engine::block::{
         buffer::{Batch, BlobPart, Block, Buffer, SplitCtx, Splitter},
@@ -177,7 +177,7 @@ where
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
-        #[cfg(any(test, feature = "test_utils"))] flush_holder: FlushHolder,
+        #[cfg(any(test, feature = "test_utils"))] flush_switch: Switch,
     ) -> Result<()> {
         let id = self.id;
         let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
@@ -219,7 +219,7 @@ where
             current_block_handle,
             max_entry_size,
             #[cfg(any(test, feature = "test_utils"))]
-            flush_holder,
+            flush_switch,
         };
 
         runtime.write().spawn(async move {
@@ -321,7 +321,7 @@ where
     max_entry_size: usize,
 
     #[cfg(any(test, feature = "test_utils"))]
-    flush_holder: FlushHolder,
+    flush_switch: Switch,
 }
 
 impl<K, V, P> Runner<K, V, P>
@@ -348,7 +348,7 @@ where
             #[cfg(not(any(test, feature = "test_utils")))]
             let can_flush = true;
             #[cfg(any(test, feature = "test_utils"))]
-            let can_flush = !self.flush_holder.is_held() && rx.is_empty();
+            let can_flush = !self.flush_switch.is_on() && rx.is_empty();
 
             let need_flush = !self.buffer.as_ref().unwrap().is_empty()
                 || !self.waiters.is_empty()

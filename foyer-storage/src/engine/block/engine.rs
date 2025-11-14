@@ -44,7 +44,7 @@ use super::{
     recover::RecoverRunner,
 };
 #[cfg(any(test, feature = "test_utils"))]
-use crate::engine::block::test_utils::*;
+use crate::test_utils::*;
 use crate::{
     compress::Compression,
     engine::{
@@ -96,7 +96,9 @@ where
     reinsertion_filter: StorageFilter,
     enable_tombstone_log: bool,
     #[cfg(any(test, feature = "test_utils"))]
-    flush_holder: FlushHolder,
+    flush_switch: Switch,
+    #[cfg(any(test, feature = "test_utils"))]
+    load_holder: Holder,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -152,7 +154,9 @@ where
             reinsertion_filter: StorageFilter::new().with_condition(RejectAll),
             enable_tombstone_log: false,
             #[cfg(any(test, feature = "test_utils"))]
-            flush_holder: FlushHolder::default(),
+            flush_switch: Switch::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holder: Holder::default(),
             marker: PhantomData,
         }
     }
@@ -303,8 +307,15 @@ where
 
     /// Pass the flush holder for test.
     #[cfg(any(test, feature = "test_utils"))]
-    pub fn with_flush_holder(mut self, flush_holder: FlushHolder) -> Self {
-        self.flush_holder = flush_holder;
+    pub fn with_flush_switch(mut self, flush_switch: Switch) -> Self {
+        self.flush_switch = flush_switch;
+        self
+    }
+
+    /// Pass the load holder for test.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_load_holder(mut self, load_holder: Holder) -> Self {
+        self.load_holder = load_holder;
         self
     }
 
@@ -411,7 +422,7 @@ where
                 metrics.clone(),
                 &runtime,
                 #[cfg(any(test, feature = "test_utils"))]
-                self.flush_holder.clone(),
+                self.flush_switch.clone(),
             )?;
         }
 
@@ -430,7 +441,9 @@ where
             active: AtomicBool::new(true),
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
-            flush_holder: self.flush_holder,
+            flush_switch: self.flush_switch,
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holder: self.load_holder,
         };
         let inner = Arc::new(inner);
         let engine = BlockEngine { inner };
@@ -509,7 +522,10 @@ where
     metrics: Arc<Metrics>,
 
     #[cfg(any(test, feature = "test_utils"))]
-    flush_holder: FlushHolder,
+    flush_switch: Switch,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    load_holder: Holder,
 }
 
 impl<K, V, P> Clone for BlockEngine<K, V, P>
@@ -591,11 +607,17 @@ where
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
         tracing::trace!(hash, "[block engine]: load");
 
+        #[cfg(any(test, feature = "test_utils"))]
+        let load_holer = self.inner.load_holder.wait();
+
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
         let block_manager = self.inner.block_manager.clone();
 
         let load = async move {
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holer.await;
+
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
@@ -769,12 +791,12 @@ where
 
     #[cfg(any(test, feature = "test_utils"))]
     pub fn hold_flush(&self) {
-        self.inner.flush_holder.hold();
+        self.inner.flush_switch.on();
     }
 
     #[cfg(any(test, feature = "test_utils"))]
     pub fn unhold_flush(&self) {
-        self.inner.flush_holder.unhold();
+        self.inner.flush_switch.off();
     }
 }
 
@@ -895,7 +917,8 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            flush_holder: FlushHolder::default(),
+            flush_switch: Switch::default(),
+            load_holder: Holder::default(),
             marker: PhantomData,
         };
 
@@ -937,7 +960,8 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
-            flush_holder: FlushHolder::default(),
+            flush_switch: Switch::default(),
+            load_holder: Holder::default(),
             marker: PhantomData,
         };
         let builder = Box::new(builder);

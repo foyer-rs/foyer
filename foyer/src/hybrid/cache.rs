@@ -39,7 +39,7 @@ use foyer_common::{
     properties::{Age, Hint, Location, Properties},
     rate::RateLimiter,
 };
-use foyer_memory::{Cache, CacheEntry, FetchError, FetchState, FetchTarget, GetOrFetch, Piece, Pipe};
+use foyer_memory::{Cache, CacheEntry, FetchError, FetchTarget, GetOrFetch, Piece, Pipe};
 use foyer_storage::{Load, Populated, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
@@ -668,6 +668,7 @@ where
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
+        let runtime = self.inner.storage.runtime().user();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
             Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key: &K| {
@@ -697,6 +698,7 @@ where
             })),
             None,
             ctx,
+            runtime,
         );
 
         let metrics = self.inner.metrics.clone();
@@ -727,6 +729,7 @@ where
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
+        let runtime = self.inner.storage.runtime().user();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
             Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key| {
@@ -782,6 +785,7 @@ where
                 .boxed()
             })),
             ctx.clone(),
+            runtime,
         );
 
         let policy = self.inner.policy;
@@ -814,7 +818,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<GetOrFetchCtx>>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
     metrics: Arc<Metrics>,
     start: Instant,
     #[cfg(feature = "tracing")]
@@ -876,28 +880,6 @@ where
     }
 }
 
-impl<K, V, S> HybridGet<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    /// Check if the fetch future is the leader.
-    pub fn is_leader(&self) -> bool {
-        self.inner.is_leader()
-    }
-
-    /// Check if the fetch future is the follower.
-    pub fn is_follower(&self) -> bool {
-        self.inner.is_follower()
-    }
-
-    /// Get the state of the fetch future.
-    pub fn state(&self) -> FetchState {
-        self.inner.state()
-    }
-}
-
 #[derive(Debug, Default)]
 struct GetOrFetchCtx {
     throttled: AtomicBool,
@@ -913,7 +895,7 @@ where
     S: HashBuilder + Debug,
 {
     #[pin]
-    inner: GetOrFetch<K, V, S, HybridCacheProperties, Arc<GetOrFetchCtx>>,
+    inner: GetOrFetch<K, V, S, HybridCacheProperties>,
     policy: HybridCachePolicy,
     store: Store<K, V, S, HybridCacheProperties>,
     ctx: Arc<GetOrFetchCtx>,
@@ -990,39 +972,12 @@ where
     }
 }
 
-impl<K, V, S> HybridGetOrFetch<K, V, S>
-where
-    K: StorageKey,
-    V: StorageValue,
-    S: HashBuilder + Debug,
-{
-    /// Check if the fetch future is the leader.
-    pub fn is_leader(&self) -> bool {
-        self.inner.is_leader()
-    }
-
-    /// Check if the fetch future is the follower.
-    pub fn is_follower(&self) -> bool {
-        self.inner.is_follower()
-    }
-
-    /// Get the state of the fetch future.
-    pub fn state(&self) -> FetchState {
-        self.inner.state()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{future::poll_fn, path::Path, sync::Arc, task::Poll};
+    use std::{path::Path, sync::Arc};
 
     use foyer_common::{hasher::ModHasher, properties::Source};
-    use foyer_memory::FetchState;
-    use foyer_storage::{
-        test_utils::{Record, Recorder},
-        StorageFilter,
-    };
-    use futures_util::FutureExt as _;
+    use foyer_storage::{test_utils::*, StorageFilter};
     use storage::test_utils::Biased;
     use tokio::sync::Barrier;
 
@@ -1475,31 +1430,23 @@ mod tests {
     async fn test_concurrent_get_and_fetch() {
         let dir = tempfile::tempdir().unwrap();
 
-        let hybrid = open(dir.path()).await;
+        let load_holder = Holder::default();
+        let hybrid = open_with(dir.path(), |b| b, |b| b.with_load_holder(load_holder.clone())).await;
 
         // Test non-concurrent get returns none.
         assert!(hybrid.get(&42).await.unwrap().is_none());
 
         let barrier = Arc::new(Barrier::new(2));
 
-        let mut get = hybrid.get(&42);
+        // Hold disk cache load to wait for fetch op.
+        load_holder.hold();
+        let get = hybrid.get(&42);
         let b = barrier.clone();
         let fetch = hybrid.get_or_fetch(&42, |_| async move {
             b.wait().await;
             Ok(vec![b'x'; 42])
         });
-
-        // Test get will fallback to fetch if there is concurrent fetch.
-        poll_fn(|cx| {
-            let poll = get.poll_unpin(cx);
-            tracing::trace!(?poll, state = ?get.inner.state(), "poll fn");
-            assert!(matches!(poll, Poll::Pending));
-            match get.inner.state() {
-                FetchState::FetchRequired => Poll::Ready(()),
-                _ => Poll::Pending,
-            }
-        })
-        .await;
+        load_holder.unhold();
 
         // Release fetch to proceed.
         barrier.wait().await;
@@ -1516,9 +1463,9 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
 
-        let flush_holder = foyer_storage::test_utils::FlushHolder::default();
+        let flush_switch = foyer_storage::test_utils::Switch::default();
 
-        let hybrid = open_with(dir.path(), |b| b, |b| b.with_flush_holder(flush_holder.clone())).await;
+        let hybrid = open_with(dir.path(), |b| b, |b| b.with_flush_switch(flush_switch.clone())).await;
 
         let f1 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
         let f2 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
@@ -1538,7 +1485,7 @@ mod tests {
         assert_eq!(e3.source(), Source::Memory);
         drop(e3);
 
-        flush_holder.hold();
+        flush_switch.on();
         hybrid.memory().evict_all();
         let e4 = hybrid
             .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
@@ -1546,7 +1493,7 @@ mod tests {
             .unwrap();
         assert_eq!(e4.source(), Source::Memory);
         drop(e4);
-        flush_holder.unhold();
+        flush_switch.off();
 
         hybrid.memory().remove(&1);
         assert!(hybrid.memory().get(&1).is_none());
