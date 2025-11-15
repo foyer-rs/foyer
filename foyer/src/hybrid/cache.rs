@@ -880,6 +880,34 @@ where
     }
 }
 
+impl<K, V, S> HybridGet<K, V, S>
+where
+    K: StorageKey + Clone,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Check if the future need to be awaited or can be unwrap at once.
+    pub fn need_await(&self) -> bool {
+        self.inner.need_await()
+    }
+
+    /// Try to unwrap the future if it is already ready.
+    /// Otherwise, return the original future.
+    #[expect(clippy::allow_attributes)]
+    #[allow(clippy::result_large_err)]
+    pub fn try_unwrap(self) -> std::result::Result<HybridCacheEntry<K, V, S>, Self> {
+        self.inner.try_unwrap().map_err(|inner| Self {
+            inner,
+            metrics: self.metrics,
+            start: self.start,
+            #[cfg(feature = "tracing")]
+            span: self.span,
+            #[cfg(feature = "tracing")]
+            span_cancel_threshold: self.span_cancel_threshold,
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 struct GetOrFetchCtx {
     throttled: AtomicBool,
@@ -969,6 +997,37 @@ where
         try_cancel!(this.span, *this.span_cancel_threshold);
 
         Poll::Ready(res)
+    }
+}
+
+impl<K, V, S> HybridGetOrFetch<K, V, S>
+where
+    K: StorageKey + Clone,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+{
+    /// Check if the future need to be awaited or can be unwrap at once.
+    pub fn need_await(&self) -> bool {
+        self.inner.need_await()
+    }
+
+    /// Try to unwrap the future if it is already ready.
+    /// Otherwise, return the original future.
+    #[expect(clippy::allow_attributes)]
+    #[allow(clippy::result_large_err)]
+    pub fn try_unwrap(self) -> std::result::Result<HybridCacheEntry<K, V, S>, Self> {
+        self.inner.try_unwrap().map_err(|inner| Self {
+            inner,
+            policy: self.policy,
+            store: self.store,
+            ctx: self.ctx,
+            metrics: self.metrics,
+            start: self.start,
+            #[cfg(feature = "tracing")]
+            span: self.span,
+            #[cfg(feature = "tracing")]
+            span_cancel_threshold: self.span_cancel_threshold,
+        })
     }
 }
 

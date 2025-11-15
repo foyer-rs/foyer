@@ -1047,6 +1047,31 @@ where
             GetOrFetchProj::Sieve(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
         }
     }
+
+    /// Check if the future need to be awaited or can be unwrap at once.
+    pub fn need_await(&self) -> bool {
+        match self {
+            GetOrFetch::Fifo(fut) => fut.need_await(),
+            GetOrFetch::S3Fifo(fut) => fut.need_await(),
+            GetOrFetch::Lru(fut) => fut.need_await(),
+            GetOrFetch::Lfu(fut) => fut.need_await(),
+            GetOrFetch::Sieve(fut) => fut.need_await(),
+        }
+    }
+
+    /// Try to unwrap the future if it is already ready.
+    /// Otherwise, return the original future.
+    #[expect(clippy::allow_attributes)]
+    #[allow(clippy::result_large_err)]
+    pub fn try_unwrap(self) -> std::result::Result<CacheEntry<K, V, S, P>, Self> {
+        match self {
+            GetOrFetch::Fifo(fut) => fut.try_unwrap().map(|opt| opt.unwrap().into()).map_err(Self::from),
+            GetOrFetch::S3Fifo(fut) => fut.try_unwrap().map(|opt| opt.unwrap().into()).map_err(Self::from),
+            GetOrFetch::Lru(fut) => fut.try_unwrap().map(|opt| opt.unwrap().into()).map_err(Self::from),
+            GetOrFetch::Lfu(fut) => fut.try_unwrap().map(|opt| opt.unwrap().into()).map_err(Self::from),
+            GetOrFetch::Sieve(fut) => fut.try_unwrap().map(|opt| opt.unwrap().into()).map_err(Self::from),
+        }
+    }
 }
 
 impl<K, V, S, P> Cache<K, V, S, P>

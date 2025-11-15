@@ -1075,6 +1075,29 @@ where
     }
 }
 
+impl<E, S, I> RawGetOrFetch<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    pub fn need_await(&self) -> bool {
+        matches!(self, Self::Miss(_))
+    }
+
+    #[expect(clippy::allow_attributes)]
+    #[allow(clippy::result_large_err)]
+    pub fn try_unwrap(self) -> std::result::Result<Option<RawCacheEntry<E, S, I>>, Self> {
+        match self {
+            Self::Hit(opt) => {
+                assert!(opt.is_some(), "entry is already taken");
+                Ok(opt)
+            }
+            Self::Miss(_) => Err(self),
+        }
+    }
+}
+
 type Once<T> = Option<T>;
 
 #[must_use]
