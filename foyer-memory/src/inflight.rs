@@ -12,7 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{any::Any, fmt::Debug, hash::Hash};
+use std::{
+    any::Any,
+    fmt::Debug,
+    hash::Hash,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use equivalent::Equivalent;
 use foyer_common::{
@@ -123,6 +131,7 @@ where
     I: Indexer<Eviction = E>,
 {
     id: usize,
+    close: Arc<AtomicBool>,
     notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     // If a required fetch request comes in while there is already an inflight,
     // we store the fetch builder here to let the leader perform the fetch later.
@@ -206,13 +215,16 @@ where
                     key: key.to_owned(),
                     inflight: Inflight {
                         id,
+                        close: Arc::new(AtomicBool::new(false)),
                         notifiers: vec![tx],
                         f: None,
                     },
                 };
                 v.insert(entry);
+                let close = Arc::new(AtomicBool::new(false));
                 Enqueue::Lead {
                     id,
+                    close,
                     waiter: rx,
                     required_fetch_builder: f,
                 }
@@ -232,12 +244,16 @@ where
     {
         match self.inflights.entry(hash, |e| key.equivalent(&e.key), |e| e.hash) {
             Entry::Occupied(o) => match id {
-                Some(id) if id == o.get().inflight.id => Some(o.remove().0.inflight.notifiers),
+                Some(id) if id == o.get().inflight.id => Some(o.remove().0.inflight),
                 Some(_) => None,
-                None => Some(o.remove().0.inflight.notifiers),
+                None => Some(o.remove().0.inflight),
             },
             Entry::Vacant(..) => None,
         }
+        .map(|inflight| {
+            inflight.close.store(true, Ordering::Relaxed);
+            inflight.notifiers
+        })
     }
 
     pub fn fetch_or_take<Q, C>(&mut self, hash: u64, key: &Q, id: usize) -> Option<FetchOrTake<E, S, I, C>>
@@ -255,7 +271,9 @@ where
                 match f.map(unerase_required_fetch_builder) {
                     Some(f) => Some(FetchOrTake::Fetch(f)),
                     None => {
-                        let notifiers = o.remove().0.inflight.notifiers;
+                        let inflight = o.remove().0.inflight;
+                        inflight.close.store(true, Ordering::Relaxed);
+                        let notifiers = inflight.notifiers;
                         Some(FetchOrTake::Notifiers(notifiers))
                     }
                 }
@@ -274,6 +292,7 @@ where
 {
     Lead {
         id: usize,
+        close: Arc<AtomicBool>,
         waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
         required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
     },

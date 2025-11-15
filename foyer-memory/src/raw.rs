@@ -19,7 +19,10 @@ use std::{
     hash::Hash,
     ops::Deref,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -30,6 +33,7 @@ use foyer_common::{
     event::{Event, EventListener},
     metrics::Metrics,
     properties::{Location, Properties, Source},
+    runtime::SingletonHandle,
     strict_assert,
     utils::scope::Scope,
 };
@@ -924,7 +928,7 @@ where
     I: Indexer<Eviction = E>,
 {
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get_or_fetch"))]
-    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I, ()>
+    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         F: FnOnce(&E::Key) -> FU + Send + 'static,
@@ -946,6 +950,7 @@ where
                 .boxed()
             })),
             (),
+            &tokio::runtime::Handle::current().into(),
         )
     }
 
@@ -964,7 +969,8 @@ where
         optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         ctx: C,
-    ) -> RawGetOrFetch<E, S, I, C>
+        runtime: &SingletonHandle,
+    ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         C: Any + Send + Sync + 'static,
@@ -981,34 +987,29 @@ where
                 }))
             })
             .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
-                // TODO(MrCroxx): Is it better to spawn a new detached task here to prevent from leader cancelled?
                 Enqueue::Lead {
                     id,
+                    close,
                     waiter,
                     required_fetch_builder,
-                } => RawGetOrFetch::Miss(RawFetch {
-                    state: RawFetchState::Init {
-                        optional_fetch_builder,
-                        required_fetch_builder,
-                    },
-                    id,
-                    hash,
-                    key: Some(key.to_owned()),
-                    ctx,
-                    cache: self.clone(),
-                    inflights: inflights.clone(),
-                    waiter,
-                }),
-                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawFetch {
-                    state: RawFetchState::Wait,
-                    id: PHONY_FETCH_ID,
-                    hash,
-                    key: Some(key.to_owned()),
-                    ctx,
-                    cache: self.clone(),
-                    inflights: inflights.clone(),
-                    waiter,
-                }),
+                } => {
+                    let fetch = RawFetch {
+                        state: RawFetchState::Init {
+                            optional_fetch_builder,
+                            required_fetch_builder,
+                        },
+                        id,
+                        hash,
+                        key: Some(key.to_owned()),
+                        ctx,
+                        cache: self.clone(),
+                        inflights: inflights.clone(),
+                        close,
+                    };
+                    runtime.spawn(fetch);
+                    RawGetOrFetch::Miss(RawWait { waiter })
+                }
+                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
             })
         };
 
@@ -1024,31 +1025,23 @@ where
                 .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
         };
 
-        match &res {
-            RawGetOrFetch::Hit(..) => tracing::trace!(hash, "fetch => Hit"),
-            RawGetOrFetch::Miss(fetch) if matches!(fetch.state, RawFetchState::Init { .. }) => {
-                tracing::trace!(hash, "fetch => Miss (Lead)")
-            }
-            RawGetOrFetch::Miss(..) => tracing::trace!(hash, "fetch => Miss (Wait)"),
-        }
-
         res
     }
 }
 
 #[must_use]
 #[pin_project(project = RawGetOrFetchProj)]
-pub enum RawGetOrFetch<E, S, I, C>
+pub enum RawGetOrFetch<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     Hit(Option<RawCacheEntry<E, S, I>>),
-    Miss(#[pin] RawFetch<E, S, I, C>),
+    Miss(#[pin] RawWait<E, S, I>),
 }
 
-impl<E, S, I, C> Debug for RawGetOrFetch<E, S, I, C>
+impl<E, S, I> Debug for RawGetOrFetch<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -1062,12 +1055,11 @@ where
     }
 }
 
-impl<E, S, I, C> Future for RawGetOrFetch<E, S, I, C>
+impl<E, S, I> Future for RawGetOrFetch<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    C: Any + Send + 'static,
 {
     type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
 
@@ -1083,27 +1075,25 @@ where
     }
 }
 
-impl<E, S, I, C> RawGetOrFetch<E, S, I, C>
+impl<E, S, I> RawGetOrFetch<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    pub fn is_leader(&self) -> bool {
-        match self {
-            RawGetOrFetch::Hit(_) => true,
-            RawGetOrFetch::Miss(fetch) => fetch.id != PHONY_FETCH_ID,
-        }
+    pub fn need_await(&self) -> bool {
+        matches!(self, Self::Miss(_))
     }
 
-    pub fn is_follower(&self) -> bool {
-        !self.is_leader()
-    }
-
-    pub fn state(&self) -> FetchState {
+    #[expect(clippy::allow_attributes)]
+    #[allow(clippy::result_large_err)]
+    pub fn try_unwrap(self) -> std::result::Result<Option<RawCacheEntry<E, S, I>>, Self> {
         match self {
-            RawGetOrFetch::Hit(_) => FetchState::Hit,
-            RawGetOrFetch::Miss(fetch) => FetchState::from(&fetch.state),
+            Self::Hit(opt) => {
+                assert!(opt.is_some(), "entry is already taken");
+                Ok(opt)
+            }
+            Self::Miss(_) => Err(self),
         }
     }
 }
@@ -1120,9 +1110,7 @@ where
 {
     Noop,
     SetStateAndContinue(RawFetchState<E, S, I, C>),
-    #[expect(unused)]
-    Pending,
-    Ready(FetchResult<Option<RawCacheEntry<E, S, I>>>),
+    Ready,
 }
 
 macro_rules! handle_try {
@@ -1137,44 +1125,12 @@ macro_rules! handle_try {
                 $state = state;
                 continue;
             },
-            Try::Pending => return Poll::Pending,
-            Try::Ready(res) => return Poll::Ready(res),
+            Try::Ready => {
+                $state = RawFetchState::Ready;
+                return Poll::Ready(())
+            },
         }
     };
-}
-
-/// The state of a fetch operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FetchState {
-    /// Memory cache hit.
-    Hit,
-    /// Preparing to init fetch for leader.
-    Init,
-    /// Fetching data (optional).
-    FetchOptional,
-    /// Fetching data (required).
-    FetchRequired,
-    /// Preparing to notify waiters.
-    Notify,
-    /// Waiting for the waiter to be notified.
-    Wait,
-}
-
-impl<E, S, I, C> From<&RawFetchState<E, S, I, C>> for FetchState
-where
-    E: Eviction,
-    S: HashBuilder,
-    I: Indexer<Eviction = E>,
-{
-    fn from(state: &RawFetchState<E, S, I, C>) -> Self {
-        match state {
-            RawFetchState::Init { .. } => FetchState::Init,
-            RawFetchState::FetchOptional { .. } => FetchState::FetchOptional,
-            RawFetchState::FetchRequired { .. } => FetchState::FetchRequired,
-            RawFetchState::Notify { .. } => FetchState::Notify,
-            RawFetchState::Wait => FetchState::Wait,
-        }
-    }
 }
 
 #[expect(clippy::type_complexity)]
@@ -1199,7 +1155,7 @@ where
         res: Option<FetchResult<Option<RawCacheEntry<E, S, I>>>>,
         notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     },
-    Wait,
+    Ready,
 }
 
 impl<E, S, I, C> Debug for RawFetchState<E, S, I, C>
@@ -1214,8 +1170,48 @@ where
             Self::FetchOptional { .. } => f.debug_struct("Optional").finish(),
             Self::FetchRequired { .. } => f.debug_struct("Required").finish(),
             Self::Notify { res, .. } => f.debug_struct("Notify").field("res", res).finish(),
-            Self::Wait { .. } => f.debug_struct("Wait").finish(),
+            Self::Ready => f.debug_struct("Ready").finish(),
         }
+    }
+}
+
+#[pin_project]
+pub struct RawWait<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
+}
+
+impl<E, S, I> Debug for RawWait<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawWait").field("waiter", &self.waiter).finish()
+    }
+}
+
+impl<E, S, I> Future for RawWait<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        // TODO(MrCroxx): Switch to `Result::flatten` after MSRV is 1.89+
+        // return waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten());
+        this.waiter.poll_unpin(cx).map(|r| match r {
+            Ok(r) => r,
+            Err(e) => Err(Box::new(e) as FetchError),
+        })
     }
 }
 
@@ -1233,7 +1229,7 @@ where
     ctx: C,
     cache: RawCache<E, S, I>,
     inflights: Arc<Mutex<InflightManager<E, S, I>>>,
-    waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
+    close: Arc<AtomicBool>,
 }
 
 impl<E, S, I, C> Debug for RawFetch<E, S, I, C>
@@ -1258,7 +1254,7 @@ where
     I: Indexer<Eviction = E>,
     C: Any + Send + 'static,
 {
-    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+    type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
@@ -1275,7 +1271,9 @@ where
                     optional_fetch,
                     required_fetch_builder,
                 } => {
-                    handle_try! { *this.state, try_poll_waiter(cx, this.waiter) }
+                    if this.close.load(Ordering::Relaxed) {
+                        return Poll::Ready(());
+                    }
                     match optional_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(Some(target))) => {
@@ -1290,7 +1288,9 @@ where
                     }
                 }
                 RawFetchState::FetchRequired { required_fetch } => {
-                    handle_try! { *this.state, try_poll_waiter(cx, this.waiter) }
+                    if this.close.load(Ordering::Relaxed) {
+                        return Poll::Ready(());
+                    }
                     match required_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(target)) => {
@@ -1304,14 +1304,7 @@ where
                 RawFetchState::Notify { res, notifiers } => {
                     handle_try! { *this.state, handle_notify(res.take().unwrap(), notifiers) }
                 }
-                RawFetchState::Wait => {
-                    // TODO(MrCroxx): Switch to `Result::flatten` after MSRV is 1.89+
-                    // return waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten());
-                    return this.waiter.poll_unpin(cx).map(|r| match r {
-                        Ok(r) => r,
-                        Err(e) => Err(Box::new(e) as FetchError),
-                    });
-                }
+                RawFetchState::Ready => return Poll::Ready(()),
             }
         }
     }
@@ -1364,7 +1357,7 @@ where
         // Slow path if the leader has no optional fetch.
         let fetch_or_take = match inflights.lock().fetch_or_take(hash, key, id) {
             Some(fetch_or_take) => fetch_or_take,
-            None => return Try::Ready(res_no_fetch),
+            None => return Try::Ready,
         };
         match fetch_or_take {
             FetchOrTake::Fetch(required_fetch_builder) => {
@@ -1375,17 +1368,6 @@ where
                 res: Some(res_no_fetch),
                 notifiers,
             }),
-        }
-    }
-
-    fn try_poll_waiter(cx: &mut Context<'_>, waiter: &mut Waiter<Option<RawCacheEntry<E, S, I>>>) -> Try<E, S, I, C> {
-        // TODO(MrCroxx): Switch to `Result::flatten` after MSRV is 1.89+
-        match waiter.poll_unpin(cx).map(|r| match r {
-            Ok(r) => r,
-            Err(e) => Err(Box::new(e) as FetchError),
-        }) {
-            Poll::Ready(res) => Try::Ready(res),
-            Poll::Pending => Try::Noop,
         }
     }
 
@@ -1406,7 +1388,7 @@ where
                 cache.insert_piece(piece);
             }
         }
-        Try::SetStateAndContinue(RawFetchState::Wait)
+        Try::Ready
     }
 
     fn handle_error(
@@ -1419,7 +1401,7 @@ where
         let notifiers = match inflights.lock().take(hash, key, Some(id)) {
             Some(notifiers) => notifiers,
             None => {
-                return Try::Ready(Ok(None));
+                return Try::Ready;
             }
         };
         Try::SetStateAndContinue(RawFetchState::Notify {
@@ -1446,14 +1428,13 @@ where
                 }
             }
         }
-        Try::SetStateAndContinue(RawFetchState::Wait)
+        Try::Ready
     }
 }
 
 /// Error indicating that a fetch operation was cancelled.
 #[derive(Debug)]
 pub struct FetchCancelled;
-const PHONY_FETCH_ID: usize = usize::MAX;
 
 impl Display for FetchCancelled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1473,7 +1454,7 @@ where
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         match this.state {
-            RawFetchState::Notify { .. } | RawFetchState::Wait => return,
+            RawFetchState::Notify { .. } | RawFetchState::Ready => return,
             RawFetchState::Init { .. } | RawFetchState::FetchOptional { .. } | RawFetchState::FetchRequired { .. } => {}
         }
         if let Some(notifiers) = this
@@ -1591,33 +1572,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-    }
-
-    #[test_log::test]
-    fn test_lead_cancel() {
-        let cache = fifo_cache_for_test();
-
-        let pending = |_: &u64| async { std::future::pending::<Result<u64>>().await };
-        let mut leader = cache.get_or_fetch(&42, pending);
-        let mut follower = cache.get_or_fetch(&42, pending);
-        assert!(matches!(leader, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
-        assert!(matches!(follower, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Wait)));
-
-        let waker = futures_util::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-
-        assert!(matches!(leader.poll_unpin(&mut cx), Poll::Pending));
-        assert!(matches!(follower.poll_unpin(&mut cx), Poll::Pending));
-
-        drop(leader);
-        assert!(
-            matches!(follower.poll_unpin(&mut cx), Poll::Ready(Err(e)) if e.to_string() == FetchCancelled.to_string())
-        );
-
-        let leader2 = cache.get_or_fetch(&42, pending);
-        assert!(matches!(leader2, RawGetOrFetch::Miss(ref fetch) if matches!(fetch.state, RawFetchState::Init { .. })));
-
-        drop(follower);
     }
 
     #[test_log::test]

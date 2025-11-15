@@ -79,7 +79,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    #[cfg(feature = "test_utils")]
+    #[cfg(any(test, feature = "test_utils"))]
     load_throttle_switch: LoadThrottleSwitch,
 }
 
@@ -365,6 +365,9 @@ where
 
     compression: Compression,
     recover_mode: RecoverMode,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    load_throttle_switch: LoadThrottleSwitch,
 }
 
 impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
@@ -409,6 +412,8 @@ where
 
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_throttle_switch: LoadThrottleSwitch::default(),
         }
     }
 
@@ -447,6 +452,13 @@ where
     /// Configure the dedicated runtime for the disk cache store.
     pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
         self.runtime_config = runtime_options;
+        self
+    }
+
+    /// Set the load throttle switch for the disk cache store.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_load_throttle_switch(mut self, switch: LoadThrottleSwitch) -> Self {
+        self.load_throttle_switch = switch;
         self
     }
 
@@ -534,6 +546,8 @@ where
 
         let keeper = Keeper::new(memory.shards());
         let hasher = memory.hash_builder().clone();
+        #[cfg(any(test, feature = "test_utils"))]
+        let load_throttle_switch = self.load_throttle_switch;
         let inner = StoreInner {
             hasher,
             keeper,
@@ -541,8 +555,8 @@ where
             compression,
             runtime,
             metrics,
-            #[cfg(feature = "test_utils")]
-            load_throttle_switch: LoadThrottleSwitch::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_throttle_switch,
         };
         let inner = Arc::new(inner);
         let store = Store { inner };
