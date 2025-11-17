@@ -29,7 +29,6 @@ use foyer_common::{
     properties::{Age, Properties},
 };
 use foyer_memory::{Cache, Piece};
-use tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -39,7 +38,7 @@ use crate::{
         noop::{NoopEngine, NoopEngineBuilder},
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
-    error::{Error, Result},
+    error::Result,
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device},
         engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
@@ -323,23 +322,6 @@ pub struct TokioRuntimeOptions {
     pub max_blocking_threads: usize,
 }
 
-/// Options for the dedicated runtime.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum RuntimeOptions {
-    /// Disable dedicated runtime. The runtime which foyer is built on will be used.
-    Disabled,
-    /// Use unified dedicated runtime for both reads and writes.
-    Unified(TokioRuntimeOptions),
-    /// Use separated dedicated runtime for reads or writes.
-    Separated {
-        /// Dedicated runtime for reads.
-        read_runtime_options: TokioRuntimeOptions,
-        /// Dedicated runtime for both foreground and background writes
-        write_runtime_options: TokioRuntimeOptions,
-    },
-}
-
 /// The builder of the disk cache.
 pub struct StoreBuilder<K, V, S, P>
 where
@@ -350,12 +332,11 @@ where
 {
     name: Cow<'static, str>,
     memory: Cache<K, V, S, P>,
+    executor: ExecutorEnum,
     metrics: Arc<Metrics>,
 
     io_engine: Option<Arc<dyn IoEngine>>,
     engine_builder: Option<Box<dyn EngineConfig<K, V, P>>>,
-
-    runtime_config: RuntimeOptions,
 
     compression: Compression,
     recover_mode: RecoverMode,
@@ -375,10 +356,10 @@ where
         f.debug_struct("StoreBuilder")
             .field("name", &self.name)
             .field("memory", &self.memory)
+            .field("executor", &self.executor)
             .field("metrics", &self.metrics)
             .field("io_engine", &self.io_engine)
             .field("engine_builder", &self.engine_builder)
-            .field("runtime_config", &self.runtime_config)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
             .finish()
@@ -393,16 +374,20 @@ where
     P: Properties,
 {
     /// Setup disk cache store for the given in-memory cache.
-    pub fn new(name: impl Into<Cow<'static, str>>, memory: Cache<K, V, S, P>, metrics: Arc<Metrics>) -> Self {
+    pub fn new(
+        name: impl Into<Cow<'static, str>>,
+        memory: Cache<K, V, S, P>,
+        executor: ExecutorEnum,
+        metrics: Arc<Metrics>,
+    ) -> Self {
         Self {
             name: name.into(),
             memory,
+            executor,
             metrics,
 
             io_engine: None,
             engine_builder: None,
-
-            runtime_config: RuntimeOptions::Disabled,
 
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
@@ -443,12 +428,6 @@ where
         self
     }
 
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
-        self.runtime_config = runtime_options;
-        self
-    }
-
     /// Set the load throttle switch for the disk cache store.
     #[cfg(any(test, feature = "test_utils"))]
     pub fn with_load_throttle_switch(mut self, switch: LoadThrottleSwitch) -> Self {
@@ -465,49 +444,9 @@ where
     pub async fn build(self) -> Result<Store<K, V, S, P>> {
         let memory = self.memory.clone();
         let metrics = self.metrics.clone();
+        let executor = self.executor;
 
         let compression = self.compression;
-
-        let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
-            #[cfg(madsim)]
-            let _ = config;
-            #[cfg(not(madsim))]
-            if config.worker_threads != 0 {
-                builder.worker_threads(config.worker_threads);
-            }
-            #[cfg(not(madsim))]
-            if config.max_blocking_threads != 0 {
-                builder.max_blocking_threads(config.max_blocking_threads);
-            }
-            builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
-            let runtime = TokioBackgroundShutdownRuntime::from(runtime);
-            Ok::<_, Error>(Arc::new(runtime))
-        };
-
-        let user_runtime_handle = Handle::current();
-        let (read_runtime, write_runtime) = match self.runtime_config {
-            RuntimeOptions::Disabled => {
-                tracing::info!(
-                    "[store]: Dedicated runtime is disabled. This may lead to spikes in latency under high load. Hint: Consider configuring a dedicated runtime."
-                );
-                (None, None)
-            }
-            RuntimeOptions::Unified(runtime_config) => {
-                let runtime = build_runtime(&runtime_config, "unified")?;
-                (Some(runtime.clone()), Some(runtime.clone()))
-            }
-            RuntimeOptions::Separated {
-                read_runtime_options: read_runtime_config,
-                write_runtime_options: write_runtime_config,
-            } => {
-                let read_runtime = build_runtime(&read_runtime_config, "read")?;
-                let write_runtime = build_runtime(&write_runtime_config, "write")?;
-                (Some(read_runtime), Some(write_runtime))
-            }
-        };
-        let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
         let io_engine = match self.io_engine {
             Some(ie) => ie,
@@ -532,8 +471,8 @@ where
         let engine = engine_builder
             .build(EngineBuildContext {
                 io_engine,
+                executor: executor.clone(),
                 metrics: metrics.clone(),
-                runtime: runtime.clone(),
                 recover_mode: self.recover_mode,
             })
             .await?;
@@ -547,7 +486,7 @@ where
             keeper,
             engine,
             compression,
-            executor: runtime,
+            executor,
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
             load_throttle_switch,
@@ -561,7 +500,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use foyer_common::hasher::ModHasher;
+    use foyer_common::{executor::tokio::TokioHandleExecutor, hasher::ModHasher};
     use foyer_memory::CacheBuilder;
 
     use super::*;
@@ -576,7 +515,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
-        let _ = StoreBuilder::new("test", memory, metrics)
+        let executor = TokioHandleExecutor::current().into();
+        let _ = StoreBuilder::new("test", memory, executor, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
                 BlockEngineBuilder::new(
@@ -600,13 +540,14 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u128, String, ModHasher> =
             CacheBuilder::new(10).with_hash_builder(ModHasher::default()).build();
+        let executor = TokioHandleExecutor::current().into();
 
         let e1 = memory.insert(1, "foo".to_string());
         let e2 = memory.insert(1 + 1 + u64::MAX as u128, "bar".to_string());
 
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
-        let store = StoreBuilder::new("test", memory, metrics)
+        let store = StoreBuilder::new("test", memory, executor, metrics)
             .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
             .with_engine_config(
                 BlockEngineBuilder::new(

@@ -27,6 +27,7 @@ use std::{
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    executor::{Executor, ExecutorEnum},
     metrics::Metrics,
     properties::Properties,
 };
@@ -55,7 +56,6 @@ use crate::{
         PAGE,
     },
     keeper::PieceRef,
-    runtime::Runtime,
     Compression,
 };
 
@@ -176,7 +176,7 @@ where
         block_manager: BlockManager,
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
-        runtime: &Runtime,
+        executor: &ExecutorEnum,
         #[cfg(any(test, feature = "test_utils"))] flush_switch: Switch,
     ) -> Result<()> {
         let id = self.id;
@@ -213,7 +213,7 @@ where
             indexer,
             tombstone_log,
             compression,
-            runtime: runtime.clone(),
+            executor: executor.clone(),
             metrics: metrics.clone(),
             io_tasks: VecDeque::with_capacity(1),
             current_block_handle,
@@ -222,7 +222,7 @@ where
             flush_switch,
         };
 
-        runtime.write().spawn(async move {
+        executor.spawn(async move {
             if let Err(e) = runner.run().await {
                 tracing::error!(id, "[flusher]: flusher exit with error: {e}");
             }
@@ -312,7 +312,7 @@ where
 
     compression: Compression,
 
-    runtime: Runtime,
+    executor: ExecutorEnum,
 
     metrics: Arc<Metrics>,
 
@@ -611,8 +611,7 @@ where
 
         let f: BoxFuture<'_, Result<(Vec<GetCleanBlockHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
-            .runtime
-            .write()
+            .executor
             .spawn(f)
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {

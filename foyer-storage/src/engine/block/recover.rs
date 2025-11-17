@@ -19,7 +19,10 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::metrics::Metrics;
+use foyer_common::{
+    executor::{Executor, ExecutorEnum},
+    metrics::Metrics,
+};
 use futures_util::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
@@ -36,7 +39,6 @@ use crate::{
         RecoverMode,
     },
     error::{Error, Result},
-    runtime::Runtime,
 };
 
 #[derive(Debug)]
@@ -53,7 +55,7 @@ impl RecoverRunner {
         indexer: &Indexer,
         block_manager: &BlockManager,
         tombstones: &[Tombstone],
-        runtime: Runtime,
+        executor: ExecutorEnum,
         metrics: Arc<Metrics>,
     ) -> Result<()> {
         let now = Instant::now();
@@ -62,9 +64,7 @@ impl RecoverRunner {
         let mode = recover_mode;
         let total = stream::iter(blocks.into_iter().map(|id| {
             let block = block_manager.block(id).clone();
-            runtime
-                .user()
-                .spawn(async move { BlockRecoverRunner::run(mode, block, blob_index_size).await })
+            executor.spawn(async move { BlockRecoverRunner::run(mode, block, blob_index_size).await })
         }))
         .buffered(recover_concurrency)
         .try_collect::<Vec<_>>()

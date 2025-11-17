@@ -22,7 +22,10 @@ use std::{
     },
 };
 
-use foyer_common::metrics::Metrics;
+use foyer_common::{
+    executor::{Executor, ExecutorEnum},
+    metrics::Metrics,
+};
 use futures_core::future::BoxFuture;
 use futures_util::{
     future::{ready, Shared},
@@ -43,7 +46,7 @@ use crate::{
         device::Partition,
         engine::IoEngine,
     },
-    Device, IoError, Runtime,
+    Device, IoError,
 };
 
 pub type BlockId = u32;
@@ -159,7 +162,7 @@ struct Inner {
     reclaim_concurrency: usize,
     clean_block_threshold: usize,
     metrics: Arc<Metrics>,
-    runtime: Runtime,
+    executor: ExecutorEnum,
 }
 
 #[derive(Debug, Clone)]
@@ -178,7 +181,7 @@ impl BlockManager {
         reclaim_concurrency: usize,
         clean_block_threshold: usize,
         metrics: Arc<Metrics>,
-        runtime: Runtime,
+        executor: ExecutorEnum,
     ) -> Result<Self> {
         let mut blocks = vec![];
 
@@ -223,7 +226,7 @@ impl BlockManager {
             reclaim_concurrency,
             clean_block_threshold,
             metrics,
-            runtime,
+            executor,
         };
         let inner = Arc::new(inner);
         let this = Self { inner };
@@ -381,7 +384,7 @@ impl BlockManager {
                     block,
                 };
                 let future = self.inner.reclaimer.reclaim(block);
-                self.inner.runtime.write().spawn(future);
+                self.inner.executor.spawn(future);
             }
         }
     }

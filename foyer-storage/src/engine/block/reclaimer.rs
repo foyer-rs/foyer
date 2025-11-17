@@ -17,6 +17,7 @@ use std::{fmt::Debug, sync::Arc};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    executor::{Executor, ExecutorEnum},
     properties::Properties,
 };
 use futures_core::future::BoxFuture;
@@ -36,7 +37,6 @@ use crate::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
     },
-    runtime::Runtime,
     Statistics, StorageFilter,
 };
 
@@ -55,7 +55,7 @@ where
     reinsertion_filter: Arc<StorageFilter>,
     blob_index_size: usize,
     statistics: Arc<Statistics>,
-    runtime: Runtime,
+    executor: ExecutorEnum,
 }
 
 impl<K, V, P> Debug for Reclaimer<K, V, P>
@@ -81,7 +81,7 @@ where
         reinsertion_filter: Arc<StorageFilter>,
         blob_index_size: usize,
         statistics: Arc<Statistics>,
-        runtime: Runtime,
+        executor: ExecutorEnum,
     ) -> Self {
         Self {
             indexer,
@@ -89,7 +89,7 @@ where
             reinsertion_filter,
             blob_index_size,
             statistics,
-            runtime,
+            executor,
         }
     }
 }
@@ -105,7 +105,7 @@ where
         let statistics = self.statistics.clone();
         let blob_index_size = self.blob_index_size;
         let flushers = self.flushers.clone();
-        let runtime = self.runtime.clone();
+        let runtime = self.executor.clone();
         let indexer = self.indexer.clone();
         async move {
             let id = block.id();
@@ -166,7 +166,7 @@ where
             let unpicked_count = unpicked.len();
 
             let waits = flushers.iter().map(|flusher| flusher.wait()).collect_vec();
-            runtime.write().spawn(async move {
+            runtime.spawn(async move {
                 join_all(waits).await;
             });
             indexer.remove_batch(unpicked);

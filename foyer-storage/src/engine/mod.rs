@@ -16,13 +16,14 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
+    executor::ExecutorEnum,
     metrics::Metrics,
     properties::{Age, Properties},
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device};
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,10 +123,10 @@ pub enum RecoverMode {
 pub struct EngineBuildContext {
     /// IO engine for the disk cache engine.
     pub io_engine: Arc<dyn IoEngine>,
+    /// The executor for the disk cache engine.
+    pub executor: ExecutorEnum,
     /// Shared metrics for all components.
     pub metrics: Arc<Metrics>,
-    /// The runtime for the disk cache engine.
-    pub runtime: Runtime,
     /// The recover mode of the disk cache engine.
     pub recover_mode: RecoverMode,
 }

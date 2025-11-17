@@ -28,6 +28,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    executor::{Executor, ExecutorEnum},
     metrics::Metrics,
     properties::{Age, Properties},
 };
@@ -61,7 +62,6 @@ use crate::{
     filter::conditions::IoThrottle,
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
-    runtime::Runtime,
     serde::EntryDeserializer,
     Device, Load, RejectAll, StorageFilter, StorageFilterResult,
 };
@@ -325,7 +325,7 @@ where
         EngineBuildContext {
             io_engine,
             metrics,
-            runtime,
+            executor: runtime,
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
@@ -437,7 +437,7 @@ where
             submit_queue_size,
             submit_queue_size_threshold: self.submit_queue_size_threshold,
             sequence,
-            runtime,
+            executor: runtime,
             active: AtomicBool::new(true),
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
@@ -515,7 +515,7 @@ where
 
     sequence: AtomicSequence,
 
-    runtime: Runtime,
+    executor: ExecutorEnum,
 
     active: AtomicBool,
 
@@ -739,7 +739,7 @@ where
             });
 
         let this = self.clone();
-        self.inner.runtime.write().spawn(async move {
+        self.inner.executor.spawn(async move {
             this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
                 tombstone: Tombstone { hash, sequence },
                 stats,
@@ -927,7 +927,7 @@ mod tests {
             .build(EngineBuildContext {
                 io_engine,
                 metrics,
-                runtime,
+                executor: runtime,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -969,7 +969,7 @@ mod tests {
             .build(EngineBuildContext {
                 io_engine,
                 metrics,
-                runtime,
+                executor: runtime,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -1397,7 +1397,7 @@ mod tests {
             .build(EngineBuildContext {
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),
-                runtime,
+                executor,
                 recover_mode: RecoverMode::None,
             })
             .await
