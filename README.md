@@ -33,7 +33,7 @@ foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cac
 
 However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
-For more details, please visit foyer's website: https://foyer-rs.github.io/foyer 🥰
+For more details, please visit foyer's website: <https://foyer-rs.github.io/foyer> 🥰
 
 [Website](https://foyer-rs.github.io/foyer) |
 [Tutorial](https://foyer-rs.github.io/foyer/docs/overview) |
@@ -49,6 +49,8 @@ For more details, please visit foyer's website: https://foyer-rs.github.io/foyer
 - **User-Friendly Interface**: Offers a simple and intuitive API, making cache integration effortless and accessible for developers of all levels.
 - **Out-of-the-Box Observability**: Integrate popular observation systems such as Prometheus, Grafana, Opentelemetry, and Jaeger in just *ONE* line.
 
+<!-- rustdoc-ignore-start -->
+
 ## Projects Using *foyer*
 
 Feel free to open a PR and add your projects here:
@@ -63,20 +65,22 @@ Feel free to open a PR and add your projects here:
 - [AntTP](https://github.com/traktion/AntTP): Serves Autonomi Network data over HTTP protocol.
 - [Cachey](https://github.com/s2-streamstore/cachey): Read-through cache for object storage.
 
+<!-- rustdoc-ignore-end -->
+
 ## Quick Start
 
-**This section only shows briefs. Please visit https://foyer-rs.github.io/foyer for more details.**
+**This section only shows briefs. Please visit <https://foyer-rs.github.io/foyer> for more details.**
 
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.20"
+foyer = "0.21-dev"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.20", features = ["nightly"] }
+foyer = { version = "0.21-dev", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -86,14 +90,12 @@ The in-memory cache setup is extremely easy and can be setup in at least 1 line.
 ```rust
 use foyer::{Cache, CacheBuilder};
 
-fn main() {
-    let cache: Cache<String, String> = CacheBuilder::new(16).build();
+let cache: Cache<String, String> = CacheBuilder::new(16).build();
 
-    let entry = cache.insert("hello".to_string(), "world".to_string());
-    let e = cache.get("hello").unwrap();
+let entry = cache.insert("hello".to_string(), "world".to_string());
+let e = cache.get("hello").unwrap();
 
-    assert_eq!(entry.value(), e.value());
-}
+assert_eq!(entry.value(), e.value());
 ```
 
 ### Easy-to-use Hybrid Cache
@@ -211,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let e = hybrid
-        .fetch(20230512, || async {
+        .get_or_fetch(&20230512, |_key| async {
             let value = mock().await?;
             Ok(value)
         })
@@ -298,6 +300,10 @@ If you want to run a broader range of checks locally, run `cargo x`. 🙌
 
 Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
 
+<!-- rustdoc-ignore-start -->
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=foyer-rs/foyer&type=Date)](https://www.star-history.com/#foyer-rs/foyer&Date)
+
+<!-- rustdoc-ignore-end -->

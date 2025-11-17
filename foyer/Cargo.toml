@@ -71,6 +71,8 @@ tokio = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+anyhow = "1.0"
+chrono = "0.4"
 foyer = { path = ".", features = ["test_utils"] }
 foyer-storage = { workspace = true, features = ["test_utils"] }
 rand = "0.9"
