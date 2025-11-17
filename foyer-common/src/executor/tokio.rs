@@ -17,8 +17,10 @@ use std::{
     future::Future,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
+use futures_util::FutureExt;
 use tokio::{
     runtime::{Handle, Runtime},
     task::JoinHandle,
@@ -27,6 +29,8 @@ use tokio::{
 /// A wrapper around [`Runtime`] that shuts down the runtime in the background when dropped.
 ///
 /// This is necessary because directly dropping a nested runtime is not allowed in a parent runtime.
+///
+/// FYI: https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.shutdown_background
 pub struct BackgroundShutdownRuntime(ManuallyDrop<Runtime>);
 
 impl Debug for BackgroundShutdownRuntime {
@@ -95,7 +99,7 @@ impl SingletonHandle {
     /// # Examples
     ///
     /// ```
-    /// use tokio::runtime::Runtime;
+    /// use Runtime;
     ///
     /// # fn dox() {
     /// // Create the runtime
@@ -123,7 +127,7 @@ impl SingletonHandle {
     /// # Examples
     ///
     /// ```
-    /// use tokio::runtime::Runtime;
+    /// use Runtime;
     ///
     /// # fn dox() {
     /// // Create the runtime
@@ -143,85 +147,130 @@ impl SingletonHandle {
     {
         self.0.spawn_blocking(func)
     }
+}
 
-    /// Runs a future to completion on this `Handle`'s associated `Runtime`.
-    ///
-    /// This runs the given future on the current thread, blocking until it is
-    /// complete, and yielding its resolved result. Any tasks or timers which
-    /// the future spawns internally will be executed on the runtime.
-    ///
-    /// When this is used on a `current_thread` runtime, only the
-    /// [`Runtime::block_on`] method can drive the IO and timer drivers, but the
-    /// `Handle::block_on` method cannot drive them. This means that, when using
-    /// this method on a `current_thread` runtime, anything that relies on IO or
-    /// timers will not work unless there is another thread currently calling
-    /// [`Runtime::block_on`] on the same runtime.
-    ///
-    /// # If the runtime has been shut down
-    ///
-    /// If the `Handle`'s associated `Runtime` has been shut down (through
-    /// [`Runtime::shutdown_background`], [`Runtime::shutdown_timeout`], or by
-    /// dropping it) and `Handle::block_on` is used it might return an error or
-    /// panic. Specifically IO resources will return an error and timers will
-    /// panic. Runtime independent futures will run as normal.
-    ///
-    /// # Panics
-    ///
-    /// This function panics if the provided future panics, if called within an
-    /// asynchronous execution context, or if a timer future is executed on a
-    /// runtime that has been shut down.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tokio::runtime::Runtime;
-    ///
-    /// // Create the runtime
-    /// let rt  = Runtime::new().unwrap();
-    ///
-    /// // Get a handle from this runtime
-    /// let handle = rt.handle();
-    ///
-    /// // Execute the future, blocking the current thread until completion
-    /// handle.block_on(async {
-    ///     println!("hello");
-    /// });
-    /// ```
-    ///
-    /// Or using `Handle::current`:
-    ///
-    /// ```
-    /// use tokio::runtime::Handle;
-    ///
-    /// #[tokio::main]
-    /// async fn main () {
-    ///     let handle = Handle::current();
-    ///     std::thread::spawn(move || {
-    ///         // Using Handle::block_on to run async code in the new thread.
-    ///         handle.block_on(async {
-    ///             println!("hello");
-    ///         });
-    ///     });
-    /// }
-    /// ```
-    ///
-    /// [`JoinError`]: struct@tokio::task::JoinError
-    /// [`JoinHandle`]: struct@tokio::task::JoinHandle
-    /// [`Runtime::block_on`]: fn@crate::runtime::Runtime::block_on
-    /// [`Runtime::shutdown_background`]: fn@tokio::runtime::Runtime::shutdown_background
-    /// [`Runtime::shutdown_timeout`]: fn@tokio::runtime::Runtime::shutdown_timeout
-    /// [`spawn_blocking`]: tokio::task::spawn_blocking
-    /// [`tokio::fs`]: tokio::fs
-    /// [`tokio::net`]: tokio::net
-    /// [`tokio::time`]: tokio::time
-    #[cfg(not(madsim))]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.0.block_on(future)
+/// A join handle for Tokio executor.
+pub struct TokioJoinHandle<T> {
+    inner: JoinHandle<T>,
+}
+
+impl<T> Debug for TokioJoinHandle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokioJoinHandle").finish()
+    }
+}
+
+impl<T> From<JoinHandle<T>> for TokioJoinHandle<T> {
+    fn from(inner: JoinHandle<T>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T> Future for TokioJoinHandle<T>
+where
+    T: Send + 'static,
+{
+    type Output = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        this.inner.poll_unpin(cx).map_err(|e| e.into())
+    }
+}
+
+impl<T> super::JoinHandle<T> for TokioJoinHandle<T> where T: Send + 'static {}
+
+/// An executor implementation for Tokio runtime.
+///
+/// This executor owns a `Runtime` and spawns tasks onto it.
+#[derive(Debug, Clone)]
+pub struct TokioRuntimeExecutor {
+    inner: Arc<BackgroundShutdownRuntime>,
+}
+
+impl TokioRuntimeExecutor {
+    /// Creates a new `TokioRuntimeExecutor` from a `Runtime`.
+    pub fn new(inner: Runtime) -> Self {
+        Self {
+            inner: Arc::new(inner.into()),
+        }
+    }
+}
+
+impl From<Runtime> for TokioRuntimeExecutor {
+    fn from(inner: Runtime) -> Self {
+        Self::new(inner)
+    }
+}
+
+impl super::Executor for TokioRuntimeExecutor {
+    type JoinHandle<T>
+        = TokioJoinHandle<T>
+    where
+        T: Send + 'static;
+
+    fn spawn<F>(&self, future: F) -> Self::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.inner.spawn(future).into()
     }
 
-    #[cfg(madsim)]
-    /// Dummy implementation for madsim.
-    pub fn block_on<F: Future>(&self, _: F) -> F::Output {
-        unimplemented!("`block_on()` is not supported with madsim")
+    fn spawn_blocking<F, R>(&self, func: F) -> Self::JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.inner.spawn_blocking(func).into()
+    }
+}
+
+/// An executor implementation for Tokio runtime.
+///
+/// This executor uses a `Handle` to spawn tasks onto an existing runtime.
+#[derive(Debug, Clone)]
+pub struct TokioHandleExecutor {
+    inner: Handle,
+}
+
+impl TokioHandleExecutor {
+    /// Creates a new `TokioHandleExecutor` from a `Handle`.
+    pub fn new(inner: Handle) -> Self {
+        Self { inner }
+    }
+
+    /// Creates a new `TokioHandleExecutor` from the current runtime handle.
+    pub fn current() -> Self {
+        Self::new(Handle::current())
+    }
+}
+
+impl From<Handle> for TokioHandleExecutor {
+    fn from(inner: Handle) -> Self {
+        Self::new(inner)
+    }
+}
+
+impl super::Executor for TokioHandleExecutor {
+    type JoinHandle<T>
+        = TokioJoinHandle<T>
+    where
+        T: Send + 'static;
+
+    fn spawn<F>(&self, future: F) -> Self::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.inner.spawn(future).into()
+    }
+
+    fn spawn_blocking<F, R>(&self, func: F) -> Self::JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.inner.spawn_blocking(func).into()
     }
 }

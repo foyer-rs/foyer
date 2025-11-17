@@ -31,9 +31,9 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::HashBuilder,
     event::{Event, EventListener},
+    executor::{tokio::TokioHandleExecutor, Executor, ExecutorEnum},
     metrics::Metrics,
     properties::{Location, Properties, Source},
-    runtime::SingletonHandle,
     strict_assert,
     utils::scope::Scope,
 };
@@ -950,7 +950,7 @@ where
                 .boxed()
             })),
             (),
-            &tokio::runtime::Handle::current().into(),
+            &ExecutorEnum::from(TokioHandleExecutor::current()),
         )
     }
 
@@ -969,7 +969,7 @@ where
         optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         ctx: C,
-        runtime: &SingletonHandle,
+        executor: &ExecutorEnum,
     ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
@@ -1006,7 +1006,7 @@ where
                         inflights: inflights.clone(),
                         close,
                     };
-                    runtime.spawn(fetch);
+                    executor.spawn(fetch);
                     RawGetOrFetch::Miss(RawWait { waiter })
                 }
                 Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),

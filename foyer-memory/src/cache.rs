@@ -18,9 +18,9 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, Key, Value},
     event::EventListener,
+    executor::ExecutorEnum,
     metrics::Metrics,
     properties::{Age, Hint, Location, Properties, Source},
-    runtime::SingletonHandle,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -1114,7 +1114,7 @@ where
         optional_fetch_builder: Option<OptionalFetchBuilder<K, V, P, C>>,
         required_fetch_builder: Option<RequiredFetchBuilder<K, V, P, C>>,
         ctx: C,
-        runtime: &SingletonHandle,
+        runtime: &ExecutorEnum,
     ) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,

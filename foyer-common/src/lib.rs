@@ -16,8 +16,6 @@
 
 /// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
-/// The util that convert the blocking call to async call.
-pub mod asyncify;
 /// The bitwise utils.
 pub mod bits;
 /// The [`bytes::Buf`] and [`bytes::BufMut`] extensions.
@@ -37,7 +35,7 @@ pub mod rate;
 ///  A ticket-based rate limiter.
 pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
-pub mod runtime;
+pub mod executor;
 /// Tracing related components.
 #[cfg(feature = "tracing")]
 pub mod tracing;

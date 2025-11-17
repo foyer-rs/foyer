@@ -47,6 +47,5 @@ pub use crate::{
         },
         error::{IoError, IoResult},
     },
-    runtime::Runtime,
     store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
 };

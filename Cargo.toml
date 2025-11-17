@@ -80,6 +80,7 @@ rand_distr = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_json = "1"
+smol = "2"
 tempfile = "3"
 test-log = "0.2"
 thiserror = "2"

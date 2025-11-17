@@ -24,9 +24,9 @@ use std::{
 use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
+    executor::{Executor, ExecutorEnum},
     metrics::Metrics,
     properties::{Age, Properties},
-    runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
 use tokio::runtime::Handle;
@@ -45,7 +45,6 @@ use crate::{
         engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
     },
     keeper::Keeper,
-    runtime::Runtime,
     serde::EntrySerializer,
     StorageFilterResult,
 };
@@ -75,7 +74,7 @@ where
 
     compression: Compression,
 
-    runtime: Runtime,
+    executor: ExecutorEnum,
 
     metrics: Arc<Metrics>,
 
@@ -95,7 +94,7 @@ where
             .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("compression", &self.inner.compression)
-            .field("runtimes", &self.inner.runtime)
+            .field("executor", &self.inner.executor)
             .finish()
     }
 }
@@ -186,7 +185,7 @@ where
         }
 
         let future = self.inner.engine.load(hash);
-        match self.inner.runtime.read().spawn(future).await.unwrap() {
+        match self.inner.executor.spawn(future).await.unwrap() {
             Ok(Load::Entry {
                 key: k,
                 value: v,
@@ -280,11 +279,6 @@ where
     /// Get the io throttle of the disk cache.
     pub fn throttle(&self) -> &Throttle {
         self.inner.engine.device().statistics().throttle()
-    }
-
-    /// Get the runtime.
-    pub fn runtime(&self) -> &Runtime {
-        &self.inner.runtime
     }
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
@@ -488,7 +482,7 @@ where
             }
             builder.thread_name(format!("{}-{}", &self.name, suffix));
             let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
-            let runtime = BackgroundShutdownRuntime::from(runtime);
+            let runtime = TokioBackgroundShutdownRuntime::from(runtime);
             Ok::<_, Error>(Arc::new(runtime))
         };
 
@@ -553,7 +547,7 @@ where
             keeper,
             engine,
             compression,
-            runtime,
+            executor: runtime,
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
             load_throttle_switch,
