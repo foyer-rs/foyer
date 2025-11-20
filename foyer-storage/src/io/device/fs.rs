@@ -81,11 +81,12 @@ impl DeviceBuilder for FsDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - value % align;
 
-        let capacity = self.capacity.unwrap_or({
+        let capacity = self.capacity.map(Ok::<_, IoError>).unwrap_or({
             // Create an empty directory before to get free space.
-            create_dir_all(&self.dir).unwrap();
-            free_space(&self.dir).unwrap() as usize / 10 * 8
-        });
+            create_dir_all(&self.dir)?;
+            Ok(free_space(&self.dir)? as usize / 10 * 8)
+        })?;
+
         let capacity = align_v(capacity, PAGE);
 
         let statistics = Arc::new(Statistics::new(self.throttle));
