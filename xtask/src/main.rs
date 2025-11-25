@@ -145,7 +145,7 @@ fn check(fast: bool) {
     run("cargo sort -w");
     run("taplo fmt");
     run("cargo fmt --all");
-    run("cargo +nightly-2024-08-30 fmt --all -- --config-path rustfmt.nightly.toml");
+    run("cargo +nightly-2025-02-20 fmt --all -- --config-path rustfmt.nightly.toml");
 
     if !fast {
         run("cargo clippy -p foyer");
