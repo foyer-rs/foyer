@@ -14,15 +14,47 @@
 
 #![expect(missing_docs)]
 
-#[cfg(feature = "serde")]
-mod bench;
+use std::time::Instant;
+
+use criterion::Bencher;
+use foyer_common::code::StorageValue;
 
 #[cfg(feature = "serde")]
-criterion::criterion_group!(benches, bench::bench_encode, bench::bench_decode);
+mod serde;
+#[cfg(feature = "serde")]
+criterion::criterion_group!(benches, serde::bench_encode, serde::bench_decode);
 #[cfg(feature = "serde")]
 criterion::criterion_main!(benches);
 
 #[cfg(not(feature = "serde"))]
-fn main() {
-    println!("Please enable the `serde` feature to run the benchmarks.");
+mod no_serde;
+#[cfg(not(feature = "serde"))]
+criterion::criterion_group!(benches, no_serde::bench_encode, no_serde::bench_decode);
+#[cfg(not(feature = "serde"))]
+criterion::criterion_main!(benches);
+
+const K: usize = 1 << 10;
+const M: usize = 1 << 20;
+
+fn encode<V: StorageValue>(b: &mut Bencher, v: V, size: usize) {
+    b.iter_custom(|iters| {
+        let mut buf = vec![0; size * 2];
+        let start = Instant::now();
+        for _ in 0..iters {
+            v.encode(&mut &mut buf[..]).unwrap();
+        }
+        start.elapsed()
+    });
+}
+
+fn decode<V: StorageValue>(b: &mut Bencher, v: V, size: usize) {
+    b.iter_custom(|iters| {
+        let mut buf = vec![0; size * 2];
+        v.encode(&mut &mut buf[..]).unwrap();
+        let start = Instant::now();
+        for _ in 0..iters {
+            V::decode(&mut &buf[..]).unwrap();
+        }
+        start.elapsed()
+    });
 }

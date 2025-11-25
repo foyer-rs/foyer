@@ -224,9 +224,7 @@ impl Code for String {
     {
         let len = usize::decode(reader)?;
         let mut v = Vec::with_capacity(len);
-        unsafe {
-            v.set_len(len);
-        }
+        unsafe { v.set_len(len) };
         reader.read_exact(&mut v).map_err(CodeError::from)?;
         String::from_utf8(v).map_err(|e| CodeError::Unrecognized(e.into_bytes()))
     }
@@ -250,9 +248,7 @@ impl Code for bytes::Bytes {
     {
         let len = usize::decode(reader)?;
         let mut v = Vec::with_capacity(len);
-        unsafe {
-            v.set_len(len);
-        }
+        unsafe { v.set_len(len) };
         reader.read_exact(&mut v).map_err(CodeError::from)?;
         Ok(bytes::Bytes::from(v))
     }
