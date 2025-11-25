@@ -236,6 +236,32 @@ impl Code for String {
     }
 }
 
+#[cfg(not(feature = "serde"))]
+impl Code for bytes::Bytes {
+    fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), CodeError> {
+        self.len().encode(writer)?;
+        writer.write_all(self).map_err(CodeError::from)
+    }
+
+    #[expect(clippy::uninit_vec)]
+    fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, CodeError>
+    where
+        Self: Sized,
+    {
+        let len = usize::decode(reader)?;
+        let mut v = Vec::with_capacity(len);
+        unsafe {
+            v.set_len(len);
+        }
+        reader.read_exact(&mut v).map_err(CodeError::from)?;
+        Ok(bytes::Bytes::from(v))
+    }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<usize>() + self.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +332,17 @@ mod tests {
             let mut buf = vec![0xffu8; a.estimated_size()];
             a.encode(&mut buf.as_mut_slice()).unwrap();
             let b = String::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(a, b);
+        }
+
+        #[test]
+        fn test_bytes_serde() {
+            let mut a = vec![0u8; 42];
+            rand::fill(&mut a[..]);
+            let a = bytes::Bytes::from(a);
+            let mut buf = vec![0xffu8; a.estimated_size()];
+            a.encode(&mut buf.as_mut_slice()).unwrap();
+            let b = Vec::<u8>::decode(&mut buf.as_slice()).unwrap();
             assert_eq!(a, b);
         }
     }
