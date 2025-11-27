@@ -442,6 +442,15 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
+      - name: Run tests with single worker thread and deadlock detection
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable"
+          RUST_LOG: info
+          TOKIO_WORKER_THREADS: 1
+          CI: true
+        run: |-
+          cargo test --all --features deadlock -- --nocapture
       - name: Build foyer-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
