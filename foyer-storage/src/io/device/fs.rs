@@ -22,7 +22,10 @@ use fs4::free_space;
 
 use crate::{
     io::{
-        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
+        device::{
+            statistics::Statistics, throttle::Throttle, BlockCaps, Device, DeviceBuilder, DeviceCaps, Partition,
+            PartitionId,
+        },
         error::IoResult,
         PAGE,
     },
@@ -103,6 +106,7 @@ impl DeviceBuilder for FsDeviceBuilder {
             #[cfg(target_os = "linux")]
             direct: self.direct,
             partitions: RwLock::new(vec![]),
+            caps: DeviceCaps::Block(BlockCaps::default()),
         };
         let device: Arc<dyn Device> = Arc::new(device);
         Ok(device)
@@ -118,6 +122,7 @@ pub struct FsDevice {
     #[cfg(target_os = "linux")]
     direct: bool,
     partitions: RwLock<Vec<Arc<FsPartition>>>,
+    caps: DeviceCaps,
 }
 
 impl FsDevice {
@@ -128,6 +133,10 @@ impl FsDevice {
 }
 
 impl Device for FsDevice {
+    fn caps(&self) -> &DeviceCaps {
+        &self.caps
+    }
+
     fn capacity(&self) -> usize {
         self.capacity
     }
