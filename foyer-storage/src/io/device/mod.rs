@@ -17,7 +17,7 @@ pub mod throttle;
 
 use std::{any::Any, fmt::Debug, sync::Arc};
 
-use crate::io::{device::statistics::Statistics, error::IoResult};
+use crate::io::{device::statistics::Statistics, error::IoResult, PAGE};
 
 pub type PartitionId = u32;
 
@@ -42,6 +42,26 @@ pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     fn build(self) -> IoResult<Arc<dyn Device>>;
 }
 
+/// The capabilities of a device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceCaps {
+    /// A block-addressable device.
+    Block(BlockCaps),
+}
+
+/// Capabilities for block devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockCaps {
+    /// The required alignment for block I/O.
+    pub alignment: usize,
+}
+
+impl Default for BlockCaps {
+    fn default() -> Self {
+        Self { alignment: PAGE }
+    }
+}
+
 /// Partition is a logical segment of a device.
 pub trait Partition: Send + Sync + 'static + Debug + Any {
     /// Get the id of the partition.
@@ -61,6 +81,9 @@ pub trait Partition: Send + Sync + 'static + Debug + Any {
 
 /// Device trait.
 pub trait Device: Send + Sync + 'static + Debug + Any {
+    /// Get the capabilities of the device.
+    fn caps(&self) -> &DeviceCaps;
+
     /// Get the capacity of the device.
     ///
     /// NOTE: `capacity` must be 4K aligned.

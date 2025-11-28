@@ -59,7 +59,7 @@ use crate::{
     },
     error::{Error, Result},
     filter::conditions::IoThrottle,
-    io::{bytes::IoSliceMut, PAGE},
+    io::{bytes::IoSliceMut, device::DeviceCaps, PAGE},
     keeper::PieceRef,
     runtime::Runtime,
     serde::EntryDeserializer,
@@ -331,6 +331,10 @@ where
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
         let device = self.device;
         let block_size = self.block_size;
+
+        match device.caps() {
+            DeviceCaps::Block(_) => {}
+        }
 
         let mut tombstones = vec![];
 

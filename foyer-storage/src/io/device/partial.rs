@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{statistics::Statistics, Device, DeviceBuilder, Partition, PartitionId},
+        device::{statistics::Statistics, Device, DeviceBuilder, DeviceCaps, Partition, PartitionId},
         error::IoResult,
     },
     IoError,
@@ -51,10 +51,14 @@ impl PartialDeviceBuilder {
 
 impl DeviceBuilder for PartialDeviceBuilder {
     fn build(self) -> IoResult<Arc<dyn Device>> {
+        let caps = match self.device.caps() {
+            DeviceCaps::Block(block) => *block,
+        };
         Ok(Arc::new(PartialDevice {
             inner: self.device,
             capacity: self.capacity,
             partitions: RwLock::new(vec![]),
+            caps: DeviceCaps::Block(caps),
         }))
     }
 }
@@ -65,9 +69,14 @@ pub struct PartialDevice {
     inner: Arc<dyn Device>,
     capacity: usize,
     partitions: RwLock<Vec<Arc<PartialPartition>>>,
+    caps: DeviceCaps,
 }
 
 impl Device for PartialDevice {
+    fn caps(&self) -> &DeviceCaps {
+        &self.caps
+    }
+
     fn capacity(&self) -> usize {
         self.capacity
     }

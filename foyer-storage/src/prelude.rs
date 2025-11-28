@@ -38,7 +38,7 @@ pub use crate::{
             partial::PartialDeviceBuilder,
             statistics::Statistics,
             throttle::{IopsCounter, Throttle},
-            Device, DeviceBuilder, RawFile,
+            BlockCaps, Device, DeviceBuilder, DeviceCaps, RawFile,
         },
         engine::{
             noop::{NoopIoEngine, NoopIoEngineBuilder},

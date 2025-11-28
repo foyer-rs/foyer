@@ -16,7 +16,10 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
+        device::{
+            statistics::Statistics, throttle::Throttle, BlockCaps, Device, DeviceBuilder, DeviceCaps, Partition,
+            PartitionId,
+        },
         error::IoResult,
     },
     RawFile,
@@ -48,6 +51,7 @@ impl DeviceBuilder for NoopDeviceBuilder {
             partitions: RwLock::new(vec![]),
             capacity: self.capacity,
             statistics,
+            caps: DeviceCaps::Block(BlockCaps::default()),
         }))
     }
 }
@@ -59,9 +63,14 @@ pub struct NoopDevice {
     capacity: usize,
 
     statistics: Arc<Statistics>,
+    caps: DeviceCaps,
 }
 
 impl Device for NoopDevice {
+    fn caps(&self) -> &DeviceCaps {
+        &self.caps
+    }
+
     fn capacity(&self) -> usize {
         self.capacity
     }

@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
+        device::{BlockCaps, Device, DeviceBuilder, DeviceCaps, Partition, PartitionId},
         error::{IoError, IoResult},
     },
     RawFile, Statistics, Throttle,
@@ -65,6 +65,16 @@ impl CombinedDeviceBuilder {
 
 impl DeviceBuilder for CombinedDeviceBuilder {
     fn build(self) -> IoResult<Arc<dyn Device>> {
+        let mut alignment = 0;
+        for device in &self.devices {
+            match device.caps() {
+                DeviceCaps::Block(block) => alignment = alignment.max(block.alignment),
+            }
+        }
+        if self.devices.is_empty() {
+            return Err(IoError::other("combined device requires at least one inner device"));
+        }
+
         let device = CombinedDevice {
             devices: self.devices,
             statistics: Arc::new(Statistics::new(self.throttle)),
@@ -72,6 +82,7 @@ impl DeviceBuilder for CombinedDeviceBuilder {
                 partitions: vec![],
                 next: 0,
             }),
+            caps: DeviceCaps::Block(BlockCaps { alignment }),
         };
         let device = Arc::new(device);
         Ok(device)
@@ -90,9 +101,14 @@ pub struct CombinedDevice {
     devices: Vec<Arc<dyn Device>>,
     inner: RwLock<Inner>,
     statistics: Arc<Statistics>,
+    caps: DeviceCaps,
 }
 
 impl Device for CombinedDevice {
+    fn caps(&self) -> &DeviceCaps {
+        &self.caps
+    }
+
     fn capacity(&self) -> usize {
         self.devices.iter().map(|d| d.capacity()).sum()
     }
