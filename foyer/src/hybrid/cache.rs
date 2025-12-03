@@ -719,7 +719,7 @@ where
     pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce(&K) -> FU + Send + 'static,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = Result<IT>> + Send + 'static,
         IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
     {
@@ -730,6 +730,7 @@ where
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let runtime = self.inner.storage.runtime().user();
+        let fut = fetch(key);
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
             Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key| {
@@ -760,9 +761,8 @@ where
                 }
                 .boxed()
             })),
-            Some(Box::new(|ctx, k| {
+            Some(Box::new(|ctx, _| {
                 let ctx = ctx.clone();
-                let fut = fetch(k);
                 async move {
                     match fut.await {
                         Ok(it) => {
