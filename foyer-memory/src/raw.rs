@@ -931,16 +931,16 @@ where
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
-        F: FnOnce(&E::Key) -> FU + Send + 'static,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
         ER: std::error::Error + Send + Sync + 'static,
     {
+        let fut = fetch(key);
         self.get_or_fetch_inner(
             key,
             None,
-            Some(Box::new(|_, k| {
-                let fut = fetch(k);
+            Some(Box::new(|_, _| {
                 async {
                     match fut.await {
                         Ok(it) => Ok(it.into()),

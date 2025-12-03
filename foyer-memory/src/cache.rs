@@ -1090,7 +1090,7 @@ where
     pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce(&K) -> FU + Send + 'static,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = Result<IT>> + Send + 'static,
         IT: Into<FetchTarget<K, V, P>>,
     {
