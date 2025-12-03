@@ -47,8 +47,7 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{sentry::Sentry, Indexer},
     inflight::{
-        Enqueue, FetchOrTake, FetchResult, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
-        RequiredFetch, RequiredFetchBuilder, Waiter,
+        Enqueue, FetchOrTake, FetchResult, FetchTarget, InflightManager, Notifier, OptionalFetch, RequiredFetch, Waiter,
     },
     pipe::NoopPipe,
     record::{Data, Record},
@@ -931,15 +930,16 @@ where
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
-        F: FnOnce(&E::Key) -> FU + Send + 'static,
+        F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
         ER: std::error::Error + Send + Sync + 'static,
     {
         self.get_or_fetch_inner(
             key,
-            None,
-            Some(Box::new(|_, k| {
+            (),
+            |_, _| None,
+            |_, k| {
                 let fut = fetch(k);
                 async {
                     match fut.await {
@@ -948,8 +948,8 @@ where
                     }
                 }
                 .boxed()
-            })),
-            (),
+                .into()
+            },
             &tokio::runtime::Handle::current().into(),
         )
     }
@@ -963,19 +963,24 @@ where
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
     #[expect(clippy::type_complexity)]
-    pub fn get_or_fetch_inner<Q, C>(
+    pub fn get_or_fetch_inner<Q, C, OFB, RFB>(
         &self,
         key: &Q,
-        optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         ctx: C,
+        optional_fetch_builder: OFB,
+        required_fetch_builder: RFB,
         runtime: &SingletonHandle,
     ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         C: Any + Send + Sync + 'static,
+        OFB: FnOnce(&C, &Q) -> Option<OptionalFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
+        RFB: FnOnce(&C, &Q) -> Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
     {
         let hash = self.inner.hash_builder.hash_one(key);
+
+        let optional_fetch = optional_fetch_builder(&ctx, key);
+        let required_fetch = required_fetch_builder(&ctx, key);
 
         // Make sure cache query and inflight query are in the same lock critical section.
         let extract = |key: &Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManager<E, S, I>>>| {
@@ -986,17 +991,17 @@ where
                     source: Source::Memory,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
+            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch) {
                 Enqueue::Lead {
                     id,
                     close,
                     waiter,
-                    required_fetch_builder,
+                    required_fetch,
                 } => {
                     let fetch = RawFetch {
                         state: RawFetchState::Init {
-                            optional_fetch_builder,
-                            required_fetch_builder,
+                            optional_fetch,
+                            required_fetch,
                         },
                         id,
                         hash,
@@ -1101,15 +1106,14 @@ where
 type Once<T> = Option<T>;
 
 #[must_use]
-enum Try<E, S, I, C>
+enum Try<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    C: Any + Send + 'static,
 {
     Noop,
-    SetStateAndContinue(RawFetchState<E, S, I, C>),
+    SetStateAndContinue(RawFetchState<E, S, I>),
     Ready,
 }
 
@@ -1134,19 +1138,19 @@ macro_rules! handle_try {
 }
 
 #[expect(clippy::type_complexity)]
-pub enum RawFetchState<E, S, I, C>
+pub enum RawFetchState<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
     Init {
-        optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        optional_fetch: Option<OptionalFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
+        required_fetch: Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
     },
     FetchOptional {
         optional_fetch: OptionalFetch<FetchTarget<E::Key, E::Value, E::Properties>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        required_fetch: Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
     },
     FetchRequired {
         required_fetch: RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>,
@@ -1158,7 +1162,7 @@ where
     Ready,
 }
 
-impl<E, S, I, C> Debug for RawFetchState<E, S, I, C>
+impl<E, S, I> Debug for RawFetchState<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
@@ -1222,7 +1226,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    state: RawFetchState<E, S, I, C>,
+    state: RawFetchState<E, S, I>,
     id: usize,
     hash: u64,
     key: Once<E::Key>,
@@ -1261,15 +1265,15 @@ where
         loop {
             match this.state {
                 RawFetchState::Init {
-                    optional_fetch_builder,
-                    required_fetch_builder,
+                    optional_fetch: optional_fetch_builder,
+                    required_fetch: required_fetch_builder,
                 } => {
                     handle_try! { *this.state, try_set_optional(optional_fetch_builder, required_fetch_builder, this.key.as_ref().unwrap(), this.ctx) }
                     handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), this.inflights, Ok(None)) }
                 }
                 RawFetchState::FetchOptional {
                     optional_fetch,
-                    required_fetch_builder,
+                    required_fetch,
                 } => {
                     if this.close.load(Ordering::Relaxed) {
                         return Poll::Ready(());
@@ -1280,10 +1284,10 @@ where
                             handle_try! {*this.state, handle_target(target, this.key, this.cache, Source::Disk) }
                         }
                         Poll::Ready(Ok(None)) => {
-                            handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Ok(None)) }
+                            handle_try! { *this.state, try_set_required(required_fetch, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Ok(None)) }
                         }
                         Poll::Ready(Err(e)) => {
-                            handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Err(e)) }
+                            handle_try! { *this.state, try_set_required(required_fetch, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Err(e)) }
                         }
                     }
                 }
@@ -1319,20 +1323,17 @@ where
 {
     #[expect(clippy::type_complexity)]
     fn try_set_optional(
-        optional_fetch_builder: &mut Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-        required_fetch_builder: &mut Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        optional_fetch: &mut Option<OptionalFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
+        required_fetch: &mut Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
         key: &E::Key,
         ctx: &mut C,
-    ) -> Try<E, S, I, C> {
-        match optional_fetch_builder.take() {
+    ) -> Try<E, S, I> {
+        match optional_fetch.take() {
             None => Try::Noop,
-            Some(optional_fetch_builder) => {
-                let optional_fetch = optional_fetch_builder(ctx, key);
-                Try::SetStateAndContinue(RawFetchState::FetchOptional {
-                    optional_fetch,
-                    required_fetch_builder: required_fetch_builder.take(),
-                })
-            }
+            Some(optional_fetch) => Try::SetStateAndContinue(RawFetchState::FetchOptional {
+                optional_fetch,
+                required_fetch: required_fetch.take(),
+            }),
         }
     }
 

@@ -43,43 +43,10 @@ pub type OptionalFetch<T> = BoxFuture<'static, FetchResult<Option<T>>>;
 /// A required fetch operation that must return a value.
 pub type RequiredFetch<T> = BoxFuture<'static, FetchResult<T>>;
 
-/// A builder for an optional fetch operation.
-pub type OptionalFetchBuilder<K, V, P, C> =
-    Box<dyn FnOnce(&mut C, &K) -> OptionalFetch<FetchTarget<K, V, P>> + Send + 'static>;
-/// A builder for a required fetch operation.
-pub type RequiredFetchBuilder<K, V, P, C> =
-    Box<dyn FnOnce(&mut C, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
-/// A type-erased builder for a required fetch operation.
-pub type RequiredFetchBuilderErased<K, V, P> =
-    Box<dyn FnOnce(&mut dyn Any, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
-
 /// A waiter for a fetch operation.
 pub type Waiter<T> = oneshot::Receiver<FetchResult<T>>;
 /// A notifier for a fetch operation.
 pub type Notifier<T> = oneshot::Sender<FetchResult<T>>;
-
-fn erase_required_fetch_builder<K, V, P, C, F>(f: F) -> RequiredFetchBuilderErased<K, V, P>
-where
-    C: Any + Send + 'static,
-    F: FnOnce(&mut C, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static,
-{
-    Box::new(move |ctx, key| {
-        let ctx = ctx.downcast_mut::<C>().expect("fetch context type mismatch");
-        f(ctx, key)
-    })
-}
-
-pub fn unerase_required_fetch_builder<K, V, P, C>(
-    f: RequiredFetchBuilderErased<K, V, P>,
-) -> RequiredFetchBuilder<K, V, P, C>
-where
-    K: 'static,
-    V: 'static,
-    P: 'static,
-    C: Any + Send + 'static,
-{
-    Box::new(move |ctx, key| f(ctx as &mut dyn Any, key))
-}
 
 /// The target of a fetch operation.
 pub enum FetchTarget<K, V, P> {
@@ -134,8 +101,8 @@ where
     close: Arc<AtomicBool>,
     notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     // If a required fetch request comes in while there is already an inflight,
-    // we store the fetch builder here to let the leader perform the fetch later.
-    f: Option<RequiredFetchBuilderErased<E::Key, E::Value, E::Properties>>,
+    // we store the fetch future here to let the leader perform the fetch later.
+    f: Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
 }
 
 struct InflightEntry<E, S, I>
@@ -186,21 +153,20 @@ where
     }
 
     #[expect(clippy::type_complexity)]
-    pub fn enqueue<Q, C>(
+    pub fn enqueue<Q>(
         &mut self,
         hash: u64,
         key: &Q,
-        f: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-    ) -> Enqueue<E, S, I, C>
+        f: Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
+    ) -> Enqueue<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
-        C: Any + Send + 'static,
     {
         match self.inflights.entry(hash, |e| key.equivalent(&e.key), |e| e.hash) {
             Entry::Occupied(mut o) => {
                 let entry = o.get_mut();
                 if entry.inflight.f.is_none() && f.is_some() {
-                    entry.inflight.f = f.map(erase_required_fetch_builder);
+                    entry.inflight.f = f;
                 }
                 let (tx, rx) = oneshot::channel();
                 entry.inflight.notifiers.push(tx);
@@ -226,7 +192,7 @@ where
                     id,
                     close,
                     waiter: rx,
-                    required_fetch_builder: f,
+                    required_fetch: f,
                 }
             }
         }
@@ -256,7 +222,7 @@ where
         })
     }
 
-    pub fn fetch_or_take<Q, C>(&mut self, hash: u64, key: &Q, id: usize) -> Option<FetchOrTake<E, S, I, C>>
+    pub fn fetch_or_take<Q, C>(&mut self, hash: u64, key: &Q, id: usize) -> Option<FetchOrTake<E, S, I>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
         C: Any + Send + 'static,
@@ -268,7 +234,7 @@ where
                     return None;
                 }
                 let f = o.get_mut().inflight.f.take();
-                match f.map(unerase_required_fetch_builder) {
+                match f {
                     Some(f) => Some(FetchOrTake::Fetch(f)),
                     None => {
                         let inflight = o.remove().0.inflight;
@@ -283,28 +249,27 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-pub enum Enqueue<E, S, I, C>
+pub enum Enqueue<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
-    C: Any + Send + 'static,
 {
     Lead {
         id: usize,
         close: Arc<AtomicBool>,
         waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        required_fetch: Option<RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>>,
     },
     Wait(Waiter<Option<RawCacheEntry<E, S, I>>>),
 }
 
-pub enum FetchOrTake<E, S, I, C>
+pub enum FetchOrTake<E, S, I>
 where
     E: Eviction,
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    Fetch(RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>),
+    Fetch(RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>),
     Notifiers(Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>),
 }
