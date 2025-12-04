@@ -28,6 +28,7 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
     metrics::Metrics,
     properties::{Age, Properties},
 };
@@ -57,7 +58,6 @@ use crate::{
         },
         Engine, EngineBuildContext, EngineConfig, Populated,
     },
-    error::{Error, Result},
     filter::conditions::IoThrottle,
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
@@ -636,11 +636,6 @@ where
             let (buf, res) = block.read(Box::new(buf), addr.offset as _).await;
             match res {
                 Ok(_) => {}
-                Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(?e, "[block engine load]: invalid io range, remove this entry and skip");
-                    indexer.remove(hash);
-                    return Ok(Load::Miss);
-                }
                 Err(e) => {
                     tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
                     return Err(e);
@@ -649,24 +644,25 @@ where
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
-                Err(e @ Error::MagicMismatch { .. })
-                | Err(e @ Error::ChecksumMismatch { .. })
-                | Err(e @ Error::CompressionAlgorithmNotSupported(_))
-                | Err(e @ Error::OutOfRange { .. })
-                | Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(
-                        hash,
-                        ?addr,
-                        ?e,
-                        "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                    );
-                    indexer.remove(hash);
-                    return Ok(Load::Miss);
-                }
-                Err(e) => {
-                    tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
-                    return Err(e);
-                }
+                Err(e) => match e.kind() {
+                    ErrorKind::Parse
+                    | ErrorKind::MagicMismatch
+                    | ErrorKind::ChecksumMismatch
+                    | ErrorKind::OutOfRange => {
+                        tracing::warn!(
+                            hash,
+                            ?addr,
+                            ?e,
+                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                        );
+                        indexer.remove(hash);
+                        return Ok(Load::Miss);
+                    }
+                    _ => {
+                        tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
+                        return Err(e);
+                    }
+                },
             };
 
             let (key, value) = {
@@ -679,24 +675,23 @@ where
                     Some(header.checksum),
                 ) {
                     Ok(res) => res,
-                    Err(e @ Error::MagicMismatch { .. })
-                    | Err(e @ Error::ChecksumMismatch { .. })
-                    | Err(e @ Error::OutOfRange { .. })
-                    | Err(e @ Error::InvalidIoRange { .. }) => {
-                        tracing::warn!(
-                            hash,
-                            ?addr,
-                            ?header,
-                            ?e,
-                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                        );
-                        indexer.remove(hash);
-                        return Ok(Load::Miss);
-                    }
-                    Err(e) => {
-                        tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
-                        return Err(e);
-                    }
+                    Err(e) => match e.kind() {
+                        ErrorKind::MagicMismatch | ErrorKind::ChecksumMismatch | ErrorKind::OutOfRange => {
+                            tracing::warn!(
+                                hash,
+                                ?addr,
+                                ?header,
+                                ?e,
+                                "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                            );
+                            indexer.remove(hash);
+                            return Ok(Load::Miss);
+                        }
+                        _ => {
+                            tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
+                            return Err(e);
+                        }
+                    },
                 };
                 metrics
                     .storage_entry_deserialize_duration
@@ -755,7 +750,7 @@ where
         let this = self.clone();
         async move {
             if !this.inner.active.load(Ordering::Relaxed) {
-                return Err(anyhow::anyhow!("cannot delete entry after closed").into());
+                return Err(Error::new(ErrorKind::Closed, "cannot delete entry after closed"));
             }
 
             // Write an tombstone to clear tombstone log by increase the max sequence.
@@ -1268,7 +1263,6 @@ mod tests {
         store.wait().await;
         let mut res = vec![];
         for i in 0..12 {
-            tracing::trace!("==========> {i}");
             res.push(store.load(memory.hash(&i)).await.unwrap().kv());
         }
         assert_eq!(

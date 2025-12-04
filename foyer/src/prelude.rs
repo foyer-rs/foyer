@@ -19,7 +19,8 @@ pub use crate::storage::{UringIoEngine, UringIoEngineBuilder};
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
-        code::{Code, CodeError, CodeResult, DefaultHasher, Key, StorageKey, StorageValue, Value},
+        code::{Code, DefaultHasher, Key, StorageKey, StorageValue, Value},
+        error::{Error, ErrorKind, Result},
         event::{Event, EventListener},
         properties::{Age, Hint, Location, Source},
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
@@ -27,20 +28,18 @@ pub use crate::{
     hybrid::{
         builder::{HybridCacheBuilder, HybridCacheBuilderPhaseMemory, HybridCacheBuilderPhaseStorage},
         cache::{HybridCache, HybridCacheEntry, HybridCachePolicy, HybridCacheProperties, HybridGet, HybridGetOrFetch},
-        error::{Error, Result},
         writer::{HybridCacheStorageWriter, HybridCacheWriter},
     },
     memory::{
-        Cache, CacheBuilder, CacheEntry, CacheProperties, Error as MemoryError, EvictionConfig, FifoConfig, Filter,
-        GetOrFetch, LfuConfig, LruConfig, Result as MemoryResult, S3FifoConfig, Weighter,
+        Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FifoConfig, Filter, GetOrFetch, LfuConfig,
+        LruConfig, S3FifoConfig, Weighter,
     },
     storage::{
         AdmitAll, Block, BlockEngineBuilder, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
-        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, Error as StorageError, EstimatedSize, EvictionInfo,
-        EvictionPicker, FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder,
-        IoError, IoHandle, IoResult, IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder,
-        PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll,
-        Result as StorageResult, Runtime, RuntimeOptions, Statistics, StorageFilter, StorageFilterCondition,
-        StorageFilterResult, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
+        FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoHandle,
+        IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine,
+        PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll, Runtime, RuntimeOptions, Statistics, StorageFilter,
+        StorageFilterCondition, StorageFilterResult, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
     },
 };

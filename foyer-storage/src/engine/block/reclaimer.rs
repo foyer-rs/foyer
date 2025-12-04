@@ -17,6 +17,7 @@ use std::{fmt::Debug, sync::Arc};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    error::Result,
     properties::Properties,
 };
 use futures_core::future::BoxFuture;
@@ -31,7 +32,6 @@ use crate::{
         scanner::BlockScanner,
         serde::Sequence,
     },
-    error::Result,
     io::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,

@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use foyer::{
-    BlockEngineBuilder, Code, CodeResult, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
-    HybridCachePolicy, StorageValue,
+    BlockEngineBuilder, Code, DeviceBuilder, Error, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    HybridCachePolicy, Result, StorageValue,
 };
 
 #[cfg(feature = "serde")]
@@ -33,24 +33,28 @@ struct Bar {
 }
 
 impl Code for Bar {
-    fn encode(&self, writer: &mut impl std::io::Write) -> CodeResult<()> {
-        writer.write_all(&self.a.to_le_bytes())?;
-        writer.write_all(&(self.b.len() as u64).to_le_bytes())?;
-        writer.write_all(self.b.as_bytes())?;
+    fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
+        writer.write_all(&self.a.to_le_bytes()).map_err(Error::io_error)?;
+        writer
+            .write_all(&(self.b.len() as u64).to_le_bytes())
+            .map_err(Error::io_error)?;
+        writer.write_all(self.b.as_bytes()).map_err(Error::io_error)?;
         Ok(())
     }
 
-    fn decode(reader: &mut impl std::io::Read) -> CodeResult<Self>
+    fn decode(reader: &mut impl std::io::Read) -> Result<Self>
     where
         Self: Sized,
     {
         let mut buf = [0u8; 8];
-        reader.read_exact(&mut buf)?;
+        reader.read_exact(&mut buf).map_err(Error::io_error)?;
         let a = u64::from_le_bytes(buf);
-        reader.read_exact(&mut buf)?;
+        reader.read_exact(&mut buf).map_err(Error::io_error)?;
         let b_len = u64::from_le_bytes(buf) as usize;
         let bytes = vec![0u8; b_len];
-        let b = String::from_utf8(bytes).map_err(std::io::Error::other)?;
+        let b = String::from_utf8(bytes)
+            .map_err(std::io::Error::other)
+            .map_err(Error::io_error)?;
         Ok(Self { a, b })
     }
 

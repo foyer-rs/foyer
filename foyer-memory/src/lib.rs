@@ -38,7 +38,6 @@
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 
 mod cache;
-mod error;
 mod eviction;
 mod indexer;
 mod inflight;

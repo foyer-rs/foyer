@@ -14,7 +14,7 @@
 
 // TODO(MrCroxx): unify compress interface?
 
-use crate::error::Error;
+use foyer_common::error::{Error, ErrorKind};
 
 /// The compression algorithm of the disk cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,7 +59,7 @@ impl TryFrom<u8> for Compression {
             0 => Ok(Self::None),
             1 => Ok(Self::Zstd),
             2 => Ok(Self::Lz4),
-            _ => Err(Error::CompressionAlgorithmNotSupported(value)),
+            _ => Err(Error::new(ErrorKind::Parse, "failed to parse Compression").with_context("value", value)),
         }
     }
 }

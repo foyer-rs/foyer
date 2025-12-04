@@ -24,6 +24,7 @@ use std::{
 use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
     metrics::Metrics,
     properties::{Age, Properties},
     runtime::BackgroundShutdownRuntime,
@@ -39,7 +40,6 @@ use crate::{
         noop::{NoopEngine, NoopEngineBuilder},
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
-    error::{Error, Result},
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device},
         engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
@@ -487,7 +487,10 @@ where
                 builder.max_blocking_threads(config.max_blocking_threads);
             }
             builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
+            let runtime = builder
+                .enable_all()
+                .build()
+                .map_err(|source| Error::new(ErrorKind::Io, "failed to build dedicated runtime").with_source(source))?;
             let runtime = BackgroundShutdownRuntime::from(runtime);
             Ok::<_, Error>(Arc::new(runtime))
         };

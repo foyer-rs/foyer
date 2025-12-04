@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use foyer_common::error::Result;
 use itertools::Itertools;
 
 use super::indexer::EntryAddress;
 use crate::{
     engine::block::{buffer::BlobIndexReader, manager::Block},
-    error::Result,
     io::bytes::IoSliceMut,
 };
 

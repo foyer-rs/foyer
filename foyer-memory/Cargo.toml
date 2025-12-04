@@ -20,6 +20,7 @@ strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["dep:fastrace", "foyer-common/tracing"]
 
 [dependencies]
+anyhow = { workspace = true }
 arc-swap = { workspace = true }
 bitflags = { workspace = true }
 cmsketch = { workspace = true }
@@ -35,7 +36,6 @@ parking_lot = { workspace = true }
 paste = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(madsim)'.dependencies]

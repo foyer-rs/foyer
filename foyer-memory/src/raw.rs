@@ -14,7 +14,7 @@
 
 use std::{
     any::Any,
-    fmt::{Debug, Display},
+    fmt::Debug,
     future::Future,
     hash::Hash,
     ops::Deref,
@@ -30,6 +30,7 @@ use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 use foyer_common::{
     code::HashBuilder,
+    error::{Error, ErrorKind, Result},
     event::{Event, EventListener},
     metrics::Metrics,
     properties::{Location, Properties, Source},
@@ -43,16 +44,15 @@ use parking_lot::{Mutex, RwLock};
 use pin_project::{pin_project, pinned_drop};
 
 use crate::{
-    error::{Error, Result},
     eviction::{Eviction, Op},
     indexer::{sentry::Sentry, Indexer},
     inflight::{
-        Enqueue, FetchOrTake, FetchResult, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
+        Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
         RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::NoopPipe,
     record::{Data, Record},
-    FetchError, Piece, Pipe,
+    Piece, Pipe,
 };
 
 /// The weighter for the in-memory cache.
@@ -516,7 +516,11 @@ where
             .map(|res| res.unwrap_err())
             .collect_vec();
         if !errs.is_empty() {
-            return Err(Error::multiple(errs));
+            let mut e = Error::new(ErrorKind::Config, "resize raw cache failed");
+            for err in errs {
+                e = e.with_context("reason", format!("{err}"));
+            }
+            return Err(e);
         }
 
         Ok(())
@@ -934,7 +938,7 @@ where
         F: FnOnce(&Q) -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
-        ER: std::error::Error + Send + Sync + 'static,
+        ER: Into<anyhow::Error>,
     {
         let fut = fetch(key);
         self.get_or_fetch_inner(
@@ -944,7 +948,7 @@ where
                 async {
                     match fut.await {
                         Ok(it) => Ok(it.into()),
-                        Err(e) => Err(Box::new(e) as FetchError),
+                        Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
                     }
                 }
                 .boxed()
@@ -1061,7 +1065,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+    type Output = Result<Option<RawCacheEntry<E, S, I>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -1152,7 +1156,7 @@ where
         required_fetch: RequiredFetch<FetchTarget<E::Key, E::Value, E::Properties>>,
     },
     Notify {
-        res: Option<FetchResult<Option<RawCacheEntry<E, S, I>>>>,
+        res: Option<Result<Option<RawCacheEntry<E, S, I>>>>,
         notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     },
     Ready,
@@ -1202,7 +1206,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    type Output = FetchResult<Option<RawCacheEntry<E, S, I>>>;
+    type Output = Result<Option<RawCacheEntry<E, S, I>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -1210,7 +1214,7 @@ where
         // return waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten());
         this.waiter.poll_unpin(cx).map(|r| match r {
             Ok(r) => r,
-            Err(e) => Err(Box::new(e) as FetchError),
+            Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "waiter channel closed").with_source(e)),
         })
     }
 }
@@ -1344,7 +1348,7 @@ where
         hash: u64,
         key: &E::Key,
         inflights: &Arc<Mutex<InflightManager<E, S, I>>>,
-        res_no_fetch: FetchResult<Option<RawCacheEntry<E, S, I>>>,
+        res_no_fetch: Result<Option<RawCacheEntry<E, S, I>>>,
     ) -> Try<E, S, I, C> {
         // Fast path if the required fetch builder is provided.
         match required_fetch_builder.take() {
@@ -1380,11 +1384,9 @@ where
         match target {
             FetchTarget::Entry { value, properties } => {
                 let key = key.take().unwrap();
-                tracing::trace!("==========> handle target: {source:?}");
                 cache.insert_with_properties_inner(key, value, properties, source);
             }
             FetchTarget::Piece(piece) => {
-                tracing::trace!("==========> handle target (piece): {:?}", Source::Memory);
                 cache.insert_piece(piece);
             }
         }
@@ -1392,7 +1394,7 @@ where
     }
 
     fn handle_error(
-        e: Box<dyn std::error::Error + Send + Sync + 'static>,
+        e: Error,
         id: usize,
         hash: u64,
         key: &E::Key,
@@ -1412,7 +1414,7 @@ where
 
     #[expect(clippy::type_complexity)]
     fn handle_notify(
-        res: FetchResult<Option<RawCacheEntry<E, S, I>>>,
+        res: Result<Option<RawCacheEntry<E, S, I>>>,
         notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
     ) -> Try<E, S, I, C> {
         match res {
@@ -1422,27 +1424,14 @@ where
                 }
             }
             Err(e) => {
-                let e = Arc::from(e) as Arc<dyn std::error::Error + Send + Sync>;
                 for notifier in notifiers.drain(..) {
-                    let _ = notifier.send(Err(Box::new(e.clone())));
+                    let _ = notifier.send(Err(e.clone()));
                 }
             }
         }
         Try::Ready
     }
 }
-
-/// Error indicating that a fetch operation was cancelled.
-#[derive(Debug)]
-pub struct FetchCancelled;
-
-impl Display for FetchCancelled {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fetch cancelled")
-    }
-}
-
-impl std::error::Error for FetchCancelled {}
 
 #[pinned_drop]
 impl<E, S, I, C> PinnedDrop for RawFetch<E, S, I, C>
@@ -1463,7 +1452,10 @@ where
             .take(*this.hash, this.key.as_ref().unwrap(), Some(*this.id))
         {
             for notifier in notifiers {
-                let _ = notifier.send(Err(Box::new(FetchCancelled) as FetchError));
+                let _ =
+                    notifier
+                        .send(Err(Error::new(ErrorKind::TaskCancelled, "fetch task cancelled")
+                            .with_context("hash", *this.hash)));
             }
         }
     }

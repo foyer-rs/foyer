@@ -18,15 +18,15 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use foyer_common::error::{Error, Result};
 use fs4::free_space;
 
 use crate::{
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
-        error::IoResult,
         PAGE,
     },
-    IoError, RawFile,
+    RawFile,
 };
 
 /// Builder for a file-based device that manages a single file or a raw block device.
@@ -76,7 +76,7 @@ impl FileDeviceBuilder {
 }
 
 impl DeviceBuilder for FileDeviceBuilder {
-    fn build(self) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> Result<Arc<dyn Device>> {
         // Normalize configurations.
 
         let align_v = |value: usize, align: usize| value - (value % align);
@@ -99,7 +99,7 @@ impl DeviceBuilder for FileDeviceBuilder {
             opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
         }
 
-        let file = opts.open(&self.path)?;
+        let file = opts.open(&self.path).map_err(Error::io_error)?;
 
         if file.metadata().unwrap().is_file() {
             tracing::warn!(
@@ -108,7 +108,7 @@ impl DeviceBuilder for FileDeviceBuilder {
                 "Please use `DirectFileDevice` directly on a raw block device.",
                 "Or use `DirectFsDevice` within a normal file system.",
             );
-            file.set_len(capacity as _)?;
+            file.set_len(capacity as _).map_err(Error::io_error)?;
         }
         let file = Arc::new(file);
 
@@ -143,15 +143,11 @@ impl Device for FileDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
         if allocated + size > self.capacity {
-            return Err(IoError::NoSpace {
-                capacity: self.capacity,
-                allocated,
-                required: allocated + size,
-            });
+            return Err(Error::no_space(self.capacity, allocated, allocated + size));
         }
         let offset = partitions.last().map(|p| p.offset + p.size as u64).unwrap_or_default();
         let id = partitions.len() as PartitionId;

@@ -16,13 +16,14 @@ use std::{mem::offset_of, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
+    error::Result,
     properties::Properties,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{error::Result, record::Record};
+use crate::record::Record;
 
 /// Fifo eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

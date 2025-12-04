@@ -24,7 +24,6 @@ pub use crate::{
         },
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
-    error::{Error, Result},
     filter::{
         conditions::{AdmitAll, EstimatedSize, RejectAll},
         StorageFilter, StorageFilterCondition, StorageFilterResult,
@@ -45,7 +44,6 @@ pub use crate::{
             psync::{PsyncIoEngine, PsyncIoEngineBuilder},
             IoEngine, IoEngineBuilder, IoHandle,
         },
-        error::{IoError, IoResult},
     },
     runtime::Runtime,
     store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},

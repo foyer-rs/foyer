@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
+use foyer_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::{
-    error::Result,
     io::{bytes::IoSliceMut, device::Partition, PAGE},
     IoEngine,
 };

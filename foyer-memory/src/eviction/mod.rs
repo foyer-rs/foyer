@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use foyer_common::{
     code::{Key, Value},
+    error::Result,
     properties::Properties,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{error::Result, record::Record};
+use crate::record::Record;
 
 pub trait State: Send + Sync + 'static + Default {}
 impl<T> State for T where T: Send + Sync + 'static + Default {}
