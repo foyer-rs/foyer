@@ -20,6 +20,7 @@ use std::{
 use core_affinity::CoreId;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
+use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
@@ -30,7 +31,6 @@ use crate::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
-        error::{IoError, IoResult},
     },
     RawFile,
 };
@@ -178,10 +178,11 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             if self.threads == 0 {
-                return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
+                return Err(Error::new(ErrorKind::Config, "shards must be greater than 0")
+                    .with_context("threads", self.threads));
             }
 
             let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
@@ -211,7 +212,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                     }
                 }
                 let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
-                let uring = builder.build(self.io_depth as _)?;
+                let uring = builder.build(self.io_depth as _).map_err(Error::io_error)?;
                 let shard = UringIoEngineShard {
                     read_rx,
                     write_rx,
@@ -229,7 +230,8 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                             core_affinity::set_for_current(CoreId { id: cpu as _ });
                         }
                         shard.run();
-                    })?;
+                    })
+                    .map_err(Error::code_io_error)?;
             }
 
             let engine = UringIoEngine { read_txs, write_txs };
@@ -260,7 +262,7 @@ struct RawFileAddress {
 }
 
 struct UringIoCtx {
-    tx: oneshot::Sender<IoResult<()>>,
+    tx: oneshot::Sender<Result<()>>,
     io_type: UringIoType,
     rbuf: RawBuf,
     addr: RawFileAddress,
@@ -350,7 +352,7 @@ impl UringIoEngineShard {
 
                 let res = cqe.result();
                 if res < 0 {
-                    let err = IoError::from_raw_os_error(res);
+                    let err = Error::raw_os_io_error(res);
                     let _ = ctx.tx.send(Err(err));
                 } else {
                     let _ = ctx.tx.send(Ok(()));
@@ -400,7 +402,7 @@ impl UringIoEngine {
         async move {
             let res = match rx.await {
                 Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "io completion channel closed").with_source(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -433,7 +435,7 @@ impl UringIoEngine {
         async move {
             let res = match rx.await {
                 Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "io completion channel closed").with_source(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)

@@ -27,6 +27,7 @@ use std::{
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    error::{Error, Result},
     metrics::Metrics,
     properties::Properties,
 };
@@ -49,7 +50,6 @@ use crate::{
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
-    error::{Error, Result},
     io::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,

@@ -40,7 +40,7 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineBuilder;
 use foyer::{
-    BlockEngineBuilder, Code, CodeError, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
+    BlockEngineBuilder, Code, Compression, Device, DeviceBuilder, EngineConfig, Error, FifoConfig, FifoPicker,
     FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
     InvalidRatioPicker, IoEngine, IoEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
     RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
@@ -400,13 +400,13 @@ impl Deref for Value {
 }
 
 impl Code for Value {
-    fn encode(&self, writer: &mut impl std::io::Write) -> std::result::Result<(), foyer::CodeError> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> foyer::Result<()> {
         self.len().encode(writer)?;
-        writer.write_all(self).map_err(CodeError::from)
+        writer.write_all(self).map_err(foyer::Error::io_error)
     }
 
     #[expect(clippy::uninit_vec)]
-    fn decode(reader: &mut impl std::io::Read) -> std::result::Result<Self, foyer::CodeError>
+    fn decode(reader: &mut impl std::io::Read) -> foyer::Result<Self>
     where
         Self: Sized,
     {
@@ -415,7 +415,7 @@ impl Code for Value {
         unsafe {
             v.set_len(len);
         }
-        reader.read_exact(&mut v).map_err(CodeError::from)?;
+        reader.read_exact(&mut v).map_err(foyer::Error::io_error)?;
         let this = Self { inner: Arc::new(v) };
         Ok(this)
     }
@@ -928,7 +928,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
                 }
                 tokio::task::yield_now().await;
                 let _ = miss_tx.send(time.elapsed());
-                Ok(Value {
+                Ok::<_, Error>(Value {
                     inner: Arc::new(text(idx as usize, entry_size)),
                 })
             }

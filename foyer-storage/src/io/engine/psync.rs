@@ -22,6 +22,7 @@ use std::{
 
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
+use foyer_common::error::{Error, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
@@ -30,7 +31,6 @@ use crate::{
         bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
-        error::{IoError, IoResult},
     },
     RawFile,
 };
@@ -126,7 +126,7 @@ impl PsyncIoEngineBuilder {
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
             let engine = PsyncIoEngine {
@@ -183,12 +183,12 @@ impl IoEngine for PsyncIoEngine {
                         #[cfg(target_family = "windows")]
                         {
                             use std::os::windows::fs::FileExt;
-                            file.seek_read(slice, offset).map(|_| ()).map_err(IoError::from)
+                            file.seek_read(slice, offset).map(|_| ()).map_err(Error::io_error)
                         }
                         #[cfg(target_family = "unix")]
                         {
                             use std::os::unix::fs::FileExt;
-                            file.read_exact_at(slice, offset).map_err(IoError::from)
+                            file.read_exact_at(slice, offset).map_err(Error::io_error)
                         }
                     };
                     #[cfg(any(test, feature = "test_utils"))]
@@ -204,7 +204,7 @@ impl IoEngine for PsyncIoEngine {
                     drop(span);
                     (buf, res)
                 }
-                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(Error::join(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -236,12 +236,12 @@ impl IoEngine for PsyncIoEngine {
                         #[cfg(target_family = "windows")]
                         {
                             use std::os::windows::fs::FileExt;
-                            file.seek_write(slice, offset).map(|_| ()).map_err(IoError::from)
+                            file.seek_write(slice, offset).map(|_| ()).map_err(Error::io_error)
                         }
                         #[cfg(target_family = "unix")]
                         {
                             use std::os::unix::fs::FileExt;
-                            file.write_all_at(slice, offset).map_err(IoError::from)
+                            file.write_all_at(slice, offset).map_err(Error::io_error)
                         }
                     };
                     #[cfg(any(test, feature = "test_utils"))]
@@ -257,7 +257,7 @@ impl IoEngine for PsyncIoEngine {
                     drop(span);
                     (buf, res)
                 }
-                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(IoError::other(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(Error::join(e))),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)

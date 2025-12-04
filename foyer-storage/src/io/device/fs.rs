@@ -18,15 +18,15 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use foyer_common::error::{Error, Result};
 use fs4::free_space;
 
 use crate::{
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
-        error::IoResult,
         PAGE,
     },
-    IoError, RawFile,
+    RawFile,
 };
 
 /// Builder for a filesystem-based device that manages files in a directory.
@@ -76,7 +76,7 @@ impl FsDeviceBuilder {
 }
 
 impl DeviceBuilder for FsDeviceBuilder {
-    fn build(self) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> Result<Arc<dyn Device>> {
         // Normalize configurations.
 
         let align_v = |value: usize, align: usize| value - value % align;
@@ -93,7 +93,7 @@ impl DeviceBuilder for FsDeviceBuilder {
         // Build device.
 
         if !self.dir.exists() {
-            create_dir_all(&self.dir)?;
+            create_dir_all(&self.dir).map_err(Error::io_error)?;
         }
 
         let device = FsDevice {
@@ -136,15 +136,11 @@ impl Device for FsDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
         if allocated + size > self.capacity {
-            return Err(IoError::NoSpace {
-                capacity: self.capacity,
-                allocated,
-                required: allocated + size,
-            });
+            return Err(Error::no_space(self.capacity, allocated, allocated + size));
         }
         let id = partitions.len() as PartitionId;
         let path = self.dir.join(Self::filename(id));
@@ -155,8 +151,8 @@ impl Device for FsDevice {
             use std::os::unix::fs::OpenOptionsExt;
             opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
         }
-        let file = opts.open(path)?;
-        file.set_len(size as _)?;
+        let file = opts.open(path).map_err(Error::io_error)?;
+        file.set_len(size as _).map_err(Error::io_error)?;
 
         let partition = Arc::new(FsPartition {
             id,

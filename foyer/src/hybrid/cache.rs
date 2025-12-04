@@ -35,11 +35,12 @@ use fastrace::prelude::*;
 use foyer_common::tracing::{TracingConfig, TracingOptions};
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
     metrics::Metrics,
     properties::{Age, Hint, Location, Properties},
     rate::RateLimiter,
 };
-use foyer_memory::{Cache, CacheEntry, FetchError, FetchTarget, GetOrFetch, Piece, Pipe};
+use foyer_memory::{Cache, CacheEntry, FetchTarget, GetOrFetch, Piece, Pipe};
 use foyer_storage::{Load, Populated, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
@@ -47,7 +48,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::hybrid::{
     builder::HybridCacheBuilder,
-    error::{Error, Result},
     writer::{HybridCacheStorageWriter, HybridCacheWriter},
 };
 
@@ -691,7 +691,7 @@ where
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
-                        Err(e) => Err(Box::new(e) as FetchError),
+                        Err(e) => Err(e),
                     }
                 }
                 .boxed()
@@ -716,12 +716,13 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
+    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce(&Q) -> FU,
-        FU: Future<Output = Result<IT>> + Send + 'static,
+        FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
+        ER: Into<anyhow::Error>,
     {
         root_span!(self, span, "foyer::hybrid::cache::get_or_fetch");
 
@@ -756,7 +757,7 @@ where
                             Ok(None)
                         }
                         Ok(Load::Miss) => Ok(None),
-                        Err(e) => Err(Box::new(e) as FetchError),
+                        Err(e) => Err(e),
                     }
                 }
                 .boxed()
@@ -779,7 +780,7 @@ where
                             };
                             Ok(target)
                         }
-                        Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
                     }
                 }
                 .boxed()
@@ -851,7 +852,7 @@ where
 
         #[cfg(feature = "tracing")]
         let _guard = this.span.set_local_parent();
-        let res = ready!(this.inner.poll_inner(cx).map_err(Error::other));
+        let res = ready!(this.inner.poll_inner(cx));
 
         match res.as_ref() {
             Ok(Some(_)) => {
@@ -959,7 +960,7 @@ where
 
         #[cfg(feature = "tracing")]
         let _guard = this.span.set_local_parent();
-        let res = ready!(this.inner.poll(cx).map_err(Error::other));
+        let res = ready!(this.inner.poll(cx));
 
         if let Ok(entry) = res.as_ref() {
             if entry.properties().location() != Location::InMem
@@ -1095,7 +1096,7 @@ mod tests {
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
 
         let e5 = hybrid
-            .get_or_fetch(&5, |_| async move { Ok(vec![5; 7 * KB]) })
+            .get_or_fetch(&5, |_| async move { Ok::<_, Error>(vec![5; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
@@ -1153,7 +1154,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&1, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![1; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::Default),
                 ))
@@ -1170,7 +1171,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&2, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![2; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::InMem),
                 ))
@@ -1184,7 +1185,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&3, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![3; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::OnDisk),
                 ))
@@ -1210,7 +1211,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&1, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![1; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::Default),
                 ))
@@ -1226,7 +1227,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&2, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![2; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::InMem),
                 ))
@@ -1239,7 +1240,7 @@ mod tests {
 
         hybrid
             .get_or_fetch(&3, |_| async move {
-                Ok((
+                Ok::<_, Error>((
                     vec![3; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::OnDisk),
                 ))
@@ -1378,7 +1379,7 @@ mod tests {
 
         // 4. assert fetch will not reinsert throttled but existed e1
         hybrid
-            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1420,7 +1421,7 @@ mod tests {
 
         // 4. assert fetch will not reinsert throttled but existed e1
         hybrid
-            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
@@ -1503,7 +1504,7 @@ mod tests {
         let b = barrier.clone();
         let fetch = hybrid.get_or_fetch(&42, |_| async move {
             b.wait().await;
-            Ok(vec![b'x'; 42])
+            Ok::<_, Error>(vec![b'x'; 42])
         });
         load_holder.unhold();
 
@@ -1526,8 +1527,8 @@ mod tests {
 
         let hybrid = open_with(dir.path(), |b| b, |b| b.with_flush_switch(flush_switch.clone())).await;
 
-        let f1 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
-        let f2 = hybrid.get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) });
+        let f1 = hybrid.get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) });
+        let f2 = hybrid.get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) });
 
         let e1 = f1.await.unwrap();
         let e2 = f2.await.unwrap();
@@ -1538,7 +1539,7 @@ mod tests {
         drop(e2);
 
         let e3 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e3.source(), Source::Memory);
@@ -1547,7 +1548,7 @@ mod tests {
         flush_switch.on();
         hybrid.memory().evict_all();
         let e4 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e4.source(), Source::Memory);
@@ -1559,10 +1560,45 @@ mod tests {
 
         hybrid.storage().wait().await;
         let e5 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e5.source(), Source::Disk);
         drop(e5);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_fetch_error_downcast() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct TestError(String);
+
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "TestError: {}", self.0)
+            }
+        }
+
+        impl std::error::Error for TestError {}
+
+        let e = TestError("expected unexpection".into());
+
+        let hybrid: HybridCache<u64, Vec<u8>> = HybridCacheBuilder::new()
+            .with_name("test")
+            .memory(100)
+            .storage()
+            .build()
+            .await
+            .unwrap();
+
+        let err = hybrid
+            .get_or_fetch(&0, |_| {
+                let e = e.clone();
+                async move { Err::<Vec<u8>, _>(e) }
+            })
+            .await
+            .unwrap_err();
+
+        let eref = err.downcast_ref::<TestError>();
+        assert_eq!(eref, Some(&e));
     }
 }

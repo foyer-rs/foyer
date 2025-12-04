@@ -17,6 +17,7 @@ use std::{any::Any, borrow::Cow, fmt::Debug, future::Future, hash::Hash, ops::De
 use equivalent::Equivalent;
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, Key, Value},
+    error::Result,
     event::EventListener,
     metrics::Metrics,
     properties::{Age, Hint, Location, Properties, Source},
@@ -27,7 +28,6 @@ use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::{Error, Result},
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -1021,7 +1021,7 @@ where
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         self.poll_inner(cx)
-            .map(|res| res.map(|opt| opt.unwrap()).map_err(Error::other))
+            .map(|res| res.map(|opt| opt.expect("GetOrFetch future resolved to None")))
     }
 }
 
@@ -1037,8 +1037,7 @@ where
     pub fn poll_inner(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::result::Result<Option<CacheEntry<K, V, S, P>>, Box<dyn std::error::Error + Send + Sync>>>
-    {
+    ) -> std::task::Poll<Result<Option<CacheEntry<K, V, S, P>>>> {
         match self.project() {
             GetOrFetchProj::Fifo(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
             GetOrFetchProj::S3Fifo(fut) => fut.poll(cx).map(|res| res.map(|opt| opt.map(CacheEntry::from))),
@@ -1087,12 +1086,13 @@ where
     ///
     /// The concurrent fetch requests will be deduplicated.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get_or_fetch"))]
-    pub fn get_or_fetch<Q, F, FU, IT>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce(&Q) -> FU,
-        FU: Future<Output = Result<IT>> + Send + 'static,
+        FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<K, V, P>>,
+        ER: Into<anyhow::Error>,
     {
         match self {
             Cache::Fifo(cache) => GetOrFetch::from(cache.get_or_fetch(key, fetch)),
@@ -1144,15 +1144,13 @@ where
 mod tests {
     use std::{ops::Range, time::Duration};
 
+    use foyer_common::error::Error;
     use futures_util::future::join_all;
     use itertools::Itertools;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     use super::*;
-    use crate::{
-        error::Error,
-        eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig},
-    };
+    use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};
 
     const CAPACITY: usize = 100;
     const SHARDS: usize = 4;

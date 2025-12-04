@@ -14,11 +14,10 @@
 
 use std::sync::{Arc, RwLock};
 
+use foyer_common::error::Result;
+
 use crate::{
-    io::{
-        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
-        error::IoResult,
-    },
+    io::device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
     RawFile,
 };
 
@@ -42,7 +41,7 @@ impl Default for NoopDeviceBuilder {
 }
 
 impl DeviceBuilder for NoopDeviceBuilder {
-    fn build(self) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> Result<Arc<dyn Device>> {
         let statistics = Arc::new(Statistics::new(Throttle::default()));
         Ok(Arc::new(NoopDevice {
             partitions: RwLock::new(vec![]),
@@ -70,7 +69,7 @@ impl Device for NoopDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let id = partitions.len() as PartitionId;
         let partition = Arc::new(NoopPartition {

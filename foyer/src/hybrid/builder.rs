@@ -18,6 +18,7 @@ use std::{borrow::Cow, fmt::Debug, sync::Arc};
 use foyer_common::tracing::TracingOptions;
 use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
+    error::Result,
     event::EventListener,
     metrics::Metrics,
 };
@@ -25,9 +26,8 @@ use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Filter, Weighter};
 use foyer_storage::{Compression, EngineConfig, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
-use crate::hybrid::{
-    cache::{HybridCache, HybridCacheOptions, HybridCachePipe, HybridCachePolicy, HybridCacheProperties},
-    error::Result,
+use crate::hybrid::cache::{
+    HybridCache, HybridCacheOptions, HybridCachePipe, HybridCachePolicy, HybridCacheProperties,
 };
 
 /// Hybrid cache builder.

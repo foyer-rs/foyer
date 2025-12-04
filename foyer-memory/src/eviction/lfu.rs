@@ -17,6 +17,7 @@ use std::{mem::offset_of, sync::Arc};
 use cmsketch::CMSketchU16;
 use foyer_common::{
     code::{Key, Value},
+    error::{Error, ErrorKind, Result},
     properties::Properties,
     strict_assert, strict_assert_eq, strict_assert_ne,
 };
@@ -24,10 +25,7 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{
-    error::{Error, Result},
-    record::Record,
-};
+use crate::record::Record;
 
 /// w-TinyLFU eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,28 +214,32 @@ where
 
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
-            let mut msgs = vec![];
+            let mut reasons = vec![];
             if config.window_capacity_ratio <= 0.0 || config.window_capacity_ratio >= 1.0 {
-                msgs.push(format!(
+                reasons.push(format!(
                     "window_capacity_ratio must be in (0, 1), given: {}, new config ignored",
                     config.window_capacity_ratio
                 ));
             }
             if config.protected_capacity_ratio <= 0.0 || config.protected_capacity_ratio >= 1.0 {
-                msgs.push(format!(
+                reasons.push(format!(
                     "protected_capacity_ratio must be in (0, 1), given: {}, new config ignored",
                     config.protected_capacity_ratio
                 ));
             }
             if config.window_capacity_ratio + config.protected_capacity_ratio >= 1.0 {
-                msgs.push(format!(
+                reasons.push(format!(
                     "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}, new config ignored",
                     config.window_capacity_ratio + config.protected_capacity_ratio
                 ));
             }
 
-            if !msgs.is_empty() {
-                return Err(Error::ConfigError(msgs.join(" | ")));
+            if !reasons.is_empty() {
+                let mut e = Error::new(ErrorKind::Config, "update LFU config failed");
+                for reason in reasons.iter() {
+                    e = e.with_context("reason", reason);
+                }
+                return Err(e);
             }
 
             self.config = config.clone();

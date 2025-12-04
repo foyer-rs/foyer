@@ -4,7 +4,6 @@ members = [
   "examples",
   "foyer",
   "foyer-bench",
-  "foyer-cli",
   "foyer-common",
   "foyer-memory",
   "foyer-storage",
@@ -82,7 +81,6 @@ serde_bytes = "0.11"
 serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
-thiserror = "2"
 tikv-jemallocator = "0.6"
 tokio = "1"
 tracing = "0.1"

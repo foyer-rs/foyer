@@ -24,6 +24,8 @@ pub mod bits;
 pub mod buf;
 /// The trait for the key and value encoding and decoding.
 pub mod code;
+/// Error types and result type.
+pub mod error;
 /// Components for monitoring internal events.
 pub mod event;
 /// Provisioned hashers.

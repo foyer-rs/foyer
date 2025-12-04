@@ -141,7 +141,7 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 use chrono::Datelike;
 use foyer::{
     BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, Result, RuntimeOptions,
+    IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, RuntimeOptions,
     StorageFilter, Throttle, TokioRuntimeOptions,
 };
 use tempfile::tempdir;
@@ -213,9 +213,13 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let e = hybrid
-        .get_or_fetch(&20230512, |_key| async {
-            let value = mock().await?;
-            Ok(value)
+        .get_or_fetch(&20230512, |_| async {
+            // Mock fetching data from remote source
+            let now = chrono::Utc::now();
+            if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
+                return Err(anyhow::anyhow!("Hi, time traveler!"));
+            }
+            Ok("Hello, foyer.".to_string())
         })
         .await?;
     assert_eq!(e.key(), &20230512);
@@ -224,15 +228,6 @@ async fn main() -> anyhow::Result<()> {
     hybrid.close().await.unwrap();
 
     Ok(())
-}
-
-async fn mock() -> Result<String> {
-    let now = chrono::Utc::now();
-    if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
-        let e: Box<dyn std::error::Error + Send + Sync + 'static> = "Hi, time traveler!".into();
-        return Err(e.into());
-    }
-    Ok("Hello, foyer.".to_string())
 }
 ```
 

@@ -17,7 +17,9 @@ pub mod throttle;
 
 use std::{any::Any, fmt::Debug, sync::Arc};
 
-use crate::io::{device::statistics::Statistics, error::IoResult};
+use foyer_common::error::Result;
+
+use crate::io::device::statistics::Statistics;
 
 pub type PartitionId = u32;
 
@@ -39,7 +41,7 @@ unsafe impl Sync for RawFile {}
 /// Device builder trait.
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     /// Build a device from the given configuration.
-    fn build(self) -> IoResult<Arc<dyn Device>>;
+    fn build(self) -> Result<Arc<dyn Device>>;
 }
 
 /// Partition is a logical segment of a device.
@@ -80,7 +82,7 @@ pub trait Device: Send + Sync + 'static + Debug + Any {
     ///
     /// - Allocating partition may consume more space than requested.
     /// - `size` must be 4K aligned.
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>>;
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>>;
 
     /// Get the number of partitions in the device.
     fn partitions(&self) -> usize;

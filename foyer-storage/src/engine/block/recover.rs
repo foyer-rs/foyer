@@ -19,7 +19,10 @@ use std::{
     time::Instant,
 };
 
-use foyer_common::metrics::Metrics;
+use foyer_common::{
+    error::{Error, ErrorKind, Result},
+    metrics::Metrics,
+};
 use futures_util::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
@@ -35,7 +38,6 @@ use crate::{
         },
         RecoverMode,
     },
-    error::{Error, Result},
     runtime::Runtime,
 };
 
@@ -74,8 +76,11 @@ impl RecoverRunner {
         // Return error is there is.
         let (total, errs): (Vec<_>, Vec<_>) = total.into_iter().partition(|res| res.is_ok());
         if !errs.is_empty() {
-            let errs = errs.into_iter().map(|r| r.unwrap_err()).collect_vec();
-            return Err(Error::multiple(errs));
+            let mut e = Error::new(ErrorKind::Recover, "failed to recover blocks");
+            for err in errs.into_iter().map(|r| r.unwrap_err()) {
+                e = e.with_context("reason", err.to_string());
+            }
+            return Err(e);
         }
 
         #[derive(Debug)]

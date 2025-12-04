@@ -25,6 +25,7 @@ use std::{
 use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, Key},
+    error::Result,
     properties::Properties,
 };
 use futures_util::future::BoxFuture;
@@ -33,15 +34,10 @@ use tokio::sync::oneshot;
 
 use crate::{indexer::Indexer, raw::RawCacheEntry, Eviction, Piece};
 
-/// Error type for fetch operations.
-pub type FetchError = Box<dyn std::error::Error + Send + Sync + 'static>;
-/// Result type for fetch operations.
-pub type FetchResult<T> = std::result::Result<T, FetchError>;
-
 /// An optional fetch operation that may return `None` if the entry is not found.
-pub type OptionalFetch<T> = BoxFuture<'static, FetchResult<Option<T>>>;
+pub type OptionalFetch<T> = BoxFuture<'static, Result<Option<T>>>;
 /// A required fetch operation that must return a value.
-pub type RequiredFetch<T> = BoxFuture<'static, FetchResult<T>>;
+pub type RequiredFetch<T> = BoxFuture<'static, Result<T>>;
 
 /// A builder for an optional fetch operation.
 pub type OptionalFetchBuilder<K, V, P, C> =
@@ -54,9 +50,9 @@ pub type RequiredFetchBuilderErased<K, V, P> =
     Box<dyn FnOnce(&mut dyn Any, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
 
 /// A waiter for a fetch operation.
-pub type Waiter<T> = oneshot::Receiver<FetchResult<T>>;
+pub type Waiter<T> = oneshot::Receiver<Result<T>>;
 /// A notifier for a fetch operation.
-pub type Notifier<T> = oneshot::Sender<FetchResult<T>>;
+pub type Notifier<T> = oneshot::Sender<Result<T>>;
 
 fn erase_required_fetch_builder<K, V, P, C, F>(f: F) -> RequiredFetchBuilderErased<K, V, P>
 where

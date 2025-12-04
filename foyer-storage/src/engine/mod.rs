@@ -16,13 +16,14 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
+    error::Result,
     metrics::Metrics,
     properties::{Age, Properties},
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+use crate::{filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

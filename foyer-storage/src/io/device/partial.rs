@@ -14,13 +14,9 @@
 
 use std::sync::{Arc, RwLock};
 
-use crate::{
-    io::{
-        device::{statistics::Statistics, Device, DeviceBuilder, Partition, PartitionId},
-        error::IoResult,
-    },
-    IoError,
-};
+use foyer_common::error::{Error, Result};
+
+use crate::io::device::{statistics::Statistics, Device, DeviceBuilder, Partition, PartitionId};
 
 /// Builder for a partial device that wraps another device and allows access to only a subset of capacity.
 #[derive(Debug)]
@@ -50,7 +46,7 @@ impl PartialDeviceBuilder {
 }
 
 impl DeviceBuilder for PartialDeviceBuilder {
-    fn build(self) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> Result<Arc<dyn Device>> {
         Ok(Arc::new(PartialDevice {
             inner: self.device,
             capacity: self.capacity,
@@ -76,15 +72,11 @@ impl Device for PartialDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size()).sum()
     }
 
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size()).sum::<usize>();
         if allocated + size > self.capacity {
-            return Err(IoError::NoSpace {
-                capacity: self.capacity,
-                allocated,
-                required: size,
-            });
+            return Err(Error::no_space(self.capacity, allocated, allocated + size));
         }
         self.inner.create_partition(size).map(|inner| {
             let partition = PartialPartition {
