@@ -9,6 +9,41 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-11-30
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.21.0 |
+| foyer-common | 0.21.0 |
+| foyer-memory | 0.21.0 |
+| foyer-storage | 0.21.0 |
+| foyer-bench | 0.21.0 |
+
+### Changes
+
+Features and Enhances:
+  - Refine hybrid cache read-related APIS.
+    - New `get()` API: Replace the old `obtain()` API, support memory and disk cache read, request deduplication, and other optimizations. (The old `get()` API without disk cache request deduplication is deprecated.)
+    - New `get_or_fetch()` API: Replace the old `fetch()` API, support memory and disk cache read, automatic cache refill on cache miss, request duduplication, and other optimizations.
+    - Fix panics with race condition while using both `get()` (previously `obtain()`) and `get_or_fetch()` (previously `fetch()`) on the same key.
+    - Refine error and result type with `get_or_fetch()` API.
+  - Refine `Source` and `Age` preprotities. Now, `Source` refer to where the entry comes from, e.g. memory cache, disk cache, or outer; `Age` refer to the generation the entry is in the disk cache.
+  - Refine `Error` type. Use `OpenDAL`-like error definition.
+  - Auto implement `Code` for ` bytes::Bytes` without `serde` feature.
+  - Reduce task spawning on recovery.
+
+Bug Fixes:
+  - Fix panics when cancelling spawned fetch requests.
+  - Fix string trimming when parsing io throttle.
+  - Fix build on `x86` targets.
+
+Testing:
+  - Support simulating io latency with psync io engine in `foyer-bench`.
+  - Refine hybrid cache fuzzy test.
+
+
 ## 2025-10-27
 
 ### Release
