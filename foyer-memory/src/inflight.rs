@@ -41,13 +41,13 @@ pub type RequiredFetch<T> = BoxFuture<'static, Result<T>>;
 
 /// A builder for an optional fetch operation.
 pub type OptionalFetchBuilder<K, V, P, C> =
-    Box<dyn FnOnce(&mut C, &K) -> OptionalFetch<FetchTarget<K, V, P>> + Send + 'static>;
+    Box<dyn FnOnce(&mut C) -> OptionalFetch<FetchTarget<K, V, P>> + Send + 'static>;
 /// A builder for a required fetch operation.
 pub type RequiredFetchBuilder<K, V, P, C> =
-    Box<dyn FnOnce(&mut C, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
+    Box<dyn FnOnce(&mut C) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
 /// A type-erased builder for a required fetch operation.
 pub type RequiredFetchBuilderErased<K, V, P> =
-    Box<dyn FnOnce(&mut dyn Any, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
+    Box<dyn FnOnce(&mut dyn Any) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
 
 /// A waiter for a fetch operation.
 pub type Waiter<T> = oneshot::Receiver<Result<T>>;
@@ -57,11 +57,11 @@ pub type Notifier<T> = oneshot::Sender<Result<T>>;
 fn erase_required_fetch_builder<K, V, P, C, F>(f: F) -> RequiredFetchBuilderErased<K, V, P>
 where
     C: Any + Send + 'static,
-    F: FnOnce(&mut C, &K) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static,
+    F: FnOnce(&mut C) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static,
 {
-    Box::new(move |ctx, key| {
-        let ctx = ctx.downcast_mut::<C>().expect("fetch context type mismatch");
-        f(ctx, key)
+    Box::new(move |ctx| {
+        let ctx: &mut C = ctx.downcast_mut::<C>().expect("fetch context type mismatch");
+        f(ctx)
     })
 }
 
@@ -74,7 +74,7 @@ where
     P: 'static,
     C: Any + Send + 'static,
 {
-    Box::new(move |ctx, key| f(ctx as &mut dyn Any, key))
+    Box::new(move |ctx| f(ctx as &mut dyn Any))
 }
 
 /// The target of a fetch operation.

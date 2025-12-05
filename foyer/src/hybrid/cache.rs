@@ -671,32 +671,34 @@ where
         let runtime = self.inner.storage.runtime().user();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key: &K| {
-                let ctx = ctx.clone();
-                let key = key.clone();
-                async move {
-                    match store.load(&key).await {
-                        Ok(Load::Entry {
-                            key: _,
-                            value,
-                            populated: Populated { age },
-                        }) => {
-                            let properties = HybridCacheProperties::default().with_age(age);
-                            Ok(Some(FetchTarget::Entry { value, properties }))
+            || {
+                let key = key.to_owned();
+                Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>| {
+                    let ctx = ctx.clone();
+                    async move {
+                        match store.load(&key).await {
+                            Ok(Load::Entry {
+                                key: _,
+                                value,
+                                populated: Populated { age },
+                            }) => {
+                                let properties = HybridCacheProperties::default().with_age(age);
+                                Ok(Some(FetchTarget::Entry { value, properties }))
+                            }
+                            // TODO(MrCroxx): Remove populated with piece?
+                            Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
+                            Ok(Load::Throttled) => {
+                                ctx.throttled.store(true, Ordering::Relaxed);
+                                Ok(None)
+                            }
+                            Ok(Load::Miss) => Ok(None),
+                            Err(e) => Err(e),
                         }
-                        // TODO(MrCroxx): Remove populated with piece?
-                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
-                        Ok(Load::Throttled) => {
-                            ctx.throttled.store(true, Ordering::Relaxed);
-                            Ok(None)
-                        }
-                        Ok(Load::Miss) => Ok(None),
-                        Err(e) => Err(e),
                     }
-                }
-                .boxed()
-            })),
-            None,
+                    .boxed()
+                }))
+            },
+            || None,
             ctx,
             runtime,
         );
@@ -719,7 +721,7 @@ where
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce(&Q) -> FU,
+        F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<K, V, HybridCacheProperties>>,
         ER: Into<anyhow::Error>,
@@ -731,60 +733,64 @@ where
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let runtime = self.inner.storage.runtime().user();
-        let fut = fetch(key);
+        let fut = fetch();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
-            Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>, key| {
-                let ctx = ctx.clone();
-                let key = key.clone();
-                async move {
-                    let load = store.load(&key).await;
-                    tracing::trace!(load = ?load, "[hybrid]: loaded from disk cache");
-                    match load {
-                        // match store.load(&key).await {
-                        Ok(Load::Entry {
-                            key: _,
-                            value,
-                            populated: Populated { age },
-                        }) => {
-                            let properties = HybridCacheProperties::default().with_age(age);
-                            Ok(Some(FetchTarget::Entry { value, properties }))
+            || {
+                let key = key.to_owned();
+                Some(Box::new(|ctx: &mut Arc<GetOrFetchCtx>| {
+                    let ctx = ctx.clone();
+                    async move {
+                        let load = store.load(&key).await;
+                        tracing::trace!(load = ?load, "[hybrid]: loaded from disk cache");
+                        match load {
+                            // match store.load(&key).await {
+                            Ok(Load::Entry {
+                                key: _,
+                                value,
+                                populated: Populated { age },
+                            }) => {
+                                let properties = HybridCacheProperties::default().with_age(age);
+                                Ok(Some(FetchTarget::Entry { value, properties }))
+                            }
+                            // TODO(MrCroxx): Remove populated with piece?
+                            Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
+                            Ok(Load::Throttled) => {
+                                ctx.throttled.store(true, Ordering::Relaxed);
+                                Ok(None)
+                            }
+                            Ok(Load::Miss) => Ok(None),
+                            Err(e) => Err(e),
                         }
-                        // TODO(MrCroxx): Remove populated with piece?
-                        Ok(Load::Piece { piece, populated: _ }) => Ok(Some(FetchTarget::Piece(piece))),
-                        Ok(Load::Throttled) => {
-                            ctx.throttled.store(true, Ordering::Relaxed);
-                            Ok(None)
-                        }
-                        Ok(Load::Miss) => Ok(None),
-                        Err(e) => Err(e),
                     }
-                }
-                .boxed()
-            })),
-            Some(Box::new(|ctx, _| {
-                let ctx = ctx.clone();
-                async move {
-                    match fut.await {
-                        Ok(it) => {
-                            let target = it.into();
-                            let target = match target {
-                                FetchTarget::Entry { value, mut properties } => {
-                                    properties = properties.with_age(Age::Fresh);
-                                    if ctx.throttled.load(Ordering::Relaxed) {
-                                        properties = properties.with_location(Location::InMem);
+                    .boxed()
+                }))
+            },
+            || {
+                Some(Box::new(|ctx| {
+                    let ctx = ctx.clone();
+                    async move {
+                        match fut.await {
+                            Ok(it) => {
+                                let target = it.into();
+                                let target = match target {
+                                    FetchTarget::Entry { value, mut properties } => {
+                                        properties = properties.with_age(Age::Fresh);
+                                        if ctx.throttled.load(Ordering::Relaxed) {
+                                            properties = properties.with_location(Location::InMem);
+                                        }
+                                        FetchTarget::Entry { value, properties }
                                     }
-                                    FetchTarget::Entry { value, properties }
-                                }
-                                _ => target,
-                            };
-                            Ok(target)
+                                    _ => target,
+                                };
+                                Ok(target)
+                            }
+                            Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
                         }
-                        Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
                     }
-                }
-                .boxed()
-            })),
+                    .boxed()
+                }))
+            },
             ctx.clone(),
             runtime,
         );
@@ -1096,7 +1102,7 @@ mod tests {
         assert_eq!(e4.value(), &vec![4; 7 * KB]);
 
         let e5 = hybrid
-            .get_or_fetch(&5, |_| async move { Ok::<_, Error>(vec![5; 7 * KB]) })
+            .get_or_fetch(&5, || async move { Ok::<_, Error>(vec![5; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
@@ -1153,7 +1159,7 @@ mod tests {
         let hybrid = open_with(dir.path(), |b| b.with_policy(HybridCachePolicy::WriteOnEviction), |b| b).await;
 
         hybrid
-            .get_or_fetch(&1, |_| async move {
+            .get_or_fetch(&1, || async move {
                 Ok::<_, Error>((
                     vec![1; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::Default),
@@ -1170,7 +1176,7 @@ mod tests {
         );
 
         hybrid
-            .get_or_fetch(&2, |_| async move {
+            .get_or_fetch(&2, || async move {
                 Ok::<_, Error>((
                     vec![2; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::InMem),
@@ -1184,7 +1190,7 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .get_or_fetch(&3, |_| async move {
+            .get_or_fetch(&3, || async move {
                 Ok::<_, Error>((
                     vec![3; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::OnDisk),
@@ -1210,7 +1216,7 @@ mod tests {
         .await;
 
         hybrid
-            .get_or_fetch(&1, |_| async move {
+            .get_or_fetch(&1, || async move {
                 Ok::<_, Error>((
                     vec![1; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::Default),
@@ -1226,7 +1232,7 @@ mod tests {
         );
 
         hybrid
-            .get_or_fetch(&2, |_| async move {
+            .get_or_fetch(&2, || async move {
                 Ok::<_, Error>((
                     vec![2; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::InMem),
@@ -1239,7 +1245,7 @@ mod tests {
         assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
 
         hybrid
-            .get_or_fetch(&3, |_| async move {
+            .get_or_fetch(&3, || async move {
                 Ok::<_, Error>((
                     vec![3; 7 * KB],
                     HybridCacheProperties::default().with_location(Location::OnDisk),
@@ -1379,7 +1385,7 @@ mod tests {
 
         // 4. assert fetch will not reinsert throttled but existed e1
         hybrid
-            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         hybrid.storage().wait().await;
@@ -1421,7 +1427,7 @@ mod tests {
 
         // 4. assert fetch will not reinsert throttled but existed e1
         hybrid
-            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(hybrid.memory().get(&1).unwrap().value(), &vec![1; 7 * KB]);
@@ -1502,7 +1508,7 @@ mod tests {
         load_holder.hold();
         let get = hybrid.get(&42);
         let b = barrier.clone();
-        let fetch = hybrid.get_or_fetch(&42, |_| async move {
+        let fetch = hybrid.get_or_fetch(&42, || async move {
             b.wait().await;
             Ok::<_, Error>(vec![b'x'; 42])
         });
@@ -1527,8 +1533,8 @@ mod tests {
 
         let hybrid = open_with(dir.path(), |b| b, |b| b.with_flush_switch(flush_switch.clone())).await;
 
-        let f1 = hybrid.get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) });
-        let f2 = hybrid.get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) });
+        let f1 = hybrid.get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) });
+        let f2 = hybrid.get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) });
 
         let e1 = f1.await.unwrap();
         let e2 = f2.await.unwrap();
@@ -1539,7 +1545,7 @@ mod tests {
         drop(e2);
 
         let e3 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e3.source(), Source::Memory);
@@ -1548,7 +1554,7 @@ mod tests {
         flush_switch.on();
         hybrid.memory().evict_all();
         let e4 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e4.source(), Source::Memory);
@@ -1560,7 +1566,7 @@ mod tests {
 
         hybrid.storage().wait().await;
         let e5 = hybrid
-            .get_or_fetch(&1, |_| async move { Ok::<_, Error>(vec![1; 7 * KB]) })
+            .get_or_fetch(&1, || async move { Ok::<_, Error>(vec![1; 7 * KB]) })
             .await
             .unwrap();
         assert_eq!(e5.source(), Source::Disk);
@@ -1591,7 +1597,7 @@ mod tests {
             .unwrap();
 
         let err = hybrid
-            .get_or_fetch(&0, |_| {
+            .get_or_fetch(&0, || {
                 let e = e.clone();
                 async move { Err::<Vec<u8>, _>(e) }
             })

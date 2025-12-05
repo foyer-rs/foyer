@@ -935,24 +935,26 @@ where
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
-        F: FnOnce(&Q) -> FU,
+        F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<E::Key, E::Value, E::Properties>>,
         ER: Into<anyhow::Error>,
     {
-        let fut = fetch(key);
+        let fut = fetch();
         self.get_or_fetch_inner(
             key,
-            None,
-            Some(Box::new(|_, _| {
-                async {
-                    match fut.await {
-                        Ok(it) => Ok(it.into()),
-                        Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
+            || None,
+            || {
+                Some(Box::new(|_| {
+                    async {
+                        match fut.await {
+                            Ok(it) => Ok(it.into()),
+                            Err(e) => Err(Error::new(ErrorKind::External, "fetch failed").with_source(e)),
+                        }
                     }
-                }
-                .boxed()
-            })),
+                    .boxed()
+                }))
+            },
             (),
             &tokio::runtime::Handle::current().into(),
         )
@@ -966,18 +968,19 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
-    #[expect(clippy::type_complexity)]
-    pub fn get_or_fetch_inner<Q, C>(
+    pub fn get_or_fetch_inner<Q, C, FO, FR>(
         &self,
         key: &Q,
-        optional_fetch_builder: Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        fo: FO,
+        fr: FR,
         ctx: C,
         runtime: &SingletonHandle,
     ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         C: Any + Send + Sync + 'static,
+        FO: FnOnce() -> Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        FR: FnOnce() -> Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
     {
         let hash = self.inner.hash_builder.hash_one(key);
 
@@ -990,7 +993,7 @@ where
                     source: Source::Memory,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, required_fetch_builder) {
+            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, fr()) {
                 Enqueue::Lead {
                     id,
                     close,
@@ -999,7 +1002,7 @@ where
                 } => {
                     let fetch = RawFetch {
                         state: RawFetchState::Init {
-                            optional_fetch_builder,
+                            optional_fetch_builder: fo(),
                             required_fetch_builder,
                         },
                         id,
@@ -1268,7 +1271,7 @@ where
                     optional_fetch_builder,
                     required_fetch_builder,
                 } => {
-                    handle_try! { *this.state, try_set_optional(optional_fetch_builder, required_fetch_builder, this.key.as_ref().unwrap(), this.ctx) }
+                    handle_try! { *this.state, try_set_optional(optional_fetch_builder, required_fetch_builder, this.ctx) }
                     handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), this.inflights, Ok(None)) }
                 }
                 RawFetchState::FetchOptional {
@@ -1325,13 +1328,12 @@ where
     fn try_set_optional(
         optional_fetch_builder: &mut Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
         required_fetch_builder: &mut Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
-        key: &E::Key,
         ctx: &mut C,
     ) -> Try<E, S, I, C> {
         match optional_fetch_builder.take() {
             None => Try::Noop,
             Some(optional_fetch_builder) => {
-                let optional_fetch = optional_fetch_builder(ctx, key);
+                let optional_fetch = optional_fetch_builder(ctx);
                 Try::SetStateAndContinue(RawFetchState::FetchOptional {
                     optional_fetch,
                     required_fetch_builder: required_fetch_builder.take(),
@@ -1354,7 +1356,7 @@ where
         match required_fetch_builder.take() {
             None => {}
             Some(required_fetch_builder) => {
-                let required_fetch = required_fetch_builder(ctx, key);
+                let required_fetch = required_fetch_builder(ctx);
                 return Try::SetStateAndContinue(RawFetchState::FetchRequired { required_fetch });
             }
         }
@@ -1365,7 +1367,7 @@ where
         };
         match fetch_or_take {
             FetchOrTake::Fetch(required_fetch_builder) => {
-                let required_fetch = required_fetch_builder(ctx, key);
+                let required_fetch = required_fetch_builder(ctx);
                 Try::SetStateAndContinue(RawFetchState::FetchRequired { required_fetch })
             }
             FetchOrTake::Notifiers(notifiers) => Try::SetStateAndContinue(RawFetchState::Notify {

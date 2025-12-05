@@ -920,18 +920,15 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
         let entry_size = osrng.random_range(context.entry_size_range.clone());
         let latency = context.latency;
-        let fetch = hybrid.get_or_fetch(&idx, move |idx| {
-            let idx = *idx;
-            async move {
-                if latency != Duration::ZERO {
-                    tokio::time::sleep(latency).await;
-                }
-                tokio::task::yield_now().await;
-                let _ = miss_tx.send(time.elapsed());
-                Ok::<_, Error>(Value {
-                    inner: Arc::new(text(idx as usize, entry_size)),
-                })
+        let fetch = hybrid.get_or_fetch(&idx, move || async move {
+            if latency != Duration::ZERO {
+                tokio::time::sleep(latency).await;
             }
+            tokio::task::yield_now().await;
+            let _ = miss_tx.send(time.elapsed());
+            Ok::<_, Error>(Value {
+                inner: Arc::new(text(idx as usize, entry_size)),
+            })
         });
 
         let entry = fetch.await.unwrap();
