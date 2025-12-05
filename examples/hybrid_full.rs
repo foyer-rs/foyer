@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let e = hybrid
-        .get_or_fetch(&20230512, |_| async {
+        .get_or_fetch(&20230512, || async {
             // Mock fetching data from remote source
             let now = chrono::Utc::now();
             if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {

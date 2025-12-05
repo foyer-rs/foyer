@@ -184,11 +184,11 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
 
         let res = if cnt % ERROR_PER_FETCHES as u64 == 0 {
             hybrid
-                .get_or_fetch(&key, move |_| async move { Err::<Vec<u8>, _>(Trap) })
+                .get_or_fetch(&key, || async move { Err::<Vec<u8>, _>(Trap) })
                 .await
         } else {
             hybrid
-                .get_or_fetch(&key, move |_| async move {
+                .get_or_fetch(&key, || async move {
                     tokio::time::sleep(MISS_WAIT).await;
                     Ok::<_, Error>(value(key))
                 })

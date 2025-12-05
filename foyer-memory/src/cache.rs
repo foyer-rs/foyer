@@ -1089,7 +1089,7 @@ where
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
-        F: FnOnce(&Q) -> FU,
+        F: FnOnce() -> FU,
         FU: Future<Output = std::result::Result<IT, ER>> + Send + 'static,
         IT: Into<FetchTarget<K, V, P>>,
         ER: Into<anyhow::Error>,
@@ -1108,34 +1108,26 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<Q, C>(
+    pub fn get_or_fetch_inner<Q, C, FO, FR>(
         &self,
         key: &Q,
-        optional_fetch_builder: Option<OptionalFetchBuilder<K, V, P, C>>,
-        required_fetch_builder: Option<RequiredFetchBuilder<K, V, P, C>>,
+        fo: FO,
+        fr: FR,
         ctx: C,
         runtime: &SingletonHandle,
     ) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         C: Any + Send + Sync + 'static,
+        FO: FnOnce() -> Option<OptionalFetchBuilder<K, V, P, C>>,
+        FR: FnOnce() -> Option<RequiredFetchBuilder<K, V, P, C>>,
     {
         match self {
-            Cache::Fifo(cache) => cache
-                .get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx, runtime)
-                .into(),
-            Cache::Lru(cache) => cache
-                .get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx, runtime)
-                .into(),
-            Cache::Lfu(cache) => cache
-                .get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx, runtime)
-                .into(),
-            Cache::S3Fifo(cache) => cache
-                .get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx, runtime)
-                .into(),
-            Cache::Sieve(cache) => cache
-                .get_or_fetch_inner(key, optional_fetch_builder, required_fetch_builder, ctx, runtime)
-                .into(),
+            Cache::Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::Lru(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
         }
     }
 }
@@ -1231,12 +1223,9 @@ mod tests {
             }
             3 => {
                 let entry = cache
-                    .get_or_fetch(&i, |i| {
-                        let i = *i;
-                        async move {
-                            tokio::time::sleep(Duration::from_micros(10)).await;
-                            Ok::<_, Error>(i)
-                        }
+                    .get_or_fetch(&i, || async move {
+                        tokio::time::sleep(Duration::from_micros(10)).await;
+                        Ok::<_, Error>(i)
                     })
                     .await
                     .unwrap();
