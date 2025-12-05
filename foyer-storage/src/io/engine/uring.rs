@@ -231,7 +231,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                         }
                         shard.run();
                     })
-                    .map_err(Error::code_io_error)?;
+                    .map_err(Error::io_error)?;
             }
 
             let engine = UringIoEngine { read_txs, write_txs };

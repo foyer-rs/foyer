@@ -129,16 +129,16 @@ impl EntrySerializer {
             }
             Compression::Zstd => {
                 // Do not use `auto_finish()` here, for we will lost `ZeroWrite` error.
-                let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::code_io_error)?;
+                let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::io_error)?;
                 value.encode(&mut encoder)?;
-                encoder.finish().map_err(Error::code_io_error)?;
+                encoder.finish().map_err(Error::io_error)?;
             }
             Compression::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .auto_flush(true)
                     .build(&mut writer)
-                    .map_err(Error::code_io_error)?;
+                    .map_err(Error::io_error)?;
                 value.encode(&mut encoder)?;
             }
         }
@@ -219,11 +219,11 @@ impl EntryDeserializer {
         match compression {
             Compression::None => V::decode(&mut &buf[..]),
             Compression::Zstd => {
-                let mut decoder = zstd::Decoder::new(buf).map_err(Error::code_io_error)?;
+                let mut decoder = zstd::Decoder::new(buf).map_err(Error::io_error)?;
                 V::decode(&mut decoder)
             }
             Compression::Lz4 => {
-                let mut decoder = lz4::Decoder::new(buf).map_err(Error::code_io_error)?;
+                let mut decoder = lz4::Decoder::new(buf).map_err(Error::io_error)?;
                 V::decode(&mut decoder)
             }
         }

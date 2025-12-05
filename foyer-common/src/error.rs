@@ -337,31 +337,26 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper methods for Error.
 impl Error {
-    /// Helper for creating an [`ErrorKind::Io`] error from [`std::io::Error`].
-    pub fn io_error(source: std::io::Error) -> Self {
-        Error::new(ErrorKind::Io, "").with_source(source)
-    }
-
     /// Helper for creating an [`ErrorKind::Io`] error from a raw OS error code.
     pub fn raw_os_io_error(raw: i32) -> Self {
         let source = std::io::Error::from_raw_os_error(raw);
-        Error::new(ErrorKind::Io, "").with_source(source)
+        Self::io_error(source)
     }
 
-    /// Helper for creating an error for coding from [`std::io::Error`].
-    pub fn code_io_error(source: std::io::Error) -> Self {
+    /// Helper for creating an [`ErrorKind::Io`] error from [`std::io::Error`].
+    pub fn io_error(source: std::io::Error) -> Self {
         match source.kind() {
             std::io::ErrorKind::WriteZero => Error::new(ErrorKind::BufferSizeLimit, "coding error").with_source(source),
             _ => Error::new(ErrorKind::Io, "coding error").with_source(source),
         }
     }
 
-    /// Helper for creating an error for coding from [`bincode::Error`].
+    /// Helper for creating an error from [`bincode::Error`].
     #[cfg(feature = "serde")]
-    pub fn code_bincode_error(source: bincode::Error) -> Self {
+    pub fn bincode_error(source: bincode::Error) -> Self {
         match *source {
             bincode::ErrorKind::SizeLimit => Error::new(ErrorKind::BufferSizeLimit, "coding error").with_source(source),
-            bincode::ErrorKind::Io(e) => Self::code_io_error(e),
+            bincode::ErrorKind::Io(e) => Self::io_error(e),
             _ => Error::new(ErrorKind::External, "coding error").with_source(source),
         }
     }

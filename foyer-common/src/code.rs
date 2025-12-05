@@ -54,9 +54,21 @@ impl<T> StorageValue for T where T: Value + Code {}
 /// implemented for [`Code`].
 pub trait Code {
     /// Encode the object into a writer.
+    ///
+    /// NOTE:
+    ///
+    /// When implementing [`Code`], if [`std::io::Error`] or `bincode::Error` occurs during encoding,
+    /// please use [`Error::io_error`] or `Error::bincode_error` to convert it into [`Error`],
+    /// instead of manually creating an [`Error`]..
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()>;
 
     /// Decode the object from a reader.
+    ///
+    /// NOTE:
+    ///
+    /// When implementing [`Code`], if [`std::io::Error`] or `bincode::Error` occurs during decoding,
+    /// please use [`Error::io_error`] or `Error::bincode_error` to convert it into [`Error`],
+    /// instead of manually creating an [`Error`]..
     fn decode(reader: &mut impl std::io::Read) -> Result<Self>
     where
         Self: Sized;
@@ -73,11 +85,11 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
-        bincode::serialize_into(writer, self).map_err(Error::code_bincode_error)
+        bincode::serialize_into(writer, self).map_err(Error::bincode_error)
     }
 
     fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
-        bincode::deserialize_from(reader).map_err(Error::code_bincode_error)
+        bincode::deserialize_from(reader).map_err(Error::bincode_error)
     }
 
     fn estimated_size(&self) -> usize {
@@ -91,12 +103,12 @@ macro_rules! impl_serde_for_numeric_types {
             #[cfg(not(feature = "serde"))]
             impl Code for $t {
                 fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
-                    writer.write_all(&self.to_le_bytes()).map_err(Error::code_io_error)
+                    writer.write_all(&self.to_le_bytes()).map_err(Error::io_error)
                 }
 
                 fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
                     let mut buf = [0u8; std::mem::size_of::<$t>()];
-                    reader.read_exact(&mut buf).map_err(Error::code_io_error)?;
+                    reader.read_exact(&mut buf).map_err(Error::io_error)?;
                     Ok(<$t>::from_le_bytes(buf))
                 }
 
@@ -121,7 +133,7 @@ impl Code for bool {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         writer
             .write_all(if *self { &[1u8] } else { &[0u8] })
-            .map_err(Error::code_io_error)
+            .map_err(Error::io_error)
     }
 
     fn decode(reader: &mut impl std::io::Read) -> Result<Self>
@@ -129,7 +141,7 @@ impl Code for bool {
         Self: Sized,
     {
         let mut buf = [0u8; 1];
-        reader.read_exact(&mut buf).map_err(Error::code_io_error)?;
+        reader.read_exact(&mut buf).map_err(Error::io_error)?;
         match buf[0] {
             0 => Ok(false),
             1 => Ok(true),
@@ -146,7 +158,7 @@ impl Code for bool {
 impl Code for Vec<u8> {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
-        writer.write_all(self).map_err(Error::code_io_error)
+        writer.write_all(self).map_err(Error::io_error)
     }
 
     #[expect(clippy::uninit_vec)]
@@ -159,7 +171,7 @@ impl Code for Vec<u8> {
         unsafe {
             v.set_len(len);
         }
-        reader.read_exact(&mut v).map_err(Error::code_io_error)?;
+        reader.read_exact(&mut v).map_err(Error::io_error)?;
         Ok(v)
     }
 
@@ -172,7 +184,7 @@ impl Code for Vec<u8> {
 impl Code for String {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
-        writer.write_all(self.as_bytes()).map_err(Error::code_io_error)
+        writer.write_all(self.as_bytes()).map_err(Error::io_error)
     }
 
     #[expect(clippy::uninit_vec)]
@@ -183,7 +195,7 @@ impl Code for String {
         let len = usize::decode(reader)?;
         let mut v = Vec::with_capacity(len);
         unsafe { v.set_len(len) };
-        reader.read_exact(&mut v).map_err(Error::code_io_error)?;
+        reader.read_exact(&mut v).map_err(Error::io_error)?;
         String::from_utf8(v)
             .map_err(|e| Error::new(crate::error::ErrorKind::Parse, "failed to parse String").with_source(e))
     }
@@ -197,7 +209,7 @@ impl Code for String {
 impl Code for bytes::Bytes {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
-        writer.write_all(self).map_err(Error::code_io_error)
+        writer.write_all(self).map_err(Error::io_error)
     }
 
     #[expect(clippy::uninit_vec)]
@@ -208,7 +220,7 @@ impl Code for bytes::Bytes {
         let len = usize::decode(reader)?;
         let mut v = Vec::with_capacity(len);
         unsafe { v.set_len(len) };
-        reader.read_exact(&mut v).map_err(Error::code_io_error)?;
+        reader.read_exact(&mut v).map_err(Error::io_error)?;
         Ok(bytes::Bytes::from(v))
     }
 
