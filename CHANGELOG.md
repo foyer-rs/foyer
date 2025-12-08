@@ -23,6 +23,13 @@ date: 2023-05-12T11:02:09+08:00
 
 ### Changes
 
+> [!IMPORTANT]
+> **Breaking Changes:**
+>
+> - Hybrid cache and memory cache `fetch()` API is renamed to `get_or_fetch()`, and there are subtle changes in the arguments.
+> - Hybrid cache `get()` API functions the same as the previous `obtain()`, and the `obtain()` API is removed because the naming is obscure.
+> - The Error type returned by all interfaces that return Result and Error has been refactored. When manually implementing Code for cache key or value, please pay attention to how errors are handled as described in the interface comments.
+
 Features and Enhances:
   - Refine hybrid cache read-related APIS.
     - New `get()` API: Replace the old `obtain()` API, support memory and disk cache read, request deduplication, and other optimizations. (The old `get()` API without disk cache request deduplication is deprecated.)
