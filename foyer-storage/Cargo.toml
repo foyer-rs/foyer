@@ -33,7 +33,6 @@ clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
 fastant = { workspace = true, features = ["atomic"] }
 fastrace = { workspace = true, optional = true }
-flume = { workspace = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
 fs4 = { workspace = true }
@@ -43,6 +42,7 @@ hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }
+mea = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }

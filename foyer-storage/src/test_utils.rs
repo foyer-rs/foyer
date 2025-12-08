@@ -26,8 +26,8 @@ use std::{
 
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
+use mea::oneshot;
 use parking_lot::Mutex;
-use tokio::sync::oneshot;
 
 use crate::{io::device::statistics::Statistics, StorageFilterCondition, StorageFilterResult};
 

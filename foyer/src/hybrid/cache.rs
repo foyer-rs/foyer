@@ -1044,8 +1044,8 @@ mod tests {
 
     use foyer_common::{hasher::ModHasher, properties::Source};
     use foyer_storage::{test_utils::*, StorageFilter};
+    use mea::barrier::Barrier;
     use storage::test_utils::Biased;
-    use tokio::sync::Barrier;
 
     use crate::*;
 

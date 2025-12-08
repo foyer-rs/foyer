@@ -32,8 +32,8 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
+use mea::oneshot;
 use rand::seq::IteratorRandom;
-use tokio::sync::oneshot;
 
 use crate::{
     engine::block::{

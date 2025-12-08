@@ -37,8 +37,8 @@ use std::{
 use bytesize::ByteSize;
 use foyer::Statistics;
 use hdrhistogram::Histogram;
+use mea::broadcast;
 use parking_lot::RwLock;
-use tokio::sync::broadcast;
 
 // latencies are measured by 'us'
 #[derive(Clone, Copy, Debug)]
@@ -335,7 +335,7 @@ pub async fn monitor(
     loop {
         let now = Instant::now();
         match stop.try_recv() {
-            Err(broadcast::error::TryRecvError::Empty) => {}
+            Err(broadcast::TryRecvError::Empty) => {}
             _ => return,
         }
 

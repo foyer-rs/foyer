@@ -24,7 +24,7 @@ use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
-use tokio::sync::oneshot;
+use mea::oneshot;
 
 use crate::{
     io::{

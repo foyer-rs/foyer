@@ -37,7 +37,10 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::oneshot;
+use mea::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
@@ -121,7 +124,7 @@ where
     P: Properties,
 {
     id: usize,
-    tx: flume::Sender<Submission<K, V, P>>,
+    tx: UnboundedSender<Submission<K, V, P>>,
     submit_queue_size: Arc<AtomicUsize>,
 
     metrics: Arc<Metrics>,
@@ -153,8 +156,8 @@ where
         id: usize,
         submit_queue_size: Arc<AtomicUsize>,
         metrics: Arc<Metrics>,
-    ) -> (Self, flume::Receiver<Submission<K, V, P>>) {
-        let (tx, rx) = flume::unbounded();
+    ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
+        let (tx, rx) = mea::mpsc::unbounded();
         let this = Self {
             id,
             tx,
@@ -167,7 +170,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn run(
         &self,
-        rx: flume::Receiver<Submission<K, V, P>>,
+        rx: UnboundedReceiver<Submission<K, V, P>>,
         block_size: usize,
         io_buffer_size: usize,
         blob_index_size: usize,
@@ -287,7 +290,7 @@ where
 {
     id: usize,
 
-    rx: Option<flume::Receiver<Submission<K, V, P>>>,
+    rx: Option<UnboundedReceiver<Submission<K, V, P>>>,
 
     // NOTE: writer is always `Some(..)`.
     buffer: Option<Buffer>,
@@ -342,13 +345,17 @@ where
     }
 
     pub async fn run(mut self) -> Result<()> {
-        let rx = self.rx.take().unwrap();
+        let mut rx = self.rx.take().unwrap();
 
         loop {
+            while let Ok(submission) = rx.try_recv() {
+                self.recv(submission);
+            }
+
             #[cfg(not(any(test, feature = "test_utils")))]
             let can_flush = true;
             #[cfg(any(test, feature = "test_utils"))]
-            let can_flush = !self.flush_switch.is_on() && rx.is_empty();
+            let can_flush = !self.flush_switch.is_on();
 
             let need_flush = !self.buffer.as_ref().unwrap().is_empty()
                 || !self.waiters.is_empty()
@@ -389,7 +396,7 @@ where
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
-                Ok(submission) = rx.recv_async() => {
+                Some(submission) = rx.recv() => {
                     self.recv(submission);
                 }
                 // Graceful shutdown.

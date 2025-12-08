@@ -45,7 +45,6 @@ fastant = "0.1.11"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.14"
-flume = "0.11"
 foyer = { version = "0.21.0", path = "foyer" }
 foyer-common = { version = "0.21.0", path = "foyer-common" }
 foyer-memory = { version = "0.21.0", path = "foyer-memory" }
@@ -64,6 +63,7 @@ io-uring = "0.7"
 itertools = "0.14"
 libc = "0.2"
 lz4 = "1"
+mea = "0.5.2"
 mixtrics = "0.2"
 moka = "0.12"
 opentelemetry = "0.31"
