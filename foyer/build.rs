@@ -14,13 +14,23 @@
 
 //! Build script.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+const README_FILENAME: &str = "README.md";
 
 fn main() {
-    println!("cargo:rerun-if-changed=README.md");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut readme_path = manifest_dir.join(README_FILENAME);
+    if !readme_path.exists() {
+        readme_path = manifest_dir.join("..").join(README_FILENAME);
+    }
 
-    let readme = fs::read_to_string("../README.md").unwrap();
+    println!("cargo:rerun-if-changed={}", readme_path.display());
 
+    let readme = fs::read_to_string(readme_path).unwrap();
     let mut out = String::new();
     let mut skip = false;
 
