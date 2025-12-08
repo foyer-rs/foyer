@@ -38,6 +38,7 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
+use mea::mpsc::UnboundedReceiver;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
@@ -358,7 +359,7 @@ where
         let submit_queue_size = Arc::<AtomicUsize>::default();
 
         #[expect(clippy::type_complexity)]
-        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<flume::Receiver<Submission<K, V, P>>>) = (0..self.flushers)
+        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) = (0..self.flushers)
             .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
             .unzip();
 

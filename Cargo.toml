@@ -45,7 +45,6 @@ fastant = "0.1.11"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.14"
-flume = "0.11"
 foyer = { version = "0.21.0-dev", path = "foyer" }
 foyer-common = { version = "0.21.0-dev", path = "foyer-common" }
 foyer-memory = { version = "0.21.0-dev", path = "foyer-memory" }
