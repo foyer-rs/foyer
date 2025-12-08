@@ -14,32 +14,41 @@
 
 //! Build script.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-const README_PATH: &str = "../README.md";
+const README_FILENAME: &str = "README.md";
 
 fn main() {
-    println!("cargo:rerun-if-changed={}", README_PATH);
-    if let Ok(readme) = fs::read_to_string(README_PATH) {
-        let mut out = String::new();
-        let mut skip = false;
-
-        for line in readme.lines() {
-            if line.contains("<!-- rustdoc-ignore-start -->") {
-                skip = true;
-                continue;
-            }
-            if line.contains("<!-- rustdoc-ignore-end -->") {
-                skip = false;
-                continue;
-            }
-            if !skip {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-
-        let out_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("foyer-docs.md");
-        fs::write(out_path.clone(), out).unwrap();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut readme_path = manifest_dir.join(README_FILENAME);
+    if !readme_path.exists() {
+        readme_path = manifest_dir.join("..").join(README_FILENAME);
     }
+
+    println!("cargo:rerun-if-changed={}", readme_path.display());
+
+    let readme = fs::read_to_string(readme_path).unwrap();
+    let mut out = String::new();
+    let mut skip = false;
+
+    for line in readme.lines() {
+        if line.contains("<!-- rustdoc-ignore-start -->") {
+            skip = true;
+            continue;
+        }
+        if line.contains("<!-- rustdoc-ignore-end -->") {
+            skip = false;
+            continue;
+        }
+        if !skip {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    let out_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("foyer-docs.md");
+    fs::write(out_path.clone(), out).unwrap();
 }
