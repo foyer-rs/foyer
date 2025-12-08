@@ -17,7 +17,7 @@
 use std::{fs, path::Path};
 
 fn main() {
-    println!("cargo:rerun-if-changed=README.md");
+    println!("cargo:rerun-if-changed=../README.md");
 
     let readme = fs::read_to_string("../README.md").unwrap();
 
