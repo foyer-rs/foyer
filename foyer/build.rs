@@ -16,29 +16,30 @@
 
 use std::{fs, path::Path};
 
+const README_PATH: &str = "../README.md";
+
 fn main() {
-    println!("cargo:rerun-if-changed=../README.md");
+    println!("cargo:rerun-if-changed={}", README_PATH);
+    if let Ok(readme) = fs::read_to_string(README_PATH) {
+        let mut out = String::new();
+        let mut skip = false;
 
-    let readme = fs::read_to_string("../README.md").unwrap();
+        for line in readme.lines() {
+            if line.contains("<!-- rustdoc-ignore-start -->") {
+                skip = true;
+                continue;
+            }
+            if line.contains("<!-- rustdoc-ignore-end -->") {
+                skip = false;
+                continue;
+            }
+            if !skip {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
 
-    let mut out = String::new();
-    let mut skip = false;
-
-    for line in readme.lines() {
-        if line.contains("<!-- rustdoc-ignore-start -->") {
-            skip = true;
-            continue;
-        }
-        if line.contains("<!-- rustdoc-ignore-end -->") {
-            skip = false;
-            continue;
-        }
-        if !skip {
-            out.push_str(line);
-            out.push('\n');
-        }
+        let out_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("foyer-docs.md");
+        fs::write(out_path.clone(), out).unwrap();
     }
-
-    let out_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("foyer-docs.md");
-    fs::write(out_path.clone(), out).unwrap();
 }
