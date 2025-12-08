@@ -47,12 +47,12 @@ use foyer::{
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
+use mea::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
 use rate::RateLimiter;
 use text::text;
-use tokio::sync::{broadcast, oneshot};
 
 use crate::analyze::IoStat;
 
@@ -705,7 +705,7 @@ async fn benchmark(args: Args) {
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         tracing::warn!("foyer-bench is cancelled with CTRL-C");
-        stop_tx.send(()).unwrap();
+        stop_tx.send(());
     });
 
     handle_bench.await.unwrap();
@@ -823,7 +823,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         let l = Instant::now();
 
         match stop.try_recv() {
-            Err(broadcast::error::TryRecvError::Empty) => {}
+            Err(broadcast::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed() >= context.time + context.warm_up {
@@ -898,7 +898,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
     loop {
         match stop.try_recv() {
-            Err(broadcast::error::TryRecvError::Empty) => {}
+            Err(broadcast::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed() >= context.time + context.warm_up {
@@ -914,7 +914,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let c = rng.random_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
         let idx = w + c * step;
 
-        let (miss_tx, mut miss_rx) = oneshot::channel();
+        let (miss_tx, miss_rx) = oneshot::channel();
 
         let time = Instant::now();
 
@@ -934,7 +934,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let entry = fetch.await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
-        let (hit, miss_lat) = if let Ok(elapsed) = miss_rx.try_recv() {
+        let (hit, miss_lat) = if let Ok(Some(elapsed)) = miss_rx.try_recv() {
             (false, elapsed.as_micros() as u64)
         } else {
             (true, 0)

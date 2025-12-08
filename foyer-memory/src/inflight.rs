@@ -15,6 +15,7 @@
 use std::{
     any::Any,
     fmt::Debug,
+    future::IntoFuture,
     hash::Hash,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,7 +31,7 @@ use foyer_common::{
 };
 use futures_util::future::BoxFuture;
 use hashbrown::hash_table::{Entry, HashTable};
-use tokio::sync::oneshot;
+use mea::oneshot;
 
 use crate::{indexer::Indexer, raw::RawCacheEntry, Eviction, Piece};
 
@@ -50,7 +51,7 @@ pub type RequiredFetchBuilderErased<K, V, P> =
     Box<dyn FnOnce(&mut dyn Any) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
 
 /// A waiter for a fetch operation.
-pub type Waiter<T> = oneshot::Receiver<Result<T>>;
+pub type Waiter<T> = oneshot::Recv<Result<T>>;
 /// A notifier for a fetch operation.
 pub type Notifier<T> = oneshot::Sender<Result<T>>;
 
@@ -200,7 +201,7 @@ where
                 }
                 let (tx, rx) = oneshot::channel();
                 entry.inflight.notifiers.push(tx);
-                Enqueue::Wait(rx)
+                Enqueue::Wait(rx.into_future())
             }
             Entry::Vacant(v) => {
                 let (tx, rx) = oneshot::channel();
@@ -221,7 +222,7 @@ where
                 Enqueue::Lead {
                     id,
                     close,
-                    waiter: rx,
+                    waiter: rx.into_future(),
                     required_fetch_builder: f,
                 }
             }

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use foyer_common::error::Result;
-use tokio::sync::Mutex;
+use mea::mutex::Mutex;
 
 use crate::{
     io::{bytes::IoSliceMut, device::Partition, PAGE},
@@ -286,7 +286,7 @@ mod tests {
 
         {
             let inner = log.inner.lock().await;
-            assert_eq!(inner.slot, (3 * 1024 + 42 + 1));
+            assert_eq!(inner.slot, 3 * 1024 + 42 + 1);
             let (page, _) = log.slot_addr(inner.slot);
             assert_eq!(inner.buffer.page, page);
         }

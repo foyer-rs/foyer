@@ -36,6 +36,7 @@ humantime = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
+mea = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }

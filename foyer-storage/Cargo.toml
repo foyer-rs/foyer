@@ -43,6 +43,7 @@ hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }
+mea = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }

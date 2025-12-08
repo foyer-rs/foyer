@@ -37,7 +37,7 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::oneshot;
+use mea::oneshot;
 
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
