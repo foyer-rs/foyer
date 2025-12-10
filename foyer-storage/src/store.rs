@@ -30,7 +30,7 @@ use foyer_common::{
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
-use tokio::runtime::Handle;
+use foyer_common::tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -318,14 +318,14 @@ pub struct TokioRuntimeOptions {
     /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
     /// Which is 1 worker per core.
     ///
-    /// See [`tokio::runtime::Builder::worker_threads`].
+    /// See [`foyer_common::tokio::runtime::Builder::worker_threads`].
     pub worker_threads: usize,
 
     /// Max threads to run blocking io.
     ///
     /// If the value is set to `0`, use the tokio default value (which is 512).
     ///
-    /// See [`tokio::runtime::Builder::max_blocking_threads`].
+    /// See [`foyer_common::tokio::runtime::Builder::max_blocking_threads`].
     pub max_blocking_threads: usize,
 }
 
@@ -475,7 +475,7 @@ where
         let compression = self.compression;
 
         let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            let mut builder = foyer_common::tokio::runtime::Builder::new_multi_thread();
             #[cfg(madsim)]
             let _ = config;
             #[cfg(not(madsim))]
@@ -580,7 +580,7 @@ mod tests {
         DeviceBuilder,
     };
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_build_with_unaligned_buffer_pool_size() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
@@ -603,7 +603,7 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_entry_hash_collision() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());

@@ -25,7 +25,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use prometheus::{Encoder, Registry, TextEncoder};
-use tokio::net::TcpListener;
+use foyer_common::tokio::net::TcpListener;
 
 pub struct PrometheusExporter {
     registry: Registry,
@@ -38,7 +38,7 @@ impl PrometheusExporter {
     }
 
     pub fn run(self) {
-        tokio::spawn(async move {
+        foyer_common::tokio::spawn(async move {
             let listener = TcpListener::bind(&self.addr).await.unwrap();
             loop {
                 let (stream, _) = match listener.accept().await {
@@ -54,7 +54,7 @@ impl PrometheusExporter {
                     registry: self.registry.clone(),
                 };
 
-                tokio::spawn(async move {
+                foyer_common::tokio::spawn(async move {
                     if let Err(e) = http1::Builder::new().serve_connection(io, handle).await {
                         tracing::error!("[prometheus exporter]: serve request error: {e}");
                     }

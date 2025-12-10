@@ -103,7 +103,7 @@ impl RecentEvictionQueue {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(foyer_common::tokio::test)]
 async fn test_concurrent_insert_disk_cache_and_fetch() {
     let dir = tempfile::tempdir().unwrap();
 
@@ -132,17 +132,17 @@ async fn test_concurrent_insert_disk_cache_and_fetch() {
         let h = hybrid.clone();
         let r = recent.clone();
         let i = idx.clone();
-        handles.push(tokio::spawn(async move { write(h, r, i).await }));
+        handles.push(foyer_common::tokio::spawn(async move { write(h, r, i).await }));
     }
     for _ in 0..FETCHERS {
         let h = hybrid.clone();
         let r = recent.clone();
-        handles.push(tokio::spawn(async move { fetch(h, r).await }));
+        handles.push(foyer_common::tokio::spawn(async move { fetch(h, r).await }));
     }
     for _ in 0..READERS {
         let h = hybrid.clone();
         let r = recent.clone();
-        handles.push(tokio::spawn(async move { read(h, r).await }));
+        handles.push(foyer_common::tokio::spawn(async move { read(h, r).await }));
     }
     for h in handles {
         h.await.unwrap();
@@ -168,7 +168,7 @@ async fn write(hybrid: HybridCache<u64, Vec<u8>>, _: Arc<RecentEvictionQueue>, i
                 value(k),
                 HybridCacheProperties::default().with_location(Location::OnDisk),
             );
-            tokio::time::sleep(WRITE_WAIT).await;
+            foyer_common::tokio::time::sleep(WRITE_WAIT).await;
         }
     }
 }
@@ -176,7 +176,7 @@ async fn write(hybrid: HybridCache<u64, Vec<u8>>, _: Arc<RecentEvictionQueue>, i
 async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue>) {
     let mut cnt = 0;
     loop {
-        tokio::time::sleep(FETCH_WAIT).await;
+        foyer_common::tokio::time::sleep(FETCH_WAIT).await;
         let key = match recent.pick() {
             Some(v) => v,
             None => continue,
@@ -189,7 +189,7 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
         } else {
             hybrid
                 .get_or_fetch(&key, || async move {
-                    tokio::time::sleep(MISS_WAIT).await;
+                    foyer_common::tokio::time::sleep(MISS_WAIT).await;
                     Ok::<_, Error>(value(key))
                 })
                 .await
@@ -213,7 +213,7 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
 async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue>) {
     let mut cnt = 0;
     loop {
-        tokio::time::sleep(READ_WAIT).await;
+        foyer_common::tokio::time::sleep(READ_WAIT).await;
         let key = match recent.pick() {
             Some(v) => v,
             None => continue,

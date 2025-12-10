@@ -198,7 +198,7 @@ mod tests {
     use super::*;
     use crate::{engine::block::manager::Block, io::device::noop::NoopPartition, IoEngineBuilder, NoopIoEngineBuilder};
 
-    #[test_log::test(tokio::test)]
+    #[test_log::test(foyer_common::tokio::test)]
     async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
         let mock_io_engine = NoopIoEngineBuilder.build().await.unwrap();
@@ -276,7 +276,7 @@ mod tests {
         evictable.remove(&8);
     }
 
-    #[test_log::test(tokio::test)]
+    #[test_log::test(foyer_common::tokio::test)]
     async fn test_invalid_ratio_picker() {
         let mut picker = InvalidRatioPicker::new(0.5);
         picker.init(&(0..10).collect_vec(), 10);

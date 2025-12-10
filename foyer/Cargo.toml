@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 development = ["chrono"]
 
 [features]
-default = []
+default = ["runtime-tokio"]
 clap = ["foyer-storage/clap"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
@@ -39,6 +39,9 @@ strict_assertions = [
   "foyer-storage/strict_assertions",
 ]
 
+runtime-tokio = ["foyer-common/runtime-tokio"]
+runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
+
 [dependencies]
 anyhow = { workspace = true }
 equivalent = { workspace = true }
@@ -52,28 +55,6 @@ mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
-
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
 
 [dev-dependencies]
 anyhow = { workspace = true }

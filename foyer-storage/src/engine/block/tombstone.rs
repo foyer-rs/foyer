@@ -255,7 +255,7 @@ mod tests {
         IoEngineBuilder, PsyncIoEngineBuilder,
     };
 
-    #[test_log::test(tokio::test)]
+    #[test_log::test(foyer_common::tokio::test)]
     async fn test_tombstone_log() {
         let dir = tempdir().unwrap();
 

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use foyer_common::runtime::{BackgroundShutdownRuntime, SingletonHandle};
-use tokio::runtime::Handle;
+use foyer_common::tokio::runtime::Handle;
 
 #[derive(Debug)]
 struct RuntimeInner {

@@ -18,6 +18,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::tokio::task::JoinError;
+
 /// ErrorKind is all kinds of Error of foyer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
@@ -370,7 +372,7 @@ impl Error {
     }
 
     /// Helper for creating a [`ErrorKind::Join`] error with context.
-    pub fn join(source: tokio::task::JoinError) -> Self {
+    pub fn join(source: JoinError) -> Self {
         Error::new(ErrorKind::Join, "task join error").with_source(source)
     }
 }

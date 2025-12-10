@@ -13,11 +13,15 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
+default = ["runtime-tokio"]
 nightly = ["hashbrown/nightly"]
 test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = ["foyer-common/strict_assertions"]
 tracing = ["dep:fastrace", "foyer-common/tracing"]
+
+runtime-tokio = ["foyer-common/runtime-tokio"]
+runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }

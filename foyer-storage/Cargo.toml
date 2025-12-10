@@ -13,7 +13,7 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
-default = []
+default = ["runtime-tokio"]
 serde = ["dep:serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
@@ -24,6 +24,9 @@ strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
+
+runtime-tokio = ["foyer-common/runtime-tokio"]
+runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
 
 [dependencies]
 allocator-api2 = { workspace = true }

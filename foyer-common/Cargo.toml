@@ -17,9 +17,13 @@ exclude.workspace = true
 development = ["criterion", "serde_bytes"]
 
 [features]
+default = ["runtime-tokio"]
 serde = ["dep:serde", "dep:bincode"]
 strict_assertions = []
 tracing = ["dep:fastrace"]
+
+runtime-tokio = ["dep:tokio"]
+runtime-madsim-tokio = ["dep:madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -34,27 +38,25 @@ pin-project = { workspace = true }
 serde = { workspace = true, optional = true }
 twox-hash = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
+madsim-tokio = { version = "0.2", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+], optional = true }
 
-[target.'cfg(not(madsim))'.dependencies]
 tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+], optional = true }
 
 [dev-dependencies]
 bytes = { workspace = true, features = ["serde"] }

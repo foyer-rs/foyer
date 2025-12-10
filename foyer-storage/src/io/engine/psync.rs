@@ -75,7 +75,7 @@ impl DerefMut for FileHandle {
 /// Builder for synchronous I/O engine with pread(2)/pwrite(2).
 #[derive(Debug)]
 pub struct PsyncIoEngineBuilder {
-    handle: Option<tokio::runtime::Handle>,
+    handle: Option<foyer_common::tokio::runtime::Handle>,
 
     #[cfg(any(test, feature = "test_utils"))]
     write_io_latency: Option<std::ops::Range<std::time::Duration>>,
@@ -105,7 +105,7 @@ impl PsyncIoEngineBuilder {
     /// Set the Tokio runtime to use for blocking operations.
     ///
     /// The psync io engine only uses the thread pool of the Tokio runtime for blocking operations.
-    pub fn with_tokio(mut self, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_tokio(mut self, handle: foyer_common::tokio::runtime::Handle) -> Self {
         self.handle = Some(handle);
         self
     }
@@ -128,7 +128,7 @@ impl PsyncIoEngineBuilder {
 impl IoEngineBuilder for PsyncIoEngineBuilder {
     fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
-            let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
+            let handle = self.handle.unwrap_or_else(foyer_common::tokio::runtime::Handle::current);
             let engine = PsyncIoEngine {
                 handle,
                 #[cfg(any(test, feature = "test_utils"))]
@@ -145,7 +145,7 @@ impl IoEngineBuilder for PsyncIoEngineBuilder {
 
 /// The synchronous I/O engine that uses pread(2)/pwrite(2) and tokio thread pool for reading and writing.
 pub struct PsyncIoEngine {
-    handle: tokio::runtime::Handle,
+    handle: foyer_common::tokio::runtime::Handle,
 
     #[cfg(any(test, feature = "test_utils"))]
     write_io_latency: Option<std::ops::Range<std::time::Duration>>,

@@ -1224,7 +1224,7 @@ mod tests {
             3 => {
                 let entry = cache
                     .get_or_fetch(&i, || async move {
-                        tokio::time::sleep(Duration::from_micros(10)).await;
+                        foyer_common::tokio::time::sleep(Duration::from_micros(10)).await;
                         Ok::<_, Error>(i)
                     })
                     .await
@@ -1245,7 +1245,7 @@ mod tests {
             .map(|_| {
                 let cache = cache.clone();
                 let mut rng = rng.clone();
-                tokio::spawn(async move {
+                foyer_common::tokio::spawn(async move {
                     for _ in 0..OPS {
                         operate(&cache, &mut rng).await;
                     }
@@ -1256,27 +1256,27 @@ mod tests {
         join_all(handles).await;
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_fifo_cache() {
         case(fifo()).await
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_lru_cache() {
         case(lru()).await
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_lfu_cache() {
         case(lfu()).await
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
     }
 
-    #[tokio::test]
+    #[foyer_common::tokio::test]
     async fn test_sieve_cache() {
         case(sieve()).await
     }

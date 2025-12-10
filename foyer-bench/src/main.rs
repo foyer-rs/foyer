@@ -468,7 +468,7 @@ fn main() {
     let args = Args::parse();
     println!("{args:#?}");
 
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    let mut builder = foyer_common::tokio::runtime::Builder::new_multi_thread();
     if args.user_runtime_worker_threads != 0 {
         builder.worker_threads(args.user_runtime_worker_threads);
     }
@@ -685,7 +685,7 @@ async fn benchmark(args: Args) {
 
     let (stop_tx, _) = broadcast::channel(4096);
 
-    let handle_monitor = tokio::spawn({
+    let handle_monitor = foyer_common::tokio::spawn({
         let metrics = metrics.clone();
         let stats = hybrid.statistics().clone();
         monitor(
@@ -700,10 +700,10 @@ async fn benchmark(args: Args) {
 
     let time = Instant::now();
 
-    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
+    let handle_bench = foyer_common::tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
 
-    let handle_signal = tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.unwrap();
+    let handle_signal = foyer_common::tokio::spawn(async move {
+        foyer_common::tokio::signal::ctrl_c().await.unwrap();
         tracing::warn!("foyer-bench is cancelled with CTRL-C");
         stop_tx.send(());
     });
@@ -765,10 +765,10 @@ async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, st
     });
 
     let w_handles = (0..args.writers)
-        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|id| foyer_common::tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
     let r_handles = (0..args.readers)
-        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|_| foyer_common::tokio::spawn(read(hybrid.clone(), context.clone(), stop_tx.subscribe())))
         .collect_vec();
 
     join_all(w_handles).await;
@@ -839,7 +839,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
         if let Some(limiter) = &mut limiter {
             if let Some(wait) = limiter.consume(entry_size as f64) {
-                tokio::time::sleep(wait).await;
+                foyer_common::tokio::time::sleep(wait).await;
             }
         }
 
@@ -869,7 +869,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
             TimeSeriesDistribution::Uniform { interval } => {
                 hybrid.insert(idx, data);
                 update();
-                tokio::time::sleep(interval.saturating_sub(elapsed)).await;
+                foyer_common::tokio::time::sleep(interval.saturating_sub(elapsed)).await;
             }
             TimeSeriesDistribution::Zipf { .. } => {
                 hybrid.insert(idx, data);
@@ -879,7 +879,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
                     Ok(i) => i,
                     Err(i) => i.min(G - 1),
                 };
-                tokio::time::sleep(intervals[group].1.saturating_sub(elapsed)).await;
+                foyer_common::tokio::time::sleep(intervals[group].1.saturating_sub(elapsed)).await;
             }
         }
 
@@ -908,7 +908,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let w = rng.random_range(0..step); // pick a writer to read form
         let c_w = context.counts[w as usize].load(Ordering::Relaxed);
         if c_w == 0 {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            foyer_common::tokio::time::sleep(Duration::from_millis(1)).await;
             continue;
         }
         let c = rng.random_range(c_w.saturating_sub(context.get_range / context.counts.len() as u64)..c_w);
@@ -922,9 +922,9 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let latency = context.latency;
         let fetch = hybrid.get_or_fetch(&idx, move || async move {
             if latency != Duration::ZERO {
-                tokio::time::sleep(latency).await;
+                foyer_common::tokio::time::sleep(latency).await;
             }
-            tokio::task::yield_now().await;
+            foyer_common::tokio::task::yield_now().await;
             let _ = miss_tx.send(time.elapsed());
             Ok::<_, Error>(Value {
                 inner: Arc::new(text(idx as usize, entry_size)),
@@ -948,7 +948,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
             if let Some(limiter) = &mut limiter {
                 if let Some(wait) = limiter.consume(entry_size as f64) {
-                    tokio::time::sleep(wait).await;
+                    foyer_common::tokio::time::sleep(wait).await;
                 }
             }
 
@@ -969,7 +969,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             context.metrics.get_ios.fetch_add(1, Ordering::Relaxed);
         }
 
-        tokio::task::consume_budget().await;
+        foyer_common::tokio::task::consume_budget().await;
     }
 }
 

@@ -320,7 +320,7 @@ pub async fn monitor(
     let start = Instant::now();
 
     loop {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        foyer_common::tokio::time::sleep(Duration::from_secs(1)).await;
         println!("warm up... [{}s/{}s]", start.elapsed().as_secs(), warm_up.as_secs());
         if start.elapsed() > warm_up {
             break;
@@ -339,7 +339,7 @@ pub async fn monitor(
             _ => return,
         }
 
-        tokio::time::sleep(interval).await;
+        foyer_common::tokio::time::sleep(interval).await;
         let new_stat = IoStat::snapshot(&stats);
         let new_metrics_dump = metrics.dump();
         let analysis = analyze(

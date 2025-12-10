@@ -386,7 +386,7 @@ where
                 self.buffer = Some(buffer);
             }
 
-            tokio::select! {
+            foyer_common::tokio::select! {
                 biased;
                 IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {

@@ -117,7 +117,7 @@ fn basic(
     )
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(foyer_common::tokio::test)]
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Recorder::default();
@@ -130,7 +130,7 @@ async fn test_direct_fs_store() {
     test_store(memory, builder, recorder).await;
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(foyer_common::tokio::test)]
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Recorder::default();
@@ -145,7 +145,7 @@ async fn test_direct_fs_store_zstd() {
     test_store(memory, builder, recorder).await;
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(foyer_common::tokio::test)]
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();
     let recorder = Recorder::default();
