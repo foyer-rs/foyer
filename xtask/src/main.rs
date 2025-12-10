@@ -220,11 +220,14 @@ fn license() {
 fn madsim() {
     run_with_env(
         r#"cargo clippy --all-targets --no-default-features --features "runtime-madsim-tokio""#,
-        [("RUSTFLAGS", r#"--cfg tokio_unstable"#)],
+        [("RUSTFLAGS", r#"--cfg tokio_unstable --cfg madsim"#)],
     );
     run_with_env(
         r#"cargo nextest run --all --no-default-features --features "runtime-madsim-tokio,strict_assertions""#,
-        [("RUSTFLAGS", r#"--cfg tokio_unstable"#), ("RUST_BACKTRACE", "1")],
+        [
+            ("RUSTFLAGS", r#"--cfg tokio_unstable --cfg madsim"#),
+            ("RUST_BACKTRACE", "1"),
+        ],
     );
 }
 

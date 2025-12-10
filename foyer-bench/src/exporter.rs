@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "runtime-madsim-tokio")]
+extern crate madsim_tokio as tokio;
+
 use std::{future::Future, net::SocketAddr, pin::Pin};
 
 use anyhow::Ok;
-use foyer_common::tokio::net::TcpListener;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -26,6 +28,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use prometheus::{Encoder, Registry, TextEncoder};
+use tokio::net::TcpListener;
 
 pub struct PrometheusExporter {
     registry: Registry,
@@ -38,7 +41,7 @@ impl PrometheusExporter {
     }
 
     pub fn run(self) {
-        foyer_common::tokio::spawn(async move {
+        tokio::spawn(async move {
             let listener = TcpListener::bind(&self.addr).await.unwrap();
             loop {
                 let (stream, _) = match listener.accept().await {
@@ -54,7 +57,7 @@ impl PrometheusExporter {
                     registry: self.registry.clone(),
                 };
 
-                foyer_common::tokio::spawn(async move {
+                tokio::spawn(async move {
                     if let Err(e) = http1::Builder::new().serve_connection(io, handle).await {
                         tracing::error!("[prometheus exporter]: serve request error: {e}");
                     }

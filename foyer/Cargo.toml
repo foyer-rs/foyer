@@ -64,6 +64,7 @@ foyer-storage = { workspace = true, features = ["test_utils"] }
 rand = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true

@@ -584,7 +584,7 @@ jobs:
       - name: Run rust clippy check (madsim, check only)
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: "--cfg tokio_unstable"
+          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
           RUST_LOG: info
           TOKIO_WORKER_THREADS: 1
           CI: true

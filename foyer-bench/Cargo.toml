@@ -21,8 +21,8 @@ jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
 tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
 
-runtime-tokio = ["foyer/runtime-tokio"]
-runtime-madsim-tokio = ["foyer/runtime-madsim-tokio"]
+runtime-tokio = ["foyer/runtime-tokio", "dep:tokio"]
+runtime-madsim-tokio = ["foyer/runtime-madsim-tokio", "dep:madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -48,6 +48,9 @@ rand = { workspace = true }
 rand_distr = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+tokio = { workspace = true, features = ["full"], optional = true }
+madsim-tokio = { version = "0.2", features = ["full"], optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
