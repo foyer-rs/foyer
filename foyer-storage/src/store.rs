@@ -28,9 +28,9 @@ use foyer_common::{
     metrics::Metrics,
     properties::{Age, Properties},
     runtime::BackgroundShutdownRuntime,
+    tokio::runtime::Handle,
 };
 use foyer_memory::{Cache, Piece};
-use foyer_common::tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -580,7 +580,7 @@ mod tests {
         DeviceBuilder,
     };
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_build_with_unaligned_buffer_pool_size() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
@@ -603,7 +603,7 @@ mod tests {
             .unwrap();
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_entry_hash_collision() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());

@@ -128,7 +128,9 @@ impl PsyncIoEngineBuilder {
 impl IoEngineBuilder for PsyncIoEngineBuilder {
     fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
-            let handle = self.handle.unwrap_or_else(foyer_common::tokio::runtime::Handle::current);
+            let handle = self
+                .handle
+                .unwrap_or_else(foyer_common::tokio::runtime::Handle::current);
             let engine = PsyncIoEngine {
                 handle,
                 #[cfg(any(test, feature = "test_utils"))]

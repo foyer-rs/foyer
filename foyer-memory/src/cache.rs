@@ -1256,27 +1256,27 @@ mod tests {
         join_all(handles).await;
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_fifo_cache() {
         case(fifo()).await
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_lru_cache() {
         case(lru()).await
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_lfu_cache() {
         case(lfu()).await
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
     }
 
-    #[foyer_common::tokio::test]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
     async fn test_sieve_cache() {
         case(sieve()).await
     }

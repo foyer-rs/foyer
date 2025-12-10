@@ -151,7 +151,8 @@ mod tests {
         assert_eq!(b1, b2);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_io_engine() {
         let dir = tempdir().unwrap();
 

@@ -849,10 +849,9 @@ mod tests {
     use std::{fs::File, path::Path};
 
     use bytesize::ByteSize;
-    use foyer_common::hasher::ModHasher;
+    use foyer_common::{hasher::ModHasher, tokio::runtime::Handle};
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
-    use foyer_common::tokio::runtime::Handle;
 
     use super::*;
     use crate::{
@@ -980,7 +979,8 @@ mod tests {
         store.enqueue(entry.piece().into(), estimated_size);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_store_enqueue_lookup_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1075,7 +1075,8 @@ mod tests {
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_store_delete_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1134,7 +1135,8 @@ mod tests {
         );
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_store_destroy_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1191,7 +1193,8 @@ mod tests {
     }
 
     // FIXME(MrCroxx): Move the admission test to store level.
-    // #[test_log::test(foyer_common::tokio::test)]
+    // #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    // #[test_log::test]
     // async fn test_store_admission() {
     //     let dir = tempfile::tempdir().unwrap();
 
@@ -1210,7 +1213,8 @@ mod tests {
     //     assert!(store.load(&2).await.unwrap().is_none());
     // }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_store_reinsertion() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1319,7 +1323,8 @@ mod tests {
         );
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_store_magic_checksum_mismatch() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1358,7 +1363,8 @@ mod tests {
         assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_aggregated_device() {
         let dir = tempfile::tempdir().unwrap();
 

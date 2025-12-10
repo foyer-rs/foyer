@@ -1082,7 +1082,8 @@ mod tests {
             .unwrap()
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1117,7 +1118,8 @@ mod tests {
         assert!(!hybrid.contains(&1));
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_cache_writer() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1151,7 +1153,8 @@ mod tests {
         assert_eq!(e5.value(), &vec![5; 7 * KB]);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_fetch_with_cache_location() {
         // Test hybrid cache that write disk cache on eviction.
 
@@ -1261,7 +1264,8 @@ mod tests {
         );
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_insert_with_cache_location() {
         // Test hybrid cache that write disk cache on eviction.
 
@@ -1347,7 +1351,8 @@ mod tests {
         );
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_read_throttled() {
         // Test hybrid cache that write disk cache on insertion.
 
@@ -1436,7 +1441,8 @@ mod tests {
         assert_eq!(recorder.dump(), vec![Record::Admit(1)]);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_flush_on_close() {
         // check without flush on close
 
@@ -1462,7 +1468,8 @@ mod tests {
         );
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_load_after_recovery() {
         let open = |dir| async move {
             HybridCacheBuilder::new()
@@ -1492,7 +1499,8 @@ mod tests {
         assert_eq!(*hybrid.get(&1).await.unwrap().unwrap(), vec![1; 3 * KB]);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_concurrent_get_and_fetch() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1523,7 +1531,8 @@ mod tests {
         assert_eq!(r_get.unwrap().value(), r_fetch.value());
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_entry_location() {
         // Test hybrid cache that write disk cache on eviction.
 
@@ -1573,7 +1582,8 @@ mod tests {
         drop(e5);
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_hybrid_cache_fetch_error_downcast() {
         #[derive(Debug, Clone, PartialEq, Eq)]
         struct TestError(String);

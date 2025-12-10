@@ -130,7 +130,8 @@ mod tests {
         PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
-    #[test_log::test(foyer_common::tokio::test)]
+    #[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+    #[test_log::test]
     async fn test_block_scanner() {
         const BLOB_INDEX_SIZE: usize = 4 * KB;
         const BLOB_INDEX_CAPACITY: usize =

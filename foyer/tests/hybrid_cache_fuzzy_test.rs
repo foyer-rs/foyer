@@ -103,7 +103,8 @@ impl RecentEvictionQueue {
     }
 }
 
-#[test_log::test(foyer_common::tokio::test)]
+#[foyer_common::tokio::test(crate = "foyer_common::tokio")]
+#[test_log::test]
 async fn test_concurrent_insert_disk_cache_and_fetch() {
     let dir = tempfile::tempdir().unwrap();
 

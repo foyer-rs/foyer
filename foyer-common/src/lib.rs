@@ -46,13 +46,5 @@ pub mod tracing;
 /// Useful helpers.
 pub mod utils;
 
-// Switch between tokio and madsim-tokio backend.
-
-#[cfg(feature = "runtime-madsim-tokio")]
-pub extern crate madsim_tokio as tokio;
-
-#[cfg(feature = "runtime-tokio")]
-pub extern crate tokio as tokio;
-
-#[cfg(all(feature = "runtime-madsim-tokio", feature = "runtime-tokio"))]
-compile_error!("Features `runtime-madsim-tokio` and `runtime-tokio` are mutually exclusive.");
+/// Switch between tokio and madsim-tokio backend.
+pub mod tokio;

@@ -15,6 +15,7 @@
 use std::{future::Future, net::SocketAddr, pin::Pin};
 
 use anyhow::Ok;
+use foyer_common::tokio::net::TcpListener;
 use http_body_util::Full;
 use hyper::{
     body::{Bytes, Incoming},
@@ -25,7 +26,6 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use prometheus::{Encoder, Registry, TextEncoder};
-use foyer_common::tokio::net::TcpListener;
 
 pub struct PrometheusExporter {
     registry: Registry,

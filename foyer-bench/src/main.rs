@@ -700,7 +700,8 @@ async fn benchmark(args: Args) {
 
     let time = Instant::now();
 
-    let handle_bench = foyer_common::tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
+    let handle_bench =
+        foyer_common::tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
 
     let handle_signal = foyer_common::tokio::spawn(async move {
         foyer_common::tokio::signal::ctrl_c().await.unwrap();

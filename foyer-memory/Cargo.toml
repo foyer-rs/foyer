@@ -43,28 +43,6 @@ pin-project = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [dev-dependencies]
 csv = { workspace = true }
 futures-util = { workspace = true }
