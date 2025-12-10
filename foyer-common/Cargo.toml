@@ -39,23 +39,23 @@ serde = { workspace = true, optional = true }
 twox-hash = { workspace = true }
 
 madsim-tokio = { version = "0.2", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
 ], optional = true }
 
 tokio = { workspace = true, features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
 ], optional = true }
 
 [dev-dependencies]
