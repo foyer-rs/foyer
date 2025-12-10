@@ -51,7 +51,7 @@ opentelemetry_sdk = { workspace = true, features = [
 prometheus = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 tracing = { workspace = true }
 
 [[example]]

@@ -34,19 +34,7 @@ pin-project = { workspace = true }
 serde = { workspace = true, optional = true }
 twox-hash = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
 tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
   "rt",
   "rt-multi-thread",
   "sync",
