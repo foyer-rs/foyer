@@ -219,15 +219,12 @@ fn license() {
 
 fn madsim() {
     run_with_env(
-        r#"cargo clippy --all-targets"#,
-        [("RUSTFLAGS", r#"--cfg madsim --cfg tokio_unstable"#)],
+        r#"cargo clippy --all-targets --no-default-features --features "runtime-madsim-tokio""#,
+        [("RUSTFLAGS", r#"--cfg tokio_unstable"#)],
     );
     run_with_env(
-        r#"cargo nextest run --all --features "strict_assertions""#,
-        [
-            ("RUSTFLAGS", r#"--cfg madsim --cfg tokio_unstable"#),
-            ("RUST_BACKTRACE", "1"),
-        ],
+        r#"cargo nextest run --all --no-default-features --features "runtime-madsim-tokio,strict_assertions""#,
+        [("RUSTFLAGS", r#"--cfg tokio_unstable"#), ("RUST_BACKTRACE", "1")],
     );
 }
 
@@ -304,7 +301,7 @@ enum Command {
     Test,
     /// Run examples.
     Example,
-    /// Find unused dependeicies.
+    /// Find unused dependencies.
     Udeps,
     /// Check licenses headers.
     License,

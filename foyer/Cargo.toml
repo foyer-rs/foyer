@@ -39,8 +39,8 @@ strict_assertions = [
   "foyer-storage/strict_assertions",
 ]
 
-runtime-tokio = ["foyer-common/runtime-tokio"]
-runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
+runtime-tokio = ["foyer-storage/runtime-tokio"]
+runtime-madsim-tokio = ["foyer-storage/runtime-madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -59,7 +59,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-foyer = { path = ".", features = ["test_utils"] }
+foyer = { path = ".", features = ["test_utils"], default-features = false }
 foyer-storage = { workspace = true, features = ["test_utils"] }
 rand = { workspace = true }
 tempfile = { workspace = true }

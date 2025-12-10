@@ -32,7 +32,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, Piece};
 
-#[cfg(feature = "test_utils")]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
     compress::Compression,
@@ -175,7 +175,7 @@ where
             });
         }
 
-        #[cfg(feature = "test_utils")]
+        #[cfg(any(test, feature = "test_utils"))]
         if self.inner.load_throttle_switch.is_throttled() {
             self.inner.metrics.storage_throttled.increase(1);
             self.inner
@@ -298,7 +298,7 @@ where
     }
 
     /// Get the load throttle switch for the disk cache.
-    #[cfg(feature = "test_utils")]
+    #[cfg(any(test, feature = "test_utils"))]
     pub fn load_throttle_switch(&self) -> &LoadThrottleSwitch {
         &self.inner.load_throttle_switch
     }
@@ -476,13 +476,13 @@ where
 
         let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
             let mut builder = foyer_common::tokio::runtime::Builder::new_multi_thread();
-            #[cfg(madsim)]
+            #[cfg(feature = "runtime-madsim-tokio")]
             let _ = config;
-            #[cfg(not(madsim))]
+            #[cfg(feature = "runtime-tokio")]
             if config.worker_threads != 0 {
                 builder.worker_threads(config.worker_threads);
             }
-            #[cfg(not(madsim))]
+            #[cfg(feature = "runtime-tokio")]
             if config.max_blocking_threads != 0 {
                 builder.max_blocking_threads(config.max_blocking_threads);
             }

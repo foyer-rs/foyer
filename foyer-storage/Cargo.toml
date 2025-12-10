@@ -25,8 +25,8 @@ strict_assertions = [
   "foyer-memory/strict_assertions",
 ]
 
-runtime-tokio = ["foyer-common/runtime-tokio"]
-runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
+runtime-tokio = ["foyer-memory/runtime-tokio"]
+runtime-madsim-tokio = ["foyer-memory/runtime-madsim-tokio"]
 
 [dependencies]
 allocator-api2 = { workspace = true }

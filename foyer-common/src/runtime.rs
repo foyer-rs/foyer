@@ -40,9 +40,9 @@ impl Drop for BackgroundShutdownRuntime {
         // Safety: The runtime is only dropped once here.
         let runtime = unsafe { ManuallyDrop::take(&mut self.0) };
 
-        #[cfg(madsim)]
+        #[cfg(feature = "runtime-madsim-tokio")]
         drop(runtime);
-        #[cfg(not(madsim))]
+        #[cfg(feature = "runtime-tokio")]
         runtime.shutdown_background();
     }
 }
@@ -214,12 +214,12 @@ impl SingletonHandle {
     /// [`tokio::fs`]: tokio::fs
     /// [`tokio::net`]: tokio::net
     /// [`tokio::time`]: tokio::time
-    #[cfg(not(madsim))]
+    #[cfg(feature = "runtime-tokio")]
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         self.0.block_on(future)
     }
 
-    #[cfg(madsim)]
+    #[cfg(feature = "runtime-madsim-tokio")]
     /// Dummy implementation for madsim.
     pub fn block_on<F: Future>(&self, _: F) -> F::Output {
         unimplemented!("`block_on()` is not supported with madsim")

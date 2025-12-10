@@ -20,8 +20,9 @@ strict_assertions = ["foyer/strict_assertions"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
 tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
-runtime-tokio = ["foyer-common/runtime-tokio"]
-runtime-madsim-tokio = ["foyer-common/runtime-madsim-tokio"]
+
+runtime-tokio = ["foyer/runtime-tokio"]
+runtime-madsim-tokio = ["foyer/runtime-madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }

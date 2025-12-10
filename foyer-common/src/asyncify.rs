@@ -15,7 +15,7 @@
 use crate::runtime::SingletonHandle;
 
 /// Convert the block call to async call with given runtime handle.
-#[cfg(not(madsim))]
+#[cfg(feature = "runtime-tokio")]
 pub async fn asyncify_with_runtime<F, T>(runtime: &SingletonHandle, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
@@ -24,7 +24,7 @@ where
     runtime.spawn_blocking(f).await.unwrap()
 }
 
-#[cfg(madsim)]
+#[cfg(feature = "runtime-madsim-tokio")]
 /// Convert the block call to async call with given runtime.
 ///
 /// madsim compatible mode.
