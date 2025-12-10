@@ -59,7 +59,7 @@ http-body-util = "0.1"
 humantime = "2"
 hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
-intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
+intrusive-collections = { package = "foyer-intrusive-collections", git = "http://github.com/foyer-rs/intrusive-rs", rev = "bcac4152f9b2a9a3eba688944520de5762d3d825" }
 io-uring = "0.7"
 itertools = "0.14"
 libc = "0.2"
