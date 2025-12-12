@@ -51,27 +51,6 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 zstd = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 core_affinity = { workspace = true }
@@ -82,6 +61,7 @@ bytesize = { workspace = true }
 foyer-memory = { workspace = true, features = ["test_utils"] }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

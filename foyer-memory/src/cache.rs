@@ -21,7 +21,6 @@ use foyer_common::{
     event::EventListener,
     metrics::Metrics,
     properties::{Age, Hint, Location, Properties, Source},
-    runtime::SingletonHandle,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -1108,14 +1107,7 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<Q, C, FO, FR>(
-        &self,
-        key: &Q,
-        fo: FO,
-        fr: FR,
-        ctx: C,
-        runtime: &SingletonHandle,
-    ) -> GetOrFetch<K, V, S, P>
+    pub fn get_or_fetch_inner<Q, C, FO, FR>(&self, key: &Q, fo: FO, fr: FR, ctx: C) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         C: Any + Send + Sync + 'static,
@@ -1123,11 +1115,11 @@ where
         FR: FnOnce() -> Option<RequiredFetchBuilder<K, V, P, C>>,
     {
         match self {
-            Cache::Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Lru(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx).into(),
+            Cache::Lru(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx).into(),
+            Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx).into(),
+            Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx).into(),
+            Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx).into(),
         }
     }
 }

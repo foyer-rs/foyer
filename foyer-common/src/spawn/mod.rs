@@ -12,26 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::runtime::SingletonHandle;
-
-/// Convert the block call to async call with given runtime handle.
-#[cfg(not(madsim))]
-pub async fn asyncify_with_runtime<F, T>(runtime: &SingletonHandle, f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    runtime.spawn_blocking(f).await.unwrap()
+/// `tokio` [`Spawn`] implementation.
+#[cfg(feature = "runtime-tokio")]
+mod tokio {
+    pub use ::tokio::spawn;
 }
+#[cfg(feature = "runtime-tokio")]
+pub use tokio::*;
 
-#[cfg(madsim)]
-/// Convert the block call to async call with given runtime.
-///
-/// madsim compatible mode.
-pub async fn asyncify_with_runtime<F, T>(_: &SingletonHandle, f: F) -> T
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    f()
-}
+/// `madsim-tokio` [`Spawn`] implementation.
+#[cfg(feature = "runtime-madsim-tokio")]
+pub mod madsim_tokio {}

@@ -34,7 +34,6 @@ use foyer_common::{
     event::{Event, EventListener},
     metrics::Metrics,
     properties::{Location, Properties, Source},
-    runtime::SingletonHandle,
     strict_assert,
     utils::scope::Scope,
 };
@@ -956,7 +955,6 @@ where
                 }))
             },
             (),
-            &tokio::runtime::Handle::current().into(),
         )
     }
 
@@ -968,14 +966,7 @@ where
         feature = "tracing",
         fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
     )]
-    pub fn get_or_fetch_inner<Q, C, FO, FR>(
-        &self,
-        key: &Q,
-        fo: FO,
-        fr: FR,
-        ctx: C,
-        runtime: &SingletonHandle,
-    ) -> RawGetOrFetch<E, S, I>
+    pub fn get_or_fetch_inner<Q, C, FO, FR>(&self, key: &Q, fo: FO, fr: FR, ctx: C) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
         C: Any + Send + Sync + 'static,
@@ -1013,7 +1004,7 @@ where
                         inflights: inflights.clone(),
                         close,
                     };
-                    runtime.spawn(fetch);
+                    foyer_common::spawn::spawn(fetch);
                     RawGetOrFetch::Miss(RawWait { waiter })
                 }
                 Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),

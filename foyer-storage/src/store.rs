@@ -27,10 +27,8 @@ use foyer_common::{
     error::{Error, ErrorKind, Result},
     metrics::Metrics,
     properties::{Age, Properties},
-    runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
-use tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -45,7 +43,6 @@ use crate::{
         engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
     },
     keeper::Keeper,
-    runtime::Runtime,
     serde::EntrySerializer,
     StorageFilterResult,
 };
@@ -75,8 +72,6 @@ where
 
     compression: Compression,
 
-    runtime: Runtime,
-
     metrics: Arc<Metrics>,
 
     #[cfg(any(test, feature = "test_utils"))]
@@ -95,7 +90,6 @@ where
             .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("compression", &self.inner.compression)
-            .field("runtimes", &self.inner.runtime)
             .finish()
     }
 }
@@ -185,8 +179,7 @@ where
             return Ok(Load::Throttled);
         }
 
-        let future = self.inner.engine.load(hash);
-        match self.inner.runtime.read().spawn(future).await.unwrap() {
+        match self.inner.engine.load(hash).await {
             Ok(Load::Entry {
                 key: k,
                 value: v,
@@ -280,11 +273,6 @@ where
     /// Get the io throttle of the disk cache.
     pub fn throttle(&self) -> &Throttle {
         self.inner.engine.device().statistics().throttle()
-    }
-
-    /// Get the runtime.
-    pub fn runtime(&self) -> &Runtime {
-        &self.inner.runtime
     }
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
@@ -473,50 +461,6 @@ where
         let metrics = self.metrics.clone();
 
         let compression = self.compression;
-
-        let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
-            #[cfg(madsim)]
-            let _ = config;
-            #[cfg(not(madsim))]
-            if config.worker_threads != 0 {
-                builder.worker_threads(config.worker_threads);
-            }
-            #[cfg(not(madsim))]
-            if config.max_blocking_threads != 0 {
-                builder.max_blocking_threads(config.max_blocking_threads);
-            }
-            builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder
-                .enable_all()
-                .build()
-                .map_err(|source| Error::new(ErrorKind::Io, "failed to build dedicated runtime").with_source(source))?;
-            let runtime = BackgroundShutdownRuntime::from(runtime);
-            Ok::<_, Error>(Arc::new(runtime))
-        };
-
-        let user_runtime_handle = Handle::current();
-        let (read_runtime, write_runtime) = match self.runtime_config {
-            RuntimeOptions::Disabled => {
-                tracing::info!(
-                    "[store]: Dedicated runtime is disabled. This may lead to spikes in latency under high load. Hint: Consider configuring a dedicated runtime."
-                );
-                (None, None)
-            }
-            RuntimeOptions::Unified(runtime_config) => {
-                let runtime = build_runtime(&runtime_config, "unified")?;
-                (Some(runtime.clone()), Some(runtime.clone()))
-            }
-            RuntimeOptions::Separated {
-                read_runtime_options: read_runtime_config,
-                write_runtime_options: write_runtime_config,
-            } => {
-                let read_runtime = build_runtime(&read_runtime_config, "read")?;
-                let write_runtime = build_runtime(&write_runtime_config, "write")?;
-                (Some(read_runtime), Some(write_runtime))
-            }
-        };
-        let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
 
         let io_engine = match self.io_engine {
             Some(ie) => ie,
