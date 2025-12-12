@@ -16,8 +16,6 @@
 
 /// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
-/// The util that convert the blocking call to async call.
-pub mod asyncify;
 /// The bitwise utils.
 pub mod bits;
 /// The [`bytes::Buf`] and [`bytes::BufMut`] extensions.
