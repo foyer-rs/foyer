@@ -375,6 +375,19 @@ impl Error {
     }
 }
 
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::io_error(e)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::bincode_error(e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
