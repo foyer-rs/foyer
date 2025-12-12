@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2025-12-12
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.21.1 |
+| foyer-common | 0.21.1 |
+| foyer-memory | 0.21.1 |
+| foyer-storage | 0.21.1 |
+| foyer-bench | 0.21.1 |
+
+### Changes
+
+- Implement `From<std::io::Error>` and `From<bincode::Error>` (if feature `serde` is enabled) for `Error` to simplify error handling.
+
 ## 2025-12-08
 
 ### Release
