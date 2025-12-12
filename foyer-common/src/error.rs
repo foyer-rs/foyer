@@ -244,12 +244,6 @@ impl std::error::Error for Error {
     }
 }
 
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::io_error(e)
-    }
-}
-
 /// Cloning an [`Error`] with large message and context can be expensive.
 ///
 /// Be careful when cloning errors in performance-critical paths.
@@ -378,6 +372,19 @@ impl Error {
     /// Helper for creating a [`ErrorKind::Join`] error with context.
     pub fn join(source: tokio::task::JoinError) -> Self {
         Error::new(ErrorKind::Join, "task join error").with_source(source)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::io_error(e)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::bincode_error(e)
     }
 }
 
