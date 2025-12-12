@@ -244,6 +244,12 @@ impl std::error::Error for Error {
     }
 }
 
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::io_error(e)
+    }
+}
+
 /// Cloning an [`Error`] with large message and context can be expensive.
 ///
 /// Be careful when cloning errors in performance-critical paths.
