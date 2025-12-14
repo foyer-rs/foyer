@@ -64,6 +64,11 @@ unsafe impl Sync for Raw {}
 
 impl Raw {
     /// Allocate an 4K-aligned [`Raw`] with **AT LEAST** `capacity` bytes.
+    ///
+    /// # Safety
+    ///
+    /// The returned buffer contains uninitialized memory. Callers must initialize
+    /// the memory before reading from it to avoid undefined behavior.
     pub fn new(capacity: usize) -> Self {
         let capacity = bits::align_up(PAGE, capacity);
         let layout = unsafe { Layout::from_size_align_unchecked(capacity, PAGE) };
