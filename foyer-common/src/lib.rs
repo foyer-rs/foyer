@@ -34,8 +34,6 @@ pub mod metrics;
 pub mod properties;
 /// A rate limiter that returns the wait duration for limitation.
 pub mod rate;
-///  A ticket-based rate limiter.
-pub mod rated_ticket;
 /// A runtime that automatically shutdown itself on drop.
 pub mod runtime;
 /// Tracing related components.
