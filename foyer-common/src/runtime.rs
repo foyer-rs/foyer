@@ -94,7 +94,7 @@ impl SingletonHandle {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore (miri)
     /// use tokio::runtime::Runtime;
     ///
     /// # fn dox() {
@@ -122,7 +122,7 @@ impl SingletonHandle {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore (miri)
     /// use tokio::runtime::Runtime;
     ///
     /// # fn dox() {
@@ -173,7 +173,7 @@ impl SingletonHandle {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore (miri)
     /// use tokio::runtime::Runtime;
     ///
     /// // Create the runtime
@@ -190,7 +190,7 @@ impl SingletonHandle {
     ///
     /// Or using `Handle::current`:
     ///
-    /// ```
+    /// ```ignore (miri)
     /// use tokio::runtime::Handle;
     ///
     /// #[tokio::main]

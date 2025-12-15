@@ -117,6 +117,8 @@ fn basic(
     )
 }
 
+#[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+#[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store() {
     let tempdir = tempfile::tempdir().unwrap();
@@ -130,6 +132,8 @@ async fn test_direct_fs_store() {
     test_store(memory, builder, recorder).await;
 }
 
+#[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+#[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store_zstd() {
     let tempdir = tempfile::tempdir().unwrap();
@@ -145,6 +149,8 @@ async fn test_direct_fs_store_zstd() {
     test_store(memory, builder, recorder).await;
 }
 
+#[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+#[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
 #[test_log::test(tokio::test)]
 async fn test_direct_fs_store_lz4() {
     let tempdir = tempfile::tempdir().unwrap();

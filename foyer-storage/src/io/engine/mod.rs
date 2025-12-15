@@ -117,8 +117,6 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    #[cfg(target_os = "linux")]
-    use crate::io::engine::uring::UringIoEngineBuilder;
     use crate::io::{
         bytes::IoSliceMut,
         device::{file::FileDeviceBuilder, Device, DeviceBuilder},
@@ -152,11 +150,16 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_io_engine() {
+
         let dir = tempdir().unwrap();
 
-        #[cfg(target_os = "linux")]
+        // io-uring not supported under miri
+        #[cfg(all(not(miri), target_os = "linux"))]
         {
+            use crate::io::engine::uring::UringIoEngineBuilder;
+
             let path = dir.path().join("test_file_1");
             let device = build_test_file_device(&path).unwrap();
             let engine = UringIoEngineBuilder::new()

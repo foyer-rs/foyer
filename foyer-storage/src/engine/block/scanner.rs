@@ -131,6 +131,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_block_scanner() {
         const BLOB_INDEX_SIZE: usize = 4 * KB;
         const BLOB_INDEX_CAPACITY: usize =

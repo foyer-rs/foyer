@@ -3,3 +3,6 @@ rustflags = ["--cfg", "tokio_unstable"]
 
 [alias]
 x = "run --package xtask --"
+
+[env]
+MIRIFLAGS = "-Zmiri-disable-isolation"

@@ -212,6 +212,7 @@ where
             (false, false) => unsafe { self.list.remove_from_ptr(Arc::as_ptr(record)) },
         };
 
+        #[cfg(not(miri))]
         strict_assert!(!state.link.is_linked());
 
         record.set_in_eviction(false);

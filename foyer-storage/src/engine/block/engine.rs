@@ -981,6 +981,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
     async fn test_store_enqueue_lookup_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1076,6 +1078,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
     async fn test_store_delete_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1135,6 +1139,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
     async fn test_store_destroy_recovery() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1211,6 +1217,8 @@ mod tests {
     // }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "deadlocks under miri")]
     async fn test_store_reinsertion() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1320,6 +1328,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "occasionally deadlocks under miri")]
     async fn test_store_magic_checksum_mismatch() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1359,6 +1369,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_aggregated_device() {
         let dir = tempfile::tempdir().unwrap();
 

@@ -496,6 +496,8 @@ mod tests {
     const KB: usize = 1024;
 
     #[test_log::test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     fn test_blob_index_serde() {
         let mut bi = BlobIndex::new(IoSliceMut::new(PAGE * 2));
         let indices = (0..bi.capacity() / 2)
@@ -519,6 +521,8 @@ mod tests {
     }
 
     #[test_log::test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     fn test_buffer() {
         const BLOCK_SIZE: usize = 16 * KB;
         const BLOB_INDEX_SIZE: usize = 4 * KB;
@@ -678,6 +682,8 @@ mod tests {
     }
 
     #[test_log::test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     fn test_split_block_last_entry() {
         const KB: usize = 1 << 10;
 
@@ -689,7 +695,15 @@ mod tests {
         let mut ctx = SplitCtx::new(BLOCK_SIZE, BLOB_INDEX_SIZE);
         ctx.current_blob_block_offset = 40 * KB;
         ctx.current_part_blob_offset = 16 * KB;
-        ctx.current_blob_index.count = ctx.current_blob_index.capacity() - 1;
+        // Fill the index with dummy entries to match the count we're setting
+        for _ in 0..ctx.current_blob_index.capacity() - 1 {
+            ctx.current_blob_index.write(&BlobEntryIndex {
+                hash: u64::MAX,
+                sequence: u64::MAX,
+                offset: 0,
+                len: 0,
+            });
+        }
 
         let shared_io_slice = IoSliceMut::new(BATCH_SIZE).into_io_slice();
         let batch = Splitter::split(

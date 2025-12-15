@@ -13,8 +13,8 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
-default = []
-serde = ["dep:serde"]
+default = ["fastant"]
+serde = ["dep:serde", "foyer-common/serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
 nightly = ["allocator-api2/nightly", "hashbrown/nightly"]
@@ -31,7 +31,7 @@ anyhow = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
-fastant = { workspace = true, features = ["atomic"] }
+fastant = { workspace = true, features = ["atomic"], optional = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }

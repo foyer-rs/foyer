@@ -21,7 +21,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 development = ["chrono"]
 
 [features]
-default = []
+default = ["fastant"]
+fastant = ["foyer-storage/fastant"]
 clap = ["foyer-storage/clap"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
@@ -45,7 +46,7 @@ equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
-foyer-storage = { workspace = true }
+foyer-storage = { workspace = true, default-features = false }
 futures-util = { workspace = true }
 mea = { workspace = true }
 mixtrics = { workspace = true }
@@ -78,8 +79,8 @@ tokio = { workspace = true, features = [
 [dev-dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-foyer = { path = ".", features = ["test_utils"] }
-foyer-storage = { workspace = true, features = ["test_utils"] }
+foyer = { path = ".", default-features = false, features = ["test_utils"] }
+foyer-storage = { workspace = true, default-features = false, features = ["test_utils"] }
 rand = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
