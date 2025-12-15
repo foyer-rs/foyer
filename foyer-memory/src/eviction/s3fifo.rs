@@ -23,6 +23,7 @@ use std::{
 
 use foyer_common::{
     code::{Key, Value},
+    error::{Error, ErrorKind, Result},
     properties::Properties,
     strict_assert, strict_assert_eq,
 };
@@ -30,10 +31,7 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{
-    error::{Error, Result},
-    record::Record,
-};
+use crate::record::Record;
 
 /// S3Fifo eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,10 +228,15 @@ where
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
             if config.small_queue_capacity_ratio > 0.0 && config.small_queue_capacity_ratio < 1.0 {
-                return Err(Error::ConfigError(format!(
-                    "small_queue_capacity_ratio must be in (0, 1), given: {}",
-                    config.small_queue_capacity_ratio
-                )));
+                return Err(
+                    Error::new(ErrorKind::Config, "update S3-FIFO config failed").with_context(
+                        "reason",
+                        format!(
+                            "small_queue_capacity_ratio must be in (0, 1), given: {}",
+                            config.small_queue_capacity_ratio
+                        ),
+                    ),
+                );
             }
             self.config = config.clone();
         }

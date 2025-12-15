@@ -14,11 +14,10 @@
 
 use std::sync::{Arc, RwLock};
 
+use foyer_common::error::{Error, ErrorKind, Result};
+
 use crate::{
-    io::{
-        device::{Device, DeviceBuilder, Partition, PartitionId},
-        error::{IoError, IoResult},
-    },
+    io::device::{Device, DeviceBuilder, Partition, PartitionId},
     RawFile, Statistics, Throttle,
 };
 
@@ -64,7 +63,7 @@ impl CombinedDeviceBuilder {
 }
 
 impl DeviceBuilder for CombinedDeviceBuilder {
-    fn build(self) -> IoResult<Arc<dyn Device>> {
+    fn build(self) -> Result<Arc<dyn Device>> {
         let device = CombinedDevice {
             devices: self.devices,
             statistics: Arc::new(Statistics::new(self.throttle)),
@@ -107,22 +106,15 @@ impl Device for CombinedDevice {
         }
     }
 
-    fn create_partition(&self, size: usize) -> IoResult<Arc<dyn Partition>> {
+    fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut inner = self.inner.write().unwrap();
         loop {
             if inner.next >= self.devices.len() {
-                let capacity = self.devices.iter().map(|d| d.capacity()).sum();
-                return Err(IoError::NoSpace {
-                    capacity,
-                    allocated: capacity,
-                    required: size,
-                });
+                let capacity = self.devices.iter().map(|d| d.capacity()).sum::<usize>();
+                return Err(Error::no_space(capacity, capacity, size));
             }
             let device = &self.devices[inner.next];
             match device.create_partition(size) {
-                Err(IoError::NoSpace { .. }) => {
-                    inner.next += 1;
-                }
                 Ok(p) => {
                     let partition = CombinedPartition {
                         inner: p,
@@ -134,6 +126,10 @@ impl Device for CombinedDevice {
                     return Ok(partition);
                 }
                 Err(e) => {
+                    if e.kind() == ErrorKind::NoSpace {
+                        inner.next += 1;
+                        continue;
+                    }
                     return Err(e);
                 }
             }

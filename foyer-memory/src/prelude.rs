@@ -15,9 +15,12 @@
 #[cfg(any(test, feature = "test_utils"))]
 pub use crate::eviction::test_utils::TestProperties;
 pub use crate::{
-    cache::{Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, Fetch},
-    error::{Error, Result},
+    cache::{Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, GetOrFetch},
     eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig, Eviction, Op},
+    inflight::{
+        FetchTarget, Notifier, OptionalFetch, OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder,
+        RequiredFetchBuilderErased, Waiter,
+    },
     pipe::{Piece, Pipe},
-    raw::{FetchContext, FetchState, FetchTarget, Filter, Weighter},
+    raw::{Filter, Weighter},
 };

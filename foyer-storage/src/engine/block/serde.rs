@@ -15,11 +15,9 @@
 use std::sync::atomic::AtomicU64;
 
 use bytes::{Buf, BufMut};
+use foyer_common::error::{Error, ErrorKind, Result};
 
-use crate::{
-    compress::Compression,
-    error::{Error, Result},
-};
+use crate::compress::Compression;
 
 const ENTRY_MAGIC: u32 = 0x97_03_27_00;
 const ENTRY_MAGIC_MASK: u32 = 0xFF_FF_FF_00;
@@ -66,10 +64,9 @@ impl EntryHeader {
 
         let magic = v & ENTRY_MAGIC_MASK;
         if magic != ENTRY_MAGIC {
-            return Err(Error::MagicMismatch {
-                expected: ENTRY_MAGIC,
-                get: magic,
-            });
+            return Err(Error::new(ErrorKind::MagicMismatch, "entry header magic mismatch")
+                .with_context("expected", ENTRY_MAGIC)
+                .with_context("get", magic));
         }
         let compression = Compression::try_from(v as u8)?;
 

@@ -16,16 +16,24 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
+    error::Result,
     metrics::Metrics,
-    properties::{Populated, Properties},
+    properties::{Age, Properties},
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{error::Result, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+use crate::{filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+
+/// Source context for populated entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Populated {
+    /// The age of the entry.
+    pub age: Age,
+}
 
 /// Load result.
-#[derive(Debug)]
 pub enum Load<K, V, P> {
     /// Load entry success.
     Entry {
@@ -33,20 +41,35 @@ pub enum Load<K, V, P> {
         key: K,
         /// The value of the entry.
         value: V,
-        /// The populated source context of the entry.
+        /// The populated context of the entry.
         populated: Populated,
     },
     /// Load entry success from disk cache write queue.
     Piece {
         /// The piece of the entry.
         piece: Piece<K, V, P>,
-        /// The populated source context of the entry.
+        /// The populated context of the entry.
         populated: Populated,
     },
     /// The entry may be in the disk cache, the read io is throttled.
     Throttled,
     /// Disk cache miss.
     Miss,
+}
+
+impl<K, V, P> Debug for Load<K, V, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Load::Entry { populated, .. } => f.debug_struct("Load::Entry").field("populated", populated).finish(),
+            Load::Piece { piece, populated } => f
+                .debug_struct("Load::Piece")
+                .field("piece", piece)
+                .field("populated", populated)
+                .finish(),
+            Load::Throttled => f.debug_struct("Load::Throttled").finish(),
+            Load::Miss => f.debug_struct("Load::Miss").finish(),
+        }
+    }
 }
 
 impl<K, V, P> Load<K, V, P> {

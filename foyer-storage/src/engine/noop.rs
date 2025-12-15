@@ -16,6 +16,7 @@ use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use foyer_common::{
     code::{StorageKey, StorageValue},
+    error::Result,
     properties::Properties,
 };
 use futures_core::future::BoxFuture;
@@ -23,7 +24,6 @@ use futures_util::FutureExt;
 
 use crate::{
     engine::{Engine, EngineBuildContext, EngineConfig},
-    error::Result,
     keeper::PieceRef,
     Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
 };

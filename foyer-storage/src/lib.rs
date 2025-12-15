@@ -19,7 +19,6 @@
 
 mod compress;
 mod engine;
-mod error;
 mod filter;
 mod io;
 mod keeper;

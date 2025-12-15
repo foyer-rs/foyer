@@ -35,10 +35,12 @@
 //! thread, it is hard to implement in 100% safe Rust without overhead. So, accessing the algorithm managed per-entry
 //! state requires operation on the `UnsafeCell`.
 
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
+
 mod cache;
-mod error;
 mod eviction;
 mod indexer;
+mod inflight;
 mod pipe;
 mod raw;
 mod record;

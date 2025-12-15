@@ -18,17 +18,19 @@ use std::{
 };
 
 use core_affinity::CoreId;
+#[cfg(feature = "tracing")]
+use fastrace::prelude::*;
+use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{opcode, types::Fd, IoUring};
-use tokio::sync::oneshot;
+use mea::oneshot;
 
 use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
         engine::{IoEngine, IoEngineBuilder, IoHandle},
-        error::{IoError, IoResult},
     },
     RawFile,
 };
@@ -176,10 +178,11 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>> {
+    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             if self.threads == 0 {
-                return Err(IoError::other(anyhow::anyhow!("shards must be greater than 0")));
+                return Err(Error::new(ErrorKind::Config, "shards must be greater than 0")
+                    .with_context("threads", self.threads));
             }
 
             let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
@@ -209,7 +212,7 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                     }
                 }
                 let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
-                let uring = builder.build(self.io_depth as _)?;
+                let uring = builder.build(self.io_depth as _).map_err(Error::io_error)?;
                 let shard = UringIoEngineShard {
                     read_rx,
                     write_rx,
@@ -227,7 +230,8 @@ impl IoEngineBuilder for UringIoEngineBuilder {
                             core_affinity::set_for_current(CoreId { id: cpu as _ });
                         }
                         shard.run();
-                    })?;
+                    })
+                    .map_err(Error::io_error)?;
             }
 
             let engine = UringIoEngine { read_txs, write_txs };
@@ -258,10 +262,12 @@ struct RawFileAddress {
 }
 
 struct UringIoCtx {
-    tx: oneshot::Sender<IoResult<()>>,
+    tx: oneshot::Sender<Result<()>>,
     io_type: UringIoType,
     rbuf: RawBuf,
     addr: RawFileAddress,
+    #[cfg(feature = "tracing")]
+    span: fastrace::Span,
 }
 
 struct UringIoEngineShard {
@@ -346,11 +352,14 @@ impl UringIoEngineShard {
 
                 let res = cqe.result();
                 if res < 0 {
-                    let err = IoError::from_raw_os_error(res);
+                    let err = Error::raw_os_io_error(res);
                     let _ = ctx.tx.send(Err(err));
                 } else {
                     let _ = ctx.tx.send(Ok(()));
                 }
+
+                #[cfg(feature = "tracing")]
+                drop(ctx.span);
             }
         }
     }
@@ -369,6 +378,10 @@ impl Debug for UringIoEngine {
 }
 
 impl UringIoEngine {
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::uring::read")
+    )]
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.read_txs[partition.id() as usize % self.read_txs.len()];
@@ -376,16 +389,20 @@ impl UringIoEngine {
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::read::io");
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Read,
             rbuf,
             addr,
+            #[cfg(feature = "tracing")]
+            span,
         });
         async move {
             let res = match rx.await {
                 Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "io completion channel closed").with_source(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -394,6 +411,10 @@ impl UringIoEngine {
         .into()
     }
 
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::uring::write")
+    )]
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
         let shard = &self.write_txs[partition.id() as usize % self.write_txs.len()];
@@ -401,16 +422,20 @@ impl UringIoEngine {
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
+        #[cfg(feature = "tracing")]
+        let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::write::io");
         let _ = shard.send(UringIoCtx {
             tx,
             io_type: UringIoType::Write,
             rbuf,
             addr,
+            #[cfg(feature = "tracing")]
+            span,
         });
         async move {
             let res = match rx.await {
                 Ok(res) => res,
-                Err(e) => Err(IoError::other(e)),
+                Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "io completion channel closed").with_source(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)

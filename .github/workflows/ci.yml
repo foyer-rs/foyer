@@ -17,10 +17,10 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RUST_TOOLCHAIN_NIGHTLY: nightly-2024-08-30
+  RUST_TOOLCHAIN_NIGHTLY: nightly-2025-02-20
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20250627
-  CARGO_UDEPS_KEY_SUFFIX: 20250627
+  CACHE_KEY_SUFFIX: 20251109
+  CARGO_UDEPS_KEY_SUFFIX: 20251109
 
 jobs:
   misc-check:
@@ -162,7 +162,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
-        rust_toolchain: [stable, 1.82.0]
+        rust_toolchain: [stable, 1.85.0]
         serde: ["", "--features serde"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -250,7 +250,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        rust_toolchain: [stable, 1.82.0]
+        rust_toolchain: [stable, 1.85.0]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -442,6 +442,15 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-deadlock
+      - name: Run tests with single worker thread and deadlock detection
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable"
+          RUST_LOG: info
+          TOKIO_WORKER_THREADS: 1
+          CI: true
+        run: |-
+          cargo test --all --features deadlock -- --nocapture
       - name: Build foyer-bench with single worker thread and deadlock detection
         env:
           RUST_BACKTRACE: 1
@@ -523,7 +532,7 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
           CI: true
-          RUST_TOOLCHAIN_NIGHTLY: nightly-2024-08-30
+          RUST_TOOLCHAIN_NIGHTLY: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
         run: |-
           cargo +$RUST_TOOLCHAIN_NIGHTLY test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-bench With Address Sanitizer
@@ -532,7 +541,7 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
           CI: true
-          RUST_TOOLCHAIN_NIGHTLY: nightly-2024-08-30
+          RUST_TOOLCHAIN_NIGHTLY: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
         run: |-
           cargo +$RUST_TOOLCHAIN_NIGHTLY build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan

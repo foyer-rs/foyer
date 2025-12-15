@@ -28,8 +28,9 @@ use fastrace::prelude::*;
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
     metrics::Metrics,
-    properties::{Age, Populated, Properties, Source},
+    properties::{Age, Properties},
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
@@ -37,14 +38,15 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
+use mea::mpsc::UnboundedReceiver;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
     indexer::Indexer,
     recover::RecoverRunner,
 };
-#[cfg(test)]
-use crate::engine::block::test_utils::*;
+#[cfg(any(test, feature = "test_utils"))]
+use crate::test_utils::*;
 use crate::{
     compress::Compression,
     engine::{
@@ -55,9 +57,8 @@ use crate::{
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
         },
-        Engine, EngineBuildContext, EngineConfig,
+        Engine, EngineBuildContext, EngineConfig, Populated,
     },
-    error::{Error, Result},
     filter::conditions::IoThrottle,
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
@@ -95,6 +96,10 @@ where
     admission_filter: StorageFilter,
     reinsertion_filter: StorageFilter,
     enable_tombstone_log: bool,
+    #[cfg(any(test, feature = "test_utils"))]
+    flush_switch: Switch,
+    #[cfg(any(test, feature = "test_utils"))]
+    load_holder: Holder,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -149,6 +154,10 @@ where
             admission_filter: StorageFilter::new(),
             reinsertion_filter: StorageFilter::new().with_condition(RejectAll),
             enable_tombstone_log: false,
+            #[cfg(any(test, feature = "test_utils"))]
+            flush_switch: Switch::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holder: Holder::default(),
             marker: PhantomData,
         }
     }
@@ -297,6 +306,20 @@ where
         self
     }
 
+    /// Pass the flush holder for test.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_flush_switch(mut self, flush_switch: Switch) -> Self {
+        self.flush_switch = flush_switch;
+        self
+    }
+
+    /// Pass the load holder for test.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_load_holder(mut self, load_holder: Holder) -> Self {
+        self.load_holder = load_holder;
+        self
+    }
+
     /// Build the block-based disk cache engine with the given configurations.
     pub async fn build(
         self: Box<Self>,
@@ -336,7 +359,7 @@ where
         let submit_queue_size = Arc::<AtomicUsize>::default();
 
         #[expect(clippy::type_complexity)]
-        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<flume::Receiver<Submission<K, V, P>>>) = (0..self.flushers)
+        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) = (0..self.flushers)
             .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
             .unzip();
 
@@ -386,9 +409,6 @@ where
         )
         .await?;
 
-        #[cfg(test)]
-        let flush_holder = FlushHolder::default();
-
         let io_buffer_size = self.buffer_pool_size / self.flushers;
         for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
             flusher.run(
@@ -402,8 +422,8 @@ where
                 tombstone_log.clone(),
                 metrics.clone(),
                 &runtime,
-                #[cfg(test)]
-                flush_holder.clone(),
+                #[cfg(any(test, feature = "test_utils"))]
+                self.flush_switch.clone(),
             )?;
         }
 
@@ -421,8 +441,10 @@ where
             runtime,
             active: AtomicBool::new(true),
             metrics,
-            #[cfg(test)]
-            flush_holder,
+            #[cfg(any(test, feature = "test_utils"))]
+            flush_switch: self.flush_switch,
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holder: self.load_holder,
         };
         let inner = Arc::new(inner);
         let engine = BlockEngine { inner };
@@ -500,8 +522,11 @@ where
 
     metrics: Arc<Metrics>,
 
-    #[cfg(test)]
-    flush_holder: FlushHolder,
+    #[cfg(any(test, feature = "test_utils"))]
+    flush_switch: Switch,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    load_holder: Holder,
 }
 
 impl<K, V, P> Clone for BlockEngine<K, V, P>
@@ -554,19 +579,16 @@ where
 
         tracing::trace!(
             hash = piece.hash(),
-            source = ?piece.properties().source().unwrap_or_default(),
+            age = ?piece.properties().age().unwrap_or_default(),
             "[block engine]: enqueue"
         );
-        match piece.properties().source().unwrap_or_default() {
-            Source::Populated(Populated { age }) => match age {
-                Age::Young => {
-                    // skip write block engine if the entry is still young
-                    self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
-                    return;
-                }
-                Age::Old => {}
-            },
-            Source::Outer => {}
+        match piece.properties().age().unwrap_or_default() {
+            Age::Fresh | Age::Old => {}
+            Age::Young => {
+                // skip write block engine if the entry is still young
+                self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
+                return;
+            }
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
@@ -586,11 +608,17 @@ where
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
         tracing::trace!(hash, "[block engine]: load");
 
+        #[cfg(any(test, feature = "test_utils"))]
+        let load_holer = self.inner.load_holder.wait();
+
         let indexer = self.inner.indexer.clone();
         let metrics = self.inner.metrics.clone();
         let block_manager = self.inner.block_manager.clone();
 
         let load = async move {
+            #[cfg(any(test, feature = "test_utils"))]
+            load_holer.await;
+
             let addr = match indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
@@ -609,11 +637,6 @@ where
             let (buf, res) = block.read(Box::new(buf), addr.offset as _).await;
             match res {
                 Ok(_) => {}
-                Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(?e, "[block engine load]: invalid io range, remove this entry and skip");
-                    indexer.remove(hash);
-                    return Ok(Load::Miss);
-                }
                 Err(e) => {
                     tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
                     return Err(e);
@@ -622,24 +645,25 @@ where
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
-                Err(e @ Error::MagicMismatch { .. })
-                | Err(e @ Error::ChecksumMismatch { .. })
-                | Err(e @ Error::CompressionAlgorithmNotSupported(_))
-                | Err(e @ Error::OutOfRange { .. })
-                | Err(e @ Error::InvalidIoRange { .. }) => {
-                    tracing::warn!(
-                        hash,
-                        ?addr,
-                        ?e,
-                        "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                    );
-                    indexer.remove(hash);
-                    return Ok(Load::Miss);
-                }
-                Err(e) => {
-                    tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
-                    return Err(e);
-                }
+                Err(e) => match e.kind() {
+                    ErrorKind::Parse
+                    | ErrorKind::MagicMismatch
+                    | ErrorKind::ChecksumMismatch
+                    | ErrorKind::OutOfRange => {
+                        tracing::warn!(
+                            hash,
+                            ?addr,
+                            ?e,
+                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                        );
+                        indexer.remove(hash);
+                        return Ok(Load::Miss);
+                    }
+                    _ => {
+                        tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
+                        return Err(e);
+                    }
+                },
             };
 
             let (key, value) = {
@@ -652,24 +676,23 @@ where
                     Some(header.checksum),
                 ) {
                     Ok(res) => res,
-                    Err(e @ Error::MagicMismatch { .. })
-                    | Err(e @ Error::ChecksumMismatch { .. })
-                    | Err(e @ Error::OutOfRange { .. })
-                    | Err(e @ Error::InvalidIoRange { .. }) => {
-                        tracing::warn!(
-                            hash,
-                            ?addr,
-                            ?header,
-                            ?e,
-                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                        );
-                        indexer.remove(hash);
-                        return Ok(Load::Miss);
-                    }
-                    Err(e) => {
-                        tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
-                        return Err(e);
-                    }
+                    Err(e) => match e.kind() {
+                        ErrorKind::MagicMismatch | ErrorKind::ChecksumMismatch | ErrorKind::OutOfRange => {
+                            tracing::warn!(
+                                hash,
+                                ?addr,
+                                ?header,
+                                ?e,
+                                "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                            );
+                            indexer.remove(hash);
+                            return Ok(Load::Miss);
+                        }
+                        _ => {
+                            tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
+                            return Err(e);
+                        }
+                    },
                 };
                 metrics
                     .storage_entry_deserialize_duration
@@ -728,7 +751,7 @@ where
         let this = self.clone();
         async move {
             if !this.inner.active.load(Ordering::Relaxed) {
-                return Err(anyhow::anyhow!("cannot delete entry after closed").into());
+                return Err(Error::new(ErrorKind::Closed, "cannot delete entry after closed"));
             }
 
             // Write an tombstone to clear tombstone log by increase the max sequence.
@@ -762,14 +785,14 @@ where
         .boxed()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     pub fn hold_flush(&self) {
-        self.inner.flush_holder.hold();
+        self.inner.flush_switch.on();
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_utils"))]
     pub fn unhold_flush(&self) {
-        self.inner.flush_holder.unhold();
+        self.inner.flush_switch.off();
     }
 }
 
@@ -835,7 +858,6 @@ mod tests {
     use crate::{
         engine::RecoverMode,
         io::{
-            self,
             device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
             engine::{IoEngine, IoEngineBuilder},
         },
@@ -856,7 +878,7 @@ mod tests {
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        io::engine::psync::PsyncIoEngineBuilder::new().build().await.unwrap()
+        PsyncIoEngineBuilder::new().build().await.unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
@@ -891,6 +913,8 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_switch: Switch::default(),
+            load_holder: Holder::default(),
             marker: PhantomData,
         };
 
@@ -932,6 +956,8 @@ mod tests {
             buffer_pool_size: 16 * 1024 * 1024,
             blob_index_size: 4 * 1024,
             submit_queue_size_threshold: 16 * 1024 * 1024 * 2,
+            flush_switch: Switch::default(),
+            load_holder: Holder::default(),
             marker: PhantomData,
         };
         let builder = Box::new(builder);
@@ -1238,7 +1264,6 @@ mod tests {
         store.wait().await;
         let mut res = vec![];
         for i in 0..12 {
-            tracing::trace!("==========> {i}");
             res.push(store.load(memory.hash(&i)).await.unwrap().kv());
         }
         assert_eq!(

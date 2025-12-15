@@ -17,14 +17,14 @@ use std::{sync::Arc, time::Instant};
 use bytes::{Buf, BufMut};
 use foyer_common::{
     bits,
-    code::{CodeError, StorageKey, StorageValue},
+    code::{StorageKey, StorageValue},
+    error::ErrorKind,
     metrics::Metrics,
 };
 
 use crate::{
     compress::Compression,
     engine::block::serde::{EntryHeader, Sequence},
-    error::Error,
     io::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
@@ -211,9 +211,10 @@ impl Buffer {
         let info = match EntrySerializer::serialize(key, value, compression, &mut buf[EntryHeader::serialized_len()..])
         {
             Ok(info) => info,
-            Err(Error::Code(CodeError::SizeLimit)) => return false,
             Err(e) => {
-                tracing::warn!(?e, "[blob writer]: serialize entry kv error");
+                if e.kind() != ErrorKind::BufferSizeLimit {
+                    tracing::warn!(?e, "[blob writer]: serialize entry kv error");
+                }
                 return false;
             }
         };

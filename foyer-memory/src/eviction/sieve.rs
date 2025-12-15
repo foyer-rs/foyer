@@ -22,13 +22,14 @@ use std::{
 
 use foyer_common::{
     code::{Key, Value},
+    error::Result,
     properties::Properties,
 };
 use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{error::Result, record::Record};
+use crate::record::Record;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SieveConfig;

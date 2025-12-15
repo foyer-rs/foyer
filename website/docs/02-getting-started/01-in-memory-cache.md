@@ -1,94 +1,114 @@
 # Setup In-memory Cache
 
-This article will guide you through the process of setting up an in-memory cache.
+This article walks through setting up the in-memory cache that ships with ***foyer***.
 
 :::tip for hybrid cache users
 
-The in-memory cache `Cache` is literally an in-memory only cache. Which provides non-overhead in-memory cache implement for users only want to replace their in-memory cache with ***foyer***, and cannot upgrade to a hybrid cache later.
-
-The hybrid cache `HybridCache` also provides a in-memory only mode. If you want to try ***foyer*** out with the in-memory mode and have the needs of a hybrid cache, please use `HybridCache`. See [Tutorial - Hybrid Cache](/docs/getting-started/hybrid-cache).
+`Cache`[^cache] is a pure in-memory cache. If you want to experiment with ***foyer*** now but may eventually enable disk persistence, start from `HybridCache`[^hybrid-cache]. `HybridCacheBuilder::memory()` spins up the same in-memory layer, so migrating to the hybrid guide later only requires completing the storage phase.
 
 :::
 
 ## 1. Add foyer as a dependency
 
-Add this line to the `[dependencies]` section of your project's `Cargo.toml`.
+Add ***foyer*** to your project’s `Cargo.toml`.
 
 ```toml
-foyer = "0.12"
+foyer = "0.20"
 ```
 
-If you are using a nightly version of the rust toolchain, the `nightly` feature is needed.
+When compiling with nightly Rust, enable the `nightly` feature.
 
 ```toml
-foyer = { version = "0.12", features = ["nightly"] }
+foyer = { version = "0.20", features = ["nightly"] }
 ```
+
+You can also toggle optional features such as `serde` (implements `Code` for `Serialize`/`Deserialize` types) or `tracing` (tail-based tracing, see the monitor tutorial).
 
 ## 2. Build a `Cache`
 
 ### 2.1 Build with a builder
 
-`Cache`[^cache] can be built via `CacheBuilder`[^cache-builder]. For the default configuration, only `capacity` is required.
+`CacheBuilder`[^cache-builder] is the entry point. Only the in-memory capacity (measured by your weighter, see below) is required.
 
 ```rust
 use foyer::{Cache, CacheBuilder};
 
-// ... ...
-
 let cache: Cache<String, String> = CacheBuilder::new(16).build();
 ```
 
-### 2.2 Count entries by weight
+### 2.2 Select an eviction algorithm
 
-By default, `Cache` counts its usage for eviction by entry count. In the case below, which is 16.
-
-Counting by entry count may be not suitable for all cases. So, ***foyer*** also provides an interface to let the user decide how to count the usage.
+`Cache` supports FIFO, S3FIFO, LRU, LFU, and Sieve via `EvictionConfig`[^eviction-config]. Swap the default w-TinyLFU flavor with the algorithm that best fits your workload.
 
 ```rust
-let cache: Cache<String, String> = CacheBuilder::new(10000)
-  .with_weighter(|key, value| key.len() + value.len())
-  .build();
+use foyer::{Cache, CacheBuilder, EvictionConfig, LruConfig};
+
+let cache: Cache<String, String> = CacheBuilder::new(256)
+    .with_eviction_config(EvictionConfig::Lru(LruConfig {
+        high_priority_pool_ratio: 0.8,
+    }))
+    .build();
 ```
 
-With `with_weighter()`[^with-weighter], you can customize how `Cache` counts its usage. In the case below, the usage is counted by the total character length of the entry.
+Each algorithm has its own config struct (e.g. `LruConfig`[^lru-config]) so you can tune parameters such as high-priority pools or FIFO queue sizes.
 
-The weighter can be implemented to count anything. Count, length, memory usage, or anything you want.
+### 2.3 Count entries by weight
 
-### 2.3 Mitigate hot shards
+By default, usage equals the number of cached entries. Override that logic with `with_weighter()`[^with-weighter] to express memory consumption, byte length, cost, etc.
 
-The in-memory cache in ***foyer*** is a sharded cache. Each shard is protected by an individual mutex. Sometimes, one or more shards can be much hotter than others and cause performance regression.
+```rust
+let cache: Cache<String, String> = CacheBuilder::new(10 * 1024 * 1024)
+    .with_weighter(|key, value| key.len() + value.len())
+    .build();
+```
 
-There are two ways to mitigate the hot shards.
+### 2.4 Filter low-value entries
 
-1. Scale the shards
+`with_filter()`[^with-filter] lets you keep items out of the cache even if callers insert them.
 
-Scaling the shard may reduce the possibility to create hot shards. You can scale the shards to a higher number with `with_shards()`.[^with-shards]
+```rust
+use foyer::Filter;
+
+let cache = CacheBuilder::new(1024)
+    .with_filter(|_key: &String, value: &String| value.len() < 2048)
+    .build::<_>();
+```
+
+Rejected entries return lightweight placeholders to callers but are reclaimed immediately so they never count toward usage.
+
+### 2.5 Mitigate hot shards
+
+The in-memory cache is sharded across mutex-protected segments. Increase shard count or provide a custom hash builder to smooth load distribution.
 
 ```rust
 let cache: Cache<String, String> = CacheBuilder::new(1024)
-  .with_shards(64)
-  .build();
+    .with_shards(64)                               // more shards
+    .with_hash_builder(ahash::RandomState::new())  // or your own hasher
+    .build();
 ```
 
-2. Use a customized hasher
+### 2.6 Hook observability
 
-By default, ***foyer*** uses `ahash`[^ahash] as the hasher to determine which shard a key belongs to. You can use your own hasher with `with_hash_builder()`.[^with-hash-builder]
+`CacheBuilder::with_metrics_registry()` wires ***foyer***’s counters and histograms into your monitoring stack via [`mixtrics`][^mixtrics]. Combine it with `with_event_listener()`[^event-listener] to receive structured callbacks.
 
 ```rust
-let cache: Cache<String, String> = CacheBuilder::new(1024)
-  .with_hash_builder(CustomizedRandomState::default())
-  .build();
+use foyer::CacheBuilder;
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
+use prometheus::Registry;
+
+let prometheus = Registry::new();
+let registry = PrometheusMetricsRegistry::new(prometheus.clone());
+
+let cache = CacheBuilder::new(100)
+    .with_metrics_registry(Box::new(registry))
+    .build::<_>();
 ```
 
-### 2.4 More configurations
-
-Please refer to the API document.[^cache-builder]
+Now you can expose the Prometheus registry through HTTP (see `examples/export_metrics_prometheus_hyper.rs`) or reuse the same pattern for StatsD, OTLP, etc.
 
 ## 3. Use `Cache` as any other cache library
 
-`Cache` provides similar interfaces to caches from any other cache library.
-
-Here is an example.
+`Cache` exposes familiar operations.
 
 ```rust
 use foyer::{Cache, CacheBuilder};
@@ -97,22 +117,20 @@ fn main() {
     let cache: Cache<String, String> = CacheBuilder::new(16).build();
 
     let entry = cache.insert("hello".to_string(), "world".to_string());
-    let e = cache.get("hello").unwrap();
+    let snapshot = cache.get("hello").unwrap();
 
-    assert_eq!(entry.value(), e.value());
+    assert_eq!(entry.value(), snapshot.value());
 }
 ```
 
-For other interfaces, please refer to the API document.[^cache]
+Call `get_or_fetch()` when you want request de-duplication with async loaders. Refer to the API docs for the full surface.
 
 [^cache]: https://docs.rs/foyer/latest/foyer/enum.Cache.html
-
+[^hybrid-cache]: https://docs.rs/foyer/latest/foyer/struct.HybridCache.html
 [^cache-builder]: https://docs.rs/foyer/latest/foyer/struct.CacheBuilder.html
-
+[^eviction-config]: https://docs.rs/foyer/latest/foyer/enum.EvictionConfig.html
+[^lru-config]: https://docs.rs/foyer/latest/foyer/struct.LruConfig.html
 [^with-weighter]: https://docs.rs/foyer/latest/foyer/struct.CacheBuilder.html#method.with_weighter
-
-[^with-shards]: https://docs.rs/foyer/latest/foyer/struct.CacheBuilder.html#method.with_shards
-
-[^ahash]: https://crates.io/crates/ahash
-
-[^with-hash-builder]: https://docs.rs/foyer/latest/foyer/struct.CacheBuilder.html#method.with_hash_builder
+[^with-filter]: https://docs.rs/foyer/latest/foyer/trait.Filter.html
+[^event-listener]: https://docs.rs/foyer/latest/foyer/trait.EventListener.html
+[^mixtrics]: https://github.com/foyer-rs/mixtrics

@@ -27,6 +27,7 @@ use std::{
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
+    error::{Error, Result},
     metrics::Metrics,
     properties::Properties,
 };
@@ -36,10 +37,13 @@ use futures_util::{
     FutureExt,
 };
 use itertools::Itertools;
-use tokio::sync::oneshot;
+use mea::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 
-#[cfg(test)]
-use crate::engine::block::test_utils::*;
+#[cfg(any(test, feature = "test_utils"))]
+use crate::test_utils::*;
 use crate::{
     engine::block::{
         buffer::{Batch, BlobPart, Block, Buffer, SplitCtx, Splitter},
@@ -49,7 +53,6 @@ use crate::{
         serde::Sequence,
         tombstone::{Tombstone, TombstoneLog},
     },
-    error::{Error, Result},
     io::{
         bytes::{IoSlice, IoSliceMut},
         PAGE,
@@ -121,7 +124,7 @@ where
     P: Properties,
 {
     id: usize,
-    tx: flume::Sender<Submission<K, V, P>>,
+    tx: UnboundedSender<Submission<K, V, P>>,
     submit_queue_size: Arc<AtomicUsize>,
 
     metrics: Arc<Metrics>,
@@ -153,8 +156,8 @@ where
         id: usize,
         submit_queue_size: Arc<AtomicUsize>,
         metrics: Arc<Metrics>,
-    ) -> (Self, flume::Receiver<Submission<K, V, P>>) {
-        let (tx, rx) = flume::unbounded();
+    ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
+        let (tx, rx) = mea::mpsc::unbounded();
         let this = Self {
             id,
             tx,
@@ -167,7 +170,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn run(
         &self,
-        rx: flume::Receiver<Submission<K, V, P>>,
+        rx: UnboundedReceiver<Submission<K, V, P>>,
         block_size: usize,
         io_buffer_size: usize,
         blob_index_size: usize,
@@ -177,7 +180,7 @@ where
         tombstone_log: Option<TombstoneLog>,
         metrics: Arc<Metrics>,
         runtime: &Runtime,
-        #[cfg(test)] flush_holder: FlushHolder,
+        #[cfg(any(test, feature = "test_utils"))] flush_switch: Switch,
     ) -> Result<()> {
         let id = self.id;
         let io_buffer_size = bits::align_down(PAGE, io_buffer_size);
@@ -218,8 +221,8 @@ where
             io_tasks: VecDeque::with_capacity(1),
             current_block_handle,
             max_entry_size,
-            #[cfg(test)]
-            flush_holder,
+            #[cfg(any(test, feature = "test_utils"))]
+            flush_switch,
         };
 
         runtime.write().spawn(async move {
@@ -287,7 +290,7 @@ where
 {
     id: usize,
 
-    rx: Option<flume::Receiver<Submission<K, V, P>>>,
+    rx: Option<UnboundedReceiver<Submission<K, V, P>>>,
 
     // NOTE: writer is always `Some(..)`.
     buffer: Option<Buffer>,
@@ -320,8 +323,8 @@ where
 
     max_entry_size: usize,
 
-    #[cfg(test)]
-    flush_holder: FlushHolder,
+    #[cfg(any(test, feature = "test_utils"))]
+    flush_switch: Switch,
 }
 
 impl<K, V, P> Runner<K, V, P>
@@ -342,13 +345,17 @@ where
     }
 
     pub async fn run(mut self) -> Result<()> {
-        let rx = self.rx.take().unwrap();
+        let mut rx = self.rx.take().unwrap();
 
         loop {
-            #[cfg(not(test))]
+            while let Ok(submission) = rx.try_recv() {
+                self.recv(submission);
+            }
+
+            #[cfg(not(any(test, feature = "test_utils")))]
             let can_flush = true;
-            #[cfg(test)]
-            let can_flush = !self.flush_holder.is_held() && rx.is_empty();
+            #[cfg(any(test, feature = "test_utils"))]
+            let can_flush = !self.flush_switch.is_on();
 
             let need_flush = !self.buffer.as_ref().unwrap().is_empty()
                 || !self.waiters.is_empty()
@@ -389,7 +396,7 @@ where
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
-                Ok(submission) = rx.recv_async() => {
+                Some(submission) = rx.recv() => {
                     self.recv(submission);
                 }
                 // Graceful shutdown.

@@ -16,6 +16,7 @@
 
 use std::{
     collections::VecDeque,
+    fmt::Display,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
@@ -24,7 +25,7 @@ use std::{
 };
 
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    BlockEngineBuilder, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, IoEngineBuilder, Location, PsyncIoEngineBuilder,
 };
 use rand::{rng, Rng};
@@ -36,9 +37,11 @@ const WRITERS: usize = 8;
 const FETCHERS: usize = 16;
 const READERS: usize = 8;
 
-const WRITES: usize = 1000;
-const FETCHES: usize = 1000;
-const READS: usize = 1000;
+const WRITES: usize = 2000;
+const FETCHES: usize = 2000;
+const READS: usize = 2000;
+
+const ERROR_PER_FETCHES: usize = 10;
 
 const DUPLICATES: usize = 10;
 
@@ -49,6 +52,17 @@ const FETCH_WAIT: Duration = Duration::from_millis(1);
 const READ_WAIT: Duration = Duration::from_millis(1);
 
 const INTERVAL: usize = 100;
+
+#[derive(Debug)]
+struct Trap;
+
+impl Display for Trap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Trap")
+    }
+}
+
+impl std::error::Error for Trap {}
 
 #[derive(Debug)]
 struct RecentEvictionQueue {
@@ -167,15 +181,25 @@ async fn fetch(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueu
             Some(v) => v,
             None => continue,
         };
-        let e = hybrid
-            .fetch(key, || async move {
-                tokio::time::sleep(MISS_WAIT).await;
-                Ok(value(key))
-            })
-            .await
-            .unwrap();
 
-        assert_eq!(e.value(), &value(key));
+        let res = if cnt % ERROR_PER_FETCHES as u64 == 0 {
+            hybrid
+                .get_or_fetch(&key, || async move { Err::<Vec<u8>, _>(Trap) })
+                .await
+        } else {
+            hybrid
+                .get_or_fetch(&key, || async move {
+                    tokio::time::sleep(MISS_WAIT).await;
+                    Ok::<_, Error>(value(key))
+                })
+                .await
+        };
+
+        match res {
+            Ok(e) => assert_eq!(e.value(), &value(key)),
+            Err(e) => assert!(e.downcast_ref::<Trap>().is_some(), "Expected Trap error, got: {e}"),
+        }
+
         cnt += 1;
         if cnt % INTERVAL as u64 == 0 {
             tracing::info!("Fetch {cnt} items");
@@ -194,11 +218,17 @@ async fn read(hybrid: HybridCache<u64, Vec<u8>>, recent: Arc<RecentEvictionQueue
             Some(v) => v,
             None => continue,
         };
-        let e = hybrid.get(&key).await.unwrap();
+        let res = hybrid.get(&key).await;
 
-        if let Some(e) = e {
-            assert_eq!(e.value(), &value(key));
+        match res {
+            Ok(e) => {
+                if let Some(e) = e {
+                    assert_eq!(e.value(), &value(key))
+                }
+            }
+            Err(e) => assert!(e.downcast_ref::<Trap>().is_some(), "Expected Trap error, got: {e}"),
         }
+
         cnt += 1;
         if cnt % INTERVAL as u64 == 0 {
             tracing::info!("Read {cnt} items");

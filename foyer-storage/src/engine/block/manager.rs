@@ -22,28 +22,30 @@ use std::{
     },
 };
 
-use foyer_common::metrics::Metrics;
+use foyer_common::{
+    error::{ErrorKind, Result},
+    metrics::Metrics,
+};
 use futures_core::future::BoxFuture;
 use futures_util::{
     future::{ready, Shared},
     FutureExt,
 };
 use itertools::Itertools;
+use mea::oneshot;
 use rand::seq::IteratorRandom;
-use tokio::sync::oneshot;
 
 use crate::{
     engine::block::{
         eviction::{EvictionInfo, EvictionPicker},
         reclaimer::ReclaimerTrait,
     },
-    error::Result,
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
         engine::IoEngine,
     },
-    Device, IoError, Runtime,
+    Device, Runtime,
 };
 
 pub type BlockId = u32;
@@ -104,7 +106,7 @@ impl Block {
             .io_engine
             .write(buf, self.inner.partition.as_ref(), offset)
             .await;
-        (buf, res.map_err(|e| e.into()))
+        (buf, res)
     }
 
     pub(crate) async fn read(&self, buf: Box<dyn IoBufMut>, offset: u64) -> (Box<dyn IoB>, Result<()>) {
@@ -113,7 +115,7 @@ impl Block {
             .io_engine
             .read(buf, self.inner.partition.as_ref(), offset)
             .await;
-        (buf, res.map_err(|e| e.into()))
+        (buf, res)
     }
 
     pub(crate) fn partition(&self) -> &Arc<dyn Partition> {
@@ -185,8 +187,8 @@ impl BlockManager {
         while device.free() >= block_size {
             let partition = match device.create_partition(block_size) {
                 Ok(partition) => partition,
-                Err(IoError::NoSpace { .. }) => break,
-                Err(e) => return Err(e.into()),
+                Err(e) if e.kind() == ErrorKind::NoSpace => break,
+                Err(e) => return Err(e),
             };
             let id = blocks.len() as BlockId;
             let block = Block {

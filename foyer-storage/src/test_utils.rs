@@ -17,12 +17,16 @@
 use std::{
     collections::HashSet,
     fmt::Debug,
+    future::ready,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 
+use futures_core::future::BoxFuture;
+use futures_util::FutureExt;
+use mea::oneshot;
 use parking_lot::Mutex;
 
 use crate::{io::device::statistics::Statistics, StorageFilterCondition, StorageFilterResult};
@@ -174,5 +178,75 @@ impl LoadThrottleSwitch {
     /// Unthrottle all loads.
     pub fn unthrottle(&self) {
         self.throttled.store(false, Ordering::Relaxed);
+    }
+}
+
+/// An wrapper of atomic bool.
+#[derive(Debug, Clone, Default)]
+pub struct Switch {
+    hold: Arc<AtomicBool>,
+}
+
+impl Switch {
+    /// Check if the switch is on.
+    pub fn is_on(&self) -> bool {
+        self.hold.load(Ordering::Relaxed)
+    }
+
+    /// Turn on the switch
+    pub fn on(&self) {
+        self.hold.store(true, Ordering::Relaxed);
+    }
+
+    /// Turn off the switch
+    pub fn off(&self) {
+        self.hold.store(false, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug, Default)]
+struct HolderInner {
+    holdees: Vec<oneshot::Sender<()>>,
+    holding: bool,
+}
+
+/// A holder that can hold and unhold.
+#[derive(Debug, Clone, Default)]
+pub struct Holder {
+    inner: Arc<Mutex<HolderInner>>,
+}
+
+impl Holder {
+    /// Check if it is being held.
+    pub fn is_held(&self) -> bool {
+        self.inner.lock().holding
+    }
+
+    /// Hold the holder. Block all following waits.
+    pub fn hold(&self) {
+        self.inner.lock().holding = true;
+    }
+
+    /// Unhold the holder. Release all previous waits.
+    pub fn unhold(&self) {
+        let mut inner = self.inner.lock();
+        inner.holding = false;
+        for tx in inner.holdees.drain(..) {
+            let _ = tx.send(());
+        }
+    }
+
+    /// Wait if it is being held.
+    pub fn wait(&self) -> BoxFuture<'static, ()> {
+        let mut inner = self.inner.lock();
+        if !inner.holding {
+            return ready(()).boxed();
+        }
+        let (tx, rx) = oneshot::channel();
+        inner.holdees.push(tx);
+        async move {
+            let _ = rx.await;
+        }
+        .boxed()
     }
 }

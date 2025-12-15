@@ -27,20 +27,26 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+#[cfg(feature = "tracing")]
+use fastrace::{future::InSpan, prelude::*};
+use foyer_common::error::Result;
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
 use crate::io::{
     bytes::{IoB, IoBuf, IoBufMut},
     device::Partition,
-    error::IoResult,
 };
 
+#[cfg(not(feature = "tracing"))]
+type IoHandleInner = BoxFuture<'static, (Box<dyn IoB>, Result<()>)>;
+#[cfg(feature = "tracing")]
+type IoHandleInner = InSpan<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>>;
 /// A detached I/O handle that can be polled for completion.
 #[pin_project]
 pub struct IoHandle {
     #[pin]
-    inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>,
+    inner: IoHandleInner,
     callback: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
@@ -50,8 +56,17 @@ impl Debug for IoHandle {
     }
 }
 
-impl From<BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>> for IoHandle {
-    fn from(inner: BoxFuture<'static, (Box<dyn IoB>, IoResult<()>)>) -> Self {
+#[cfg(not(feature = "tracing"))]
+impl From<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>> for IoHandle {
+    fn from(inner: BoxFuture<'static, (Box<dyn IoB>, Result<()>)>) -> Self {
+        Self { inner, callback: None }
+    }
+}
+
+#[cfg(feature = "tracing")]
+impl From<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>> for IoHandle {
+    fn from(inner: BoxFuture<'static, (Box<dyn IoB>, Result<()>)>) -> Self {
+        let inner = inner.in_span(Span::enter_with_local_parent("foyer::storage::io::io_handle"));
         Self { inner, callback: None }
     }
 }
@@ -68,7 +83,7 @@ impl IoHandle {
 }
 
 impl Future for IoHandle {
-    type Output = (Box<dyn IoB>, IoResult<()>);
+    type Output = (Box<dyn IoB>, Result<()>);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -83,7 +98,7 @@ impl Future for IoHandle {
 /// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self) -> BoxFuture<'static, IoResult<Arc<dyn IoEngine>>>;
+    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>>;
 }
 
 /// I/O engine builder trait.
@@ -113,7 +128,7 @@ mod tests {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
 
-    fn build_test_file_device(path: impl AsRef<Path>) -> IoResult<Arc<dyn Device>> {
+    fn build_test_file_device(path: impl AsRef<Path>) -> Result<Arc<dyn Device>> {
         let device = FileDeviceBuilder::new(&path).with_capacity(16 * MIB).build()?;
         for _ in 0..16 {
             device.create_partition(MIB)?;

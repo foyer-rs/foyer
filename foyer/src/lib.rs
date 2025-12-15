@@ -12,19 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![doc = include_str!(concat!(env!("OUT_DIR"), "/foyer-docs.md"))]
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! A hybrid cache library that supports plug-and-play cache algorithms, in-memory cache and disk cache.
-//!
-//! ![Website](https://img.shields.io/website?url=https%3A%2F%2Ffoyer-rs.github.io/foyer&up_message=foyer-rs.github.io/foyer&down_message=website&style=for-the-badge&logo=htmx&link=https%3A%2F%2Ffoyer-rs.github.io/foyer)
-//! ![Crates.io Version](https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555&link=https%3A%2F%2Fcrates.io%2Fcrates%2Ffoyer)
-//! ![docs.rs](https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555&link=https%3A%2F%2Fdocs.rs%2Ffoyer)
-//!
-//! [Website](https://foyer-rs.github.io/foyer) |
-//! [Tutorial](https://foyer-rs.github.io/foyer/docs/overview) |
-//! [API Docs](https://docs.rs/foyer) |
-//! [Crate](https://crates.io/crates/foyer)
 
 use foyer_common as common;
 use foyer_memory as memory;

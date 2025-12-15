@@ -4,7 +4,6 @@ members = [
   "examples",
   "foyer",
   "foyer-bench",
-  "foyer-cli",
   "foyer-common",
   "foyer-memory",
   "foyer-storage",
@@ -12,9 +11,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.21.0-dev"
+version = "0.22.0-dev"
 edition = "2021"
-rust-version = "1.82.0"
+rust-version = "1.85.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://foyer-rs.github.io/foyer"
 keywords = ["cache", "hybrid"]
@@ -37,24 +36,27 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 cmsketch = "0.2"
 colored = "3"
-console-subscriber = "0.4"
+console-subscriber = "0.5"
 core_affinity = "0.8"
 criterion = "0.7"
 csv = "1"
 equivalent = "1"
-fastant = "0.1"
+fastant = "0.1.11"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.13"
-flume = "0.11"
-foyer = { version = "0.21.0-dev", path = "foyer" }
-foyer-common = { version = "0.21.0-dev", path = "foyer-common" }
-foyer-memory = { version = "0.21.0-dev", path = "foyer-memory" }
-foyer-storage = { version = "0.21.0-dev", path = "foyer-storage" }
+fastrace-opentelemetry = "0.14"
+foyer = { version = "0.22.0-dev", path = "foyer" }
+foyer-common = { version = "0.22.0-dev", path = "foyer-common" }
+foyer-memory = { version = "0.22.0-dev", path = "foyer-memory" }
+foyer-storage = { version = "0.22.0-dev", path = "foyer-storage" }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-hashbrown = "0.16"
+# hashbrown v0.16.1 uses a unstable feature `trivial_clone` that only available on recent nightly version.
+# Upgrade to hashbrown v0.16.1 will break build on old nightly toolchains.
+# FYI: https://github.com/rust-lang/hashbrown/issues/673
+# TODO: Remove the upper bound when foyer bumps MSRV to Rust 1.92+.
+hashbrown = "=0.16.0"
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
@@ -65,12 +67,13 @@ io-uring = "0.7"
 itertools = "0.14"
 libc = "0.2"
 lz4 = "1"
+mea = "0.5"
 mixtrics = "0.2"
 moka = "0.12"
-opentelemetry = "0.30"
-opentelemetry-otlp = "0.30"
-opentelemetry-semantic-conventions = "0.30"
-opentelemetry_sdk = "0.30"
+opentelemetry = "0.31"
+opentelemetry-otlp = "0.31"
+opentelemetry-semantic-conventions = "0.31"
+opentelemetry_sdk = "0.31"
 parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
@@ -82,7 +85,6 @@ serde_bytes = "0.11"
 serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
-thiserror = "2"
 tikv-jemallocator = "0.6"
 tokio = "1"
 tracing = "0.1"

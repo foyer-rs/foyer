@@ -16,18 +16,16 @@
 
 /// Allow to enable debug assertions in release profile with feature "strict_assertion".
 pub mod assert;
-/// The util that convert the blocking call to async call.
-pub mod asyncify;
 /// The bitwise utils.
 pub mod bits;
 /// The [`bytes::Buf`] and [`bytes::BufMut`] extensions.
 pub mod buf;
 /// The trait for the key and value encoding and decoding.
 pub mod code;
+/// Error types and result type.
+pub mod error;
 /// Components for monitoring internal events.
 pub mod event;
-/// Future extensions.
-pub mod future;
 /// Provisioned hashers.
 pub mod hasher;
 /// The shared metrics for foyer.

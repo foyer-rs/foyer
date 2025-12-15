@@ -14,13 +14,13 @@
 
 use std::{fmt::Debug, io::Write};
 
-use foyer_common::code::{StorageKey, StorageValue};
+use foyer_common::{
+    code::{StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
+};
 use twox_hash::{XxHash32, XxHash64};
 
-use crate::{
-    compress::Compression,
-    error::{Error, Result},
-};
+use crate::compress::Compression;
 
 #[derive(Debug)]
 pub struct Checksummer;
@@ -113,7 +113,7 @@ impl EntrySerializer {
         W: Write,
     {
         let mut writer = TrackedWriter::new(writer);
-        key.encode(&mut writer).map_err(Error::from)?;
+        key.encode(&mut writer)?;
         Ok(writer.written())
     }
 
@@ -125,21 +125,21 @@ impl EntrySerializer {
         let mut writer = TrackedWriter::new(writer);
         match compression {
             Compression::None => {
-                value.encode(&mut writer).map_err(Error::from)?;
+                value.encode(&mut writer)?;
             }
             Compression::Zstd => {
                 // Do not use `auto_finish()` here, for we will lost `ZeroWrite` error.
-                let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::from)?;
-                value.encode(&mut encoder).map_err(Error::from)?;
-                encoder.finish().map_err(Error::from)?;
+                let mut encoder = zstd::Encoder::new(&mut writer, 0).map_err(Error::io_error)?;
+                value.encode(&mut encoder)?;
+                encoder.finish().map_err(Error::io_error)?;
             }
             Compression::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .checksum(lz4::ContentChecksum::NoChecksum)
                     .auto_flush(true)
                     .build(&mut writer)
-                    .map_err(Error::from)?;
-                value.encode(&mut encoder).map_err(Error::from)?;
+                    .map_err(Error::io_error)?;
+                value.encode(&mut encoder)?;
             }
         }
         Ok(writer.written())
@@ -171,17 +171,18 @@ impl EntryDeserializer {
         V: StorageValue,
     {
         if buffer.len() < value_len + ken_len {
-            return Err(Error::OutOfRange {
-                valid: 0..buffer.len(),
-                get: 0..value_len + ken_len,
-            });
+            return Err(Error::new(ErrorKind::OutOfRange, "fail to deserialize entry")
+                .with_context("valid", format!("{:?}", 0..buffer.len()))
+                .with_context("get", format!("{:?}", 0..value_len + ken_len)));
         }
 
         // calculate checksum if needed
         if let Some(expected) = checksum {
             let get = Checksummer::checksum64(&buffer[..value_len + ken_len]);
             if expected != get {
-                return Err(Error::ChecksumMismatch { expected, get });
+                return Err(Error::new(ErrorKind::ChecksumMismatch, "fail to deserialize entry")
+                    .with_context("expected", expected)
+                    .with_context("get", get));
             }
         }
 
@@ -204,7 +205,7 @@ impl EntryDeserializer {
     where
         K: StorageKey,
     {
-        K::decode(&mut &buf[..]).map_err(Error::from)
+        K::decode(&mut &buf[..])
     }
 
     #[cfg_attr(
@@ -216,14 +217,14 @@ impl EntryDeserializer {
         V: StorageValue,
     {
         match compression {
-            Compression::None => V::decode(&mut &buf[..]).map_err(Error::from),
+            Compression::None => V::decode(&mut &buf[..]),
             Compression::Zstd => {
-                let mut decoder = zstd::Decoder::new(buf).map_err(Error::from)?;
-                V::decode(&mut decoder).map_err(Error::from)
+                let mut decoder = zstd::Decoder::new(buf).map_err(Error::io_error)?;
+                V::decode(&mut decoder)
             }
             Compression::Lz4 => {
-                let mut decoder = lz4::Decoder::new(buf).map_err(Error::from)?;
-                V::decode(&mut decoder).map_err(Error::from)
+                let mut decoder = lz4::Decoder::new(buf).map_err(Error::io_error)?;
+                V::decode(&mut decoder)
             }
         }
     }

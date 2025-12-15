@@ -49,6 +49,10 @@ impl Debug for MonitoredIoEngine {
 }
 
 impl IoEngine for MonitoredIoEngine {
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::monitor::read")
+    )]
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();
@@ -65,6 +69,10 @@ impl IoEngine for MonitoredIoEngine {
         })
     }
 
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::monitor::write")
+    )]
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let now = Instant::now();
         let bytes = buf.len();

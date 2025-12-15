@@ -16,6 +16,7 @@ use std::{mem::offset_of, sync::Arc};
 
 use foyer_common::{
     code::{Key, Value},
+    error::{Error, ErrorKind, Result},
     properties::{Hint, Properties},
     strict_assert,
 };
@@ -23,10 +24,7 @@ use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink}
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
-use crate::{
-    error::{Error, Result},
-    record::Record,
-};
+use crate::record::Record;
 
 /// Lru eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,12 +134,13 @@ where
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
             if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
-                return Err(Error::ConfigError(
-                    format!(
-                        "[lru]: high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
-                        config.high_priority_pool_ratio
-                    )
-                ));
+                return Err(
+                    Error::new(ErrorKind::Config, "update LRU config failed")
+                        .with_context("reason", format!(
+                            "high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
+                            config.high_priority_pool_ratio
+                        ))
+                );
             }
             self.config = config.clone();
         }

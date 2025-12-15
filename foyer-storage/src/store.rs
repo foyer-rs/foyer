@@ -24,8 +24,9 @@ use std::{
 use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
+    error::{Error, ErrorKind, Result},
     metrics::Metrics,
-    properties::{Age, Populated, Properties},
+    properties::{Age, Properties},
     runtime::BackgroundShutdownRuntime,
 };
 use foyer_memory::{Cache, Piece};
@@ -37,9 +38,8 @@ use crate::{
     compress::Compression,
     engine::{
         noop::{NoopEngine, NoopEngineBuilder},
-        Engine, EngineBuildContext, EngineConfig, Load, RecoverMode,
+        Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
-    error::{Error, Result},
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device},
         engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
@@ -79,7 +79,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    #[cfg(feature = "test_utils")]
+    #[cfg(any(test, feature = "test_utils"))]
     load_throttle_switch: LoadThrottleSwitch,
 }
 
@@ -365,6 +365,9 @@ where
 
     compression: Compression,
     recover_mode: RecoverMode,
+
+    #[cfg(any(test, feature = "test_utils"))]
+    load_throttle_switch: LoadThrottleSwitch,
 }
 
 impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
@@ -409,6 +412,8 @@ where
 
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_throttle_switch: LoadThrottleSwitch::default(),
         }
     }
 
@@ -450,6 +455,13 @@ where
         self
     }
 
+    /// Set the load throttle switch for the disk cache store.
+    #[cfg(any(test, feature = "test_utils"))]
+    pub fn with_load_throttle_switch(mut self, switch: LoadThrottleSwitch) -> Self {
+        self.load_throttle_switch = switch;
+        self
+    }
+
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
         self.engine_builder.is_none()
@@ -475,7 +487,10 @@ where
                 builder.max_blocking_threads(config.max_blocking_threads);
             }
             builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder.enable_all().build().map_err(anyhow::Error::from)?;
+            let runtime = builder
+                .enable_all()
+                .build()
+                .map_err(|source| Error::new(ErrorKind::Io, "failed to build dedicated runtime").with_source(source))?;
             let runtime = BackgroundShutdownRuntime::from(runtime);
             Ok::<_, Error>(Arc::new(runtime))
         };
@@ -534,6 +549,8 @@ where
 
         let keeper = Keeper::new(memory.shards());
         let hasher = memory.hash_builder().clone();
+        #[cfg(any(test, feature = "test_utils"))]
+        let load_throttle_switch = self.load_throttle_switch;
         let inner = StoreInner {
             hasher,
             keeper,
@@ -541,8 +558,8 @@ where
             compression,
             runtime,
             metrics,
-            #[cfg(feature = "test_utils")]
-            load_throttle_switch: LoadThrottleSwitch::default(),
+            #[cfg(any(test, feature = "test_utils"))]
+            load_throttle_switch,
         };
         let inner = Arc::new(inner);
         let store = Store { inner };
