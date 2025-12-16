@@ -45,6 +45,5 @@ pub use crate::{
             IoEngine, IoEngineBuilder, IoHandle,
         },
     },
-    runtime::Runtime,
-    store::{RuntimeOptions, Store, StoreBuilder, TokioRuntimeOptions},
+    store::{Store, StoreBuilder},
 };

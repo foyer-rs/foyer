@@ -22,7 +22,10 @@ use std::{
 
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
-use foyer_common::error::{Error, Result};
+use foyer_common::{
+    error::{Error, Result},
+    spawn::Spawner,
+};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
@@ -30,7 +33,7 @@ use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
-        engine::{IoEngine, IoEngineBuilder, IoHandle},
+        engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder, IoHandle},
     },
     RawFile,
 };
@@ -75,8 +78,6 @@ impl DerefMut for FileHandle {
 /// Builder for synchronous I/O engine with pread(2)/pwrite(2).
 #[derive(Debug)]
 pub struct PsyncIoEngineBuilder {
-    handle: Option<tokio::runtime::Handle>,
-
     #[cfg(any(test, feature = "test_utils"))]
     write_io_latency: Option<std::ops::Range<std::time::Duration>>,
 
@@ -90,24 +91,21 @@ impl Default for PsyncIoEngineBuilder {
     }
 }
 
+impl From<PsyncIoEngineBuilder> for Box<dyn IoEngineBuilder> {
+    fn from(builder: PsyncIoEngineBuilder) -> Self {
+        builder.boxed()
+    }
+}
+
 impl PsyncIoEngineBuilder {
     /// Create a new synchronous I/O engine builder with default configurations.
     pub fn new() -> Self {
         Self {
-            handle: None,
             #[cfg(any(test, feature = "test_utils"))]
             write_io_latency: None,
             #[cfg(any(test, feature = "test_utils"))]
             read_io_latency: None,
         }
-    }
-
-    /// Set the Tokio runtime to use for blocking operations.
-    ///
-    /// The psync io engine only uses the thread pool of the Tokio runtime for blocking operations.
-    pub fn with_tokio(mut self, handle: tokio::runtime::Handle) -> Self {
-        self.handle = Some(handle);
-        self
     }
 
     /// Set the simulated additional write I/O latency for testing purposes.
@@ -126,11 +124,10 @@ impl PsyncIoEngineBuilder {
 }
 
 impl IoEngineBuilder for PsyncIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
+    fn build(self: Box<Self>, ctx: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
-            let handle = self.handle.unwrap_or_else(tokio::runtime::Handle::current);
             let engine = PsyncIoEngine {
-                handle,
+                spawner: ctx.spawner,
                 #[cfg(any(test, feature = "test_utils"))]
                 write_io_latency: None,
                 #[cfg(any(test, feature = "test_utils"))]
@@ -145,7 +142,7 @@ impl IoEngineBuilder for PsyncIoEngineBuilder {
 
 /// The synchronous I/O engine that uses pread(2)/pwrite(2) and tokio thread pool for reading and writing.
 pub struct PsyncIoEngine {
-    handle: tokio::runtime::Handle,
+    spawner: Spawner,
 
     #[cfg(any(test, feature = "test_utils"))]
     write_io_latency: Option<std::ops::Range<std::time::Duration>>,
@@ -167,7 +164,7 @@ impl IoEngine for PsyncIoEngine {
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
-        let runtime = self.handle.clone();
+        let runtime = self.spawner.clone();
 
         #[cfg(feature = "tracing")]
         let span = Span::enter_with_local_parent("foyer::storage::io::engine::psync::read::io");
@@ -204,7 +201,7 @@ impl IoEngine for PsyncIoEngine {
                     drop(span);
                     (buf, res)
                 }
-                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(Error::join(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)
@@ -220,7 +217,7 @@ impl IoEngine for PsyncIoEngine {
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (raw, offset) = partition.translate(offset);
         let file = FileHandle::from(raw);
-        let runtime = self.handle.clone();
+        let runtime = self.spawner.clone();
 
         #[cfg(feature = "tracing")]
         let span = Span::enter_with_local_parent("foyer::storage::io::engine::psync::write::io");
@@ -257,7 +254,7 @@ impl IoEngine for PsyncIoEngine {
                     drop(span);
                     (buf, res)
                 }
-                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(Error::join(e))),
+                Err(e) => return (Box::new(Raw::new(0)) as Box<dyn IoB>, Err(e)),
             };
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, res)

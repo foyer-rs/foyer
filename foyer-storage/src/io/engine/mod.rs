@@ -29,7 +29,7 @@ use std::{
 
 #[cfg(feature = "tracing")]
 use fastrace::{future::InSpan, prelude::*};
-use foyer_common::error::Result;
+use foyer_common::{error::Result, spawn::Spawner};
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
@@ -95,10 +95,24 @@ impl Future for IoHandle {
     }
 }
 
+/// Context for building the disk cache io engine.
+pub struct IoEngineBuildContext {
+    /// The runtime for the disk cache engine.
+    pub spawner: Spawner,
+}
+
 /// I/O engine builder trait.
 pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
-    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>>;
+    fn build(self: Box<Self>, ctx: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>>;
+
+    /// Box the builder.
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
 }
 
 /// I/O engine builder trait.
@@ -162,7 +176,10 @@ mod tests {
             let engine = UringIoEngineBuilder::new()
                 .with_threads(4)
                 .with_io_depth(64)
-                .build()
+                .boxed()
+                .build(IoEngineBuildContext {
+                    spawner: Spawner::current(),
+                })
                 .await
                 .unwrap();
             test_read_write(engine, device.as_ref()).await;
@@ -170,7 +187,13 @@ mod tests {
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
-        let engine = PsyncIoEngineBuilder::new().build().await.unwrap();
+        let engine = PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap();
         test_read_write(engine, device.as_ref()).await;
     }
 }

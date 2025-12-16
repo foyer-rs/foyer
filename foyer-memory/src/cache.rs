@@ -21,7 +21,7 @@ use foyer_common::{
     event::EventListener,
     metrics::Metrics,
     properties::{Age, Hint, Location, Properties, Source},
-    runtime::SingletonHandle,
+    spawn::Spawner,
 };
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 use pin_project::pin_project;
@@ -1114,7 +1114,7 @@ where
         fo: FO,
         fr: FR,
         ctx: C,
-        runtime: &SingletonHandle,
+        spawner: &Spawner,
     ) -> GetOrFetch<K, V, S, P>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
@@ -1123,11 +1123,11 @@ where
         FR: FnOnce() -> Option<RequiredFetchBuilder<K, V, P, C>>,
     {
         match self {
-            Cache::Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Lru(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
-            Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, runtime).into(),
+            Cache::Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
+            Cache::Lru(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
+            Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
+            Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
+            Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
         }
     }
 }

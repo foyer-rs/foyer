@@ -21,9 +21,10 @@ use foyer_common::{
     error::Result,
     event::EventListener,
     metrics::Metrics,
+    spawn::Spawner,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Filter, Weighter};
-use foyer_storage::{Compression, EngineConfig, IoEngine, RecoverMode, RuntimeOptions, StoreBuilder};
+use foyer_storage::{Compression, EngineConfig, IoEngineBuilder, RecoverMode, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::cache::{
@@ -255,9 +256,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set io engine for the disk cache store.
-    pub fn with_io_engine(self, io_engine: Arc<dyn IoEngine>) -> Self {
-        let builder = self.builder.with_io_engine(io_engine);
+    /// Set io engine builder for the disk cache store.
+    pub fn with_io_engine_builder(self, io_engine_builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
+        let builder = self.builder.with_io_engine_builder(io_engine_builder);
         Self {
             name: self.name,
             options: self.options,
@@ -309,9 +310,15 @@ where
         }
     }
 
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_options(self, runtime_options: RuntimeOptions) -> Self {
-        let builder = self.builder.with_runtime_options(runtime_options);
+    /// Configure the task spawner for the disk cache store.
+    ///
+    /// By default, it will use the current spawner that built foyer.
+    ///
+    /// For example, with tokio, it will be `tokio::runtime::Handle::current()`.
+    ///
+    /// FYI: [`Spawner`] and [`Spawner::current()`]
+    pub fn with_spawner(self, spawner: Spawner) -> Self {
+        let builder = self.builder.with_spawner(spawner);
         Self {
             name: self.name,
             options: self.options,

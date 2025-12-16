@@ -193,15 +193,26 @@ impl EvictionPicker for InvalidRatioPicker {
 mod tests {
     use std::{collections::HashSet, sync::Arc};
 
+    use foyer_common::spawn::Spawner;
     use itertools::Itertools;
 
     use super::*;
-    use crate::{engine::block::manager::Block, io::device::noop::NoopPartition, IoEngineBuilder, NoopIoEngineBuilder};
+    use crate::{
+        engine::block::manager::Block,
+        io::{device::noop::NoopPartition, engine::IoEngineBuildContext},
+        IoEngineBuilder, NoopIoEngineBuilder,
+    };
 
     #[test_log::test(tokio::test)]
     async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
-        let mock_io_engine = NoopIoEngineBuilder.build().await.unwrap();
+        let mock_io_engine = NoopIoEngineBuilder
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap();
 
         let blocks = (0..10)
             .map(|rid| Block::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))
@@ -281,7 +292,13 @@ mod tests {
         let mut picker = InvalidRatioPicker::new(0.5);
         picker.init(&(0..10).collect_vec(), 10);
 
-        let mock_io_engine = NoopIoEngineBuilder.build().await.unwrap();
+        let mock_io_engine = NoopIoEngineBuilder
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap();
 
         let blocks = (0..10)
             .map(|rid| Block::new_for_test(rid, Arc::<NoopPartition>::default(), mock_io_engine.clone()))

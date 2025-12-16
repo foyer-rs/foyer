@@ -31,6 +31,7 @@ use foyer_common::{
     error::{Error, ErrorKind, Result},
     metrics::Metrics,
     properties::{Age, Properties},
+    spawn::Spawner,
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
@@ -62,7 +63,6 @@ use crate::{
     filter::conditions::IoThrottle,
     io::{bytes::IoSliceMut, PAGE},
     keeper::PieceRef,
-    runtime::Runtime,
     serde::EntryDeserializer,
     Device, Load, RejectAll, StorageFilter, StorageFilterResult,
 };
@@ -326,7 +326,7 @@ where
         EngineBuildContext {
             io_engine,
             metrics,
-            runtime,
+            spawner: runtime,
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
@@ -438,7 +438,7 @@ where
             submit_queue_size,
             submit_queue_size_threshold: self.submit_queue_size_threshold,
             sequence,
-            runtime,
+            _spawner: runtime,
             active: AtomicBool::new(true),
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
@@ -516,7 +516,7 @@ where
 
     sequence: AtomicSequence,
 
-    runtime: Runtime,
+    _spawner: Spawner,
 
     active: AtomicBool,
 
@@ -735,11 +735,10 @@ where
             });
 
         let this = self.clone();
-        self.inner.runtime.write().spawn(async move {
-            this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
-                tombstone: Tombstone { hash, sequence },
-                stats,
-            });
+
+        this.inner.flushers[hash as usize % this.inner.flushers.len()].submit(Submission::Tombstone {
+            tombstone: Tombstone { hash, sequence },
+            stats,
         });
     }
 
@@ -852,14 +851,13 @@ mod tests {
     use foyer_common::hasher::ModHasher;
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
-    use tokio::runtime::Handle;
 
     use super::*;
     use crate::{
         engine::RecoverMode,
         io::{
             device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
-            engine::{IoEngine, IoEngineBuilder},
+            engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder},
         },
         serde::EntrySerializer,
         test_utils::Biased,
@@ -876,9 +874,13 @@ mod tests {
             .build()
     }
 
-    async fn io_engine_for_test() -> Arc<dyn IoEngine> {
+    async fn io_engine_for_test(spawner: Spawner) -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        PsyncIoEngineBuilder::new().build().await.unwrap()
+        PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(IoEngineBuildContext { spawner })
+            .await
+            .unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
@@ -894,9 +896,9 @@ mod tests {
             .with_capacity(ByteSize::kib(64).as_u64() as _)
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test().await;
+        let spawner = Spawner::current();
+        let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
-        let runtime = Runtime::new(None, None, Handle::current());
         let builder = BlockEngineBuilder {
             device,
             block_size: 16 * 1024,
@@ -923,7 +925,7 @@ mod tests {
             .build(EngineBuildContext {
                 io_engine,
                 metrics,
-                runtime,
+                spawner,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -937,9 +939,9 @@ mod tests {
             .with_capacity(ByteSize::kib(64).as_u64() as usize + ByteSize::kib(4).as_u64() as usize)
             .build()
             .unwrap();
-        let io_engine = io_engine_for_test().await;
+        let spawner = Spawner::current();
+        let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
-        let runtime = Runtime::new(None, None, Handle::current());
         let builder = BlockEngineBuilder {
             device,
             block_size: 16 * 1024,
@@ -965,7 +967,7 @@ mod tests {
             .build(EngineBuildContext {
                 io_engine,
                 metrics,
-                runtime,
+                spawner,
                 recover_mode: RecoverMode::Strict,
             })
             .await
@@ -1365,7 +1367,8 @@ mod tests {
         const KB: usize = 1024;
         const MB: usize = 1024 * 1024;
 
-        let runtime = Runtime::current();
+        let spawner = Spawner::current();
+        let io_engine = io_engine_for_test(spawner.clone()).await;
 
         let d1 = FsDeviceBuilder::new(dir.path().join("dev1"))
             .with_capacity(MB)
@@ -1385,14 +1388,13 @@ mod tests {
             .with_device(d3)
             .build()
             .unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
         let engine = BlockEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
             .with_block_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),
-                runtime,
+                spawner,
                 recover_mode: RecoverMode::None,
             })
             .await

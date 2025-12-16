@@ -34,8 +34,8 @@ pub mod metrics;
 pub mod properties;
 /// A rate limiter that returns the wait duration for limitation.
 pub mod rate;
-/// A runtime that automatically shutdown itself on drop.
-pub mod runtime;
+/// Utilities for spawning tasks.
+pub mod spawn;
 /// Tracing related components.
 #[cfg(feature = "tracing")]
 pub mod tracing;

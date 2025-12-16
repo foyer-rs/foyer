@@ -13,7 +13,7 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
-default = []
+default = ["spawner-tokio"]
 serde = ["dep:serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
@@ -24,6 +24,8 @@ strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
+spawner-tokio = ["foyer-common/spawner-tokio"]
+spawner-madsim-tokio = ["foyer-common/spawner-madsim-tokio"]
 
 [dependencies]
 allocator-api2 = { workspace = true }
@@ -51,28 +53,6 @@ tracing = { workspace = true }
 twox-hash = { workspace = true }
 zstd = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [target.'cfg(target_os = "linux")'.dependencies]
 core_affinity = { workspace = true }
 io-uring = { workspace = true }
@@ -82,6 +62,7 @@ bytesize = { workspace = true }
 foyer-memory = { workspace = true, features = ["test_utils"] }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

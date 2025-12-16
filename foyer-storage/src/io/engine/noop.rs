@@ -21,14 +21,14 @@ use futures_util::FutureExt;
 use crate::io::{
     bytes::{IoB, IoBuf, IoBufMut},
     device::Partition,
-    engine::{IoEngine, IoEngineBuilder, IoHandle},
+    engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder, IoHandle},
 };
 /// Builder for a no-operation mock I/O engine.
 #[derive(Debug, Default)]
 pub struct NoopIoEngineBuilder;
 
 impl IoEngineBuilder for NoopIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
+    fn build(self: Box<Self>, _: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move { Ok(Arc::new(NoopIoEngine) as Arc<dyn IoEngine>) }.boxed()
     }
 }

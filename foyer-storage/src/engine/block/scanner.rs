@@ -99,7 +99,7 @@ impl BlockScanner {
 mod tests {
     use std::{path::Path, sync::Arc};
 
-    use foyer_common::metrics::Metrics;
+    use foyer_common::{metrics::Metrics, spawn::Spawner};
     use tempfile::tempdir;
 
     use super::*;
@@ -111,7 +111,7 @@ mod tests {
         },
         io::{
             device::{fs::FsDeviceBuilder, Device, DeviceBuilder, Partition},
-            engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
+            engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuildContext, IoEngineBuilder},
             PAGE,
         },
         Compression,
@@ -127,7 +127,13 @@ mod tests {
     }
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
-        PsyncIoEngineBuilder::new().build().await.unwrap()
+        PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap()
     }
 
     #[test_log::test(tokio::test)]

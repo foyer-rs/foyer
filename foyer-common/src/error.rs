@@ -368,11 +368,6 @@ impl Error {
             .with_context("allocated", allocated)
             .with_context("required", required)
     }
-
-    /// Helper for creating a [`ErrorKind::Join`] error with context.
-    pub fn join(source: tokio::task::JoinError) -> Self {
-        Error::new(ErrorKind::Join, "task join error").with_source(source)
-    }
 }
 
 impl From<std::io::Error> for Error {

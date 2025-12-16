@@ -589,7 +589,7 @@ jobs:
           TOKIO_WORKER_THREADS: 1
           CI: true
         run: |-
-          cargo clippy --all-targets
+          cargo clippy --all-targets --no-default-features --features "spawner-madsim-tokio"
       # - name: Run nextest (madsim)
       #   env:
       #     RUST_BACKTRACE: 1

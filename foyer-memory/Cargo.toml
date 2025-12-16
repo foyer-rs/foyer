@@ -39,28 +39,6 @@ pin-project = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-] }
-
 [dev-dependencies]
 csv = { workspace = true }
 futures-util = { workspace = true }
@@ -68,6 +46,7 @@ moka = { workspace = true, features = ["sync"] }
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
+tokio = { workspace = true }
 
 [[bench]]
 name = "bench_hit_ratio"

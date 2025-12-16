@@ -19,11 +19,12 @@ use foyer_common::{
     error::Result,
     metrics::Metrics,
     properties::{Age, Properties},
+    spawn::Spawner,
 };
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device, Runtime};
+use crate::{filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device};
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +127,7 @@ pub struct EngineBuildContext {
     /// Shared metrics for all components.
     pub metrics: Arc<Metrics>,
     /// The runtime for the disk cache engine.
-    pub runtime: Runtime,
+    pub spawner: Spawner,
     /// The recover mode of the disk cache engine.
     pub recover_mode: RecoverMode,
 }

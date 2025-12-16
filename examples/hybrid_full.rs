@@ -17,8 +17,7 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 use chrono::Datelike;
 use foyer::{
     BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IoEngineBuilder, IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, RuntimeOptions,
-    StorageFilter, Throttle, TokioRuntimeOptions,
+    IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, StorageFilter, Throttle,
 };
 use tempfile::tempdir;
 
@@ -38,8 +37,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .build()?;
 
-    let io_engine = PsyncIoEngineBuilder::new().build().await?;
-
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .with_name("my-hybrid-cache")
         .with_policy(HybridCachePolicy::WriteOnEviction)
@@ -52,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         .with_weighter(|_key, value: &String| value.len())
         .with_filter(|_, _| true)
         .storage()
-        .with_io_engine(io_engine)
+        .with_io_engine_builder(PsyncIoEngineBuilder::new())
         .with_engine_config(
             BlockEngineBuilder::new(device)
                 .with_block_size(16 * 1024 * 1024)
@@ -69,16 +66,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_recover_mode(RecoverMode::Quiet)
         .with_compression(foyer::Compression::Lz4)
-        .with_runtime_options(RuntimeOptions::Separated {
-            read_runtime_options: TokioRuntimeOptions {
-                worker_threads: 4,
-                max_blocking_threads: 8,
-            },
-            write_runtime_options: TokioRuntimeOptions {
-                worker_threads: 4,
-                max_blocking_threads: 8,
-            },
-        })
+        .with_spawner(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(4)
+                .max_blocking_threads(2)
+                .build()
+                .unwrap()
+                .into(),
+        )
         .build()
         .await?;
 
