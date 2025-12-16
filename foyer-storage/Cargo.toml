@@ -13,7 +13,7 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
-default = ["fastant"]
+default = []
 serde = ["dep:serde", "foyer-common/serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
@@ -31,7 +31,6 @@ anyhow = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
-fastant = { workspace = true, features = ["atomic"], optional = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
@@ -72,6 +71,9 @@ tokio = { workspace = true, features = [
   "signal",
   "fs",
 ] }
+
+[target.'cfg(not(miri))'.dependencies]
+fastant = { workspace = true, features = ["atomic"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 core_affinity = { workspace = true }

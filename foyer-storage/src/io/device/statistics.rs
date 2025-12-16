@@ -17,16 +17,16 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "fastant")]
+#[cfg(not(miri))]
 use fastant::{Atomic, Instant};
-#[cfg(not(feature = "fastant"))]
+#[cfg(miri)]
 use std::{sync::RwLock, time::Instant};
 
 use crate::Throttle;
 
-#[cfg(feature = "fastant")]
+#[cfg(not(miri))]
 type AtomicInstant = Atomic;
-#[cfg(not(feature = "fastant"))]
+#[cfg(miri)]
 type AtomicInstant = RwLock<Instant>;
 
 #[derive(Debug)]
@@ -43,9 +43,9 @@ impl Metric {
             value: AtomicUsize::new(0),
             throttle,
             quota: AtomicIsize::new(0),
-            #[cfg(feature = "fastant")]
+            #[cfg(not(miri))]
             update: Atomic::new(Instant::now()),
-            #[cfg(not(feature = "fastant"))]
+            #[cfg(miri)]
             update: RwLock::new(Instant::now()),
         }
     }
@@ -73,9 +73,9 @@ impl Metric {
 
         let now = Instant::now();
 
-        #[cfg(feature = "fastant")]
+        #[cfg(not(miri))]
         let update = self.update.load(Ordering::Relaxed);
-        #[cfg(not(feature = "fastant"))]
+        #[cfg(miri)]
         let update = *self.update.read().unwrap();
 
         let dur = now.duration_since(update).as_secs_f64();
@@ -83,9 +83,9 @@ impl Metric {
 
         let quota = f64::min(self.throttle, self.quota.load(Ordering::Relaxed) as f64 + fill);
 
-        #[cfg(feature = "fastant")]
+        #[cfg(not(miri))]
         self.update.store(now, Ordering::Relaxed);
-        #[cfg(not(feature = "fastant"))]
+        #[cfg(miri)]
         {
             *self.update.write().unwrap() = now;
         }

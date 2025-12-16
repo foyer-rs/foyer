@@ -1083,14 +1083,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1126,14 +1119,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_hybrid_cache_writer() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1168,14 +1154,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_hybrid_fetch_with_cache_location() {
         // Test hybrid cache that write disk cache on eviction.
@@ -1287,14 +1266,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_hybrid_insert_with_cache_location() {
         // Test hybrid cache that write disk cache on eviction.
@@ -1382,14 +1354,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_hybrid_read_throttled() {
         // Test hybrid cache that write disk cache on insertion.
@@ -1480,14 +1445,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_flush_on_close() {
         // check without flush on close
@@ -1515,14 +1473,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_load_after_recovery() {
         let open = |dir| async move {
@@ -1554,14 +1505,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_concurrent_get_and_fetch() {
         let dir = tempfile::tempdir().unwrap();
 
@@ -1593,14 +1537,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_entry_location() {
         // Test hybrid cache that write disk cache on eviction.
@@ -1652,14 +1589,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    #[cfg_attr(
-        all(miri, feature = "fastant"),
-        ignore = "uses fastant crate with inline assembly (CPUID) not supported by miri"
-    )]
-    #[cfg_attr(
-        all(miri, not(feature = "fastant"), not(target_os = "linux")),
-        ignore = "requires Linux for tokio+miri"
-    )]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_hybrid_cache_fetch_error_downcast() {
         #[derive(Debug, Clone, PartialEq, Eq)]
         struct TestError(String);

@@ -18,4 +18,4 @@ ENV MIRIFLAGS="-Zmiri-disable-isolation"
 WORKDIR /workspace
 
 # Default command: run all miri tests
-CMD ["sh", "-c", "cargo +${NIGHTLY_VERSION} miri test -p foyer --no-default-features"]
+CMD ["sh", "-c", "cargo +${NIGHTLY_VERSION} miri test --features test_utils --workspace --exclude foyer-bench"]

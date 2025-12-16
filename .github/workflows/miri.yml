@@ -64,7 +64,4 @@ jobs:
           RUST_TOOLCHAIN_NIGHTLY: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
         timeout-minutes: 10
         run: |
-          cargo +$RUST_TOOLCHAIN_NIGHTLY miri test -p foyer-common --no-default-features
-          cargo +$RUST_TOOLCHAIN_NIGHTLY miri test -p foyer-memory --no-default-features --features test_utils
-          cargo +$RUST_TOOLCHAIN_NIGHTLY miri test -p foyer-storage --no-default-features --features test_utils
-          cargo +$RUST_TOOLCHAIN_NIGHTLY miri test -p foyer --no-default-features --features test_utils
+          cargo +$RUST_TOOLCHAIN_NIGHTLY miri test --features test_utils --workspace --exclude foyer-bench
