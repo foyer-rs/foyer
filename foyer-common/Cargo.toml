@@ -27,7 +27,6 @@ bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 fastrace = { workspace = true, optional = true }
-itertools = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
