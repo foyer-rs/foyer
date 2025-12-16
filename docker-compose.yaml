@@ -1,4 +1,21 @@
 services:
+  # Miri testing service for Linux (tokio support via epoll shims)
+  # Note: macOS tokio is not supported by miri - use Linux container for testing
+  miri:
+    build:
+      context: .
+      dockerfile: Dockerfile.miri
+    volumes:
+      - .:/workspace
+    environment:
+      # Optional: Add miri flags for stricter checking
+      # MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+      - RUST_BACKTRACE=1
+    command: cargo +nightly miri test --features test_utils --workspace --exclude foyer-bench
+
+  # Monitoring stack services (for performance profiling and metrics)
+  # node-exporter collects system-level metrics (CPU, memory, disk, network)
+  # Used by Prometheus for monitoring foyer-bench and other performance tests
   node-exporter: 
     image: prom/node-exporter:latest
     container_name: node-exporter

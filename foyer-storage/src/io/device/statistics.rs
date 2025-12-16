@@ -17,16 +17,24 @@ use std::{
     time::Duration,
 };
 
+#[cfg(not(miri))]
 use fastant::{Atomic, Instant};
+#[cfg(miri)]
+use std::{sync::RwLock, time::Instant};
 
 use crate::Throttle;
+
+#[cfg(not(miri))]
+type AtomicInstant = Atomic;
+#[cfg(miri)]
+type AtomicInstant = RwLock<Instant>;
 
 #[derive(Debug)]
 struct Metric {
     value: AtomicUsize,
     throttle: f64,
     quota: AtomicIsize,
-    update: Atomic,
+    update: AtomicInstant,
 }
 
 impl Metric {
@@ -35,7 +43,10 @@ impl Metric {
             value: AtomicUsize::new(0),
             throttle,
             quota: AtomicIsize::new(0),
+            #[cfg(not(miri))]
             update: Atomic::new(Instant::now()),
+            #[cfg(miri)]
+            update: RwLock::new(Instant::now()),
         }
     }
 
@@ -61,14 +72,24 @@ impl Metric {
         }
 
         let now = Instant::now();
+
+        #[cfg(not(miri))]
         let update = self.update.load(Ordering::Relaxed);
+        #[cfg(miri)]
+        let update = *self.update.read().unwrap();
 
         let dur = now.duration_since(update).as_secs_f64();
         let fill = dur * self.throttle;
 
         let quota = f64::min(self.throttle, self.quota.load(Ordering::Relaxed) as f64 + fill);
 
+        #[cfg(not(miri))]
         self.update.store(now, Ordering::Relaxed);
+        #[cfg(miri)]
+        {
+            *self.update.write().unwrap() = now;
+        }
+
         self.quota.store(quota as isize, Ordering::Relaxed);
 
         if quota >= 0.0 {

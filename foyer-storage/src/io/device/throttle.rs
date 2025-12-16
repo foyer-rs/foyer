@@ -137,6 +137,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     fn test_throttle_default() {
         assert!(matches!(
             Throttle::new(),
@@ -151,6 +152,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     fn test_iops_counter_from_str() {
         assert!(matches!(IopsCounter::from_str("PerIo"), Ok(IopsCounter::PerIo)));
         assert!(matches!(IopsCounter::from_str(" PerIo "), Ok(IopsCounter::PerIo)));

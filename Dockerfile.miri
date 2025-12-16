@@ -1,0 +1,21 @@
+# Dockerfile for running miri tests on Linux
+# Miri's tokio support requires Linux (epoll shims only, not macOS kqueue)
+
+FROM rust:latest
+
+# Nightly toolchain version for miri
+ARG NIGHTLY_VERSION=nightly-2025-02-20
+
+# Install specific nightly toolchain and miri components
+RUN rustup toolchain install ${NIGHTLY_VERSION} && \
+    rustup component add --toolchain ${NIGHTLY_VERSION} miri rust-src && \
+    cargo +${NIGHTLY_VERSION} miri setup
+
+# Set miri flags for testing
+ENV MIRIFLAGS="-Zmiri-disable-isolation"
+
+# Set working directory
+WORKDIR /workspace
+
+# Default command: run all miri tests
+CMD ["sh", "-c", "cargo +${NIGHTLY_VERSION} miri test --features test_utils --workspace --exclude foyer-bench"]

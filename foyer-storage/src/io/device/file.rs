@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use std::{
-    fs::{create_dir_all, File, OpenOptions},
+    fs::{File, OpenOptions},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
+#[cfg(not(miri))]
+use std::fs::create_dir_all;
+
 use foyer_common::error::{Error, Result};
+#[cfg(not(miri))]
 use fs4::free_space;
 
 use crate::{
@@ -81,11 +85,17 @@ impl DeviceBuilder for FileDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - (value % align);
 
-        let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get free space.
-            let dir = self.path.parent().expect("path must point to a file").to_path_buf();
-            create_dir_all(&dir).unwrap();
-            free_space(&dir).unwrap() as usize / 10 * 8
+        let capacity = self.capacity.unwrap_or_else(|| {
+            #[cfg(miri)]
+            panic!("capacity must be explicitly provided when running under miri (statvfs not supported)");
+
+            #[cfg(not(miri))]
+            {
+                // Create an empty directory before to get free space.
+                let dir = self.path.parent().expect("path must point to a file").to_path_buf();
+                create_dir_all(&dir).unwrap();
+                free_space(&dir).unwrap() as usize / 10 * 8
+            }
         });
         let capacity = align_v(capacity, PAGE);
 

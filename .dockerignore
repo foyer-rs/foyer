@@ -1,0 +1,24 @@
+# Build artifacts
+target/
+!target/CACHEDIR.TAG
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+
+# Documentation build
+website/node_modules/
+website/build/
+
+# Miri clone (if present)
+miri/
+
+# macOS
+.DS_Store

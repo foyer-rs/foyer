@@ -103,6 +103,8 @@ impl RecentEvictionQueue {
     }
 }
 
+#[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+#[cfg_attr(all(miri, target_os = "linux"), ignore = "takes more than 30 minutes under miri")]
 #[test_log::test(tokio::test)]
 async fn test_concurrent_insert_disk_cache_and_fetch() {
     let dir = tempfile::tempdir().unwrap();

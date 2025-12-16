@@ -376,6 +376,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     fn test_dyn() {
         let raw = Raw::new(4096);
         let _: Box<dyn IoBuf> = Box::new(raw.clone());

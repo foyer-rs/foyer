@@ -1257,26 +1257,31 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "hangs under miri - needs investigation")]
     async fn test_fifo_cache() {
         case(fifo()).await
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "hangs under miri - needs investigation")]
     async fn test_lru_cache() {
         case(lru()).await
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "hangs under miri - needs investigation")]
     async fn test_lfu_cache() {
         case(lfu()).await
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "hangs under miri - needs investigation")]
     async fn test_s3fifo_cache() {
         case(s3fifo()).await
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "hangs under miri - needs investigation")]
     async fn test_sieve_cache() {
         case(sieve()).await
     }

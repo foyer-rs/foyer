@@ -19,6 +19,7 @@ use std::{
 };
 
 use foyer_common::error::{Error, Result};
+#[cfg(not(miri))]
 use fs4::free_space;
 
 use crate::{
@@ -81,10 +82,16 @@ impl DeviceBuilder for FsDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - value % align;
 
-        let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get free space.
-            create_dir_all(&self.dir).unwrap();
-            free_space(&self.dir).unwrap() as usize / 10 * 8
+        let capacity = self.capacity.unwrap_or_else(|| {
+            #[cfg(miri)]
+            panic!("capacity must be explicitly provided when running under miri (statvfs not supported)");
+
+            #[cfg(not(miri))]
+            {
+                // Create an empty directory before to get free space.
+                create_dir_all(&self.dir).unwrap();
+                free_space(&self.dir).unwrap() as usize / 10 * 8
+            }
         });
         let capacity = align_v(capacity, PAGE);
 

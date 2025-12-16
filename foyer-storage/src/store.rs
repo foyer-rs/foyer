@@ -32,7 +32,7 @@ use foyer_common::{
 use foyer_memory::{Cache, Piece};
 use tokio::runtime::Handle;
 
-#[cfg(feature = "test_utils")]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
     compress::Compression,
@@ -581,6 +581,7 @@ mod tests {
     };
 
     #[tokio::test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_build_with_unaligned_buffer_pool_size() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
@@ -604,6 +605,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
+    #[cfg_attr(all(miri, target_os = "linux"), ignore = "issue 1223")]
     async fn test_entry_hash_collision() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());

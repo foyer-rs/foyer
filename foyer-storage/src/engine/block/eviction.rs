@@ -199,6 +199,7 @@ mod tests {
     use crate::{engine::block::manager::Block, io::device::noop::NoopPartition, IoEngineBuilder, NoopIoEngineBuilder};
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
         let mock_io_engine = NoopIoEngineBuilder.build().await.unwrap();
@@ -277,6 +278,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_invalid_ratio_picker() {
         let mut picker = InvalidRatioPicker::new(0.5);
         picker.init(&(0..10).collect_vec(), 10);

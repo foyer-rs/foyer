@@ -256,6 +256,7 @@ mod tests {
     };
 
     #[test_log::test(tokio::test)]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     async fn test_tombstone_log() {
         let dir = tempdir().unwrap();
 

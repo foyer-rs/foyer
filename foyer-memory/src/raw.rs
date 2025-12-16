@@ -1807,6 +1807,7 @@ mod tests {
         }
 
         #[test_log::test]
+        #[cfg_attr(miri, ignore = "takes longer than 30 minutes")]
         fn test_fifo_cache_fuzzy() {
             let cache: RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
                 RawCache::new(RawCacheConfig {
@@ -1824,6 +1825,7 @@ mod tests {
         }
 
         #[test_log::test]
+        #[cfg_attr(miri, ignore = "takes longer than 30 minutes")]
         fn test_s3fifo_cache_fuzzy() {
             let cache: RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
                 RawCache::new(RawCacheConfig {
@@ -1841,6 +1843,7 @@ mod tests {
         }
 
         #[test_log::test]
+        #[cfg_attr(miri, ignore = "takes longer than 30 minutes")]
         fn test_lru_cache_fuzzy() {
             let cache: RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
                 RawCache::new(RawCacheConfig {
@@ -1858,6 +1861,7 @@ mod tests {
         }
 
         #[test_log::test]
+        #[cfg_attr(miri, ignore = "takes longer than 30 minutes")]
         fn test_lfu_cache_fuzzy() {
             let cache: RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
                 RawCache::new(RawCacheConfig {
@@ -1875,6 +1879,7 @@ mod tests {
         }
 
         #[test_log::test]
+        #[cfg_attr(miri, ignore = "takes longer than 30 minutes")]
         fn test_sieve_cache_fuzzy() {
             let cache: RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<_>> =
                 RawCache::new(RawCacheConfig {

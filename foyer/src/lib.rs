@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![doc = include_str!(concat!(env!("OUT_DIR"), "/foyer-docs.md"))]
+#![cfg_attr(miri, doc = "foyer under miri")]
+#![cfg_attr(not(miri), doc = include_str!(concat!(env!("OUT_DIR"), "/foyer-docs.md")))]
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

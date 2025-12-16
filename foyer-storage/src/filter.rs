@@ -164,6 +164,7 @@ mod tests {
     use crate::Throttle;
 
     #[test]
+    #[cfg_attr(all(miri, not(target_os = "linux")), ignore = "requires Linux for tokio+miri")]
     fn test_estimated_size_condition() {
         let condition = EstimatedSize::new(10..20);
         let statistics = Arc::new(Statistics::new(Throttle::default()));
