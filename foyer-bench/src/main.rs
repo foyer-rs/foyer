@@ -178,7 +178,7 @@ struct Args {
     user_runtime_worker_threads: usize,
 
     /// Dedicated runtime type.
-    #[arg(long, required = false)]
+    #[arg(long, value_enum, default_value_t = Runtime::default())]
     runtime: Runtime,
 
     /// Dedicated runtime worker threads.
