@@ -81,7 +81,11 @@ pin-project = "1"
 prometheus = "0.14"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
-runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", default-features = false }
+# Enable all features by default to make it possible to opt-out madsim dependency. 
+# FYI: https://github.com/rust-lang/cargo/issues/10801
+runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
+  "full",
+] }
 runtime-tokio = { package = "tokio", version = "1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
