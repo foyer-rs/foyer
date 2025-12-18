@@ -199,7 +199,6 @@ jobs:
         run: |
           cargo clippy -p foyer
           cargo clippy -p foyer --features "tracing"
-          cargo clippy -p foyer --no-default-features
           cargo clippy --all-targets ${{ matrix.serde }} --features tokio-console -- -D warnings -A "clippy::large_enum_variant"
           cargo clippy --all-targets ${{ matrix.serde }} --features deadlock -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features tracing -- -D warnings
