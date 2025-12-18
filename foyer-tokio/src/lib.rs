@@ -21,8 +21,8 @@ pub use runtime_madsim_tokio::*;
 #[cfg(feature = "runtime-tokio")]
 pub use runtime_tokio::*;
 
-#[cfg(not(any(feature = "runtime-tokio", feature = "runtime-madsim-tokio")))]
-compile_error!("");
-
-#[cfg(all(feature = "runtime-tokio", feature = "runtime-madsim-tokio"))]
-compile_error!("");
+#[cfg(any(
+    all(feature = "runtime-tokio", feature = "runtime-madsim-tokio"),
+    not(any(feature = "runtime-tokio", feature = "runtime-madsim-tokio"))
+))]
+compile_error!("Exactly one of the `runtime-tokio` and `runtime-madsim-tokio` features must be enabled.");
