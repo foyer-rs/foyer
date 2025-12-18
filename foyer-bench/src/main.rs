@@ -178,8 +178,8 @@ struct Args {
     user_runtime_worker_threads: usize,
 
     /// Dedicated runtime type.
-    #[arg(long, value_parser = PossibleValuesParser::new(["default", "dedicated"]), default_value = "disabled")]
-    runtime: String,
+    #[arg(long, required = false)]
+    runtime: Runtime,
 
     /// Dedicated runtime worker threads.
     ///
@@ -312,6 +312,13 @@ struct Args {
     /// NOTE: Only effective when using `psync` io engine.
     #[arg(long, required = false)]
     read_io_latency: Option<humantime::Duration>,
+}
+
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
+enum Runtime {
+    #[default]
+    Default,
+    Dedicated,
 }
 
 #[derive(Debug)]
@@ -627,9 +634,9 @@ async fn benchmark(args: Args) {
     builder = builder
         .with_recover_mode(args.recover_mode)
         .with_compression(args.compression)
-        .with_spawner(match args.runtime.as_str() {
-            "default" => Spawner::current(),
-            "dedicated" => tokio::runtime::Builder::new_multi_thread()
+        .with_spawner(match args.runtime {
+            Runtime::Default => Spawner::current(),
+            Runtime::Dedicated => tokio::runtime::Builder::new_multi_thread()
                 .thread_name("foyer-rt")
                 .enable_all()
                 .worker_threads(args.runtime_worker_threads)
@@ -637,7 +644,6 @@ async fn benchmark(args: Args) {
                 .build()
                 .unwrap()
                 .into(),
-            _ => unreachable!(),
         });
 
     let hybrid = builder.build().await.unwrap();

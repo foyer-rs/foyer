@@ -30,7 +30,7 @@ equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
-foyer = { workspace = true, features = ["runtime-tokio"]}
+foyer = { workspace = true, features = ["runtime-tokio"] }
 http-body-util = { workspace = true }
 hyper = { workspace = true, default-features = false, features = [
   "server",
