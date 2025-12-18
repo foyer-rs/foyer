@@ -131,6 +131,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    #[cfg(not(madsim))]
     #[cfg(target_os = "linux")]
     use crate::io::engine::uring::UringIoEngineBuilder;
     use crate::io::{
@@ -169,6 +170,7 @@ mod tests {
     async fn test_io_engine() {
         let dir = tempdir().unwrap();
 
+        #[cfg(not(madsim))]
         #[cfg(target_os = "linux")]
         {
             let path = dir.path().join("test_file_1");

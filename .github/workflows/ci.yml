@@ -589,12 +589,11 @@ jobs:
           TOKIO_WORKER_THREADS: 1
           CI: true
         run: |-
-          cargo clippy --all-targets --no-default-features --features "spawner-madsim-tokio"
-      # - name: Run nextest (madsim)
-      #   env:
-      #     RUST_BACKTRACE: 1
-      #     RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
-      #     RUST_LOG: info
-      #     TOKIO_WORKER_THREADS: 1
-      #   run: |-
-      #     cargo nextest run --all --features "strict_assertions"
+          cargo check -p foyer --no-default-features --features "runtime-madsim-tokio"
+      - name: Run nextest (madsim)
+        env:
+          RUST_BACKTRACE: 1
+          RUSTFLAGS: "--cfg tokio_unstable --cfg madsim"
+          RUST_LOG: info
+        run: |-
+          cargo nextest run --workspace --exclude foyer-bench --exclude examples --no-default-features --features "runtime-madsim-tokio"

@@ -1,0 +1,63 @@
+[package]
+name = "foyer-tokio"
+description = "tokio adapter for foyer - Hybrid cache for Rust"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
+exclude.workspace = true
+
+[package.metadata.cargo-udeps.ignore]
+# Only used in benches and with `serde` feature enabled.
+development = ["criterion", "serde_bytes"]
+
+[features]
+# feature gate to swtich between tokio runtime and madsim-tokio runtime.
+runtime-tokio = ["dep:runtime-tokio"]
+runtime-madsim-tokio = ["dep:runtime-madsim-tokio"]
+
+# feature gates for tokio / madsim-tokio
+full = [
+  "fs",
+  "io-util",
+  "io-std",
+  "macros",
+  "net",
+  "parking_lot",
+  "process",
+  "rt",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+]
+fs = ["runtime-tokio?/fs", "runtime-madsim-tokio?/fs"]
+io-util = ["runtime-tokio?/io-util", "runtime-madsim-tokio?/io-util"]
+io-std = ["runtime-tokio?/io-std", "runtime-madsim-tokio?/io-std"]
+macros = ["runtime-tokio?/macros", "runtime-madsim-tokio?/macros"]
+net = ["runtime-tokio?/net", "runtime-madsim-tokio?/net"]
+parking_lot = [
+  "runtime-tokio?/parking_lot",
+  "runtime-madsim-tokio?/parking_lot",
+]
+process = ["runtime-tokio?/process", "runtime-madsim-tokio?/process"]
+rt = ["runtime-tokio?/rt", "runtime-madsim-tokio?/rt"]
+rt-multi-thread = [
+  "runtime-tokio?/rt-multi-thread",
+  "runtime-madsim-tokio?/rt-multi-thread",
+]
+signal = ["runtime-tokio?/signal", "runtime-madsim-tokio?/signal"]
+sync = ["runtime-tokio?/sync", "runtime-madsim-tokio?/sync"]
+time = ["runtime-tokio?/time", "runtime-madsim-tokio?/time"]
+
+[dependencies]
+runtime-madsim-tokio = { workspace = true, optional = true }
+runtime-tokio = { workspace = true, optional = true }
+
+[lints]
+workspace = true

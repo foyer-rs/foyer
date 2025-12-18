@@ -17,12 +17,9 @@ exclude.workspace = true
 development = ["criterion", "serde_bytes"]
 
 [features]
-default = ["spawner-tokio"]
 serde = ["dep:serde", "dep:bincode"]
 strict_assertions = []
 tracing = ["dep:fastrace"]
-spawner-tokio = ["dep:tokio"]
-spawner-madsim-tokio = ["dep:madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -30,12 +27,11 @@ bincode = { workspace = true, optional = true }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 fastrace = { workspace = true, optional = true }
-madsim-tokio = { workspace = true, optional = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt"] }
 twox-hash = { workspace = true }
 
 [dev-dependencies]
@@ -46,7 +42,6 @@ paste = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
-tokio = { workspace = true }
 
 [lints]
 workspace = true

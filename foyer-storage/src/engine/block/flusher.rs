@@ -30,7 +30,7 @@ use foyer_common::{
     error::{Error, Result},
     metrics::Metrics,
     properties::Properties,
-    spawn::{select, Spawner},
+    spawn::Spawner,
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
@@ -386,7 +386,7 @@ where
                 self.buffer = Some(buffer);
             }
 
-            select! {
+            tokio::select! {
                 biased;
                 IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {

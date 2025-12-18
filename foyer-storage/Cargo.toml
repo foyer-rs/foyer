@@ -13,7 +13,6 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
-default = ["spawner-tokio"]
 serde = ["dep:serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
@@ -24,8 +23,6 @@ strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
-spawner-tokio = ["foyer-common/spawner-tokio"]
-spawner-madsim-tokio = ["foyer-common/spawner-madsim-tokio"]
 
 [dependencies]
 allocator-api2 = { workspace = true }
@@ -49,6 +46,7 @@ parking_lot = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["macros"] }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 zstd = { workspace = true }
