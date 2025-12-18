@@ -28,7 +28,8 @@ clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { workspace = true, default-features = false, features = [
+foyer = { workspace = true, features = [
+  "runtime-tokio",
   "tracing",
   "clap",
   "test_utils",
