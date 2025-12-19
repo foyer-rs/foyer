@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+//! This crate re-exports `tokio`-like crates to switch between normal usage and deterministic testing.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
+/// Re-export `madsim-tokio`.
+#[cfg(feature = "runtime-madsim-tokio")]
+pub use runtime_madsim_tokio::*;
+/// Re-export `tokio`.
+#[cfg(feature = "runtime-tokio")]
+pub use runtime_tokio::*;
 
-mod compress;
-mod engine;
-mod filter;
-mod io;
-mod keeper;
-mod serde;
-mod store;
-
-mod prelude;
-pub use prelude::*;
-
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils;
+#[cfg(any(
+    all(feature = "runtime-tokio", feature = "runtime-madsim-tokio"),
+    not(any(feature = "runtime-tokio", feature = "runtime-madsim-tokio"))
+))]
+compile_error!("Exactly one of the `runtime-tokio` and `runtime-madsim-tokio` features must be enabled.");

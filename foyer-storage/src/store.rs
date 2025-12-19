@@ -24,13 +24,12 @@ use std::{
 use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, StorageKey, StorageValue},
-    error::{Error, ErrorKind, Result},
+    error::Result,
     metrics::Metrics,
     properties::{Age, Properties},
-    runtime::BackgroundShutdownRuntime,
+    spawn::Spawner,
 };
 use foyer_memory::{Cache, Piece};
-use tokio::runtime::Handle;
 
 #[cfg(feature = "test_utils")]
 use crate::test_utils::*;
@@ -42,10 +41,9 @@ use crate::{
     },
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device},
-        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuilder},
+        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngineBuildContext, IoEngineBuilder},
     },
     keeper::Keeper,
-    runtime::Runtime,
     serde::EntrySerializer,
     StorageFilterResult,
 };
@@ -75,7 +73,7 @@ where
 
     compression: Compression,
 
-    runtime: Runtime,
+    spawner: Spawner,
 
     metrics: Arc<Metrics>,
 
@@ -95,7 +93,7 @@ where
             .field("keeper", &self.inner.keeper)
             .field("engine", &self.inner.engine)
             .field("compression", &self.inner.compression)
-            .field("runtimes", &self.inner.runtime)
+            .field("runtimes", &self.inner.spawner)
             .finish()
     }
 }
@@ -185,8 +183,7 @@ where
             return Ok(Load::Throttled);
         }
 
-        let future = self.inner.engine.load(hash);
-        match self.inner.runtime.read().spawn(future).await.unwrap() {
+        match self.inner.engine.load(hash).await {
             Ok(Load::Entry {
                 key: k,
                 value: v,
@@ -282,9 +279,9 @@ where
         self.inner.engine.device().statistics().throttle()
     }
 
-    /// Get the runtime.
-    pub fn runtime(&self) -> &Runtime {
-        &self.inner.runtime
+    /// Get the spawner.
+    pub fn spawner(&self) -> &Spawner {
+        &self.inner.spawner
     }
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
@@ -309,43 +306,6 @@ where
     }
 }
 
-/// Tokio runtime configuration.
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TokioRuntimeOptions {
-    /// Dedicated runtime worker threads.
-    ///
-    /// If the value is set to `0`, the dedicated will use the default worker threads of tokio.
-    /// Which is 1 worker per core.
-    ///
-    /// See [`tokio::runtime::Builder::worker_threads`].
-    pub worker_threads: usize,
-
-    /// Max threads to run blocking io.
-    ///
-    /// If the value is set to `0`, use the tokio default value (which is 512).
-    ///
-    /// See [`tokio::runtime::Builder::max_blocking_threads`].
-    pub max_blocking_threads: usize,
-}
-
-/// Options for the dedicated runtime.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum RuntimeOptions {
-    /// Disable dedicated runtime. The runtime which foyer is built on will be used.
-    Disabled,
-    /// Use unified dedicated runtime for both reads and writes.
-    Unified(TokioRuntimeOptions),
-    /// Use separated dedicated runtime for reads or writes.
-    Separated {
-        /// Dedicated runtime for reads.
-        read_runtime_options: TokioRuntimeOptions,
-        /// Dedicated runtime for both foreground and background writes
-        write_runtime_options: TokioRuntimeOptions,
-    },
-}
-
 /// The builder of the disk cache.
 pub struct StoreBuilder<K, V, S, P>
 where
@@ -358,10 +318,10 @@ where
     memory: Cache<K, V, S, P>,
     metrics: Arc<Metrics>,
 
-    io_engine: Option<Arc<dyn IoEngine>>,
+    io_engine_builder: Option<Box<dyn IoEngineBuilder>>,
     engine_builder: Option<Box<dyn EngineConfig<K, V, P>>>,
 
-    runtime_config: RuntimeOptions,
+    spawner: Option<Spawner>,
 
     compression: Compression,
     recover_mode: RecoverMode,
@@ -382,9 +342,9 @@ where
             .field("name", &self.name)
             .field("memory", &self.memory)
             .field("metrics", &self.metrics)
-            .field("io_engine", &self.io_engine)
+            .field("io_engine_builder", &self.io_engine_builder)
             .field("engine_builder", &self.engine_builder)
-            .field("runtime_config", &self.runtime_config)
+            .field("spawner", &self.spawner)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
             .finish()
@@ -405,10 +365,10 @@ where
             memory,
             metrics,
 
-            io_engine: None,
+            io_engine_builder: None,
             engine_builder: None,
 
-            runtime_config: RuntimeOptions::Disabled,
+            spawner: None,
 
             compression: Compression::default(),
             recover_mode: RecoverMode::default(),
@@ -417,11 +377,11 @@ where
         }
     }
 
-    /// Set io engine for the disk cache store.
+    /// Set io engine builder for the disk cache store.
     ///
-    /// Default: [`crate::io::engine::psync::PsyncIoEngine`].
-    pub fn with_io_engine(mut self, io_engine: Arc<dyn IoEngine>) -> Self {
-        self.io_engine = Some(io_engine);
+    /// Default: [`crate::io::engine::psync::PsyncIoEngineBuilder`].
+    pub fn with_io_engine_builder(mut self, io_engine_builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
+        self.io_engine_builder = Some(io_engine_builder.into());
         self
     }
 
@@ -449,9 +409,15 @@ where
         self
     }
 
-    /// Configure the dedicated runtime for the disk cache store.
-    pub fn with_runtime_options(mut self, runtime_options: RuntimeOptions) -> Self {
-        self.runtime_config = runtime_options;
+    /// Configure the task spawner for the disk cache store.
+    ///
+    /// By default, it will use the current spawner that built foyer.
+    ///
+    /// For example, with tokio, it will be `tokio::runtime::Handle::current()`.
+    ///
+    /// FYI: [`Spawner`] and [`Spawner::current()`]
+    pub fn with_spawner(mut self, spawner: Spawner) -> Self {
+        self.spawner = Some(spawner);
         self
     }
 
@@ -474,57 +440,20 @@ where
 
         let compression = self.compression;
 
-        let build_runtime = |config: &TokioRuntimeOptions, suffix: &str| {
-            let mut builder = tokio::runtime::Builder::new_multi_thread();
-            #[cfg(madsim)]
-            let _ = config;
-            #[cfg(not(madsim))]
-            if config.worker_threads != 0 {
-                builder.worker_threads(config.worker_threads);
-            }
-            #[cfg(not(madsim))]
-            if config.max_blocking_threads != 0 {
-                builder.max_blocking_threads(config.max_blocking_threads);
-            }
-            builder.thread_name(format!("{}-{}", &self.name, suffix));
-            let runtime = builder
-                .enable_all()
-                .build()
-                .map_err(|source| Error::new(ErrorKind::Io, "failed to build dedicated runtime").with_source(source))?;
-            let runtime = BackgroundShutdownRuntime::from(runtime);
-            Ok::<_, Error>(Arc::new(runtime))
-        };
+        let spawner = self.spawner.unwrap_or_else(Spawner::current);
 
-        let user_runtime_handle = Handle::current();
-        let (read_runtime, write_runtime) = match self.runtime_config {
-            RuntimeOptions::Disabled => {
-                tracing::info!(
-                    "[store]: Dedicated runtime is disabled. This may lead to spikes in latency under high load. Hint: Consider configuring a dedicated runtime."
-                );
-                (None, None)
-            }
-            RuntimeOptions::Unified(runtime_config) => {
-                let runtime = build_runtime(&runtime_config, "unified")?;
-                (Some(runtime.clone()), Some(runtime.clone()))
-            }
-            RuntimeOptions::Separated {
-                read_runtime_options: read_runtime_config,
-                write_runtime_options: write_runtime_config,
-            } => {
-                let read_runtime = build_runtime(&read_runtime_config, "read")?;
-                let write_runtime = build_runtime(&write_runtime_config, "write")?;
-                (Some(read_runtime), Some(write_runtime))
-            }
-        };
-        let runtime = Runtime::new(read_runtime, write_runtime, user_runtime_handle);
-
-        let io_engine = match self.io_engine {
-            Some(ie) => ie,
+        let io_engine_builder = match self.io_engine_builder {
+            Some(builder) => builder,
             None => {
-                tracing::info!("[store builder]: No I/O engine is provided, use `PsyncIoEngine` with default parameters as default.");
-                PsyncIoEngineBuilder::new().build().await?
+                tracing::info!("[store builder]: No I/O engine builder is provided, use `PsyncIoEngineBuilder` with default parameters as default.");
+                PsyncIoEngineBuilder::new().boxed()
             }
         };
+        let io_engine = io_engine_builder
+            .build(IoEngineBuildContext {
+                spawner: spawner.clone(),
+            })
+            .await?;
         let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
 
         let engine_builder = match self.engine_builder {
@@ -542,7 +471,7 @@ where
             .build(EngineBuildContext {
                 io_engine,
                 metrics: metrics.clone(),
-                runtime: runtime.clone(),
+                spawner: spawner.clone(),
                 recover_mode: self.recover_mode,
             })
             .await?;
@@ -556,7 +485,7 @@ where
             keeper,
             engine,
             compression,
-            runtime,
+            spawner,
             metrics,
             #[cfg(any(test, feature = "test_utils"))]
             load_throttle_switch,
@@ -586,7 +515,7 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
             .with_engine_config(
                 BlockEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())
@@ -616,7 +545,7 @@ mod tests {
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
         let store = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
             .with_engine_config(
                 BlockEngineBuilder::new(
                     FsDeviceBuilder::new(dir.path())

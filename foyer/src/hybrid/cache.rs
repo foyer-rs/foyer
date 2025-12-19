@@ -357,7 +357,7 @@ where
         let storage = self.storage.clone();
         let flush_on_close = self.flush_on_close;
 
-        self.storage.runtime().user().spawn(async move {
+        self.storage.spawner().spawn(async move {
             if let Err(e) = Self::close_inner(closed, memory, storage, flush_on_close).await {
                 tracing::error!(?name, ?e, "[hybrid]: failed to close hybrid cache");
             }
@@ -668,7 +668,7 @@ where
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
-        let runtime = self.inner.storage.runtime().user();
+        let spawner = self.inner.storage.spawner();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
             || {
@@ -700,7 +700,7 @@ where
             },
             || None,
             ctx,
-            runtime,
+            spawner,
         );
 
         let metrics = self.inner.metrics.clone();
@@ -732,7 +732,7 @@ where
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
-        let runtime = self.inner.storage.runtime().user();
+        let spawner = self.inner.storage.spawner();
         let fut = fetch();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
@@ -792,7 +792,7 @@ where
                 }))
             },
             ctx.clone(),
-            runtime,
+            spawner,
         );
 
         let policy = self.inner.policy;
@@ -1075,7 +1075,7 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+            .with_io_engine_builder(PsyncIoEngineBuilder::new())
             .with_engine_config(block_engine_builder)
             .build()
             .await
@@ -1470,7 +1470,7 @@ mod tests {
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
                 .storage()
-                .with_io_engine(PsyncIoEngineBuilder::new().build().await.unwrap())
+                .with_io_engine_builder(PsyncIoEngineBuilder::new())
                 .with_engine_config(
                     BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                         .with_block_size(64 * KB),

@@ -42,8 +42,8 @@ use foyer::UringIoEngineBuilder;
 use foyer::{
     BlockEngineBuilder, Code, Compression, Device, DeviceBuilder, EngineConfig, Error, FifoConfig, FifoPicker,
     FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
-    InvalidRatioPicker, IoEngine, IoEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder,
-    RecoverMode, RuntimeOptions, S3FifoConfig, Throttle, TokioRuntimeOptions, TracingOptions,
+    InvalidRatioPicker, IoEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder, RecoverMode,
+    S3FifoConfig, Spawner, Throttle, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -178,8 +178,8 @@ struct Args {
     user_runtime_worker_threads: usize,
 
     /// Dedicated runtime type.
-    #[arg(long, value_parser = PossibleValuesParser::new(["disabled", "unified", "separated"]), default_value = "disabled")]
-    runtime: String,
+    #[arg(long, value_enum, default_value_t = Runtime::default())]
+    runtime: Runtime,
 
     /// Dedicated runtime worker threads.
     ///
@@ -187,35 +187,11 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     runtime_worker_threads: usize,
 
-    /// Max threads for blocking io.
+    /// Dedicated runtime max threads for blocking io.
     ///
     /// Only valid when using unified dedicated runtime.
     #[arg(long, default_value_t = 0)]
     runtime_max_blocking_threads: usize,
-
-    /// Dedicated runtime for writes worker threads.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    write_runtime_worker_threads: usize,
-
-    /// Dedicated runtime for writes Max threads for blocking io.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    write_runtime_max_blocking_threads: usize,
-
-    /// Dedicated runtime for reads worker threads.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    read_runtime_worker_threads: usize,
-
-    /// Dedicated runtime for writes max threads for blocking io.
-    ///
-    /// Only valid when using separated dedicated runtime.
-    #[arg(long, default_value_t = 0)]
-    read_runtime_max_blocking_threads: usize,
 
     /// compression algorithm
     #[arg(long, value_enum, default_value_t = Compression::None)]
@@ -336,6 +312,13 @@ struct Args {
     /// NOTE: Only effective when using `psync` io engine.
     #[arg(long, required = false)]
     read_io_latency: Option<humantime::Duration>,
+}
+
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
+enum Runtime {
+    #[default]
+    Default,
+    Dedicated,
 }
 
 #[derive(Debug)]
@@ -590,7 +573,7 @@ async fn benchmark(args: Args) {
         _ => unreachable!(),
     };
 
-    let io_engine: Arc<dyn IoEngine> = match args.io_engine.as_str() {
+    let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
         "psync" => {
             let mut builder = PsyncIoEngineBuilder::new();
 
@@ -601,8 +584,7 @@ async fn benchmark(args: Args) {
             if let Some(latency) = args.read_io_latency {
                 builder = builder.with_read_io_latency(latency.into()..latency.into());
             }
-
-            builder.build().await.unwrap()
+            builder.boxed()
         }
         #[cfg(target_os = "linux")]
         "io_uring" => UringIoEngineBuilder::new()
@@ -614,9 +596,7 @@ async fn benchmark(args: Args) {
             .with_sqpoll_cpus(args.io_uring_sqpoll_cpus.clone())
             .with_iopoll(args.io_uring_iopoll)
             .with_weight(args.io_uring_weight)
-            .build()
-            .await
-            .unwrap(),
+            .boxed(),
         _ => unreachable!(),
     };
 
@@ -643,29 +623,22 @@ async fn benchmark(args: Args) {
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
-        .with_io_engine(io_engine)
+        .with_io_engine_builder(io_engine_builder)
         .with_engine_config(engine_config);
 
     builder = builder
         .with_recover_mode(args.recover_mode)
         .with_compression(args.compression)
-        .with_runtime_options(match args.runtime.as_str() {
-            "disabled" => RuntimeOptions::Disabled,
-            "unified" => RuntimeOptions::Unified(TokioRuntimeOptions {
-                worker_threads: args.runtime_worker_threads,
-                max_blocking_threads: args.runtime_max_blocking_threads,
-            }),
-            "separated" => RuntimeOptions::Separated {
-                read_runtime_options: TokioRuntimeOptions {
-                    worker_threads: args.read_runtime_worker_threads,
-                    max_blocking_threads: args.read_runtime_max_blocking_threads,
-                },
-                write_runtime_options: TokioRuntimeOptions {
-                    worker_threads: args.write_runtime_worker_threads,
-                    max_blocking_threads: args.write_runtime_max_blocking_threads,
-                },
-            },
-            _ => unreachable!(),
+        .with_spawner(match args.runtime {
+            Runtime::Default => Spawner::current(),
+            Runtime::Dedicated => tokio::runtime::Builder::new_multi_thread()
+                .thread_name("foyer-rt")
+                .enable_all()
+                .worker_threads(args.runtime_worker_threads)
+                .max_blocking_threads(args.runtime_max_blocking_threads)
+                .build()
+                .unwrap()
+                .into(),
         });
 
     let hybrid = builder.build().await.unwrap();

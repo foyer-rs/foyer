@@ -246,12 +246,16 @@ impl PageBuffer {
 
 #[cfg(test)]
 mod tests {
+    use foyer_common::spawn::Spawner;
     use itertools::Itertools;
     use tempfile::tempdir;
 
     use super::*;
     use crate::{
-        io::device::{fs::FsDeviceBuilder, DeviceBuilder},
+        io::{
+            device::{fs::FsDeviceBuilder, DeviceBuilder},
+            engine::IoEngineBuildContext,
+        },
         IoEngineBuilder, PsyncIoEngineBuilder,
     };
 
@@ -266,7 +270,13 @@ mod tests {
             .unwrap();
         let p0 = device.create_partition(8 * 1024).unwrap();
         let p1 = device.create_partition(8 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new().build().await.unwrap();
+        let io_engine = PsyncIoEngineBuilder::new()
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap();
 
         let log = TombstoneLog::open(vec![p0.clone(), p1.clone()], io_engine.clone(), &mut vec![])
             .await

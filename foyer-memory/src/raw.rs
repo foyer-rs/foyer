@@ -34,7 +34,7 @@ use foyer_common::{
     event::{Event, EventListener},
     metrics::Metrics,
     properties::{Location, Properties, Source},
-    runtime::SingletonHandle,
+    spawn::Spawner,
     strict_assert,
     utils::scope::Scope,
 };
@@ -956,7 +956,7 @@ where
                 }))
             },
             (),
-            &tokio::runtime::Handle::current().into(),
+            &Spawner::current(),
         )
     }
 
@@ -974,7 +974,7 @@ where
         fo: FO,
         fr: FR,
         ctx: C,
-        runtime: &SingletonHandle,
+        spawner: &Spawner,
     ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
@@ -1013,7 +1013,7 @@ where
                         inflights: inflights.clone(),
                         close,
                     };
-                    runtime.spawn(fetch);
+                    spawner.spawn(fetch);
                     RawGetOrFetch::Miss(RawWait { waiter })
                 }
                 Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),

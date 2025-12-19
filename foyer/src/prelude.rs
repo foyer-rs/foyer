@@ -23,6 +23,7 @@ pub use crate::{
         error::{Error, ErrorKind, Result},
         event::{Event, EventListener},
         properties::{Age, Hint, Location, Source},
+        spawn::Spawner,
         utils::{option::OptionExt, range::RangeBoundsExt, scope::Scope},
     },
     hybrid::{
@@ -39,7 +40,7 @@ pub use crate::{
         DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
         FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoHandle,
         IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine,
-        PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll, Runtime, RuntimeOptions, Statistics, StorageFilter,
-        StorageFilterCondition, StorageFilterResult, Store, StoreBuilder, Throttle, TokioRuntimeOptions,
+        PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll, Statistics, StorageFilter, StorageFilterCondition,
+        StorageFilterResult, Store, StoreBuilder, Throttle,
     },
 };

@@ -22,23 +22,21 @@ use std::{
 use foyer_common::{
     error::{Error, ErrorKind, Result},
     metrics::Metrics,
+    spawn::Spawner,
 };
 use futures_util::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
 use super::indexer::{EntryAddress, Indexer};
-use crate::{
-    engine::{
-        block::{
-            indexer::HashedEntryAddress,
-            manager::{Block, BlockId, BlockManager},
-            scanner::{BlockScanner, EntryInfo},
-            serde::{AtomicSequence, Sequence},
-            tombstone::Tombstone,
-        },
-        RecoverMode,
+use crate::engine::{
+    block::{
+        indexer::HashedEntryAddress,
+        manager::{Block, BlockId, BlockManager},
+        scanner::{BlockScanner, EntryInfo},
+        serde::{AtomicSequence, Sequence},
+        tombstone::Tombstone,
     },
-    runtime::Runtime,
+    RecoverMode,
 };
 
 #[derive(Debug)]
@@ -55,7 +53,7 @@ impl RecoverRunner {
         indexer: &Indexer,
         block_manager: &BlockManager,
         tombstones: &[Tombstone],
-        runtime: Runtime,
+        spawner: Spawner,
         metrics: Arc<Metrics>,
     ) -> Result<()> {
         let now = Instant::now();
@@ -64,9 +62,7 @@ impl RecoverRunner {
         let mode = recover_mode;
         let total = stream::iter(blocks.into_iter().map(|id| {
             let block = block_manager.block(id).clone();
-            runtime
-                .user()
-                .spawn(async move { BlockRecoverRunner::run(mode, block, blob_index_size).await })
+            spawner.spawn(async move { BlockRecoverRunner::run(mode, block, blob_index_size).await })
         }))
         .buffered(recover_concurrency)
         .try_collect::<Vec<_>>()

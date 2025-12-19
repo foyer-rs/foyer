@@ -7,6 +7,7 @@ members = [
   "foyer-common",
   "foyer-memory",
   "foyer-storage",
+  "foyer-tokio",
   "xtask",
 ]
 
@@ -45,10 +46,10 @@ fastant = "0.1.11"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.14"
-foyer = { version = "0.22.0-dev", path = "foyer" }
-foyer-common = { version = "0.22.0-dev", path = "foyer-common" }
-foyer-memory = { version = "0.22.0-dev", path = "foyer-memory" }
-foyer-storage = { version = "0.22.0-dev", path = "foyer-storage" }
+foyer = { version = "0.22.0-dev", path = "foyer", default-features = false }
+foyer-common = { version = "0.22.0-dev", path = "foyer-common", default-features = false }
+foyer-memory = { version = "0.22.0-dev", path = "foyer-memory", default-features = false }
+foyer-storage = { version = "0.22.0-dev", path = "foyer-storage", default-features = false }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -80,13 +81,19 @@ pin-project = "1"
 prometheus = "0.14"
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }
+# Enable all features by default to make it possible to opt-out madsim dependency. 
+# FYI: https://github.com/rust-lang/cargo/issues/10801
+runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
+  "full",
+] }
+runtime-tokio = { package = "tokio", version = "1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
-tokio = "1"
+tokio = { package = "foyer-tokio", version = "0.22.0-dev", path = "foyer-tokio", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 twox-hash = "2"

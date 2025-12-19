@@ -30,7 +30,7 @@ use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
-        engine::{IoEngine, IoEngineBuilder, IoHandle},
+        engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder, IoHandle},
     },
     RawFile,
 };
@@ -178,7 +178,7 @@ impl UringIoEngineBuilder {
 }
 
 impl IoEngineBuilder for UringIoEngineBuilder {
-    fn build(self) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
+    fn build(self: Box<Self>, _: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             if self.threads == 0 {
                 return Err(Error::new(ErrorKind::Config, "shards must be greater than 0")

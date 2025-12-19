@@ -28,7 +28,12 @@ clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 fastrace = { workspace = true, optional = true }
 fastrace-jaeger = { workspace = true, optional = true }
-foyer = { workspace = true, features = ["tracing", "clap", "test_utils"] }
+foyer = { workspace = true, features = [
+  "runtime-tokio",
+  "tracing",
+  "clap",
+  "test_utils",
+] }
 futures-util = { workspace = true }
 hdrhistogram = { workspace = true }
 http-body-util = { workspace = true }
@@ -42,32 +47,9 @@ parking_lot = { workspace = true }
 prometheus = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-
-[target.'cfg(madsim)'.dependencies]
-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-  "net",
-] }
-
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { workspace = true, features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-  "fs",
-  "net",
-] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
