@@ -35,6 +35,8 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
+    # Only deploy on the main repository, not on forks
+    if: github.repository == 'foyer-rs/foyer'
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:
