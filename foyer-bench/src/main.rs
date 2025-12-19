@@ -417,12 +417,7 @@ fn setup() {
 fn setup() {
     use fastrace::collector::Config;
     let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
-    fastrace::set_reporter(
-        reporter,
-        Config::default()
-            .report_interval(Duration::from_millis(1))
-            .tail_sampled(true),
-    );
+    fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
 #[cfg(not(any(feature = "tokio-console", feature = "tracing")))]
