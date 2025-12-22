@@ -256,7 +256,7 @@ mod tests {
             device::{fs::FsDeviceBuilder, DeviceBuilder},
             engine::IoEngineBuildContext,
         },
-        IoEngineBuilder, PsyncIoEngineBuilder,
+        IoEngineConfig, PsyncIoEngineConfig,
     };
 
     #[test_log::test(tokio::test)]
@@ -270,7 +270,7 @@ mod tests {
             .unwrap();
         let p0 = device.create_partition(8 * 1024).unwrap();
         let p1 = device.create_partition(8 * 1024).unwrap();
-        let io_engine = PsyncIoEngineBuilder::new()
+        let io_engine = PsyncIoEngineConfig::new()
             .boxed()
             .build(IoEngineBuildContext {
                 spawner: Spawner::current(),

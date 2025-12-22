@@ -25,8 +25,8 @@ use std::{
 };
 
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
-    HybridCachePolicy, HybridCacheProperties, Location, PsyncIoEngineBuilder,
+    BlockEngineConfig, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
+    HybridCachePolicy, HybridCacheProperties, Location, PsyncIoEngineConfig,
 };
 use rand::{rng, Rng};
 
@@ -116,9 +116,9 @@ async fn test_concurrent_insert_disk_cache_and_fetch() {
         .memory(MB)
         .with_weighter(|_, v| 8 + v.len())
         .storage()
-        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
-            BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(64 * MB).build().unwrap())
+            BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(64 * MB).build().unwrap())
                 .with_block_size(4 * MB),
         )
         .build()

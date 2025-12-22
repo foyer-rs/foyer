@@ -24,7 +24,7 @@ use foyer_common::{
     spawn::Spawner,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Filter, Weighter};
-use foyer_storage::{Compression, EngineConfig, IoEngineBuilder, RecoverMode, StoreBuilder};
+use foyer_storage::{Compression, EngineConfig, IoEngineConfig, RecoverMode, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::cache::{
@@ -256,9 +256,9 @@ where
     V: StorageValue,
     S: HashBuilder + Debug,
 {
-    /// Set io engine builder for the disk cache store.
-    pub fn with_io_engine_builder(self, io_engine_builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
-        let builder = self.builder.with_io_engine_builder(io_engine_builder);
+    /// Set io engine config for the disk cache store.
+    pub fn with_io_engine_config(self, config: impl Into<Box<dyn IoEngineConfig>>) -> Self {
+        let builder = self.builder.with_io_engine_config(config);
         Self {
             name: self.name,
             options: self.options,

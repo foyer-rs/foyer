@@ -30,14 +30,14 @@ use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
-        engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder, IoHandle},
+        engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle},
     },
     RawFile,
 };
 
-/// Builder for io_uring based I/O engine.
+/// Config for io_uring based I/O engine.
 #[derive(Debug)]
-pub struct UringIoEngineBuilder {
+pub struct UringIoEngineConfig {
     threads: usize,
     cpus: Vec<u32>,
     io_depth: usize,
@@ -53,14 +53,14 @@ pub struct UringIoEngineBuilder {
     read_io_latency: Option<std::ops::Range<std::time::Duration>>,
 }
 
-impl Default for UringIoEngineBuilder {
+impl Default for UringIoEngineConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl UringIoEngineBuilder {
-    /// Create a new io_uring based I/O engine builder with default configurations.
+impl UringIoEngineConfig {
+    /// Create a new io_uring based I/O engine config with default configurations.
     pub fn new() -> Self {
         Self {
             threads: 1,
@@ -177,7 +177,7 @@ impl UringIoEngineBuilder {
     }
 }
 
-impl IoEngineBuilder for UringIoEngineBuilder {
+impl IoEngineConfig for UringIoEngineConfig {
     fn build(self: Box<Self>, _: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             if self.threads == 0 {

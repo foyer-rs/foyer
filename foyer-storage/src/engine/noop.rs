@@ -28,24 +28,24 @@ use crate::{
     Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
 };
 
-pub struct NoopEngineBuilder<K, V, P>(PhantomData<(K, V, P)>)
+pub struct NoopEngineConfig<K, V, P>(PhantomData<(K, V, P)>)
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties;
 
-impl<K, V, P> Debug for NoopEngineBuilder<K, V, P>
+impl<K, V, P> Debug for NoopEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("NoopEngineBuilder").finish()
+        f.debug_tuple("NoopEngineConfig").finish()
     }
 }
 
-impl<K, V, P> Default for NoopEngineBuilder<K, V, P>
+impl<K, V, P> Default for NoopEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<K, V, P> NoopEngineBuilder<K, V, P>
+impl<K, V, P> NoopEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<K, V, P> EngineConfig<K, V, P> for NoopEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for NoopEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -83,13 +83,13 @@ where
     }
 }
 
-impl<K, V, P> From<NoopEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
+impl<K, V, P> From<NoopEngineConfig<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    fn from(builder: NoopEngineBuilder<K, V, P>) -> Self {
+    fn from(builder: NoopEngineConfig<K, V, P>) -> Self {
         builder.boxed()
     }
 }

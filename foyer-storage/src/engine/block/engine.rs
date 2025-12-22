@@ -67,7 +67,7 @@ use crate::{
     Device, Load, RejectAll, StorageFilter, StorageFilterResult,
 };
 
-/// Builder for the block-based disk cache engine.
+/// Config for the block-based disk cache engine.
 ///
 /// The block-based disk cache engine is suitable for general cache entries with size from 2K to hundreds of MiBs.
 ///
@@ -75,7 +75,7 @@ use crate::{
 /// internal fragmentation.
 ///
 /// The disk cache evicts cache entries in block unit.
-pub struct BlockEngineBuilder<K, V, P>
+pub struct BlockEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -103,14 +103,14 @@ where
     marker: PhantomData<(K, V, P)>,
 }
 
-impl<K, V, P> Debug for BlockEngineBuilder<K, V, P>
+impl<K, V, P> Debug for BlockEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockEngineBuilder")
+        f.debug_struct("BlockEngineConfig")
             .field("device", &self.device)
             .field("block_size", &self.block_size)
             .field("compression", &self.compression)
@@ -130,7 +130,7 @@ where
     }
 }
 
-impl<K, V, P> BlockEngineBuilder<K, V, P>
+impl<K, V, P> BlockEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -453,7 +453,7 @@ where
     }
 }
 
-impl<K, V, P> EngineConfig<K, V, P> for BlockEngineBuilder<K, V, P>
+impl<K, V, P> EngineConfig<K, V, P> for BlockEngineConfig<K, V, P>
 where
     K: StorageKey,
     V: StorageValue,
@@ -464,13 +464,13 @@ where
     }
 }
 
-impl<K, V, P> From<BlockEngineBuilder<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
+impl<K, V, P> From<BlockEngineConfig<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    fn from(builder: BlockEngineBuilder<K, V, P>) -> Self {
+    fn from(builder: BlockEngineConfig<K, V, P>) -> Self {
         builder.boxed()
     }
 }
@@ -857,11 +857,11 @@ mod tests {
         engine::RecoverMode,
         io::{
             device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
-            engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder},
+            engine::{IoEngine, IoEngineBuildContext, IoEngineConfig},
         },
         serde::EntrySerializer,
         test_utils::Biased,
-        PsyncIoEngineBuilder, RejectAll,
+        PsyncIoEngineConfig, RejectAll,
     };
 
     const KB: usize = 1024;
@@ -876,7 +876,7 @@ mod tests {
 
     async fn io_engine_for_test(spawner: Spawner) -> Arc<dyn IoEngine> {
         // TODO(MrCroxx): Test with other io engines.
-        PsyncIoEngineBuilder::new()
+        PsyncIoEngineConfig::new()
             .boxed()
             .build(IoEngineBuildContext { spawner })
             .await
@@ -899,7 +899,7 @@ mod tests {
         let spawner = Spawner::current();
         let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
-        let builder = BlockEngineBuilder {
+        let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
             compression: Compression::None,
@@ -942,7 +942,7 @@ mod tests {
         let spawner = Spawner::current();
         let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
-        let builder = BlockEngineBuilder {
+        let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
             compression: Compression::None,
@@ -1388,7 +1388,7 @@ mod tests {
             .with_device(d3)
             .build()
             .unwrap();
-        let engine = BlockEngineBuilder::<u64, Vec<u8>, TestProperties>::new(device)
+        let engine = BlockEngineConfig::<u64, Vec<u8>, TestProperties>::new(device)
             .with_block_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {

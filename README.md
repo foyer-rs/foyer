@@ -103,7 +103,7 @@ assert_eq!(entry.value(), e.value());
 The setup of a hybrid cache is extremely easy.
 
 ```rust
-use foyer::{BlockEngineBuilder, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         .memory(64 * 1024 * 1024)
         .storage()
         // use block-based disk cache engine with default configuration
-        .with_engine_config(BlockEngineBuilder::new(device))
+        .with_engine_config(BlockEngineConfig::new(device))
         .build()
         .await?;
 
@@ -140,8 +140,8 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
 use chrono::Datelike;
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, StorageFilter, Throttle,
+    BlockEngineConfig, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IopsCounter, LruConfig, PsyncIoEngineConfig, RecoverMode, RejectAll, StorageFilter, Throttle,
 };
 use tempfile::tempdir;
 
@@ -173,9 +173,9 @@ async fn main() -> anyhow::Result<()> {
         .with_weighter(|_key, value: &String| value.len())
         .with_filter(|_, _| true)
         .storage()
-        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
-            BlockEngineBuilder::new(device)
+            BlockEngineConfig::new(device)
                 .with_block_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)

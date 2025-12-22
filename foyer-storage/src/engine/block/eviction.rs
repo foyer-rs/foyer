@@ -200,13 +200,13 @@ mod tests {
     use crate::{
         engine::block::manager::Block,
         io::{device::noop::NoopPartition, engine::IoEngineBuildContext},
-        IoEngineBuilder, NoopIoEngineBuilder,
+        IoEngineConfig, NoopIoEngineConfig,
     };
 
     #[test_log::test(tokio::test)]
     async fn test_fifo_picker() {
         let mut picker = FifoPicker::new(0.1);
-        let mock_io_engine = NoopIoEngineBuilder
+        let mock_io_engine = NoopIoEngineConfig
             .boxed()
             .build(IoEngineBuildContext {
                 spawner: Spawner::current(),
@@ -292,7 +292,7 @@ mod tests {
         let mut picker = InvalidRatioPicker::new(0.5);
         picker.init(&(0..10).collect_vec(), 10);
 
-        let mock_io_engine = NoopIoEngineBuilder
+        let mock_io_engine = NoopIoEngineConfig
             .boxed()
             .build(IoEngineBuildContext {
                 spawner: Spawner::current(),

@@ -36,12 +36,12 @@ use crate::test_utils::*;
 use crate::{
     compress::Compression,
     engine::{
-        noop::{NoopEngine, NoopEngineBuilder},
+        noop::{NoopEngine, NoopEngineConfig},
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
     io::{
         device::{statistics::Statistics, throttle::Throttle, Device},
-        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineBuilder, IoEngineBuildContext, IoEngineBuilder},
+        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig, IoEngineBuildContext, IoEngineConfig},
     },
     keeper::Keeper,
     serde::EntrySerializer,
@@ -318,8 +318,8 @@ where
     memory: Cache<K, V, S, P>,
     metrics: Arc<Metrics>,
 
-    io_engine_builder: Option<Box<dyn IoEngineBuilder>>,
-    engine_builder: Option<Box<dyn EngineConfig<K, V, P>>>,
+    io_engine_config: Option<Box<dyn IoEngineConfig>>,
+    engine_config: Option<Box<dyn EngineConfig<K, V, P>>>,
 
     spawner: Option<Spawner>,
 
@@ -342,8 +342,8 @@ where
             .field("name", &self.name)
             .field("memory", &self.memory)
             .field("metrics", &self.metrics)
-            .field("io_engine_builder", &self.io_engine_builder)
-            .field("engine_builder", &self.engine_builder)
+            .field("io_engine_builder", &self.io_engine_config)
+            .field("engine_builder", &self.engine_config)
             .field("spawner", &self.spawner)
             .field("compression", &self.compression)
             .field("recover_mode", &self.recover_mode)
@@ -365,8 +365,8 @@ where
             memory,
             metrics,
 
-            io_engine_builder: None,
-            engine_builder: None,
+            io_engine_config: None,
+            engine_config: None,
 
             spawner: None,
 
@@ -377,17 +377,17 @@ where
         }
     }
 
-    /// Set io engine builder for the disk cache store.
+    /// Set io engine config for the disk cache store.
     ///
-    /// Default: [`crate::io::engine::psync::PsyncIoEngineBuilder`].
-    pub fn with_io_engine_builder(mut self, io_engine_builder: impl Into<Box<dyn IoEngineBuilder>>) -> Self {
-        self.io_engine_builder = Some(io_engine_builder.into());
+    /// Default: [`crate::io::engine::psync::PsyncIoEngineConfig`].
+    pub fn with_io_engine_config(mut self, io_engine_builder: impl Into<Box<dyn IoEngineConfig>>) -> Self {
+        self.io_engine_config = Some(io_engine_builder.into());
         self
     }
 
     /// Set engine config for the disk cache store.
     pub fn with_engine_config(mut self, config: impl Into<Box<dyn EngineConfig<K, V, P>>>) -> Self {
-        self.engine_builder = Some(config.into());
+        self.engine_config = Some(config.into());
         self
     }
 
@@ -430,7 +430,7 @@ where
 
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
-        self.engine_builder.is_none()
+        self.engine_config.is_none()
     }
 
     /// Build the disk cache store with the given configuration.
@@ -442,11 +442,11 @@ where
 
         let spawner = self.spawner.unwrap_or_else(Spawner::current);
 
-        let io_engine_builder = match self.io_engine_builder {
+        let io_engine_builder = match self.io_engine_config {
             Some(builder) => builder,
             None => {
-                tracing::info!("[store builder]: No I/O engine builder is provided, use `PsyncIoEngineBuilder` with default parameters as default.");
-                PsyncIoEngineBuilder::new().boxed()
+                tracing::info!("[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default.");
+                PsyncIoEngineConfig::new().boxed()
             }
         };
         let io_engine = io_engine_builder
@@ -456,14 +456,14 @@ where
             .await?;
         let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
 
-        let engine_builder = match self.engine_builder {
+        let engine_builder = match self.engine_config {
             Some(eb) => eb,
             None => {
                 tracing::info!(
                     "[store builder]: No engine builder is provided, run disk cache in mock mode that do nothing."
                 );
 
-                Box::<NoopEngineBuilder<K, V, P>>::default()
+                Box::<NoopEngineConfig<K, V, P>>::default()
             }
         };
 
@@ -504,8 +504,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        engine::block::engine::BlockEngineBuilder,
-        io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineBuilder},
+        engine::block::engine::BlockEngineConfig,
+        io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineConfig},
         DeviceBuilder,
     };
 
@@ -515,9 +515,9 @@ mod tests {
         let metrics = Arc::new(Metrics::noop());
         let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
         let _ = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_io_engine_config(PsyncIoEngineConfig::new())
             .with_engine_config(
-                BlockEngineBuilder::new(
+                BlockEngineConfig::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(64 * 1024)
                         .build()
@@ -545,9 +545,9 @@ mod tests {
         assert_eq!(memory.hash(e1.key()), memory.hash(e2.key()));
 
         let store = StoreBuilder::new("test", memory, metrics)
-            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_io_engine_config(PsyncIoEngineConfig::new())
             .with_engine_config(
-                BlockEngineBuilder::new(
+                BlockEngineConfig::new(
                     FsDeviceBuilder::new(dir.path())
                         .with_capacity(4 * 1024 * 1024)
                         .build()

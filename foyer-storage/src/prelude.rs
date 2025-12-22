@@ -13,12 +13,12 @@
 // limitations under the License.
 
 #[cfg(target_os = "linux")]
-pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineBuilder};
+pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
     compress::Compression,
     engine::{
         block::{
-            engine::BlockEngineBuilder,
+            engine::BlockEngineConfig,
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             manager::{Block, BlockStatistics},
         },
@@ -40,9 +40,9 @@ pub use crate::{
             Device, DeviceBuilder, RawFile,
         },
         engine::{
-            noop::{NoopIoEngine, NoopIoEngineBuilder},
-            psync::{PsyncIoEngine, PsyncIoEngineBuilder},
-            IoEngine, IoEngineBuilder, IoHandle,
+            noop::{NoopIoEngine, NoopIoEngineConfig},
+            psync::{PsyncIoEngine, PsyncIoEngineConfig},
+            IoEngine, IoEngineConfig, IoHandle,
         },
     },
     store::{Store, StoreBuilder},
