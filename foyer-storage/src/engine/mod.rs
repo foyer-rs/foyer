@@ -132,7 +132,7 @@ pub struct EngineBuildContext {
     pub recover_mode: RecoverMode,
 }
 
-/// Disk cache engine builder trait.
+/// Disk cache engine config trait.
 #[expect(clippy::type_complexity)]
 pub trait EngineConfig<K, V, P>: Send + Sync + 'static + Debug
 where
@@ -143,7 +143,7 @@ where
     /// Build the engine with the given configurations.
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
 
-    /// Box the builder.
+    /// Box the config.
     fn boxed(self) -> Box<Self>
     where
         Self: Sized,

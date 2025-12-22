@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::{BlockEngineBuilder, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder};
+use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         .memory(64 * 1024 * 1024)
         .storage()
         // use block-based disk cache engine with default configuration
-        .with_engine_config(BlockEngineBuilder::new(device))
+        .with_engine_config(BlockEngineConfig::new(device))
         .build()
         .await?;
 

@@ -16,8 +16,8 @@ use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
 use chrono::Datelike;
 use foyer::{
-    BlockEngineBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
-    IopsCounter, LruConfig, PsyncIoEngineBuilder, RecoverMode, RejectAll, StorageFilter, Throttle,
+    BlockEngineConfig, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
+    IopsCounter, LruConfig, PsyncIoEngineConfig, RecoverMode, RejectAll, StorageFilter, Throttle,
 };
 use tempfile::tempdir;
 
@@ -49,9 +49,9 @@ async fn main() -> anyhow::Result<()> {
         .with_weighter(|_key, value: &String| value.len())
         .with_filter(|_, _| true)
         .storage()
-        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+        .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
-            BlockEngineBuilder::new(device)
+            BlockEngineConfig::new(device)
                 .with_block_size(16 * 1024 * 1024)
                 .with_indexer_shards(64)
                 .with_recover_concurrency(8)

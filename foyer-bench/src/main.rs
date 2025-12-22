@@ -38,11 +38,11 @@ use bytesize::ByteSize;
 use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
 use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
-use foyer::UringIoEngineBuilder;
+use foyer::UringIoEngineConfig;
 use foyer::{
-    BlockEngineBuilder, Code, Compression, Device, DeviceBuilder, EngineConfig, Error, FifoConfig, FifoPicker,
+    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, Error, FifoConfig, FifoPicker,
     FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
-    InvalidRatioPicker, IoEngineBuilder, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineBuilder, RecoverMode,
+    InvalidRatioPicker, IoEngineConfig, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineConfig, RecoverMode,
     S3FifoConfig, Spawner, Throttle, TracingOptions,
 };
 use futures_util::future::join_all;
@@ -573,9 +573,9 @@ async fn benchmark(args: Args) {
         _ => unreachable!(),
     };
 
-    let io_engine_builder: Box<dyn IoEngineBuilder> = match args.io_engine.as_str() {
+    let io_engine_builder: Box<dyn IoEngineConfig> = match args.io_engine.as_str() {
         "psync" => {
-            let mut builder = PsyncIoEngineBuilder::new();
+            let mut builder = PsyncIoEngineConfig::new();
 
             if let Some(latency) = args.write_io_latency {
                 builder = builder.with_write_io_latency(latency.into()..latency.into());
@@ -587,7 +587,7 @@ async fn benchmark(args: Args) {
             builder.boxed()
         }
         #[cfg(target_os = "linux")]
-        "io_uring" => UringIoEngineBuilder::new()
+        "io_uring" => UringIoEngineConfig::new()
             .with_threads(args.io_uring_threads)
             .with_cpus(args.io_uring_cpus.clone())
             .with_io_depth(args.io_uring_iodepth)
@@ -601,7 +601,7 @@ async fn benchmark(args: Args) {
     };
 
     let engine_config: Box<dyn EngineConfig<u64, Value, HybridCacheProperties>> = {
-        let mut builder = BlockEngineBuilder::new(device)
+        let mut builder = BlockEngineConfig::new(device)
             .with_block_size(args.block_size.as_u64() as _)
             .with_indexer_shards(args.shards)
             .with_recover_concurrency(args.recover_concurrency)
@@ -623,7 +623,7 @@ async fn benchmark(args: Args) {
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
-        .with_io_engine_builder(io_engine_builder)
+        .with_io_engine_config(io_engine_builder)
         .with_engine_config(engine_config);
 
     builder = builder

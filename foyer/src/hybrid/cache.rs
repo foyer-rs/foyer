@@ -1060,11 +1060,11 @@ mod tests {
         dir: impl AsRef<Path>,
         hybrid_cache_builder_mapper: impl FnOnce(HybridCacheBuilder<u64, Vec<u8>>) -> HybridCacheBuilder<u64, Vec<u8>>,
         block_engine_builder_mapper: impl FnOnce(
-            BlockEngineBuilder<u64, Vec<u8>, HybridCacheProperties>,
-        ) -> BlockEngineBuilder<u64, Vec<u8>, HybridCacheProperties>,
+            BlockEngineConfig<u64, Vec<u8>, HybridCacheProperties>,
+        ) -> BlockEngineConfig<u64, Vec<u8>, HybridCacheProperties>,
     ) -> HybridCache<u64, Vec<u8>, ModHasher> {
         let mut block_engine_builder =
-            BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+            BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                 .with_block_size(MB);
         block_engine_builder = block_engine_builder_mapper(block_engine_builder);
 
@@ -1075,7 +1075,7 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .with_io_engine_builder(PsyncIoEngineBuilder::new())
+            .with_io_engine_config(PsyncIoEngineConfig::new())
             .with_engine_config(block_engine_builder)
             .build()
             .await
@@ -1470,9 +1470,9 @@ mod tests {
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
                 .storage()
-                .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                .with_io_engine_config(PsyncIoEngineConfig::new())
                 .with_engine_config(
-                    BlockEngineBuilder::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
+                    BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                         .with_block_size(64 * KB),
                 )
                 .build()

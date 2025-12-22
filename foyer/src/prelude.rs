@@ -15,7 +15,7 @@
 #[cfg(feature = "tracing")]
 pub use crate::common::tracing::TracingOptions;
 #[cfg(target_os = "linux")]
-pub use crate::storage::{UringIoEngine, UringIoEngineBuilder};
+pub use crate::storage::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
     common::{
         buf::{BufExt, BufMutExt},
@@ -36,11 +36,11 @@ pub use crate::{
         LruConfig, S3FifoConfig, Weighter,
     },
     storage::{
-        AdmitAll, Block, BlockEngineBuilder, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
-        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
-        FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineBuilder, IoHandle,
-        IopsCounter, Load, NoopDeviceBuilder, NoopIoEngine, NoopIoEngineBuilder, PartialDeviceBuilder, PsyncIoEngine,
-        PsyncIoEngineBuilder, RawFile, RecoverMode, RejectAll, Statistics, StorageFilter, StorageFilterCondition,
-        StorageFilterResult, Store, StoreBuilder, Throttle,
+        AdmitAll, Block, BlockEngineConfig, BlockStatistics, CombinedDeviceBuilder, Compression, Device, DeviceBuilder,
+        Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker, FifoPicker,
+        FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineConfig, IoHandle, IopsCounter, Load,
+        NoopDeviceBuilder, NoopIoEngine, NoopIoEngineConfig, PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineConfig,
+        RawFile, RecoverMode, RejectAll, Statistics, StorageFilter, StorageFilterCondition, StorageFilterResult, Store,
+        StoreBuilder, Throttle,
     },
 };

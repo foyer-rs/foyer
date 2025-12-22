@@ -111,7 +111,7 @@ mod tests {
         },
         io::{
             device::{fs::FsDeviceBuilder, Device, DeviceBuilder, Partition},
-            engine::{psync::PsyncIoEngineBuilder, IoEngine, IoEngineBuildContext, IoEngineBuilder},
+            engine::{psync::PsyncIoEngineConfig, IoEngine, IoEngineBuildContext, IoEngineConfig},
             PAGE,
         },
         Compression,
@@ -127,7 +127,7 @@ mod tests {
     }
 
     async fn io_engine_for_test() -> Arc<dyn IoEngine> {
-        PsyncIoEngineBuilder::new()
+        PsyncIoEngineConfig::new()
             .boxed()
             .build(IoEngineBuildContext {
                 spawner: Spawner::current(),

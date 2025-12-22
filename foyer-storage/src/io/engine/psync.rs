@@ -33,7 +33,7 @@ use crate::{
     io::{
         bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
-        engine::{IoEngine, IoEngineBuildContext, IoEngineBuilder, IoHandle},
+        engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle},
     },
     RawFile,
 };
@@ -75,9 +75,9 @@ impl DerefMut for FileHandle {
     }
 }
 
-/// Builder for synchronous I/O engine with pread(2)/pwrite(2).
+/// Config for synchronous I/O engine with pread(2)/pwrite(2).
 #[derive(Debug)]
-pub struct PsyncIoEngineBuilder {
+pub struct PsyncIoEngineConfig {
     #[cfg(any(test, feature = "test_utils"))]
     write_io_latency: Option<std::ops::Range<std::time::Duration>>,
 
@@ -85,20 +85,20 @@ pub struct PsyncIoEngineBuilder {
     read_io_latency: Option<std::ops::Range<std::time::Duration>>,
 }
 
-impl Default for PsyncIoEngineBuilder {
+impl Default for PsyncIoEngineConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<PsyncIoEngineBuilder> for Box<dyn IoEngineBuilder> {
-    fn from(builder: PsyncIoEngineBuilder) -> Self {
+impl From<PsyncIoEngineConfig> for Box<dyn IoEngineConfig> {
+    fn from(builder: PsyncIoEngineConfig) -> Self {
         builder.boxed()
     }
 }
 
-impl PsyncIoEngineBuilder {
-    /// Create a new synchronous I/O engine builder with default configurations.
+impl PsyncIoEngineConfig {
+    /// Create a new synchronous I/O engine config with default configurations.
     pub fn new() -> Self {
         Self {
             #[cfg(any(test, feature = "test_utils"))]
@@ -123,7 +123,7 @@ impl PsyncIoEngineBuilder {
     }
 }
 
-impl IoEngineBuilder for PsyncIoEngineBuilder {
+impl IoEngineConfig for PsyncIoEngineConfig {
     fn build(self: Box<Self>, ctx: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
             let engine = PsyncIoEngine {

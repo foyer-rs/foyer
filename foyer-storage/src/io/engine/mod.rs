@@ -101,12 +101,12 @@ pub struct IoEngineBuildContext {
     pub spawner: Spawner,
 }
 
-/// I/O engine builder trait.
-pub trait IoEngineBuilder: Send + Sync + 'static + Debug {
+/// I/O engine config trait.
+pub trait IoEngineConfig: Send + Sync + 'static + Debug {
     /// Build an I/O engine from the given configuration.
     fn build(self: Box<Self>, ctx: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>>;
 
-    /// Box the builder.
+    /// Box the config.
     fn boxed(self) -> Box<Self>
     where
         Self: Sized,
@@ -133,11 +133,11 @@ mod tests {
     use super::*;
     #[cfg(not(madsim))]
     #[cfg(target_os = "linux")]
-    use crate::io::engine::uring::UringIoEngineBuilder;
+    use crate::io::engine::uring::UringIoEngineConfig;
     use crate::io::{
         bytes::IoSliceMut,
         device::{file::FileDeviceBuilder, Device, DeviceBuilder},
-        engine::psync::PsyncIoEngineBuilder,
+        engine::psync::PsyncIoEngineConfig,
     };
 
     const KIB: usize = 1024;
@@ -175,7 +175,7 @@ mod tests {
         {
             let path = dir.path().join("test_file_1");
             let device = build_test_file_device(&path).unwrap();
-            let engine = UringIoEngineBuilder::new()
+            let engine = UringIoEngineConfig::new()
                 .with_threads(4)
                 .with_io_depth(64)
                 .boxed()
@@ -189,7 +189,7 @@ mod tests {
 
         let path = dir.path().join("test_file_1");
         let device = build_test_file_device(&path).unwrap();
-        let engine = PsyncIoEngineBuilder::new()
+        let engine = PsyncIoEngineConfig::new()
             .boxed()
             .build(IoEngineBuildContext {
                 spawner: Spawner::current(),
