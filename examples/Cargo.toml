@@ -25,7 +25,6 @@ ot = [
 
 [dependencies]
 anyhow = { workspace = true }
-chrono = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true, optional = true }
@@ -39,6 +38,7 @@ hyper = { workspace = true, default-features = false, features = [
 hyper-util = { workspace = true, default-features = false, features = [
   "tokio",
 ] }
+jiff = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, features = [

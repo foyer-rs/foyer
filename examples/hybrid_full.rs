@@ -14,7 +14,6 @@
 
 use std::{hash::BuildHasherDefault, num::NonZeroUsize};
 
-use chrono::Datelike;
 use foyer::{
     BlockEngineConfig, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy,
     IopsCounter, LruConfig, PsyncIoEngineConfig, RecoverMode, RejectAll, StorageFilter, Throttle,
@@ -87,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let e = hybrid
         .get_or_fetch(&20230512, || async {
             // Mock fetching data from remote source
-            let now = chrono::Utc::now();
+            let now = jiff::Zoned::now();
             if format!("{}{}{}", now.year(), now.month(), now.day()) == "20230512" {
                 return Err(anyhow::anyhow!("Hi, time traveler!"));
             }
@@ -97,7 +96,6 @@ async fn main() -> anyhow::Result<()> {
     assert_eq!(e.key(), &20230512);
     assert_eq!(e.value(), "Hello, foyer.");
 
-    hybrid.close().await.unwrap();
-
+    hybrid.close().await?;
     Ok(())
 }
