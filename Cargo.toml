@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "examples",
-    "foyer",
-    "foyer-bench",
-    "foyer-common",
-    "foyer-memory",
-    "foyer-storage",
-    "foyer-tokio",
-    "xtask",
+  "examples",
+  "foyer",
+  "foyer-bench",
+  "foyer-common",
+  "foyer-memory",
+  "foyer-storage",
+  "foyer-tokio",
+  "xtask",
 ]
 
 [workspace.package]
@@ -82,7 +82,7 @@ rand_distr = { version = "0.5" }
 # Enable all features by default to make it possible to opt-out madsim dependency. 
 # FYI: https://github.com/rust-lang/cargo/issues/10801
 runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
-    "full",
+  "full",
 ] }
 runtime-tokio = { package = "tokio", version = "1", default-features = false }
 serde = { version = "1", features = ["derive"] }
