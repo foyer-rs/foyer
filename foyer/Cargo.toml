@@ -16,10 +16,6 @@ exclude.workspace = true
 features = ["serde", "tracing", "nightly", "deadlock", "strict_assertions"]
 rustdoc-args = ["--cfg", "docsrs"]
 
-[package.metadata.cargo-udeps.ignore]
-# Only used in doc test.
-development = ["chrono"]
-
 [features]
 default = ["runtime-tokio"]
 clap = ["foyer-storage/clap"]
@@ -58,9 +54,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-chrono = { workspace = true }
 foyer = { path = ".", default-features = false, features = ["test_utils"] }
 foyer-storage = { workspace = true, features = ["test_utils"] }
+jiff = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
