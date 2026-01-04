@@ -567,10 +567,7 @@ where
         .boxed()
     }
 
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::storage::engine::block::generic::enqueue")
-    )]
+    #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::generic::enqueue"))]
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
@@ -645,25 +642,27 @@ where
 
             let header = match EntryHeader::read(&buf[..EntryHeader::serialized_len()]) {
                 Ok(header) => header,
-                Err(e) => match e.kind() {
-                    ErrorKind::Parse
-                    | ErrorKind::MagicMismatch
-                    | ErrorKind::ChecksumMismatch
-                    | ErrorKind::OutOfRange => {
-                        tracing::warn!(
-                            hash,
-                            ?addr,
-                            ?e,
-                            "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                        );
-                        indexer.remove(hash);
-                        return Ok(Load::Miss);
+                Err(e) => {
+                    return match e.kind() {
+                        ErrorKind::Parse
+                        | ErrorKind::MagicMismatch
+                        | ErrorKind::ChecksumMismatch
+                        | ErrorKind::OutOfRange => {
+                            tracing::warn!(
+                                hash,
+                                ?addr,
+                                ?e,
+                                "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                            );
+                            indexer.remove(hash);
+                            Ok(Load::Miss)
+                        }
+                        _ => {
+                            tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
+                            Err(e)
+                        }
                     }
-                    _ => {
-                        tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
-                        return Err(e);
-                    }
-                },
+                }
             };
 
             let (key, value) = {
@@ -676,23 +675,25 @@ where
                     Some(header.checksum),
                 ) {
                     Ok(res) => res,
-                    Err(e) => match e.kind() {
-                        ErrorKind::MagicMismatch | ErrorKind::ChecksumMismatch | ErrorKind::OutOfRange => {
-                            tracing::warn!(
+                    Err(e) => {
+                        return match e.kind() {
+                            ErrorKind::MagicMismatch | ErrorKind::ChecksumMismatch | ErrorKind::OutOfRange => {
+                                tracing::warn!(
                                 hash,
                                 ?addr,
                                 ?header,
                                 ?e,
                                 "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
                             );
-                            indexer.remove(hash);
-                            return Ok(Load::Miss);
+                                indexer.remove(hash);
+                                Ok(Load::Miss)
+                            }
+                            _ => {
+                                tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
+                                Err(e)
+                            }
                         }
-                        _ => {
-                            tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
-                            return Err(e);
-                        }
-                    },
+                    }
                 };
                 metrics
                     .storage_entry_deserialize_duration
@@ -753,7 +754,7 @@ where
                 return Err(Error::new(ErrorKind::Closed, "cannot delete entry after closed"));
             }
 
-            // Write an tombstone to clear tombstone log by increase the max sequence.
+            // Write a tombstone to clear tombstone log by increase the max sequence.
             let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
 
             this.inner.flushers[0].submit(Submission::Tombstone {

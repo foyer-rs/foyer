@@ -315,7 +315,7 @@ pub async fn monitor(
     total_secs: Duration,
     warm_up: Duration,
     metrics: Metrics,
-    mut stop: broadcast::Receiver<()>,
+    mut stop: broadcast::overflow::Receiver<()>,
 ) {
     let start = Instant::now();
 
@@ -335,7 +335,7 @@ pub async fn monitor(
     loop {
         let now = Instant::now();
         match stop.try_recv() {
-            Err(broadcast::TryRecvError::Empty) => {}
+            Err(broadcast::overflow::TryRecvError::Empty) => {}
             _ => return,
         }
 

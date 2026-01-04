@@ -40,7 +40,7 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineConfig;
 use foyer::{
-    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, Error, FifoConfig, FifoPicker,
+    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
     FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
     InvalidRatioPicker, IoEngineConfig, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineConfig, RecoverMode,
     S3FifoConfig, Spawner, Throttle, TracingOptions,
@@ -404,7 +404,7 @@ impl Code for Value {
     }
 
     fn estimated_size(&self) -> usize {
-        std::mem::size_of::<usize>() + self.len()
+        size_of::<usize>() + self.len()
     }
 }
 
@@ -651,7 +651,7 @@ async fn benchmark(args: Args) {
 
     let metrics_dump_start = metrics.dump();
 
-    let (stop_tx, _) = broadcast::channel(4096);
+    let (stop_tx, _) = broadcast::overflow::channel(4096);
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
@@ -703,7 +703,12 @@ async fn benchmark(args: Args) {
     teardown();
 }
 
-async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop_tx: broadcast::Sender<()>) {
+async fn bench(
+    args: Args,
+    hybrid: HybridCache<u64, Value>,
+    metrics: Metrics,
+    stop_tx: broadcast::overflow::Sender<()>,
+) {
     let w_rate = if args.w_rate.as_u64() == 0 {
         None
     } else {
@@ -743,7 +748,12 @@ async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, st
     join_all(r_handles).await;
 }
 
-async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
+async fn write(
+    id: u64,
+    hybrid: HybridCache<u64, Value>,
+    context: Arc<Context>,
+    mut stop: broadcast::overflow::Receiver<()>,
+) {
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
@@ -791,7 +801,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
         let l = Instant::now();
 
         match stop.try_recv() {
-            Err(broadcast::TryRecvError::Empty) => {}
+            Err(broadcast::overflow::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed() >= context.time + context.warm_up {
@@ -843,10 +853,9 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
                 hybrid.insert(idx, data);
                 update();
                 let intervals = zipf_intervals.as_ref().unwrap();
-                let group = match intervals.binary_search_by_key(&(c as usize % K), |(sum, _)| *sum) {
-                    Ok(i) => i,
-                    Err(i) => i.min(G - 1),
-                };
+                let group = intervals
+                    .binary_search_by_key(&(c as usize % K), |(sum, _)| *sum)
+                    .unwrap_or_else(|i| i.min(G - 1));
                 tokio::time::sleep(intervals[group].1.saturating_sub(elapsed)).await;
             }
         }
@@ -855,7 +864,7 @@ async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, 
     }
 }
 
-async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::Receiver<()>) {
+async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::overflow::Receiver<()>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
@@ -866,7 +875,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
 
     loop {
         match stop.try_recv() {
-            Err(broadcast::TryRecvError::Empty) => {}
+            Err(broadcast::overflow::TryRecvError::Empty) => {}
             _ => return,
         }
         if start.elapsed() >= context.time + context.warm_up {
@@ -894,7 +903,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             }
             tokio::task::yield_now().await;
             let _ = miss_tx.send(time.elapsed());
-            Ok::<_, Error>(Value {
+            Ok::<_, foyer::Error>(Value {
                 inner: Arc::new(text(idx as usize, entry_size)),
             })
         });
@@ -902,7 +911,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
         let entry = fetch.await.unwrap();
         let lat = time.elapsed().as_micros() as u64;
 
-        let (hit, miss_lat) = if let Ok(Some(elapsed)) = miss_rx.try_recv() {
+        let (hit, miss_lat) = if let Ok(elapsed) = miss_rx.try_recv() {
             (false, elapsed.as_micros() as u64)
         } else {
             (true, 0)
