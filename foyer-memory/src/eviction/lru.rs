@@ -68,6 +68,7 @@ where
     list: LinkedList<Adapter<K, V, P>>,
     pin_list: LinkedList<Adapter<K, V, P>>,
 
+    // Weight of entries currently in the high-priority list (unpinned only).
     high_priority_weight: usize,
     high_priority_weight_capacity: usize,
 
@@ -200,7 +201,6 @@ where
         match (state.is_pinned, state.in_high_priority_pool) {
             (true, false) => unsafe { self.pin_list.remove_from_ptr(Arc::as_ptr(record)) },
             (true, true) => unsafe {
-                self.high_priority_weight -= record.weight();
                 state.in_high_priority_pool = false;
                 self.pin_list.remove_from_ptr(Arc::as_ptr(record))
             },
@@ -226,7 +226,6 @@ where
             strict_assert!(!state.link.is_linked());
 
             if state.in_high_priority_pool {
-                self.high_priority_weight -= record.weight();
                 state.in_high_priority_pool = false;
             }
 
@@ -260,6 +259,10 @@ where
                 unsafe { this.list.remove_from_ptr(Arc::as_ptr(record)) }
             };
 
+            if state.in_high_priority_pool {
+                this.high_priority_weight -= record.weight();
+            }
+
             this.pin_list.push_back(r);
 
             state.is_pinned = true;
@@ -284,7 +287,9 @@ where
             unsafe { this.pin_list.remove_from_ptr(Arc::as_ptr(record)) };
 
             if state.in_high_priority_pool {
+                this.high_priority_weight += record.weight();
                 this.high_priority_list.push_back(record.clone());
+                this.may_overflow_high_priority_pool();
             } else {
                 this.list.push_back(record.clone());
             }
@@ -517,5 +522,28 @@ pub mod tests {
 
         lru.clear();
         assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_lru_pin_resize_no_panic() {
+        let record = Arc::new(Record::new(Data {
+            key: 0u64,
+            value: 0u64,
+            properties: TestProperties::default().with_hint(Hint::Normal),
+            hash: 0,
+            weight: 1,
+        }));
+
+        let config = LruConfig {
+            high_priority_pool_ratio: 1.0,
+        };
+        let mut lru = TestLru::new(1, &config);
+
+        lru.push(record.clone());
+        lru.acquire_mutable(&record);
+
+        lru.update(0, None).unwrap();
+
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![record]]);
     }
 }
