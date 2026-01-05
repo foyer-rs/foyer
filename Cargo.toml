@@ -67,7 +67,7 @@ itertools = "0.14"
 jiff = { version = "0.2.16" }
 libc = "0.2"
 lz4 = "1"
-mea = "0.5"
+mea = "0.6"
 mixtrics = "0.2"
 moka = "0.12"
 opentelemetry = "0.31"
