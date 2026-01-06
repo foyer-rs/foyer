@@ -96,7 +96,7 @@ impl RecorderInner {
 
 /// A recorder that records the cache entry admission of a disk cache.
 ///
-/// This is supposed to be used as a admission filter condition.
+/// This is supposed to be used as an admission filter condition.
 #[derive(Debug)]
 pub struct AdmitRecorder {
     inner: Arc<RecorderInner>,
@@ -181,7 +181,7 @@ impl LoadThrottleSwitch {
     }
 }
 
-/// An wrapper of atomic bool.
+/// A wrapper of atomic bool.
 #[derive(Debug, Clone, Default)]
 pub struct Switch {
     hold: Arc<AtomicBool>,

@@ -396,7 +396,7 @@ where
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
-                Some(submission) = rx.recv() => {
+                Ok(submission) = rx.recv() => {
                     self.recv(submission);
                 }
                 // Graceful shutdown.
