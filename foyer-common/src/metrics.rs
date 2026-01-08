@@ -31,6 +31,7 @@ pub struct Metrics {
     pub memory_fetch: BoxedCounter,
 
     pub memory_usage: BoxedGauge,
+    pub memory_entries: BoxedGauge,
 
     /* disk cache metrics */
     pub storage_enqueue: BoxedCounter,
@@ -116,6 +117,11 @@ impl Metrics {
             "foyer in-memory cache usage".into(),
             &["name"],
         );
+        let foyer_memory_entries = registry.register_gauge_vec(
+            "foyer_memory_entries".into(),
+            "foyer in-memory cache entries".into(),
+            &["name"],
+        );
 
         let memory_insert = foyer_memory_op_total.counter(&[name.clone(), "insert".into()]);
         let memory_replace = foyer_memory_op_total.counter(&[name.clone(), "replace".into()]);
@@ -129,6 +135,7 @@ impl Metrics {
         let memory_fetch = foyer_memory_op_total.counter(&[name.clone(), "fetch".into()]);
 
         let memory_usage = foyer_memory_usage.gauge(std::slice::from_ref(&name));
+        let memory_entries = foyer_memory_entries.gauge(std::slice::from_ref(&name));
 
         /* disk cache metrics */
 
@@ -314,6 +321,7 @@ impl Metrics {
             memory_queue,
             memory_fetch,
             memory_usage,
+            memory_entries,
 
             storage_enqueue,
             storage_hit,
