@@ -838,6 +838,17 @@ where
         }
     }
 
+    /// Get the entry count of the in-memory cache.
+    pub fn entries(&self) -> usize {
+        match self {
+            Cache::Fifo(cache) => cache.entries(),
+            Cache::S3Fifo(cache) => cache.entries(),
+            Cache::Lru(cache) => cache.entries(),
+            Cache::Lfu(cache) => cache.entries(),
+            Cache::Sieve(cache) => cache.entries(),
+        }
+    }
+
     /// Hash the given key with the hash builder of the cache.
     pub fn hash<Q>(&self, key: &Q) -> u64
     where

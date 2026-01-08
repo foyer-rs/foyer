@@ -99,6 +99,7 @@ where
     indexer: Sentry<I>,
 
     usage: usize,
+    entries: usize,
     capacity: usize,
 
     inflights: Arc<Mutex<InflightManager<E, S, I>>>,
@@ -130,6 +131,8 @@ where
             strict_assert!(!evicted.as_ref().is_in_eviction());
 
             self.usage -= evicted.weight();
+            self.entries -= 1;
+            self.metrics.memory_entries.decrease(1);
 
             garbages.push((Event::Evict, evicted));
         }
@@ -158,6 +161,8 @@ where
                 strict_assert!(!old.is_in_eviction());
 
                 self.usage -= old.weight();
+                self.entries -= 1;
+                self.metrics.memory_entries.decrease(1);
 
                 garbages.push((Event::Replace, old));
             }
@@ -189,6 +194,8 @@ where
             garbages.push((Event::Replace, old));
         } else {
             self.metrics.memory_insert.increase(1);
+            self.entries += 1;
+            self.metrics.memory_entries.increase(1);
         }
         strict_assert!(record.is_in_indexer());
 
@@ -222,9 +229,11 @@ where
         strict_assert!(!record.is_in_eviction());
 
         self.usage -= record.weight();
+        self.entries -= 1;
 
         self.metrics.memory_remove.increase(1);
         self.metrics.memory_usage.decrease(record.weight() as _);
+        self.metrics.memory_entries.decrease(1);
 
         record.inc_refs(1);
 
@@ -300,7 +309,11 @@ where
             garbages.push(record);
         }
 
-        self.metrics.memory_remove.increase(count);
+        self.entries = 0;
+        if count > 0 {
+            self.metrics.memory_entries.decrease(count);
+            self.metrics.memory_remove.increase(count);
+        }
     }
 
     #[cfg_attr(
@@ -444,6 +457,7 @@ where
                 eviction: E::new(shard_capacity, &config.eviction_config),
                 indexer: Sentry::default(),
                 usage: 0,
+                entries: 0,
                 capacity: shard_capacity,
                 inflights: Arc::new(Mutex::new(InflightManager::new())),
                 metrics: config.metrics.clone(),
@@ -755,6 +769,10 @@ where
 
     pub fn usage(&self) -> usize {
         self.inner.shards.iter().map(|shard| shard.read().usage).sum()
+    }
+
+    pub fn entries(&self) -> usize {
+        self.inner.shards.iter().map(|shard| shard.read().entries).sum()
     }
 
     pub fn metrics(&self) -> &Metrics {
