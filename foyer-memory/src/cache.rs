@@ -879,18 +879,6 @@ where
         }
     }
 
-    /// Set the pipe for the hybrid cache.
-    #[doc(hidden)]
-    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = K, Value = V, Properties = P>>) {
-        match self {
-            Cache::Fifo(cache) => cache.set_pipe(pipe),
-            Cache::S3Fifo(cache) => cache.set_pipe(pipe),
-            Cache::Lru(cache) => cache.set_pipe(pipe),
-            Cache::Lfu(cache) => cache.set_pipe(pipe),
-            Cache::Sieve(cache) => cache.set_pipe(pipe),
-        }
-    }
-
     /// Evict all entries from the in-memory cache.
     ///
     /// Instead of [`Cache::clear`], [`Cache::evict_all`] will send the evicted pipe to the pipe.
@@ -917,6 +905,20 @@ where
             Cache::Lru(cache) => cache.flush().await,
             Cache::Lfu(cache) => cache.flush().await,
             Cache::Sieve(cache) => cache.flush().await,
+        }
+    }
+
+    /// Set the pipe for the hybrid cache.
+    ///
+    /// This is a configuration method and should be called before any cache operations.
+    #[doc(hidden)]
+    pub fn set_pipe(&mut self, pipe: Box<dyn Pipe<Key = K, Value = V, Properties = P>>) {
+        match self {
+            Cache::Fifo(cache) => cache.set_pipe(pipe),
+            Cache::S3Fifo(cache) => cache.set_pipe(pipe),
+            Cache::Lru(cache) => cache.set_pipe(pipe),
+            Cache::Lfu(cache) => cache.set_pipe(pipe),
+            Cache::Sieve(cache) => cache.set_pipe(pipe),
         }
     }
 }

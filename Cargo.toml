@@ -26,7 +26,6 @@ exclude = ["website/*"]
 [workspace.dependencies]
 allocator-api2 = "0.2"
 anyhow = "1"
-arc-swap = "1"
 bincode = "1"
 bitflags = "2"
 bytes = "1"

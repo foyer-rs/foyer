@@ -26,7 +26,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 use foyer_common::{
     code::HashBuilder,
@@ -378,7 +377,7 @@ where
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pipe: ArcSwap<Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>>,
+    pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>,
 }
 
 impl<E, S, I> RawCacheInner<E, S, I>
@@ -466,9 +465,6 @@ where
             .map(RwLock::new)
             .collect_vec();
 
-        let pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>> =
-            Box::new(NoopPipe::default());
-
         let inner = RawCacheInner {
             shards,
             capacity: config.capacity,
@@ -477,7 +473,7 @@ where
             filter: config.filter,
             metrics: config.metrics,
             event_listener: config.event_listener,
-            pipe: ArcSwap::new(Arc::new(pipe)),
+            pipe: Box::new(NoopPipe::default()),
         };
 
         Self { inner: Arc::new(inner) }
@@ -506,7 +502,7 @@ where
                         })
                     });
                     // Deallocate data out of the lock critical section.
-                    let pipe = inner.pipe.load();
+                    let pipe = &inner.pipe;
                     let piped = pipe.is_enabled();
                     if inner.event_listener.is_some() || piped {
                         for (event, record) in garbages {
@@ -610,7 +606,7 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
+        let pipe = &self.inner.pipe;
         let piped = pipe.is_enabled();
         if self.inner.event_listener.is_some() || piped {
             for (event, record) in garbages {
@@ -639,7 +635,7 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
+        let pipe = &self.inner.pipe;
         let piped = pipe.is_enabled();
         if self.inner.event_listener.is_some() || piped {
             for (event, record) in garbages {
@@ -665,7 +661,7 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
+        let pipe = &self.inner.pipe;
         let piped = pipe.is_enabled();
 
         if let Some(listener) = self.inner.event_listener.as_ref() {
@@ -787,8 +783,8 @@ where
         self.inner.shards.len()
     }
 
-    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>) {
-        self.inner.pipe.store(Arc::new(pipe));
+    pub(crate) fn set_pipe(&mut self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>) {
+        self.inner.pipe = pipe;
     }
 
     fn shard(&self, hash: u64) -> usize {
@@ -839,7 +835,7 @@ where
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(Event::Evict, self.record.key(), self.record.value());
                 }
-                let pipe = self.inner.pipe.load();
+                let pipe = &self.inner.pipe;
                 if pipe.is_enabled() {
                     pipe.send(Piece::new(self.record.clone()));
                 }
@@ -1644,7 +1640,7 @@ mod tests {
     fn test_evict_all() {
         let pipe = Box::new(PiecePipe::default());
 
-        let fifo = fifo_cache_for_test();
+        let mut fifo = fifo_cache_for_test();
         fifo.set_pipe(pipe.clone());
         for i in 0..fifo.capacity() as _ {
             fifo.insert(i, i);

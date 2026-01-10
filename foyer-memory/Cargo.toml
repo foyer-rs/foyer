@@ -21,7 +21,6 @@ tracing = ["dep:fastrace", "foyer-common/tracing"]
 
 [dependencies]
 anyhow = { workspace = true }
-arc-swap = { workspace = true }
 bitflags = { workspace = true }
 cmsketch = { workspace = true }
 equivalent = { workspace = true }
