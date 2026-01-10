@@ -78,7 +78,7 @@ impl<K, V, P> Clone for Piece<K, V, P> {
 }
 
 impl<K, V, P> Piece<K, V, P> {
-    /// Create a record piece from an record wrapped by [`Arc`].
+    /// Create a record piece from a record wrapped by [`Arc`].
     pub fn new<E>(record: Arc<Record<E>>) -> Self
     where
         E: Eviction<Key = K, Value = V, Properties = P>,
@@ -132,6 +132,9 @@ impl<K, V, P> Piece<K, V, P> {
     }
 }
 
+/// An Arc-wrapped dynamic [`Pipe`] impl.
+pub type ArcPipe<K, V, P> = Arc<dyn Pipe<Key = K, Value = V, Properties = P>>;
+
 /// Pipe is used to notify disk cache to cache entries from the in-memory cache.
 pub trait Pipe: Send + Sync + 'static + Debug {
     /// Type of the key of the record.
@@ -147,7 +150,7 @@ pub trait Pipe: Send + Sync + 'static + Debug {
     /// Send the piece to the disk cache.
     fn send(&self, piece: Piece<Self::Key, Self::Value, Self::Properties>);
 
-    /// Flush all the pieces to the disk cache in a asynchronous manner.
+    /// Flush all the pieces to the disk cache in an asynchronous manner.
     ///
     /// This function is called when the in-memory cache is flushed.
     /// It is expected to obey the io throttle of the disk cache.
@@ -157,7 +160,7 @@ pub trait Pipe: Send + Sync + 'static + Debug {
     ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
-/// An no-op pipe that is never enabled.
+/// A no-op pipe that is never enabled.
 pub struct NoopPipe<K, V, P>(PhantomData<(K, V, P)>);
 
 impl<K, V, P> Debug for NoopPipe<K, V, P> {
@@ -192,7 +195,7 @@ where
         &self,
         _: Vec<Piece<Self::Key, Self::Value, Self::Properties>>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async {})
+        Box::pin(std::future::ready(()))
     }
 }
 

@@ -435,8 +435,8 @@ where
 
     /// Build the disk cache store with the given configuration.
     pub async fn build(self) -> Result<Store<K, V, S, P>> {
-        let memory = self.memory.clone();
-        let metrics = self.metrics.clone();
+        let memory = self.memory;
+        let metrics = self.metrics;
 
         let compression = self.compression;
 
