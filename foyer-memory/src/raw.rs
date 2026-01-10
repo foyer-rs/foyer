@@ -360,7 +360,6 @@ where
     }
 }
 
-#[expect(clippy::type_complexity)]
 struct RawCacheInner<E, S, I>
 where
     E: Eviction,
