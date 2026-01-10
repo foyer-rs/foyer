@@ -13,6 +13,7 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
+default = ["tokio/runtime-tokio"]
 nightly = ["hashbrown/nightly"]
 test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]
@@ -37,6 +38,7 @@ parking_lot = { workspace = true }
 paste = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
@@ -46,7 +48,6 @@ moka = { workspace = true, features = ["sync"] }
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
-tokio = { workspace = true }
 
 [[bench]]
 name = "bench_hit_ratio"

@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.22.0"
+version = "0.22.1"
 edition = "2021"
 rust-version = "1.85.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -44,10 +44,10 @@ fastant = "0.1.11"
 fastrace = "0.7"
 fastrace-jaeger = "0.7"
 fastrace-opentelemetry = "0.14"
-foyer = { version = "0.22.0", path = "foyer", default-features = false }
-foyer-common = { version = "0.22.0", path = "foyer-common", default-features = false }
-foyer-memory = { version = "0.22.0", path = "foyer-memory", default-features = false }
-foyer-storage = { version = "0.22.0", path = "foyer-storage", default-features = false }
+foyer = { version = "0.22.1", path = "foyer", default-features = false }
+foyer-common = { version = "0.22.1", path = "foyer-common", default-features = false }
+foyer-memory = { version = "0.22.1", path = "foyer-memory", default-features = false }
+foyer-storage = { version = "0.22.1", path = "foyer-storage", default-features = false }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -91,7 +91,7 @@ serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
-tokio = { package = "foyer-tokio", version = "0.22.0", path = "foyer-tokio", default-features = false }
+tokio = { package = "foyer-tokio", version = "0.22.1", path = "foyer-tokio", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 twox-hash = "2"
