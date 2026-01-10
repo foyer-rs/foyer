@@ -9,6 +9,34 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-01-10
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.0 |
+| foyer-common | 0.22.0 |
+| foyer-memory | 0.22.0 |
+| foyer-storage | 0.22.0 |
+| foyer-bench | 0.22.0 |
+
+### Changes
+
+> [!IMPORTANT]
+> **Breaking Changes:**
+>
+> - Remove `.with_runtime_options()` and `RuntimeOptions` from the disk cache build. Use `.with_spawner()` and `Spawner` instead. At the same time, simplified the `Runtime` options that are no longer needed. [#1229](https://github.com/foyer-rs/foyer/pull/1229)
+> - Align io engine and engine config naming. All items that need to be built by the user are named `..Builder`, and all items built by foyer are named `..Config`. [#1232](https://github.com/foyer-rs/foyer/pull/1232)
+
+Changes:
+
+- Remove `.with_runtime_options()` and `RuntimeOptions` from the disk cache build. Use `.with_spawner()` and `Spawner` instead. At the same time, simplified the `Runtime` options that are no longer needed. [#1229](https://github.com/foyer-rs/foyer/pull/1229)
+- Align io engine and engine config naming. All items that need to be built by the user are named `..Builder`, and all items built by foyer are named `..Config`. [#1232](https://github.com/foyer-rs/foyer/pull/1232)
+- Support get memory entry count via API and metrics.
+- Fix LRU high priority weight calculation.
+- Update dependencies. Drop [`madsim`](https://crates.io/crates/madsim) dependency when it is not needed.
+
 ## 2025-12-12
 
 ### Release
