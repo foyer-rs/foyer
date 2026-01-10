@@ -26,7 +26,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use arc_swap::ArcSwap;
 use equivalent::Equivalent;
 use foyer_common::{
     code::HashBuilder,
@@ -50,9 +49,9 @@ use crate::{
         Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
         RequiredFetch, RequiredFetchBuilder, Waiter,
     },
-    pipe::NoopPipe,
+    pipe::{ArcPipe, NoopPipe},
     record::{Data, Record},
-    Piece, Pipe,
+    Piece,
 };
 
 /// The weighter for the in-memory cache.
@@ -361,7 +360,6 @@ where
     }
 }
 
-#[expect(clippy::type_complexity)]
 struct RawCacheInner<E, S, I>
 where
     E: Eviction,
@@ -378,7 +376,6 @@ where
 
     metrics: Arc<Metrics>,
     event_listener: Option<Arc<dyn EventListener<Key = E::Key, Value = E::Value>>>,
-    pipe: ArcSwap<Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>>,
 }
 
 impl<E, S, I> RawCacheInner<E, S, I>
@@ -411,18 +408,8 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
+    pipe: ArcPipe<E::Key, E::Value, E::Properties>,
     inner: Arc<RawCacheInner<E, S, I>>,
-}
-
-impl<E, S, I> Drop for RawCacheInner<E, S, I>
-where
-    E: Eviction,
-    S: HashBuilder,
-    I: Indexer<Eviction = E>,
-{
-    fn drop(&mut self) {
-        self.clear();
-    }
 }
 
 impl<E, S, I> Clone for RawCache<E, S, I>
@@ -433,8 +420,20 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            pipe: self.pipe.clone(),
             inner: self.inner.clone(),
         }
+    }
+}
+
+impl<E, S, I> Drop for RawCacheInner<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -466,21 +465,18 @@ where
             .map(RwLock::new)
             .collect_vec();
 
-        let pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>> =
-            Box::new(NoopPipe::default());
-
-        let inner = RawCacheInner {
-            shards,
-            capacity: config.capacity,
-            hash_builder: Arc::new(config.hash_builder),
-            weighter: config.weighter,
-            filter: config.filter,
-            metrics: config.metrics,
-            event_listener: config.event_listener,
-            pipe: ArcSwap::new(Arc::new(pipe)),
-        };
-
-        Self { inner: Arc::new(inner) }
+        Self {
+            pipe: Arc::new(NoopPipe::default()),
+            inner: Arc::new(RawCacheInner {
+                shards,
+                capacity: config.capacity,
+                hash_builder: Arc::new(config.hash_builder),
+                weighter: config.weighter,
+                filter: config.filter,
+                metrics: config.metrics,
+                event_listener: config.event_listener,
+            }),
+        }
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::resize"))]
@@ -496,6 +492,7 @@ where
             .into_iter()
             .enumerate()
             .map(|(i, shard_capacity)| {
+                let pipe = self.pipe.clone();
                 let inner = self.inner.clone();
                 std::thread::spawn(move || {
                     let mut garbages = vec![];
@@ -506,7 +503,6 @@ where
                         })
                     });
                     // Deallocate data out of the lock critical section.
-                    let pipe = inner.pipe.load();
                     let piped = pipe.is_enabled();
                     if inner.event_listener.is_some() || piped {
                         for (event, record) in garbages {
@@ -603,6 +599,7 @@ where
         // Notify waiters out of the lock critical section.
         for notifier in notifiers {
             let _ = notifier.send(Ok(Some(RawCacheEntry {
+                pipe: self.pipe.clone(),
                 record: record.clone(),
                 inner: self.inner.clone(),
                 source,
@@ -610,21 +607,21 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
-        let piped = pipe.is_enabled();
+        let piped = self.pipe.is_enabled();
         if self.inner.event_listener.is_some() || piped {
             for (event, record) in garbages {
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(event, record.key(), record.value())
                 }
                 if piped && event == Event::Evict {
-                    pipe.send(Piece::new(record));
+                    self.pipe.send(Piece::new(record));
                 }
             }
         }
 
         RawCacheEntry {
             record,
+            pipe: self.pipe.clone(),
             inner: self.inner.clone(),
             source,
         }
@@ -639,15 +636,14 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
-        let piped = pipe.is_enabled();
+        let piped = self.pipe.is_enabled();
         if self.inner.event_listener.is_some() || piped {
             for (event, record) in garbages {
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(event, record.key(), record.value())
                 }
                 if piped && event == Event::Evict {
-                    pipe.send(Piece::new(record));
+                    self.pipe.send(Piece::new(record));
                 }
             }
         }
@@ -665,8 +661,7 @@ where
         }
 
         // Deallocate data out of the lock critical section.
-        let pipe = self.inner.pipe.load();
-        let piped = pipe.is_enabled();
+        let piped = self.pipe.is_enabled();
 
         if let Some(listener) = self.inner.event_listener.as_ref() {
             for (event, record) in garbages.iter() {
@@ -675,7 +670,7 @@ where
         }
         if piped {
             let pieces = garbages.into_iter().map(|(_, record)| Piece::new(record)).collect_vec();
-            pipe.flush(pieces).await;
+            self.pipe.flush(pieces).await;
         }
     }
 
@@ -690,6 +685,7 @@ where
             .write()
             .with(|mut shard| {
                 shard.remove(hash, key).map(|record| RawCacheEntry {
+                    pipe: self.pipe.clone(),
                     inner: self.inner.clone(),
                     record,
                     source: Source::Memory,
@@ -721,6 +717,7 @@ where
         }?;
 
         Some(RawCacheEntry {
+            pipe: self.pipe.clone(),
             inner: self.inner.clone(),
             record,
             source: Source::Memory,
@@ -787,8 +784,9 @@ where
         self.inner.shards.len()
     }
 
-    pub fn set_pipe(&self, pipe: Box<dyn Pipe<Key = E::Key, Value = E::Value, Properties = E::Properties>>) {
-        self.inner.pipe.store(Arc::new(pipe));
+    pub(crate) fn with_pipe(mut self, pipe: ArcPipe<E::Key, E::Value, E::Properties>) -> Self {
+        self.pipe = pipe;
+        self
     }
 
     fn shard(&self, hash: u64) -> usize {
@@ -808,6 +806,7 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
+    pipe: ArcPipe<E::Key, E::Value, E::Properties>,
     inner: Arc<RawCacheInner<E, S, I>>,
     record: Arc<Record<E>>,
     source: Source,
@@ -839,9 +838,8 @@ where
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(Event::Evict, self.record.key(), self.record.value());
                 }
-                let pipe = self.inner.pipe.load();
-                if pipe.is_enabled() {
-                    pipe.send(Piece::new(self.record.clone()));
+                if self.pipe.is_enabled() {
+                    self.pipe.send(Piece::new(self.record.clone()));
                 }
                 return;
             }
@@ -864,6 +862,7 @@ where
     fn clone(&self) -> Self {
         self.record.inc_refs(1);
         Self {
+            pipe: self.pipe.clone(),
             inner: self.inner.clone(),
             record: self.record.clone(),
             source: self.source,
@@ -1006,6 +1005,7 @@ where
         let extract = |key: &Q, opt: Option<Arc<Record<E>>>, inflights: &Arc<Mutex<InflightManager<E, S, I>>>| {
             opt.map(|record| {
                 RawGetOrFetch::Hit(Some(RawCacheEntry {
+                    pipe: self.pipe.clone(),
                     inner: self.inner.clone(),
                     record,
                     source: Source::Memory,
@@ -1642,10 +1642,9 @@ mod tests {
 
     #[test]
     fn test_evict_all() {
-        let pipe = Box::new(PiecePipe::default());
+        let pipe = Arc::new(PiecePipe::default());
 
-        let fifo = fifo_cache_for_test();
-        fifo.set_pipe(pipe.clone());
+        let fifo = fifo_cache_for_test().with_pipe(pipe.clone());
         for i in 0..fifo.capacity() as _ {
             fifo.insert(i, i);
         }
