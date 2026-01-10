@@ -331,14 +331,23 @@ where
     /// Build and open the hybrid cache with the given configurations.
     pub async fn build(self) -> Result<HybridCache<K, V, S>> {
         let builder = self.builder;
+
+        let piped = match (builder.is_noop(), self.options.policy) {
+            // noop storage; do nothing
+            (true, _) => false,
+            // storage written on eviction; notify storage on eviction
+            (false, HybridCachePolicy::WriteOnEviction) => true,
+            // storage written on insert; no need to notify storage on eviction
+            (false, HybridCachePolicy::WriteOnInsertion) => false,
+        };
+
         let storage = builder.build().await?;
 
-        let mut memory = self.memory;
-        let piped = !builder.is_noop() && self.options.policy == HybridCachePolicy::WriteOnEviction;
-        if piped {
-            let pipe = HybridCachePipe::new(storage.clone());
-            memory.set_pipe(Box::new(pipe));
-        }
+        let memory = if piped {
+            self.memory.with_pipe(Arc::new(HybridCachePipe::new(storage.clone())))
+        } else {
+            self.memory
+        };
 
         Ok(HybridCache::new(self.name, self.options, memory, storage, self.metrics))
     }

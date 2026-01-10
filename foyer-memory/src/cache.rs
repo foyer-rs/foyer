@@ -37,8 +37,9 @@ use crate::{
     },
     indexer::hash_table::HashTableIndexer,
     inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
+    pipe::ArcPipe,
     raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
-    FetchTarget, Piece, Pipe,
+    FetchTarget, Piece,
 };
 
 /// Entry properties for in-memory only cache.
@@ -563,7 +564,7 @@ where
             .unwrap_or_else(|| Arc::new(Metrics::new(self.name, &self.registry)));
 
         match self.eviction_config {
-            EvictionConfig::Fifo(eviction_config) => Cache::Fifo(Arc::new(RawCache::new(RawCacheConfig {
+            EvictionConfig::Fifo(eviction_config) => Cache::Fifo(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -572,8 +573,8 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            }))),
-            EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(Arc::new(RawCache::new(RawCacheConfig {
+            })),
+            EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -582,8 +583,8 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            }))),
-            EvictionConfig::Lru(eviction_config) => Cache::Lru(Arc::new(RawCache::new(RawCacheConfig {
+            })),
+            EvictionConfig::Lru(eviction_config) => Cache::Lru(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -592,8 +593,8 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            }))),
-            EvictionConfig::Lfu(eviction_config) => Cache::Lfu(Arc::new(RawCache::new(RawCacheConfig {
+            })),
+            EvictionConfig::Lfu(eviction_config) => Cache::Lfu(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -602,8 +603,8 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            }))),
-            EvictionConfig::Sieve(eviction_config) => Cache::Sieve(Arc::new(RawCache::new(RawCacheConfig {
+            })),
+            EvictionConfig::Sieve(eviction_config) => Cache::Sieve(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
                 eviction_config,
@@ -612,7 +613,7 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            }))),
+            })),
         }
     }
 }
@@ -626,15 +627,33 @@ where
     P: Properties,
 {
     /// In-memory FIFO cache.
-    Fifo(Arc<FifoCache<K, V, S, P>>),
+    Fifo(FifoCache<K, V, S, P>),
     /// In-memory LRU cache.
-    Lru(Arc<LruCache<K, V, S, P>>),
+    Lru(LruCache<K, V, S, P>),
     /// In-memory LFU cache.
-    Lfu(Arc<LfuCache<K, V, S, P>>),
+    Lfu(LfuCache<K, V, S, P>),
     /// In-memory S3FIFO cache.
-    S3Fifo(Arc<S3FifoCache<K, V, S, P>>),
+    S3Fifo(S3FifoCache<K, V, S, P>),
     /// In-memory Sieve cache.
-    Sieve(Arc<SieveCache<K, V, S, P>>),
+    Sieve(SieveCache<K, V, S, P>),
+}
+
+impl<K, V, S, P> Clone for Cache<K, V, S, P>
+where
+    K: Key,
+    V: Value,
+    S: HashBuilder,
+    P: Properties,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Cache::Fifo(cache) => Cache::Fifo(cache.clone()),
+            Cache::Lru(cache) => Cache::Lru(cache.clone()),
+            Cache::Lfu(cache) => Cache::Lfu(cache.clone()),
+            Cache::S3Fifo(cache) => Cache::S3Fifo(cache.clone()),
+            Cache::Sieve(cache) => Cache::Sieve(cache.clone()),
+        }
+    }
 }
 
 impl<K, V, S, P> Debug for Cache<K, V, S, P>
@@ -651,24 +670,6 @@ where
             Self::Lru(_) => f.debug_tuple("Cache::LruCache").finish(),
             Self::Lfu(_) => f.debug_tuple("Cache::LfuCache").finish(),
             Self::Sieve(_) => f.debug_tuple("Cache::SieveCache").finish(),
-        }
-    }
-}
-
-impl<K, V, S, P> Clone for Cache<K, V, S, P>
-where
-    K: Key,
-    V: Value,
-    S: HashBuilder,
-    P: Properties,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Self::Fifo(cache) => Self::Fifo(cache.clone()),
-            Self::S3Fifo(cache) => Self::S3Fifo(cache.clone()),
-            Self::Lru(cache) => Self::Lru(cache.clone()),
-            Self::Lfu(cache) => Self::Lfu(cache.clone()),
-            Self::Sieve(cache) => Self::Sieve(cache.clone()),
         }
     }
 }
@@ -908,17 +909,15 @@ where
         }
     }
 
-    /// Set the pipe for the hybrid cache.
-    ///
-    /// This is a configuration method and should be called before any cache operations.
+    /// Return a new hybrid cache with the given pipe.
     #[doc(hidden)]
-    pub fn set_pipe(&mut self, pipe: Box<dyn Pipe<Key = K, Value = V, Properties = P>>) {
+    pub fn with_pipe(self, pipe: ArcPipe<K, V, P>) -> Self {
         match self {
-            Cache::Fifo(cache) => cache.set_pipe(pipe),
-            Cache::S3Fifo(cache) => cache.set_pipe(pipe),
-            Cache::Lru(cache) => cache.set_pipe(pipe),
-            Cache::Lfu(cache) => cache.set_pipe(pipe),
-            Cache::Sieve(cache) => cache.set_pipe(pipe),
+            Cache::Fifo(cache) => Cache::Fifo(cache.with_pipe(pipe)),
+            Cache::S3Fifo(cache) => Cache::S3Fifo(cache.with_pipe(pipe)),
+            Cache::Lru(cache) => Cache::Lru(cache.with_pipe(pipe)),
+            Cache::Lfu(cache) => Cache::Lfu(cache.with_pipe(pipe)),
+            Cache::Sieve(cache) => Cache::Sieve(cache.with_pipe(pipe)),
         }
     }
 }
@@ -1254,6 +1253,7 @@ mod tests {
 
         init_cache(&cache, &mut rng);
 
+        let cache = Arc::new(cache);
         let handles = (0..CONCURRENCY)
             .map(|_| {
                 let cache = cache.clone();

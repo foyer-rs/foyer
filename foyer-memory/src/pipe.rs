@@ -132,6 +132,9 @@ impl<K, V, P> Piece<K, V, P> {
     }
 }
 
+/// An Arc-wrapped dynamic [`Pipe`] impl.
+pub type ArcPipe<K, V, P> = Arc<dyn Pipe<Key = K, Value = V, Properties = P>>;
+
 /// Pipe is used to notify disk cache to cache entries from the in-memory cache.
 pub trait Pipe: Send + Sync + 'static + Debug {
     /// Type of the key of the record.
