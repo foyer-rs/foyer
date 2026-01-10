@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     sync::{atomic::Ordering, Arc},
     time::Instant,
@@ -87,9 +87,23 @@ impl RecoverRunner {
 
         // Dedup entries.
         let mut latest_sequence = 0;
-        let mut indices: HashMap<u64, Vec<(Sequence, EntryAddressOrTombstone)>> = HashMap::new();
+        let mut indices: HashMap<u64, (Sequence, EntryAddressOrTombstone)> = HashMap::new();
         let mut clean_blocks = vec![];
         let mut evictable_blocks = vec![];
+
+        let mut insert_or_update =
+            |hash: u64, sequence: Sequence, addr: EntryAddressOrTombstone| match indices.entry(hash) {
+                Entry::Occupied(mut entry) => {
+                    let (latest, latest_addr) = entry.get_mut();
+                    if sequence >= *latest {
+                        *latest = sequence;
+                        *latest_addr = addr;
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert((sequence, addr));
+                }
+            };
         for (block, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
             let block = block as BlockId;
 
@@ -101,30 +115,20 @@ impl RecoverRunner {
 
             for EntryInfo { hash, addr } in infos {
                 latest_sequence = latest_sequence.max(addr.sequence);
-                indices
-                    .entry(hash)
-                    .or_default()
-                    .push((addr.sequence, EntryAddressOrTombstone::EntryAddress(addr)));
+                insert_or_update(hash, addr.sequence, EntryAddressOrTombstone::EntryAddress(addr));
             }
         }
         tombstones.iter().for_each(|tombstone| {
             latest_sequence = latest_sequence.max(tombstone.sequence);
-            indices
-                .entry(tombstone.hash)
-                .or_default()
-                .push((tombstone.sequence, EntryAddressOrTombstone::Tombstone))
+            insert_or_update(tombstone.hash, tombstone.sequence, EntryAddressOrTombstone::Tombstone);
         });
         let indices = indices
             .into_iter()
-            .filter_map(|(hash, mut versions)| {
-                versions.sort_by_key(|(sequence, _)| *sequence);
-                tracing::trace!("[recover runner]: hash {hash} has versions: {versions:?}");
-                match versions.pop() {
-                    None => None,
-                    Some((_, EntryAddressOrTombstone::Tombstone)) => None,
-                    Some((_, EntryAddressOrTombstone::EntryAddress(address))) => {
-                        Some(HashedEntryAddress { hash, address })
-                    }
+            .filter_map(|(hash, (sequence, addr))| {
+                tracing::trace!("[recover runner]: hash {hash} has version: {sequence:?} {addr:?}");
+                match addr {
+                    EntryAddressOrTombstone::Tombstone => None,
+                    EntryAddressOrTombstone::EntryAddress(address) => Some(HashedEntryAddress { hash, address }),
                 }
             })
             .collect_vec();
