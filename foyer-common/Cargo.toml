@@ -17,6 +17,7 @@ exclude.workspace = true
 development = ["criterion", "serde_bytes"]
 
 [features]
+default = ["tokio/runtime-tokio"]
 serde = ["dep:serde", "dep:bincode"]
 strict_assertions = []
 tracing = ["dep:fastrace"]

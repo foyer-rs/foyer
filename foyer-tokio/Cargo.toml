@@ -17,6 +17,7 @@ exclude.workspace = true
 development = ["criterion", "serde_bytes"]
 
 [features]
+default = ["runtime-tokio"]
 # feature gate to swtich between tokio runtime and madsim-tokio runtime.
 runtime-tokio = ["dep:runtime-tokio"]
 runtime-madsim-tokio = ["dep:runtime-madsim-tokio"]

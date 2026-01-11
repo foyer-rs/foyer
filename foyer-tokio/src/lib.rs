@@ -25,4 +25,5 @@ pub use runtime_tokio::*;
     all(feature = "runtime-tokio", feature = "runtime-madsim-tokio"),
     not(any(feature = "runtime-tokio", feature = "runtime-madsim-tokio"))
 ))]
+
 compile_error!("Exactly one of the `runtime-tokio` and `runtime-madsim-tokio` features must be enabled.");

@@ -13,6 +13,7 @@ readme = { workspace = true }
 exclude.workspace = true
 
 [features]
+default = ["tokio/runtime-tokio"]
 serde = ["dep:serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
