@@ -50,11 +50,7 @@ foyer-storage = { version = "0.23.0-dev", path = "foyer-storage", default-featur
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-# hashbrown v0.16.1 uses a unstable feature `trivial_clone` that only available on recent nightly version.
-# Upgrade to hashbrown v0.16.1 will break build on old nightly toolchains.
-# FYI: https://github.com/rust-lang/hashbrown/issues/673
-# TODO: Remove the upper bound when foyer bumps MSRV to Rust 1.92+.
-hashbrown = "=0.16.0"
+hashbrown = "0.16"
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
