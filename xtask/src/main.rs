@@ -145,7 +145,7 @@ fn check(fast: bool) {
     run("cargo sort -w");
     run("taplo fmt");
     run("cargo fmt --all");
-    run("cargo +nightly-2025-02-20 fmt --all -- --config-path rustfmt.nightly.toml");
+    run("cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml");
 
     if !fast {
         run("cargo clippy -p foyer");
@@ -174,7 +174,7 @@ fn test(fast: bool) {
     );
     run_with_env("cargo test --doc", [("RUST_BACKTRACE", "1")]);
     run_with_env(
-        r#"cargo +nightly-2025-02-20 doc --features "nightly" --no-deps"#,
+        r#"cargo +nightly doc --features "nightly" --no-deps"#,
         [("RUSTDOCFLAGS", "--cfg docsrs")],
     );
     if !fast {
@@ -232,14 +232,14 @@ fn madsim() {
 }
 
 fn msrv() {
-    run("cargo +1.85.0 fmt --all");
-    run("cargo +1.85.0 clippy --all-targets --features deadlock");
-    run("cargo +1.85.0 clippy --all-targets --features tokio-console");
-    run("cargo +1.85.0 clippy --all-targets");
-    run_with_env("cargo +1.85.0 nextest run --all", [("RUST_BACKTRACE", "1")]);
-    run_with_env("cargo +1.85.0 test --doc", [("RUST_BACKTRACE", "1")]);
+    run("cargo +1.86.0 fmt --all");
+    run("cargo +1.86.0 clippy --all-targets --features deadlock");
+    run("cargo +1.86.0 clippy --all-targets --features tokio-console");
+    run("cargo +1.86.0 clippy --all-targets");
+    run_with_env("cargo +1.86.0 nextest run --all", [("RUST_BACKTRACE", "1")]);
+    run_with_env("cargo +1.86.0 test --doc", [("RUST_BACKTRACE", "1")]);
     run_with_env(
-        "cargo +1.85.0 nextest run --run-ignored ignored-only --no-capture --workspace",
+        "cargo +1.86.0 nextest run --run-ignored ignored-only --no-capture --workspace",
         [("RUST_BACKTRACE", "1")],
     );
 }

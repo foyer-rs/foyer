@@ -17,10 +17,9 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RUST_TOOLCHAIN_NIGHTLY: nightly-2025-02-20
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20260110
-  CARGO_UDEPS_KEY_SUFFIX: 20260110
+  CACHE_KEY_SUFFIX: 20260112
+  CARGO_UDEPS_KEY_SUFFIX: 20260112
 
 jobs:
   misc-check:
@@ -134,7 +133,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: $RUST_TOOLCHAIN_NIGHTLY
+          toolchain: nightly
           components: rustfmt
       - name: Cache Cargo home
         uses: actions/cache@v4
@@ -162,7 +161,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm]
-        rust_toolchain: [stable, 1.85.0]
+        rust_toolchain: [stable, 1.86.0]
         serde: ["", "--features serde"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -249,7 +248,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        rust_toolchain: [stable, 1.85.0]
+        rust_toolchain: [stable, 1.86.0]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -514,7 +513,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: $RUST_TOOLCHAIN_NIGHTLY
+          toolchain: nightly
       - name: Cache Cargo home
         uses: actions/cache@v4
         id: cache
@@ -531,18 +530,16 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
           CI: true
-          RUST_TOOLCHAIN_NIGHTLY: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
         run: |-
-          cargo +$RUST_TOOLCHAIN_NIGHTLY test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
+          cargo test --lib --bins --tests --target x86_64-unknown-linux-gnu -- --nocapture
       - name: Run foyer-bench With Address Sanitizer
         env:
           RUST_BACKTRACE: 1
           RUSTFLAGS: "-Zsanitizer=address --cfg tokio_unstable"
           RUST_LOG: info
           CI: true
-          RUST_TOOLCHAIN_NIGHTLY: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
         run: |-
-          cargo +$RUST_TOOLCHAIN_NIGHTLY build --all --target x86_64-unknown-linux-gnu
+          cargo build --all --target x86_64-unknown-linux-gnu
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan
           timeout 2m ./target/x86_64-unknown-linux-gnu/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/asan --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60
       - name: Prepare Artifacts on Failure
@@ -566,7 +563,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_NIGHTLY }}
+          toolchain: nightly
           components: rustfmt, clippy
       - name: Cache Cargo home
         uses: actions/cache@v4
