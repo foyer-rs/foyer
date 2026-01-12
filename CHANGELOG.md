@@ -9,6 +9,23 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-01-12
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.2 |
+| foyer-tokio | 0.22.2 |
+| foyer-common | 0.22.2 |
+| foyer-memory | 0.22.2 |
+| foyer-storage | 0.22.2 |
+| foyer-bench | 0.22.2 |
+
+### Changes
+
+- Unpin hashbrown version.
+
 ## 2026-01-11
 
 ### Release
