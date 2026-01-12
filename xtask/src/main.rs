@@ -145,7 +145,7 @@ fn check(fast: bool) {
     run("cargo sort -w");
     run("taplo fmt");
     run("cargo fmt --all");
-    run("cargo +nightly-2025-04-03 fmt --all -- --config-path rustfmt.nightly.toml");
+    run("cargo +nightly fmt --all -- --config-path rustfmt.nightly.toml");
 
     if !fast {
         run("cargo clippy -p foyer");
@@ -174,7 +174,7 @@ fn test(fast: bool) {
     );
     run_with_env("cargo test --doc", [("RUST_BACKTRACE", "1")]);
     run_with_env(
-        r#"cargo +nightly-2025-04-03 doc --features "nightly" --no-deps"#,
+        r#"cargo +nightly doc --features "nightly" --no-deps"#,
         [("RUSTDOCFLAGS", "--cfg docsrs")],
     );
     if !fast {
