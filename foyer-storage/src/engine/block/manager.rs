@@ -372,7 +372,7 @@ impl BlockManager {
         }
     }
 
-    fn reclaim_if_needed<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) {
+    fn reclaim_if_needed(&self, state: &mut RwLockWriteGuard<'_, State>) {
         if state.clean_blocks.len() < self.inner.clean_block_threshold
             && state.reclaiming_blocks.len() < self.inner.reclaim_concurrency
         {
@@ -389,7 +389,7 @@ impl BlockManager {
         }
     }
 
-    fn evict<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) -> Option<Block> {
+    fn evict(&self, state: &mut RwLockWriteGuard<'_, State>) -> Option<Block> {
         let mut picked = None;
 
         if state.evictable_blocks.is_empty() {
