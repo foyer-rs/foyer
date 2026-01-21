@@ -31,7 +31,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, Piece};
 
-#[cfg(feature = "test_utils")]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
     compress::Compression,
@@ -208,7 +208,16 @@ where
                     .record(now.elapsed().as_secs_f64());
                 Ok(Load::Piece { piece, populated })
             }
-            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) | Ok(Load::Miss) => {
+            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) => {
+                self.inner.metrics.storage_miss.increase(1);
+                self.inner.metrics.storage_false_positive.increase(1);
+                self.inner
+                    .metrics
+                    .storage_miss_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Miss)
+            }
+            Ok(Load::Miss) => {
                 self.inner.metrics.storage_miss.increase(1);
                 self.inner
                     .metrics
