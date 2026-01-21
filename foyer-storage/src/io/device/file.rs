@@ -55,7 +55,9 @@ impl FileDeviceBuilder {
     ///
     /// The given capacity may be modified on build for alignment.
     ///
-    /// The file device uses 80% of the current free disk space by default.
+    /// If not specified, the capacity defaults to:
+    /// 1. The size of the file, if it already exists and has a non-zero size.
+    /// 2. 80% of the current free disk space of the parent directory, otherwise.
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.capacity = Some(capacity);
         self
@@ -81,11 +83,22 @@ impl DeviceBuilder for FileDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - (value % align);
 
-        let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get free space.
-            let dir = self.path.parent().expect("path must point to a file").to_path_buf();
-            create_dir_all(&dir).unwrap();
-            free_space(&dir).unwrap() as usize / 10 * 8
+        let capacity = self.capacity.unwrap_or_else(|| {
+            let base = match std::fs::metadata(&self.path) {
+                Ok(metadata) => if metadata.is_file() && metadata.len() > 0 {
+                    metadata.len() as usize
+                } else {
+                    let dir = self.path.parent().expect("path must point to a file").to_path_buf();
+                    create_dir_all(&dir).unwrap();
+                    free_space(&dir).unwrap() as usize
+                },
+                Err(_) => {
+                    let dir = self.path.parent().expect("path must point to a file").to_path_buf();
+                    create_dir_all(&dir).unwrap();
+                    free_space(&dir).unwrap() as usize
+                }
+            };
+            base / 10 * 8
         });
         let capacity = align_v(capacity, PAGE);
 

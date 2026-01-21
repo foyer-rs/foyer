@@ -31,7 +31,7 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, Piece};
 
-#[cfg(feature = "test_utils")]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
     compress::Compression,
