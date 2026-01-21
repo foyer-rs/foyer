@@ -55,9 +55,7 @@ impl FileDeviceBuilder {
     ///
     /// The given capacity may be modified on build for alignment.
     ///
-    /// If not specified, the capacity defaults to:
-    /// 1. The size of the file, if it already exists and has a non-zero size.
-    /// 2. 80% of the current free disk space of the parent directory, otherwise.
+    /// The file device uses 80% of the current free disk space by default.
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.capacity = Some(capacity);
         self
