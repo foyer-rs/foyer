@@ -83,13 +83,15 @@ impl DeviceBuilder for FileDeviceBuilder {
 
         let capacity = self.capacity.unwrap_or_else(|| {
             let base = match std::fs::metadata(&self.path) {
-                Ok(metadata) => if metadata.is_file() && metadata.len() > 0 {
-                    metadata.len() as usize
-                } else {
-                    let dir = self.path.parent().expect("path must point to a file").to_path_buf();
-                    create_dir_all(&dir).unwrap();
-                    free_space(&dir).unwrap() as usize
-                },
+                Ok(metadata) => {
+                    if metadata.is_file() && metadata.len() > 0 {
+                        metadata.len() as usize
+                    } else {
+                        let dir = self.path.parent().expect("path must point to a file").to_path_buf();
+                        create_dir_all(&dir).unwrap();
+                        free_space(&dir).unwrap() as usize
+                    }
+                }
                 Err(_) => {
                     let dir = self.path.parent().expect("path must point to a file").to_path_buf();
                     create_dir_all(&dir).unwrap();
