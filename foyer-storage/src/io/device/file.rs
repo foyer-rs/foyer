@@ -84,7 +84,19 @@ impl DeviceBuilder for FileDeviceBuilder {
         let capacity = self.capacity.unwrap_or_else(|| {
             let base = match std::fs::metadata(&self.path) {
                 Ok(metadata) => {
-                    if metadata.is_file() && metadata.len() > 0 {
+                    #[cfg(target_family = "unix")]
+                    let is_block = {
+                        use std::os::unix::fs::FileTypeExt;
+                        metadata.file_type().is_block_device()
+                    };
+                    #[cfg(not(target_family = "unix"))]
+                    let is_block = false;
+
+                    if is_block {
+                        let mut file = File::open(&self.path).expect("failed to open block device");
+                        use std::io::{Seek, SeekFrom};
+                        file.seek(SeekFrom::End(0)).expect("failed to get block device size") as usize
+                    } else if metadata.len() > 0 {
                         metadata.len() as usize
                     } else {
                         let dir = self.path.parent().expect("path must point to a file").to_path_buf();
