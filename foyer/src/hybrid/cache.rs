@@ -37,7 +37,7 @@ use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     error::{Error, ErrorKind, Result},
     metrics::Metrics,
-    properties::{Age, Hint, Location, Properties},
+    properties::{Age, Hint, Location, Properties, Source},
     rate::RateLimiter,
 };
 use foyer_memory::{Cache, CacheEntry, FetchTarget, GetOrFetch, Piece, Pipe};
@@ -744,7 +744,6 @@ where
                         let load = store.load(&key).await;
                         tracing::trace!(load = ?load, "[hybrid]: loaded from disk cache");
                         match load {
-                            // match store.load(&key).await {
                             Ok(Load::Entry {
                                 key: _,
                                 value,
@@ -979,14 +978,14 @@ where
         }
 
         match res.as_ref() {
-            Ok(e) => match e.properties().age() {
-                Age::Fresh => {
+            Ok(e) => match e.source() {
+                Source::Outer => {
                     this.metrics.hybrid_miss.increase(1);
                     this.metrics
                         .hybrid_miss_duration
                         .record(this.start.elapsed().as_secs_f64());
                 }
-                Age::Young | Age::Old => {
+                Source::Memory | Source::Disk => {
                     this.metrics.hybrid_hit.increase(1);
                     this.metrics
                         .hybrid_hit_duration
