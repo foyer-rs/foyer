@@ -9,6 +9,22 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-01-23
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.21.2 |
+| foyer-common | 0.21.2 |
+| foyer-memory | 0.21.2 |
+| foyer-storage | 0.21.2 |
+| foyer-bench | 0.21.2 |
+
+### Changes
+
+- Fix: Fix false positive hybrid cache miss metrics with `HybridCache::get_or_fetch()` API call.
+
 ## 2025-12-12
 
 ### Release
