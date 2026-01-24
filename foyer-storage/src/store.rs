@@ -147,6 +147,8 @@ where
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
+        } else {
+            self.delete(piece.key());
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
