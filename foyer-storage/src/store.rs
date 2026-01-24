@@ -581,4 +581,49 @@ mod tests {
         assert!(matches!(l2, Load::Entry { .. }));
         assert_eq!(l2.entry().unwrap().1, "bar");
     }
+
+    #[tokio::test]
+    async fn test_store_enqueue_admission_reject_update() {
+        use crate::filter::StorageFilter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        let switch = Switch::default();
+        switch.on();
+        let filter = StorageFilter::new().with_condition(switch.clone());
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_admission_filter(filter),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), false);
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Entry { ref value, .. } if value == b"v1"));
+
+        switch.off();
+
+        let e2 = memory.insert(1, b"v2".to_vec());
+        store.enqueue(e2.piece(), false);
+        store.wait().await;
+
+        let l2 = store.load(&1).await.unwrap();
+        assert!(matches!(l2, Load::Miss));
+    }
 }
