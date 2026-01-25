@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::Path;
-
-use foyer_common::error::{Error, Result};
-
 #[cfg(unix)]
-pub fn get_dev_capacity(path: impl AsRef<Path>) -> Result<usize> {
+pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::error::Result<usize> {
+    use foyer_common::error::Error;
+
     const BLKGETSIZE64: u64 = 0x80081272;
     const DIOCGMEDIASIZE: u64 = 0x40086481;
     const DKIOCGETBLOCKSIZE: u64 = 0x40046418;
