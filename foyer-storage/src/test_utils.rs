@@ -204,6 +204,16 @@ impl Switch {
     }
 }
 
+impl StorageFilterCondition for Switch {
+    fn filter(&self, _: &Arc<Statistics>, _: u64, _: usize) -> StorageFilterResult {
+        if self.is_on() {
+            StorageFilterResult::Admit
+        } else {
+            StorageFilterResult::Reject
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct HolderInner {
     holdees: Vec<oneshot::Sender<()>>,
