@@ -81,13 +81,26 @@ impl DeviceBuilder for FileDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - (value % align);
 
-        let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get free space.
+        let capacity = self.capacity.unwrap_or_else(|| {
+            // Try to get the capacity if `path` refer to a raw block device.
+            #[cfg(unix)]
+            if let Ok(metadata) = std::fs::metadata(&self.path) {
+                let file_type = metadata.file_type();
+
+                use std::os::unix::fs::FileTypeExt;
+                if file_type.is_block_device() {
+                    return super::utils::get_dev_capacity(&self.path).unwrap();
+                }
+            }
+
+            // Create an empty directory if needed before to get free space.
             let dir = self.path.parent().expect("path must point to a file").to_path_buf();
             create_dir_all(&dir).unwrap();
             free_space(&dir).unwrap() as usize / 10 * 8
         });
         let capacity = align_v(capacity, PAGE);
+
+        println!("==========> {capacity}");
 
         // Build device.
 
