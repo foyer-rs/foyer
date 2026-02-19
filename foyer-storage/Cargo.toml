@@ -49,7 +49,7 @@ rand = { workspace = true }
 serde = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros"] }
 tracing = { workspace = true }
-twox-hash = { workspace = true }
+twox-hash = { workspace = true, features = ["xxhash32", "xxhash64"] }
 zstd = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
