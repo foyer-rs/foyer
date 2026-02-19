@@ -153,7 +153,7 @@ mod tests {
 
     async fn test_read_write(engine: Arc<dyn IoEngine>, device: &dyn Device) {
         let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
-        Fill::fill(&mut b1[..], &mut rng());
+        Fill::fill_slice(&mut b1[..], &mut rng());
 
         let (b1, res) = engine.write(b1, device.partition(0).as_ref(), 0).await;
         res.unwrap();

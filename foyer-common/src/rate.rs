@@ -68,11 +68,11 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use rand::{Rng, rng};
+    use rand::{RngExt, rng};
 
     use super::*;
 
-    const ERATIO: f64 = 0.05;
+    const ERROR_RATIO: f64 = 0.05;
     const THREADS: usize = 8;
     const RATE: usize = 1000;
     const DURATION: Duration = Duration::from_secs(10);
@@ -112,8 +112,10 @@ mod tests {
         }
 
         let error = (v.load(Ordering::Relaxed) as isize - RATE as isize * DURATION.as_secs() as isize).unsigned_abs();
-        let eratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
-        assert!(eratio < ERATIO, "eratio: {eratio}, target: {ERATIO}");
-        println!("eratio {eratio} < ERATIO {ERATIO}");
+        let error_ratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
+        assert!(
+            error_ratio < ERROR_RATIO,
+            "error_ratio: {error_ratio}, target: {ERROR_RATIO}"
+        );
     }
 }

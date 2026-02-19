@@ -50,7 +50,11 @@ use itertools::Itertools;
 use mea::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
-use rand::{Rng, SeedableRng, distr::Distribution, rngs::StdRng};
+use rand::{
+    RngExt, SeedableRng,
+    distr::Distribution,
+    rngs::{StdRng, SysRng},
+};
 use rate::RateLimiter;
 use text::text;
 
@@ -796,7 +800,7 @@ async fn write(
         _ => None,
     };
 
-    let mut osrng = StdRng::from_os_rng();
+    let mut osrng = StdRng::try_from_rng(&mut SysRng).unwrap();
     let mut c = 0;
 
     loop {
@@ -873,7 +877,7 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     let step = context.counts.len() as u64;
 
     let mut rng = StdRng::seed_from_u64(0);
-    let mut osrng = StdRng::from_os_rng();
+    let mut osrng = StdRng::try_from_rng(&mut SysRng).unwrap();
 
     loop {
         match stop.try_recv() {

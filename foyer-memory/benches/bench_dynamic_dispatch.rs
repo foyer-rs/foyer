@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{Rng, distr::Alphanumeric, rng};
+use rand::{RngExt, distr::Alphanumeric, rng};
 
 struct T<F>
 where

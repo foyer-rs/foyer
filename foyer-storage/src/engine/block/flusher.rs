@@ -616,10 +616,9 @@ where
             }
         };
 
-        let f: BoxFuture<'_, Result<(Vec<GetCleanBlockHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
             .spawner
-            .spawn(f)
+            .spawn(Box::pin(try_join(try_join_all(futures), future)))
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {
                     handle: states.pop(),
@@ -651,10 +650,9 @@ where
                         tombstone_infos,
                     }
                 }
-            })
-            .boxed();
+            });
 
-        handle
+        Box::pin(handle)
     }
 
     fn handle_io_complete(

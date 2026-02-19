@@ -1038,7 +1038,7 @@ where
             })
         };
 
-        let res = match E::acquire() {
+        match E::acquire() {
             Op::Noop => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| extract(key, shard.get_noop(hash, key), &shard.inflights)),
@@ -1048,9 +1048,7 @@ where
             Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
-        };
-
-        res
+        }
     }
 }
 
@@ -1484,7 +1482,7 @@ where
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModHasher;
-    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
+    use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{

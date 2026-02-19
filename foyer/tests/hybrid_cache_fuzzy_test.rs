@@ -28,7 +28,7 @@ use foyer::{
     BlockEngineConfig, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, Location, PsyncIoEngineConfig,
 };
-use rand::{Rng, rng};
+use rand::{RngExt, rng};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;

@@ -40,7 +40,7 @@ bytes = { workspace = true, features = ["serde"] }
 criterion = { workspace = true }
 mixtrics = { workspace = true, features = ["test-utils"] }
 paste = { workspace = true }
-rand = { workspace = true }
+rand = { workspace = true, features = ["thread_rng"] }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 
