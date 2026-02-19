@@ -17,8 +17,8 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, RwLock, RwLockWriteGuard,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
@@ -29,14 +29,15 @@ use foyer_common::{
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{ready, Shared},
     FutureExt,
+    future::{Shared, ready},
 };
 use itertools::Itertools;
 use mea::oneshot;
 use rand::seq::IteratorRandom;
 
 use crate::{
+    Device,
     engine::block::{
         eviction::{EvictionInfo, EvictionPicker},
         reclaimer::ReclaimerTrait,
@@ -46,7 +47,6 @@ use crate::{
         device::Partition,
         engine::IoEngine,
     },
-    Device,
 };
 
 pub type BlockId = u32;

@@ -24,7 +24,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 #[cfg(feature = "tracing")]
@@ -127,7 +127,7 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
 mod tests {
     use std::path::Path;
 
-    use rand::{rng, Fill};
+    use rand::{Fill, rng};
     use tempfile::tempdir;
 
     use super::*;
@@ -136,7 +136,7 @@ mod tests {
     use crate::io::engine::uring::UringIoEngineConfig;
     use crate::io::{
         bytes::IoSliceMut,
-        device::{file::FileDeviceBuilder, Device, DeviceBuilder},
+        device::{Device, DeviceBuilder, file::FileDeviceBuilder},
         engine::psync::PsyncIoEngineConfig,
     };
 
@@ -153,7 +153,7 @@ mod tests {
 
     async fn test_read_write(engine: Arc<dyn IoEngine>, device: &dyn Device) {
         let mut b1 = Box::new(IoSliceMut::new(16 * KIB));
-        Fill::fill(&mut b1[..], &mut rng());
+        Fill::fill_slice(&mut b1[..], &mut rng());
 
         let (b1, res) = engine.write(b1, device.partition(0).as_ref(), 0).await;
         res.unwrap();

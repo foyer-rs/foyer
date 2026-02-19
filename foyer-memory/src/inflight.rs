@@ -18,8 +18,8 @@ use std::{
     future::IntoFuture,
     hash::Hash,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -33,7 +33,7 @@ use futures_util::future::BoxFuture;
 use hashbrown::hash_table::{Entry, HashTable};
 use mea::oneshot;
 
-use crate::{indexer::Indexer, raw::RawCacheEntry, Eviction, Piece};
+use crate::{Eviction, Piece, indexer::Indexer, raw::RawCacheEntry};
 
 /// An optional fetch operation that may return `None` if the entry is not found.
 pub type OptionalFetch<T> = BoxFuture<'static, Result<Option<T>>>;

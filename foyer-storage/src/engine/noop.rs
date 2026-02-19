@@ -23,9 +23,9 @@ use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
+    Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
     engine::{Engine, EngineBuildContext, EngineConfig},
     keeper::PieceRef,
-    Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
 };
 
 pub struct NoopEngineConfig<K, V, P>(PhantomData<(K, V, P)>)

@@ -19,8 +19,8 @@ use std::{
     fmt::Debug,
     future::ready,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -29,7 +29,7 @@ use futures_util::FutureExt;
 use mea::oneshot;
 use parking_lot::Mutex;
 
-use crate::{io::device::statistics::Statistics, StorageFilterCondition, StorageFilterResult};
+use crate::{StorageFilterCondition, StorageFilterResult, io::device::statistics::Statistics};
 
 /// A picker that only admits hash from the given list.
 #[derive(Debug)]
