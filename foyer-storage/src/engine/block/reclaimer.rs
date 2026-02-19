@@ -22,10 +22,11 @@ use foyer_common::{
     spawn::Spawner,
 };
 use futures_core::future::BoxFuture;
-use futures_util::{future::join_all, FutureExt};
+use futures_util::{FutureExt, future::join_all};
 use itertools::Itertools;
 
 use crate::{
+    Statistics, StorageFilter,
     engine::block::{
         flusher::{Flusher, Submission},
         indexer::Indexer,
@@ -34,10 +35,9 @@ use crate::{
         serde::Sequence,
     },
     io::{
-        bytes::{IoSlice, IoSliceMut},
         PAGE,
+        bytes::{IoSlice, IoSliceMut},
     },
-    Statistics, StorageFilter,
 };
 
 pub trait ReclaimerTrait: Send + Sync + 'static + Debug {

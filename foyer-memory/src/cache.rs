@@ -28,6 +28,7 @@ use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    FetchTarget, Piece,
     eviction::{
         fifo::{Fifo, FifoConfig},
         lfu::{Lfu, LfuConfig},
@@ -39,7 +40,6 @@ use crate::{
     inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
     pipe::ArcPipe,
     raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
-    FetchTarget, Piece,
 };
 
 /// Entry properties for in-memory only cache.
@@ -1151,7 +1151,7 @@ mod tests {
     use foyer_common::error::Error;
     use futures_util::future::join_all;
     use itertools::Itertools;
-    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
     use super::*;
     use crate::eviction::{fifo::FifoConfig, lfu::LfuConfig, lru::LruConfig, s3fifo::S3FifoConfig};

@@ -15,12 +15,12 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
-    task::{ready, Poll},
+    task::{Poll, ready},
     time::Instant,
 };
 
@@ -34,8 +34,8 @@ use foyer_common::{
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
     FutureExt,
+    future::{try_join, try_join_all},
 };
 use itertools::Itertools;
 use mea::{
@@ -46,6 +46,7 @@ use mea::{
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
+    Compression,
     engine::block::{
         buffer::{Batch, BlobPart, Block, Buffer, SplitCtx, Splitter},
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
@@ -55,11 +56,10 @@ use crate::{
         tombstone::{Tombstone, TombstoneLog},
     },
     io::{
-        bytes::{IoSlice, IoSliceMut},
         PAGE,
+        bytes::{IoSlice, IoSliceMut},
     },
     keeper::PieceRef,
-    Compression,
 };
 
 pub enum Submission<K, V, P>

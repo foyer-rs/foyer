@@ -27,15 +27,15 @@ use std::{
     net::SocketAddr,
     ops::{Deref, Range},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use analyze::{analyze, monitor, Metrics};
+use analyze::{Metrics, analyze, monitor};
 use bytesize::ByteSize;
-use clap::{builder::PossibleValuesParser, ArgGroup, Parser};
+use clap::{ArgGroup, Parser, builder::PossibleValuesParser};
 use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineConfig;
@@ -50,7 +50,7 @@ use itertools::Itertools;
 use mea::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
-use rand::{distr::Distribution, rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distr::Distribution, rngs::StdRng};
 use rate::RateLimiter;
 use text::text;
 
@@ -422,7 +422,7 @@ fn setup() {
 
 #[cfg(not(any(feature = "tokio-console", feature = "tracing")))]
 fn setup() {
-    use tracing_subscriber::{prelude::*, EnvFilter};
+    use tracing_subscriber::{EnvFilter, prelude::*};
 
     tracing_subscriber::registry()
         .with(
@@ -465,22 +465,24 @@ async fn benchmark(args: Args) {
 
     #[cfg(feature = "deadlock")]
     {
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(1));
-            let deadlocks = parking_lot::deadlock::check_deadlock();
-            if deadlocks.is_empty() {
-                continue;
-            }
-
-            println!("{} deadlocks detected", deadlocks.len());
-            for (i, threads) in deadlocks.iter().enumerate() {
-                println!("Deadlock #{i}");
-                for t in threads {
-                    println!("Thread Id {:#?}", t.thread_id());
-                    println!("{:#?}", t.backtrace());
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let deadlocks = parking_lot::deadlock::check_deadlock();
+                if deadlocks.is_empty() {
+                    continue;
                 }
+
+                println!("{} deadlocks detected", deadlocks.len());
+                for (i, threads) in deadlocks.iter().enumerate() {
+                    println!("Deadlock #{i}");
+                    for t in threads {
+                        println!("Thread Id {:#?}", t.thread_id());
+                        println!("{:#?}", t.backtrace());
+                    }
+                }
+                panic!()
             }
-            panic!()
         });
     }
 

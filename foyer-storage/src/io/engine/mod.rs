@@ -24,7 +24,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 #[cfg(feature = "tracing")]
@@ -127,7 +127,7 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
 mod tests {
     use std::path::Path;
 
-    use rand::{rng, Fill};
+    use rand::{Fill, rng};
     use tempfile::tempdir;
 
     use super::*;
@@ -136,7 +136,7 @@ mod tests {
     use crate::io::engine::uring::UringIoEngineConfig;
     use crate::io::{
         bytes::IoSliceMut,
-        device::{file::FileDeviceBuilder, Device, DeviceBuilder},
+        device::{Device, DeviceBuilder, file::FileDeviceBuilder},
         engine::psync::PsyncIoEngineConfig,
     };
 

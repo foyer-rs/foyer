@@ -20,8 +20,8 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll},
 };
@@ -43,15 +43,15 @@ use parking_lot::{Mutex, RwLock};
 use pin_project::{pin_project, pinned_drop};
 
 use crate::{
+    Piece,
     eviction::{Eviction, Op},
-    indexer::{sentry::Sentry, Indexer},
+    indexer::{Indexer, sentry::Sentry},
     inflight::{
         Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
         RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::{ArcPipe, NoopPipe},
     record::{Data, Record},
-    Piece,
 };
 
 /// The weighter for the in-memory cache.
@@ -1484,7 +1484,7 @@ where
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModHasher;
-    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{
@@ -1512,8 +1512,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn fifo_cache_for_test(
-    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
+    fn fifo_cache_for_test()
+    -> RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1527,8 +1527,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn s3fifo_cache_for_test(
-    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>> {
+    fn s3fifo_cache_for_test()
+    -> RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1542,8 +1542,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lru_cache_for_test(
-    ) -> RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
+    fn lru_cache_for_test()
+    -> RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1557,8 +1557,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lfu_cache_for_test(
-    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
+    fn lfu_cache_for_test()
+    -> RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1572,8 +1572,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn sieve_cache_for_test(
-    ) -> RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Sieve<u64, u64, TestProperties>>> {
+    fn sieve_cache_for_test()
+    -> RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Sieve<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
