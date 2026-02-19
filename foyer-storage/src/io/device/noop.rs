@@ -17,8 +17,8 @@ use std::sync::{Arc, RwLock};
 use foyer_common::error::Result;
 
 use crate::{
-    io::device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
     RawFile,
+    io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
 };
 
 /// Builder for a no-operation mock device.

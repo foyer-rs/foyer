@@ -21,7 +21,7 @@ use std::{
     sync::Arc,
 };
 
-use allocator_api2::alloc::{handle_alloc_error, Allocator, Global, Layout};
+use allocator_api2::alloc::{Allocator, Global, Layout, handle_alloc_error};
 use foyer_common::bits;
 
 use super::PAGE;

@@ -61,7 +61,7 @@ anyhow = { workspace = true }
 foyer = { path = ".", default-features = false, features = ["test_utils"] }
 foyer-storage = { workspace = true, features = ["test_utils"] }
 jiff = { workspace = true }
-rand = { workspace = true }
+rand = { workspace = true, features = ["thread_rng"] }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
 tokio = { workspace = true }

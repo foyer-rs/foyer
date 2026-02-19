@@ -24,7 +24,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef, Device};
+use crate::{Device, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef};
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

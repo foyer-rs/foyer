@@ -45,7 +45,7 @@ mea = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
-rand = { workspace = true }
+rand = { workspace = true, features = ["thread_rng"] }
 rand_distr = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }

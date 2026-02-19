@@ -21,10 +21,10 @@ use std::{
     hash::Hash,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Instant,
 };
 
@@ -1042,7 +1042,7 @@ mod tests {
     use std::{path::Path, sync::Arc};
 
     use foyer_common::{hasher::ModHasher, properties::Source};
-    use foyer_storage::{test_utils::*, StorageFilter};
+    use foyer_storage::{StorageFilter, test_utils::*};
     use mea::barrier::Barrier;
     use storage::test_utils::Biased;
 

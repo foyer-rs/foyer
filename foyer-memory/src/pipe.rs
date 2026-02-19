@@ -19,7 +19,7 @@ use foyer_common::{
     properties::Properties,
 };
 
-use crate::{record::Record, Eviction};
+use crate::{Eviction, record::Record};
 
 /// A piece of record that is irrelevant to the eviction algorithm.
 ///

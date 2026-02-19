@@ -14,7 +14,7 @@
 
 use std::{
     fmt::Debug,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
 };
 
 use core_affinity::CoreId;
@@ -23,16 +23,16 @@ use fastrace::prelude::*;
 use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
-use io_uring::{opcode, types::Fd, IoUring};
+use io_uring::{IoUring, opcode, types::Fd};
 use mea::oneshot;
 
 use crate::{
+    RawFile,
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
         engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle},
     },
-    RawFile,
 };
 
 /// Config for io_uring based I/O engine.

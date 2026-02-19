@@ -16,9 +16,9 @@ mod monitor;
 
 use std::{
     ffi::OsStr,
-    io::{stdin, stdout, Write},
+    io::{Write, stdin, stdout},
     path::Path,
-    process::{exit, Command as StdCommand, Stdio},
+    process::{Command as StdCommand, Stdio, exit},
 };
 
 use clap::{Parser, Subcommand};

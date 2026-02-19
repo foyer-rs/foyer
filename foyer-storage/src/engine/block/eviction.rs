@@ -198,9 +198,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        IoEngineConfig, NoopIoEngineConfig,
         engine::block::manager::Block,
         io::{device::noop::NoopPartition, engine::IoEngineBuildContext},
-        IoEngineConfig, NoopIoEngineConfig,
     };
 
     #[test_log::test(tokio::test)]

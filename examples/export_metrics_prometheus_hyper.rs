@@ -18,11 +18,11 @@ use anyhow::Ok;
 use foyer::{Cache, CacheBuilder};
 use http_body_util::Full;
 use hyper::{
+    Request, Response,
     body::{Bytes, Incoming},
     header::CONTENT_TYPE,
     server::conn::http1,
     service::Service,
-    Request, Response,
 };
 use hyper_util::rt::TokioIo;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;

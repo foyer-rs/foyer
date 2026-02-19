@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    fs::{create_dir_all, File, OpenOptions},
+    fs::{File, OpenOptions, create_dir_all},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -22,11 +22,11 @@ use foyer_common::error::{Error, Result};
 use fs4::free_space;
 
 use crate::{
-    io::{
-        device::{statistics::Statistics, throttle::Throttle, Device, DeviceBuilder, Partition, PartitionId},
-        PAGE,
-    },
     RawFile,
+    io::{
+        PAGE,
+        device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+    },
 };
 
 /// Builder for a file-based device that manages a single file or a raw block device.

@@ -13,7 +13,7 @@ members = [
 
 [workspace.package]
 version = "0.23.0-dev"
-edition = "2021"
+edition = "2024"
 rust-version = "1.86.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://foyer-rs.github.io/foyer"
@@ -36,7 +36,7 @@ cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.5"
 core_affinity = "0.8"
-criterion = "0.7"
+criterion = "0.8.2"
 csv = "1"
 equivalent = "1"
 fastant = "0.1.11"
@@ -72,10 +72,10 @@ parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
 prometheus = "0.14"
-rand = { version = "0.9" }
-rand_distr = { version = "0.5" }
+rand = { version = "0.10.0", default-features = false }
+rand_distr = { version = "0.6.0" }
 # Enable all features by default to make it possible to opt-out madsim dependency. 
-# FYI: https://github.com/rust-lang/cargo/issues/10801
+# See why we need this at https://github.com/rust-lang/cargo/issues/10801
 runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
   "full",
 ] }
@@ -89,7 +89,7 @@ tikv-jemallocator = "0.6"
 tokio = { package = "foyer-tokio", version = "0.23.0-dev", path = "foyer-tokio", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-twox-hash = "2"
+twox-hash = { version = "2.1.2", default-features = false }
 zstd = "0.13"
 
 [workspace.lints.rust]
