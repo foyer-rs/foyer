@@ -18,8 +18,8 @@ use std::{
     collections::VecDeque,
     fmt::Display,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -28,7 +28,7 @@ use foyer::{
     BlockEngineConfig, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, Location, PsyncIoEngineConfig,
 };
-use rand::{rng, Rng};
+use rand::{RngExt, rng};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;

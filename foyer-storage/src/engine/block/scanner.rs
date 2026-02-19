@@ -104,17 +104,17 @@ mod tests {
 
     use super::*;
     use crate::{
+        Compression,
         engine::block::{
             buffer::{BlobEntryIndex, BlobIndex, BlobPart, Buffer, SplitCtx, Splitter},
             manager::BlockId,
             serde::Sequence,
         },
         io::{
-            device::{fs::FsDeviceBuilder, Device, DeviceBuilder, Partition},
-            engine::{psync::PsyncIoEngineConfig, IoEngine, IoEngineBuildContext, IoEngineConfig},
             PAGE,
+            device::{Device, DeviceBuilder, Partition, fs::FsDeviceBuilder},
+            engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, psync::PsyncIoEngineConfig},
         },
-        Compression,
     };
 
     const KB: usize = 1024;

@@ -17,19 +17,20 @@ pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
     compress::Compression,
     engine::{
+        Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
         block::{
             engine::BlockEngineConfig,
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             manager::{Block, BlockStatistics},
         },
-        Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
     },
     filter::{
-        conditions::{AdmitAll, EstimatedSize, RejectAll},
         StorageFilter, StorageFilterCondition, StorageFilterResult,
+        conditions::{AdmitAll, EstimatedSize, RejectAll},
     },
     io::{
         device::{
+            Device, DeviceBuilder, RawFile,
             combined::CombinedDeviceBuilder,
             file::FileDeviceBuilder,
             fs::FsDeviceBuilder,
@@ -37,12 +38,11 @@ pub use crate::{
             partial::PartialDeviceBuilder,
             statistics::Statistics,
             throttle::{IopsCounter, Throttle},
-            Device, DeviceBuilder, RawFile,
         },
         engine::{
+            IoEngine, IoEngineConfig, IoHandle,
             noop::{NoopIoEngine, NoopIoEngineConfig},
             psync::{PsyncIoEngine, PsyncIoEngineConfig},
-            IoEngine, IoEngineConfig, IoHandle,
         },
     },
     store::{Store, StoreBuilder},

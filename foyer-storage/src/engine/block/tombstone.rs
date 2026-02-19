@@ -19,8 +19,8 @@ use foyer_common::error::Result;
 use mea::mutex::Mutex;
 
 use crate::{
-    io::{bytes::IoSliceMut, device::Partition, PAGE},
     IoEngine,
+    io::{PAGE, bytes::IoSliceMut, device::Partition},
 };
 
 #[derive(Debug, Clone)]
@@ -252,11 +252,11 @@ mod tests {
 
     use super::*;
     use crate::{
+        IoEngineConfig, PsyncIoEngineConfig,
         io::{
-            device::{fs::FsDeviceBuilder, DeviceBuilder},
+            device::{DeviceBuilder, fs::FsDeviceBuilder},
             engine::IoEngineBuildContext,
         },
-        IoEngineConfig, PsyncIoEngineConfig,
     };
 
     #[test_log::test(tokio::test)]

@@ -26,8 +26,8 @@ use crate::{
     compress::Compression,
     engine::block::serde::{EntryHeader, Sequence},
     io::{
-        bytes::{IoSlice, IoSliceMut},
         PAGE,
+        bytes::{IoSlice, IoSliceMut},
     },
     serde::{Checksummer, EntrySerializer},
 };

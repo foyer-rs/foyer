@@ -34,18 +34,18 @@ use foyer_memory::{Cache, Piece};
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
+    StorageFilterResult,
     compress::Compression,
     engine::{
-        noop::{NoopEngine, NoopEngineConfig},
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
+        noop::{NoopEngine, NoopEngineConfig},
     },
     io::{
-        device::{statistics::Statistics, throttle::Throttle, Device},
-        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig, IoEngineBuildContext, IoEngineConfig},
+        device::{Device, statistics::Statistics, throttle::Throttle},
+        engine::{IoEngineBuildContext, IoEngineConfig, monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig},
     },
     keeper::Keeper,
     serde::EntrySerializer,
-    StorageFilterResult,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -456,7 +456,9 @@ where
         let io_engine_builder = match self.io_engine_config {
             Some(builder) => builder,
             None => {
-                tracing::info!("[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default.");
+                tracing::info!(
+                    "[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default."
+                );
                 PsyncIoEngineConfig::new().boxed()
             }
         };
@@ -515,9 +517,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        DeviceBuilder,
         engine::block::engine::BlockEngineConfig,
         io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineConfig},
-        DeviceBuilder,
     };
 
     #[tokio::test]

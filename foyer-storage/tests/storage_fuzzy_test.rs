@@ -21,7 +21,7 @@ use std::{path::Path, sync::Arc};
 use foyer_common::{hasher::ModHasher, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
 use foyer_storage::{
-    test_utils::Recorder, BlockEngineConfig, Compression, DeviceBuilder, FsDeviceBuilder, StorageFilter, StoreBuilder,
+    BlockEngineConfig, Compression, DeviceBuilder, FsDeviceBuilder, StorageFilter, StoreBuilder, test_utils::Recorder,
 };
 
 const KB: usize = 1024;
