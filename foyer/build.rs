@@ -22,7 +22,7 @@ use std::{
 const README_FILENAME: &str = "README.md";
 
 fn main() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
     let mut readme_path = manifest_dir.join(README_FILENAME);
     if !readme_path.exists() {
         readme_path = manifest_dir.join("..").join(README_FILENAME);
