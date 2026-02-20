@@ -493,7 +493,7 @@ where
     P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GenericStore").finish()
+        f.debug_struct("BlockEngine").finish()
     }
 }
 
@@ -568,7 +568,7 @@ where
         .boxed()
     }
 
-    #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::generic::enqueue"))]
+    #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::engine::enqueue"))]
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
@@ -715,7 +715,7 @@ where
         };
         #[cfg(feature = "tracing")]
         let load = load.in_span(Span::enter_with_local_parent(
-            "foyer::storage::engine::block::generic::load",
+            "foyer::storage::engine::block::engine::load",
         ));
         load
     }
