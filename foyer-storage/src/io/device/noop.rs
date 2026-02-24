@@ -17,8 +17,9 @@ use std::sync::{Arc, RwLock};
 use foyer_common::error::Result;
 
 use crate::{
-    RawFile,
-    io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+    engine::block::device::{Partition, PartitionId, PartitionableDevice},
+    io::device::RawFile,
+    io::device::{Device, DeviceBuilder, statistics::Statistics, throttle::Throttle},
 };
 
 /// Builder for a no-operation mock device.
@@ -69,6 +70,12 @@ impl Device for NoopDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for NoopDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let id = partitions.len() as PartitionId;
@@ -85,12 +92,8 @@ impl Device for NoopDevice {
         self.partitions.read().unwrap().len()
     }
 
-    fn partition(&self, id: super::PartitionId) -> Arc<dyn Partition> {
+    fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
-    }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
     }
 }
 

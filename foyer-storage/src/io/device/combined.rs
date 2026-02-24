@@ -18,7 +18,8 @@ use foyer_common::error::{Error, ErrorKind, Result};
 
 use crate::{
     RawFile, Statistics, Throttle,
-    io::device::{Device, DeviceBuilder, Partition, PartitionId},
+    engine::block::device::{Partition, PartitionId, PartitionableDevice},
+    io::device::{Device, DeviceBuilder},
 };
 
 /// Builder for a combined device that wraps multiple devices and allows access to their blocks.
@@ -106,6 +107,12 @@ impl Device for CombinedDevice {
         }
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for CombinedDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut inner = self.inner.write().unwrap();
         loop {
@@ -142,10 +149,6 @@ impl Device for CombinedDevice {
 
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.inner.read().unwrap().partitions[id as usize].clone()
-    }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
     }
 }
 

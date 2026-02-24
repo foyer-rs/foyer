@@ -16,7 +16,10 @@ use std::sync::{Arc, RwLock};
 
 use foyer_common::error::{Error, Result};
 
-use crate::io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics};
+use crate::{
+    engine::block::device::{Partition, PartitionId, PartitionableDevice},
+    io::device::{Device, DeviceBuilder, statistics::Statistics},
+};
 
 /// Builder for a partial device that wraps another device and allows access to only a subset of capacity.
 #[derive(Debug)]
@@ -72,6 +75,12 @@ impl Device for PartialDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size()).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.statistics()
+    }
+}
+
+impl PartitionableDevice for PartialDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size()).sum::<usize>();
@@ -96,13 +105,8 @@ impl Device for PartialDevice {
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
     }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        self.inner.statistics()
-    }
 }
 
-#[derive(Debug)]
 pub struct PartialPartition {
     inner: Arc<dyn Partition>,
     id: PartitionId,

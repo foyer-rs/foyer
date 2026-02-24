@@ -23,9 +23,10 @@ use fs4::free_space;
 
 use crate::{
     RawFile,
+    engine::block::device::{Partition, PartitionId, PartitionableDevice},
     io::{
         PAGE,
-        device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+        device::{Device, DeviceBuilder, statistics::Statistics, throttle::Throttle},
     },
 };
 
@@ -156,6 +157,12 @@ impl Device for FileDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for FileDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
@@ -181,10 +188,6 @@ impl Device for FileDevice {
 
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
-    }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
     }
 }
 
